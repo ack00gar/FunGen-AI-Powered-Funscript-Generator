@@ -479,6 +479,35 @@ class KeyboardShortcutsDialog:
                 "This modifies the active profile's shortcuts."
             )
 
+        # --- Mouse Modifier Keys ---
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        imgui.text_colored("Mouse Modifier Keys", 0.6, 0.8, 1.0, 1.0)
+        imgui.spacing()
+        imgui.text_wrapped(
+            "Configure modifier keys for mouse-based timeline interactions. "
+            "Hold the modifier key while left-click dragging to pan the timeline "
+            "(alternative to middle-mouse drag for trackpad users)."
+        )
+        imgui.spacing()
+
+        # Pan drag modifier dropdown
+        modifier_options = ["SHIFT", "ALT", "CTRL", "SUPER"]
+        display_options = ["SHIFT", "ALT", "CTRL", "CMD" if self._is_macos else "SUPER"]
+        current_mod = self.app.app_settings.get("timeline_pan_drag_modifier", "SHIFT")
+        current_idx = modifier_options.index(current_mod) if current_mod in modifier_options else 0
+
+        imgui.text("Pan Timeline (Drag):")
+        imgui.same_line()
+        imgui.set_next_item_width(120)
+        changed, new_idx = imgui.combo("##PanDragModifier", current_idx, display_options)
+        if changed:
+            self.app.app_settings.set("timeline_pan_drag_modifier", modifier_options[new_idx])
+
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Hold this key + left-click drag to pan the timeline.\nAlternative to middle-mouse drag for trackpad users.")
+
     def _render_cheat_sheet(self):
         """Render the keyboard shortcuts cheat sheet window"""
         imgui.set_next_window_size(600, 700, imgui.ONCE)

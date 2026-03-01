@@ -142,6 +142,10 @@ class InteractiveFunscriptTimeline:
         self._alt_top_value = 95
         self._alt_bottom_value = 5
 
+        # Pan-seek throttle for continuous video updates during middle-mouse drag
+        self._last_pan_seek_time: float = 0.0
+        self._is_modifier_panning: bool = False
+
         # Recording Mode (Phase 3.2)
         self._recording_capture: Optional[RecordingCapture] = None
         self._recording_rdp_epsilon = 2.0
@@ -357,6 +361,13 @@ class InteractiveFunscriptTimeline:
                 app_state.timeline_pan_offset_ms -= delta_x * tf.zoom
                 app_state.timeline_interaction_active = True
 
+                # Continuous video frame updates during pan (~30fps cap)
+                now = time.time()
+                if now - self._last_pan_seek_time >= 0.033:
+                    center_time_ms = tf.x_to_time(tf.x_offset + tf.width / 2)
+                    self._seek_video_no_pan(center_time_ms)
+                    self._last_pan_seek_time = now
+
         # --- Mode-specific input dispatch ---
         if self._mode == TimelineMode.ALTERNATING:
             self._handle_alternating_mode_input(app_state, tf, mouse_pos, is_hovered, io)
@@ -395,7 +406,11 @@ class InteractiveFunscriptTimeline:
         if is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and self._mode == TimelineMode.SELECT:
             hit_idx = self._hit_test_point(mouse_pos, actions, tf)
 
-            if io.key_alt:
+            if self._is_pan_modifier_held(io):
+                # Modifier + Drag = Pan (trackpad alternative to middle-mouse)
+                self._is_modifier_panning = True
+
+            elif io.key_alt:
                 # Alt + Drag = Range Select
                 self.range_selecting = True
                 self.range_start_time = tf.x_to_time(mouse_pos[0])
@@ -438,8 +453,19 @@ class InteractiveFunscriptTimeline:
 
         # --- Dragging Processing ---
         if imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT):
-            
-            if self.dragging_action_idx != -1:
+
+            if self._is_modifier_panning:
+                delta_x = io.mouse_delta[0]
+                app_state.timeline_pan_offset_ms -= delta_x * tf.zoom
+                app_state.timeline_interaction_active = True
+                # Continuous video frame updates during pan (~30fps cap)
+                now = time.time()
+                if now - self._last_pan_seek_time >= 0.033:
+                    center_time_ms = tf.x_to_time(tf.x_offset + tf.width / 2)
+                    self._seek_video_no_pan(center_time_ms)
+                    self._last_pan_seek_time = now
+
+            elif self.dragging_action_idx != -1:
                 # Threshold check (prevent jitter on simple clicks)
                 if not self.is_dragging_active:
                     dist = math.hypot(mouse_pos[0] - self.drag_start_pos[0], mouse_pos[1] - self.drag_start_pos[1])
@@ -459,12 +485,18 @@ class InteractiveFunscriptTimeline:
 
         # --- Mouse Release ---
         if imgui.is_mouse_released(glfw.MOUSE_BUTTON_LEFT):
-            if self.is_marqueeing:
-                self._finalize_marquee(tf, actions, io.key_ctrl)
-            elif self.range_selecting:
-                self._finalize_range_select(actions, io.key_ctrl)
-            elif self.is_dragging_active:
-                self._finalize_drag()
+            if self._is_modifier_panning:
+                self._is_modifier_panning = False
+                app_state.timeline_interaction_active = False
+                center_time_ms = tf.x_to_time(tf.x_offset + tf.width / 2)
+                self._seek_video(center_time_ms)
+            else:
+                if self.is_marqueeing:
+                    self._finalize_marquee(tf, actions, io.key_ctrl)
+                elif self.range_selecting:
+                    self._finalize_range_select(actions, io.key_ctrl)
+                elif self.is_dragging_active:
+                    self._finalize_drag()
 
             # Reset States
             self.is_marqueeing = False
@@ -746,6 +778,24 @@ class InteractiveFunscriptTimeline:
                 frame = int(round((time_ms / 1000.0) * fps))
                 self.app.processor.seek_video(frame)
                 self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+
+    def _is_pan_modifier_held(self, io) -> bool:
+        """Check if the configured pan drag modifier key is held."""
+        mod = self.app.app_settings.get("timeline_pan_drag_modifier", "SHIFT")
+        if mod == "SHIFT": return io.key_shift
+        if mod == "ALT": return io.key_alt
+        if mod == "CTRL": return io.key_ctrl
+        if mod == "SUPER": return io.key_super
+        return False
+
+    def _seek_video_no_pan(self, time_ms: float):
+        """Seek video without forcing timeline pan. Used during drag to update
+        the video frame while the user controls the timeline position."""
+        if self.app.processor and self.app.processor.video_info:
+            fps = self.app.processor.fps
+            if fps > 0:
+                frame = int(round((time_ms / 1000.0) * fps))
+                self.app.processor.seek_video(frame)
 
     # --- Nudge Helpers ---
     def _nudge_selection_value(self, delta: int):
