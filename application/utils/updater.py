@@ -1644,7 +1644,7 @@ class AutoUpdater:
 
         imgui.separator()
         imgui.text("Enter GitHub Personal Access Token:")
-        imgui.text_wrapped("Get a token from: GitHub → Settings → Developer settings → Personal access tokens")
+        imgui.text_wrapped("Get a token from: GitHub > Settings > Developer settings > Personal access tokens")
         imgui.text_wrapped("Required scope: public_repo (for public repositories)")
         changed, self._github_token_buffer = imgui.input_text("Token", self._github_token_buffer, 100, imgui.INPUT_TEXT_PASSWORD)
 
