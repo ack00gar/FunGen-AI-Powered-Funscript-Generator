@@ -349,7 +349,7 @@ class FeatureDetector:
         message = "Premium Features Available with Project Support:\\n\\n"
         
         for feature in missing_features:
-            message += f"• {feature.display_name}: {feature.description}\\n"
+            message += f"- {feature.display_name}: {feature.description}\\n"
         
         message += "\\nSupport the project to unlock these features!"
         message += "\\nSupporters receive folders to unlock premium functionality."

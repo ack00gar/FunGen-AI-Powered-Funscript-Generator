@@ -292,7 +292,7 @@ class FullscreenDisplayManager:
         # Play/Pause button (dynamic based on state)
         is_playing = self._is_playing()
         play_pause_icon_name = 'pause.png' if is_playing else 'play.png'
-        play_pause_fallback = "⏸" if is_playing else "▶"
+        play_pause_fallback = "||" if is_playing else "|>"
 
         play_pause_tex, _, _ = icon_mgr.get_icon_texture(play_pause_icon_name)
         if play_pause_tex and imgui.image_button(play_pause_tex, button_size, button_size):
@@ -309,7 +309,7 @@ class FullscreenDisplayManager:
         if stop_tex and imgui.image_button(stop_tex, button_size, button_size):
             if self.on_stop:
                 self.on_stop()
-        elif not stop_tex and imgui.button("⏹", button_size, button_size):
+        elif not stop_tex and imgui.button("[.]", button_size, button_size):
             if self.on_stop:
                 self.on_stop()
 
@@ -319,7 +319,7 @@ class FullscreenDisplayManager:
         fullscreen_exit_tex, _, _ = icon_mgr.get_icon_texture('fullscreen-exit.png')
         if fullscreen_exit_tex and imgui.image_button(fullscreen_exit_tex, button_size, button_size):
             return False  # Exit fullscreen
-        elif not fullscreen_exit_tex and imgui.button("⛶", button_size, button_size):
+        elif not fullscreen_exit_tex and imgui.button("[x]", button_size, button_size):
             return False  # Exit fullscreen
 
         imgui.same_line(spacing=button_spacing)
@@ -328,7 +328,7 @@ class FullscreenDisplayManager:
         settings_tex, _, _ = icon_mgr.get_icon_texture('settings.png')
         if settings_tex and imgui.image_button(settings_tex, button_size, button_size):
             pass  # Settings popup
-        elif not settings_tex and imgui.button("⚙", button_size, button_size):
+        elif not settings_tex and imgui.button("[=]", button_size, button_size):
             pass  # Settings popup
         
         return True
