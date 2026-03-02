@@ -255,6 +255,11 @@ class AppSettings:
             "device_control_max_rate_hz": 20.0,
             "device_control_selected_devices": [],  # List of selected device IDs
             "device_control_log_commands": False,
+
+            # Audio Playback
+            "audio_enabled": True,
+            "audio_volume": 0.8,
+            "audio_muted": False,
         }
         return defaults
 
