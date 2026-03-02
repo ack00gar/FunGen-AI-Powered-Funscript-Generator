@@ -654,9 +654,11 @@ class StreamerMixin:
                 self._native_sync_manager.enable_xbvr_browser = True
 
             self._native_sync_manager.start()
+            self.app._streamer_active = True
 
         except Exception as e:
             self.app.logger.error(f"Failed to start streamer: {e}")
+            self.app._streamer_active = False
             import traceback
             self.app.logger.error(traceback.format_exc())
 
@@ -665,9 +667,11 @@ class StreamerMixin:
         try:
             self.app.logger.info("Stopping streamer...")
             self._native_sync_manager.stop()
+            self.app._streamer_active = False
 
         except Exception as e:
             self.app.logger.error(f"Failed to stop streamer: {e}")
+            self.app._streamer_active = False
 
     def _open_in_browser(self, url: str):
         """Open URL in system default browser."""

@@ -27,6 +27,11 @@ from application.utils import get_icon_texture_manager
 from application.utils.button_styles import primary_button_style, destructive_button_style
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 
+try:
+    from video.audio_player import SOUNDDEVICE_AVAILABLE
+except ImportError:
+    SOUNDDEVICE_AVAILABLE = False
+
 
 class ToolbarUI:
     """Main application toolbar with common actions."""
@@ -38,6 +43,28 @@ class ToolbarUI:
         self._label_height = 14  # Height for section labels
         self._label_spacing = 2  # Space between label and buttons
         self._selected_edit_timeline = 1
+
+    def _get_button_row_height(self):
+        """Total pixel height of a toolbar image button (icon + frame padding)."""
+        return self._icon_size + self._button_padding * 2
+
+    def _begin_vcenter(self):
+        """Begin vertical centering context for a non-button widget in the toolbar.
+
+        Call before the widget (after same_line if needed).
+        Starts a group and adds a top dummy to push the widget down
+        so it's vertically centered within the button row.
+        """
+        row_h = self._get_button_row_height()
+        frame_h = imgui.get_frame_height()
+        self._vcenter_offset = max(0.0, (row_h - frame_h) / 2.0)
+        imgui.begin_group()
+        if self._vcenter_offset > 0:
+            imgui.dummy(0, self._vcenter_offset)
+
+    def _end_vcenter(self):
+        """End vertical centering context. Ensures the group occupies full button row height."""
+        imgui.end_group()
 
     def get_toolbar_height(self):
         """Get the total height of the toolbar including labels.
@@ -170,6 +197,15 @@ class ToolbarUI:
         # --- PLAYBACK CONTROLS SECTION ---
         self._begin_toolbar_section("Playback")
         self._render_playback_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
+
+        imgui.same_line(spacing=12)
+        self._render_separator()
+        imgui.same_line(spacing=12)
+
+        # --- AUDIO CONTROLS SECTION ---
+        self._begin_toolbar_section("Audio")
+        self._render_audio_section(icon_mgr, btn_size)
         self._end_toolbar_section()
 
         imgui.same_line(spacing=12)
@@ -391,9 +427,11 @@ class ToolbarUI:
         current_idx = valid_tls.index(self._selected_edit_timeline)
         labels = [item[1] for item in axis_items]
 
+        self._begin_vcenter()
         imgui.push_item_width(120)
         changed, new_idx = imgui.combo("##EditAxisCombo", current_idx, labels)
         imgui.pop_item_width()
+        self._end_vcenter()
         if changed:
             self._selected_edit_timeline = valid_tls[new_idx]
 
@@ -580,6 +618,65 @@ class ToolbarUI:
 
         if current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
             self._apply_button_color_default()
+
+    def _render_audio_section(self, icon_mgr, btn_size):
+        """Render audio mute toggle and volume slider."""
+        app = self.app
+        settings = app.app_settings
+
+        sd_ok = SOUNDDEVICE_AVAILABLE
+        player_ok = getattr(app, '_audio_player', None) is not None
+        has_audio_system = sd_ok and player_ok
+        is_muted = settings.get("audio_muted", False)
+        vol = getattr(app, '_audio_volume_live', settings.get("audio_volume", 0.8))
+
+        disabled = not has_audio_system
+        if disabled:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+
+        # --- Mute / unmute toggle ---
+        icon = 'speaker-muted.png' if is_muted else 'speaker-high.png'
+
+        if is_muted and not disabled:
+            self._apply_button_color_red()
+
+        # Tooltip
+        if disabled:
+            reasons = []
+            if not sd_ok:
+                reasons.append("sounddevice not installed")
+            if not player_ok:
+                reasons.append("audio player not initialized")
+            tooltip = f"Audio unavailable ({', '.join(reasons)})"
+        else:
+            tooltip = "Unmute Audio" if is_muted else "Mute Audio"
+
+        if self._toolbar_button(icon_mgr, icon, btn_size, tooltip):
+            if not disabled:
+                is_muted = not is_muted
+                settings.set("audio_muted", is_muted)
+                if app._audio_sync:
+                    app._audio_sync.update_settings(vol, is_muted)
+
+        if is_muted and not disabled:
+            self._apply_button_color_default()
+
+        # --- Volume slider (always visible) ---
+        imgui.same_line()
+        self._begin_vcenter()
+        imgui.push_item_width(100)
+        pct_label = f"{int(vol * 100)}%%"
+        changed, vol = imgui.slider_float("##vol", vol, 0.0, 1.0, pct_label)
+        if changed and not disabled:
+            # Update the player live — volume is persisted to settings on quit only
+            app._audio_volume_live = vol
+            if app._audio_sync:
+                app._audio_sync.update_settings(vol, is_muted)
+        imgui.pop_item_width()
+        self._end_vcenter()
+
+        if disabled:
+            imgui.pop_style_var()
 
     def _render_navigation_section(self, icon_mgr, btn_size):
         """Render navigation buttons (points and chapters)."""

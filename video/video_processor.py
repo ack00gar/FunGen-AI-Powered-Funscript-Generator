@@ -1312,14 +1312,35 @@ class VideoProcessor:
             is_vfr = r_frame_rate_str != avg_frame_rate_str
 
             has_audio_ffprobe = False
+            audio_codec_name = ''
+            audio_codec_long_name = ''
+            audio_bitrate = 0
+            audio_sample_rate = 0
+            audio_channels = 0
             cmd_audio_check = ['ffprobe', '-v', 'error', '-select_streams', 'a:0',
-                               '-show_entries', 'stream=codec_type', '-of', 'json', filename]
+                               '-show_entries', 'stream=codec_type,codec_name,codec_long_name,sample_rate,channels,bit_rate',
+                               '-of', 'json', filename]
             try:
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 result_audio = subprocess.run(cmd_audio_check, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, creationflags=creation_flags)
                 audio_data = json.loads(result_audio.stdout)
                 if audio_data.get('streams') and audio_data['streams'][0].get('codec_type') == 'audio':
                     has_audio_ffprobe = True
+                    a_stream = audio_data['streams'][0]
+                    audio_codec_name = a_stream.get('codec_name', '')
+                    audio_codec_long_name = a_stream.get('codec_long_name', '')
+                    try:
+                        audio_bitrate = int(a_stream.get('bit_rate', 0))
+                    except (ValueError, TypeError):
+                        audio_bitrate = 0
+                    try:
+                        audio_sample_rate = int(a_stream.get('sample_rate', 0))
+                    except (ValueError, TypeError):
+                        audio_sample_rate = 0
+                    try:
+                        audio_channels = int(a_stream.get('channels', 0))
+                    except (ValueError, TypeError):
+                        audio_channels = 0
             except Exception:
                 pass
 
@@ -1358,7 +1379,12 @@ class VideoProcessor:
                     "file_size": file_size_bytes, "bitrate": bitrate_bps,
                     "is_vfr": is_vfr, "filename": file_name,
                     "codec_name": stream_info.get('codec_name', 'N/A'),
-                    "codec_long_name": stream_info.get('codec_long_name', 'N/A')
+                    "codec_long_name": stream_info.get('codec_long_name', 'N/A'),
+                    "audio_codec_name": audio_codec_name,
+                    "audio_codec_long_name": audio_codec_long_name,
+                    "audio_bitrate": audio_bitrate,
+                    "audio_sample_rate": audio_sample_rate,
+                    "audio_channels": audio_channels,
                     }
         except Exception as e:
             self.logger.error(f"Error in _get_video_info for {filename}: {e}")

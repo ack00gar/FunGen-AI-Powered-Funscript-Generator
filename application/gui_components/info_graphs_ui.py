@@ -496,6 +496,55 @@ class InfoGraphsUI:
                         "Filters are applied on-the-fly."
                     )
             imgui.next_column()
+
+            # --- Audio Stream Info ---
+            imgui.separator()
+            if info.get("has_audio"):
+                imgui.text("Audio Codec:")
+                imgui.next_column()
+                a_codec = info.get("audio_codec_name", "")
+                imgui.text(a_codec.upper() if a_codec else "N/A")
+                if imgui.is_item_hovered():
+                    a_long = info.get("audio_codec_long_name", "")
+                    if a_long:
+                        imgui.set_tooltip(a_long)
+                imgui.next_column()
+
+                imgui.text("Audio Bitrate:")
+                imgui.next_column()
+                a_bps = info.get("audio_bitrate", 0)
+                if a_bps > 0:
+                    imgui.text(f"{a_bps / 1000:.0f} kbps")
+                else:
+                    imgui.text("N/A")
+                imgui.next_column()
+
+                imgui.text("Sample Rate:")
+                imgui.next_column()
+                a_sr = info.get("audio_sample_rate", 0)
+                if a_sr > 0:
+                    imgui.text(f"{a_sr} Hz")
+                else:
+                    imgui.text("N/A")
+                imgui.next_column()
+
+                imgui.text("Channels:")
+                imgui.next_column()
+                a_ch = info.get("audio_channels", 0)
+                if a_ch == 1:
+                    imgui.text("Mono")
+                elif a_ch == 2:
+                    imgui.text("Stereo")
+                elif a_ch > 0:
+                    imgui.text(f"{a_ch}ch")
+                else:
+                    imgui.text("N/A")
+                imgui.next_column()
+            else:
+                imgui.text("Audio:")
+                imgui.next_column()
+                imgui.text_colored("No audio stream", 0.5, 0.5, 0.5, 1.0)
+                imgui.next_column()
         else:
             imgui.text("Status:")
             imgui.next_column()
