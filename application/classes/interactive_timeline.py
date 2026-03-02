@@ -150,6 +150,14 @@ class InteractiveFunscriptTimeline:
         self._recording_capture: Optional[RecordingCapture] = None
         self._recording_rdp_epsilon = 2.0
 
+        # Controller live-scripting (gamepad input for recording mode)
+        self._gamepad_input = None           # Lazy-init GamepadInput
+        self._gamepad_connected: bool = False
+        self._controller_device_preview: bool = False
+        self._controller_input_delay_ms: int = 0
+        self._calibration = None             # CalibrationRoutine when active
+        self._show_controller_settings: bool = False
+
         # BPM/Tempo Overlay (Phase 3.3)
         self._bpm_config: Optional[BPMOverlayConfig] = None
         self._tap_tempo = TapTempo()
@@ -1513,25 +1521,153 @@ class InteractiveFunscriptTimeline:
                                       mouse_pos, is_hovered, io):
         """Handle input for recording mode (Phase 3.2).
 
-        While recording: map mouse Y in canvas to 0-100, capture each frame.
+        While recording: map mouse Y (or gamepad stick) in canvas to 0-100,
+        capture each frame.
         """
         if not self._recording_capture:
             return
 
         if self._recording_capture.is_recording:
-            # Map mouse Y to 0-100
+            processor = self.app.processor
+            if not processor or processor.fps <= 0:
+                return
+            current_ms = (processor.current_frame_index / processor.fps) * 1000.0
+
+            # --- Gamepad input (priority when connected) ---
+            if self._gamepad_input and self._gamepad_connected:
+                state = self._gamepad_input.poll()
+                if state is not None:
+                    self._recording_capture.capture_frame(current_ms, state.primary)
+                    self.preview_actions = self._recording_capture._samples
+                    self.is_previewing = True
+
+                    # Optional device preview
+                    if self._controller_device_preview:
+                        self._send_device_preview(state.primary, state.secondary)
+
+                    # B button = stop recording
+                    if state.button_b:
+                        self._stop_recording_and_merge()
+                    return  # Gamepad takes priority
+
+            # --- Mouse input (original behaviour) ---
             if is_hovered and tf.height > 0:
                 normalized_y = 1.0 - ((mouse_pos[1] - tf.y_offset) / tf.height)
                 pos = max(0, min(100, normalized_y * 100.0))
+                self._recording_capture.capture_frame(current_ms, pos)
+                self.preview_actions = self._recording_capture._samples
+                self.is_previewing = True
 
-                # Get current video time
-                processor = self.app.processor
-                if processor and processor.fps > 0:
-                    current_ms = (processor.current_frame_index / processor.fps) * 1000.0
-                    self._recording_capture.capture_frame(current_ms, pos)
-                    # Show raw samples as live preview on timeline
-                    self.preview_actions = self._recording_capture._samples
-                    self.is_previewing = True
+    # ------------------------------------------------------------------
+    # Controller / gamepad helpers (recording mode)
+    # ------------------------------------------------------------------
+
+    def _init_gamepad(self):
+        """Lazy-init gamepad input and detect controllers."""
+        from application.live_scripting.gamepad_input import GamepadInput
+        self._gamepad_input = GamepadInput()
+        gamepads = self._gamepad_input.detect_gamepads()
+        if gamepads:
+            self._gamepad_input.active_joystick_id = gamepads[0].joystick_id
+            self._gamepad_connected = True
+
+    def _stop_recording_and_merge(self):
+        """Stop recording, RDP-simplify, merge into timeline."""
+        self.is_previewing = False
+        self.preview_actions = None
+        if not self._recording_capture:
+            return
+        simplified = self._recording_capture.stop_recording(self._recording_rdp_epsilon)
+        if simplified:
+            self._record_timeline_action()
+            actions = self._get_actions()
+            merged = list(actions) + simplified
+            merged.sort(key=lambda a: a['at'])
+            fs, axis = self._get_target_funscript_details()
+            if fs and axis:
+                fs.set_axis_actions(axis, merged)
+                self._finalize_action_and_update_ui()
+
+    def _send_device_preview(self, primary: float, secondary: float):
+        """Send position to device_manager for haptic feedback (optional)."""
+        dm = self._get_device_manager()
+        if dm and hasattr(dm, 'update_position'):
+            dm.update_position(primary, secondary)
+
+    def _get_device_manager(self):
+        """Safely get device_manager if device_control addon is loaded."""
+        try:
+            return self.app.device_manager
+        except AttributeError:
+            return None
+
+    def _start_calibration(self):
+        """Begin input-delay calibration routine."""
+        from application.live_scripting.gamepad_input import CalibrationRoutine
+        if self._gamepad_input:
+            self._calibration = CalibrationRoutine(self._gamepad_input)
+            self._calibration.start()
+
+    def _draw_controller_settings(self):
+        """Draw collapsible controller settings panel below the recording toolbar."""
+        gp = self._gamepad_input
+        if not gp:
+            return
+
+        imgui.indent(10)
+
+        # Axis mapping
+        axis_options = ["left_y", "left_x", "right_y", "right_x"]
+        axis_labels = ["Left Y", "Left X", "Right Y", "Right X"]
+        cur = axis_options.index(gp.axis_mapping) if gp.axis_mapping in axis_options else 0
+        imgui.push_item_width(70)
+        changed, new_idx = imgui.combo(f"Axis##{self.timeline_num}_gp", cur, axis_labels)
+        if changed:
+            gp.axis_mapping = axis_options[new_idx]
+        imgui.pop_item_width()
+
+        imgui.same_line()
+        changed, inv = imgui.checkbox(f"Inv##{self.timeline_num}_inv", gp.invert_primary)
+        if changed:
+            gp.invert_primary = inv
+
+        # Deadzone
+        imgui.same_line()
+        imgui.push_item_width(60)
+        changed, dz = imgui.slider_float(f"DZ##{self.timeline_num}", gp.deadzone, 0.05, 0.40, "%.2f")
+        if changed:
+            gp.deadzone = dz
+        imgui.pop_item_width()
+
+        # Input delay
+        imgui.push_item_width(80)
+        changed, delay = imgui.slider_int(
+            f"Delay##{self.timeline_num}", self._controller_input_delay_ms, 0, 200, "%d ms")
+        if changed:
+            self._controller_input_delay_ms = delay
+        imgui.pop_item_width()
+
+        imgui.same_line()
+        if imgui.small_button(f"Cal##{self.timeline_num}"):
+            self._start_calibration()
+        if self._calibration and self._calibration.result_ms is not None and not self._calibration.is_running:
+            imgui.same_line()
+            imgui.text(f"({self._calibration.result_ms:.0f}ms)")
+
+        # Device preview toggle (only if device_control addon loaded)
+        dm = self._get_device_manager()
+        if dm is not None:
+            changed, preview = imgui.checkbox(
+                f"Device Preview##{self.timeline_num}", self._controller_device_preview)
+            if changed:
+                self._controller_device_preview = preview
+
+        # Live position bar
+        state = gp.poll()
+        if state:
+            imgui.progress_bar(state.primary / 100.0, (-1, 14), f"{state.primary:.0f}")
+
+        imgui.unindent(10)
 
     def _handle_injection_mode_input(self, app_state, tf: TimelineTransformer,
                                       mouse_pos, is_hovered, io):
@@ -1628,6 +1764,42 @@ class InteractiveFunscriptTimeline:
             dl.add_circle_filled(tf.x_offset + 12, tf.y_offset + 12, 5, rec_col)
             dl.add_text(tf.x_offset + 20, tf.y_offset + 5,
                         imgui.get_color_u32_rgba(0.9, 0.1, 0.1, 1.0), "REC")
+
+        # 6. Calibration modal
+        if self._calibration and self._calibration.is_running:
+            self._draw_calibration_modal()
+
+    def _draw_calibration_modal(self):
+        """Render the controller input-delay calibration popup."""
+        cal = self._calibration
+        modal_id = f"Calibrate Input Delay##{self.timeline_num}_cal"
+        imgui.open_popup(modal_id)
+        opened, _ = imgui.begin_popup_modal(modal_id, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+        if opened:
+            beat_active = cal.get_current_beat_active()
+            progress = cal.current_beat / cal.NUM_BEATS
+            imgui.text(f"Beat {cal.current_beat}/{cal.NUM_BEATS}")
+            imgui.progress_bar(progress, (-1, 0))
+            if beat_active:
+                imgui.text_colored(">>> PRESS A <<<", 0.2, 1.0, 0.2, 1.0)
+            else:
+                imgui.text("   Wait...")
+            done = cal.update()
+            if done and cal.result_ms is not None:
+                imgui.separator()
+                imgui.text(f"Result: {cal.result_ms:.0f}ms")
+                if imgui.button("Accept"):
+                    self._controller_input_delay_ms = int(cal.result_ms)
+                    self._calibration = None
+                    imgui.close_current_popup()
+                imgui.same_line()
+                if imgui.button("Retry"):
+                    cal.start()
+                imgui.same_line()
+                if imgui.button("Cancel"):
+                    self._calibration = None
+                    imgui.close_current_popup()
+            imgui.end_popup()
 
     def _draw_state_border(self, dl, canvas_pos, canvas_size, app_state):
         """
@@ -1824,21 +1996,11 @@ class InteractiveFunscriptTimeline:
             imgui.same_line()
             if self._recording_capture and self._recording_capture.is_recording:
                 if imgui.button(f"Stop Rec##{self.timeline_num}"):
-                    self.is_previewing = False
-                    self.preview_actions = None
-                    simplified = self._recording_capture.stop_recording(self._recording_rdp_epsilon)
-                    if simplified:
-                        self._record_timeline_action()
-                        actions = self._get_actions()
-                        merged = list(actions) + simplified
-                        merged.sort(key=lambda a: a['at'])
-                        fs, axis = self._get_target_funscript_details()
-                        if fs and axis:
-                            fs.set_axis_actions(axis, merged)
-                            self._finalize_action_and_update_ui()
+                    self._stop_recording_and_merge()
             else:
                 if imgui.button(f"Record##{self.timeline_num}"):
                     self._recording_capture = RecordingCapture()
+                    self._recording_capture.input_delay_ms = self._controller_input_delay_ms
                     self._recording_capture.start_recording()
                     self.is_previewing = True
                     self.preview_actions = self._recording_capture._samples
@@ -1849,6 +2011,31 @@ class InteractiveFunscriptTimeline:
             imgui.pop_item_width()
             if imgui.is_item_hovered():
                 imgui.set_tooltip("RDP simplification (higher = fewer points)")
+
+            # --- Controller indicator / detect ---
+            imgui.same_line()
+            imgui.text("|")
+            imgui.same_line()
+            if self._gamepad_connected:
+                imgui.text_colored("Gamepad", 0.2, 1.0, 0.4, 1.0)
+                if imgui.is_item_hovered():
+                    name = getattr(self._gamepad_input, '_detected_name', 'Controller')
+                    imgui.set_tooltip(f"Connected: {name}")
+            else:
+                if imgui.small_button(f"Gamepad##{self.timeline_num}"):
+                    self._init_gamepad()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Detect gamepad controller")
+
+            # Expand/collapse controller settings
+            if self._gamepad_connected:
+                imgui.same_line()
+                if imgui.small_button(f"...##{self.timeline_num}_gp"):
+                    self._show_controller_settings = not self._show_controller_settings
+
+            # --- Controller settings panel (collapsible) ---
+            if self._show_controller_settings and self._gamepad_connected:
+                self._draw_controller_settings()
 
         # BPM controls (core feature)
         imgui.same_line()

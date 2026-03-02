@@ -26,6 +26,7 @@ class RecordingCapture:
         self._samples: List[Dict] = []
         self._is_recording = False
         self._last_capture_ms = 0.0
+        self.input_delay_ms: int = 0  # Subtracted from time_ms (controller lag compensation)
 
     @property
     def is_recording(self) -> bool:
@@ -51,13 +52,16 @@ class RecordingCapture:
         if not self._is_recording:
             return
 
+        # Apply input delay compensation (controller lag offset)
+        corrected_time = time_ms - self.input_delay_ms
+
         # Rate-limit captures
-        if self._samples and (time_ms - self._last_capture_ms) < self._min_interval_ms:
+        if self._samples and (corrected_time - self._last_capture_ms) < self._min_interval_ms:
             return
 
         pos = max(0, min(100, int(round(position_0_100))))
-        self._samples.append({'at': int(time_ms), 'pos': pos})
-        self._last_capture_ms = time_ms
+        self._samples.append({'at': int(corrected_time), 'pos': pos})
+        self._last_capture_ms = corrected_time
 
     def stop_recording(self, epsilon: float = 2.0) -> List[Dict]:
         """Stop recording and return simplified actions.
