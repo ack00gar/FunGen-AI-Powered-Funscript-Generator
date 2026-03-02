@@ -33,11 +33,9 @@ class AppStateUI:
         self.status_message_time: float = 0.0
 
         # Load last used tracker using dynamic discovery
-        # Default to OD exp2 if no setting exists (Better default than legacy)
-        default_tracker = "OD exp2"
         self.selected_tracker_name: str = self.app_settings.get(
             "selected_tracker_name",
-            defaults.get("selected_tracker_name", default_tracker)
+            defaults.get("selected_tracker_name", DEFAULT_TRACKER_NAME)
         )
         # Load saved processing speed mode, default to REALTIME
         saved_speed_mode = self.app_settings.get("selected_processing_speed_mode", "REALTIME")
