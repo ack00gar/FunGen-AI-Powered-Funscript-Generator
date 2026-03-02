@@ -275,6 +275,7 @@ class StatusStripColors:
     TEXT = CurrentTheme.STATUS_STRIP_TEXT
     ACCENT = CurrentTheme.STATUS_STRIP_ACCENT
     ENERGY_SAVER = CurrentTheme.ENERGY_SAVER_INDICATOR
+    WARNING = CurrentTheme.STATUS_STRIP_WARNING
 
 
 class ButtonColors:

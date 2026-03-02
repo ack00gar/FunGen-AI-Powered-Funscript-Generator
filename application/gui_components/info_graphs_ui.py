@@ -1239,10 +1239,10 @@ class InfoGraphsUI:
         imgui.spacing()
 
         # Get buffer information
-        if hasattr(processor, 'arrow_nav_backward_buffer'):
-            with processor.arrow_nav_backward_buffer_lock:
-                current_buffer_fill = len(processor.arrow_nav_backward_buffer)
-                max_buffer_size = processor.arrow_nav_backward_buffer.maxlen if processor.arrow_nav_backward_buffer.maxlen else 600
+        if hasattr(processor, '_frame_buffer'):
+            buf = processor.buffer_info
+            current_buffer_fill = buf['size']
+            max_buffer_size = buf['capacity'] if buf['capacity'] else 600
 
             # Calculate fill percentage
             fill_percentage = (current_buffer_fill / max_buffer_size) if max_buffer_size > 0 else 0.0

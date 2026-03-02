@@ -258,7 +258,7 @@ class ShortcutHandlerMixin:
                     time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
 
                     if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
-                        # Continuous scrolling: only navigate after interval
+                        # Both forward and backward hold: frame-by-frame from pipe/buffer
                         if time_since_last >= self.arrow_key_state['seek_interval']:
                             should_navigate = True
                     # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
@@ -272,47 +272,48 @@ class ShortcutHandlerMixin:
         if not self.app.processor or not self.app.processor.video_info:
             return
 
+        proc = self.app.processor
+
         # Skip if already seeking to avoid frame jump issues
-        if self.app.processor.seek_in_progress:
+        if proc.seek_in_progress:
             return
 
-        new_frame = self.app.processor.current_frame_index + delta_frames
-        total_frames = self.app.processor.total_frames
+        new_frame = proc.current_frame_index + delta_frames
+        total_frames = proc.total_frames
         new_frame = max(0, min(new_frame, total_frames - 1 if total_frames > 0 else 0))
 
-        if new_frame == self.app.processor.current_frame_index:
+        if new_frame == proc.current_frame_index:
             return  # No change needed
 
         t0 = time.perf_counter()
 
-        # Only use rolling buffer when NOT tracking/processing
-        if not self.app.processor.is_processing and not (self.app.tracker and self.app.tracker.tracking_active):
+        # Use fast pipe/buffer path when idle or paused (paused = pipe available)
+        is_actively_playing = (proc.is_processing
+                               and not proc.pause_event.is_set())
+        is_tracking = self.app.tracker and self.app.tracker.tracking_active
+        if not is_actively_playing and not is_tracking:
             if delta_frames > 0:
-                # Forward: sequential read + add to backward buffer
-                frame = self.app.processor.arrow_nav_forward(new_frame)
+                frame = proc.arrow_nav_forward(new_frame)
                 if frame is not None:
-                    self.app.processor.current_frame = frame
-                    # Add to rolling backward buffer for future backward navigation
-                    self.app.processor.add_frame_to_backward_buffer(new_frame, frame)
+                    proc.current_frame = frame
             else:
-                # Backward: use rolling buffer (with async refill if needed)
-                frame = self.app.processor.arrow_nav_backward(new_frame)
+                frame = proc.arrow_nav_backward(new_frame)
                 if frame is not None:
-                    self.app.processor.current_frame = frame
+                    proc.current_frame = frame
         else:
             # During tracking/processing: use standard cache-based seek
             frame_from_cache = None
-            with self.app.processor.frame_cache_lock:
-                if new_frame in self.app.processor.frame_cache:
-                    frame_from_cache = self.app.processor.frame_cache[new_frame]
-                    self.app.processor.frame_cache.move_to_end(new_frame)
+            with proc.frame_cache_lock:
+                if new_frame in proc.frame_cache:
+                    frame_from_cache = proc.frame_cache[new_frame]
+                    proc.frame_cache.move_to_end(new_frame)
 
             if frame_from_cache is not None:
-                self.app.processor.current_frame_index = new_frame
-                self.app.processor.current_frame = frame_from_cache
+                proc.current_frame_index = new_frame
+                proc.current_frame = frame_from_cache
             else:
-                self.app.processor.current_frame_index = new_frame
-                self.app.processor.seek_video(new_frame)
+                proc.current_frame_index = new_frame
+                proc.seek_video(new_frame)
 
         # Report to perf monitor so it shows as "ArrowNavDecode" instead of
         # being lumped into "GlobalShortcuts"
