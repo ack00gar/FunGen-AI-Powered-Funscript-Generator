@@ -283,6 +283,8 @@ class ShortcutHandlerMixin:
         if new_frame == self.app.processor.current_frame_index:
             return  # No change needed
 
+        t0 = time.perf_counter()
+
         # Only use rolling buffer when NOT tracking/processing
         if not self.app.processor.is_processing and not (self.app.tracker and self.app.tracker.tracking_active):
             if delta_frames > 0:
@@ -311,6 +313,11 @@ class ShortcutHandlerMixin:
             else:
                 self.app.processor.current_frame_index = new_frame
                 self.app.processor.seek_video(new_frame)
+
+        # Report to perf monitor so it shows as "ArrowNavDecode" instead of
+        # being lumped into "GlobalShortcuts"
+        decode_ms = (time.perf_counter() - t0) * 1000
+        self.track_frame_seek_time(decode_ms, path="arrow")
 
         # Update UI
         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
