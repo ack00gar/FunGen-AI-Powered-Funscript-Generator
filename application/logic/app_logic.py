@@ -40,6 +40,13 @@ from .app_cli_runner import (
     cli_stage3_progress_callback,
 )
 
+# Audio playback (optional — graceful degradation if sounddevice missing)
+try:
+    from video.audio_player import AudioPlayer, SOUNDDEVICE_AVAILABLE
+    from video.audio_video_sync import AudioVideoSync
+except ImportError:
+    SOUNDDEVICE_AVAILABLE = False
+
 # Import InteractiveFunscriptTimeline for type hinting
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -229,6 +236,25 @@ class ApplicationLogic:
         self.roi_manager = AppROIManager(self)
         self.batch_processor = AppBatchProcessor(self)
         self.cli_runner = AppCLIRunner(self)
+
+        # --- Streamer state (set by cp_streamer_ui when streamer starts/stops) ---
+        self._streamer_active = False
+
+        # --- Audio Playback (GUI only — no audio in CLI/batch mode) ---
+        self._audio_player = None
+        self._audio_sync = None
+        if not self.is_cli_mode and SOUNDDEVICE_AVAILABLE and self.app_settings.get("audio_enabled", True):
+            try:
+                self._audio_player = AudioPlayer()
+                self._audio_sync = AudioVideoSync(self.processor, self._audio_player, self)
+                self._audio_player.set_volume(self.app_settings.get("audio_volume", 0.8))
+                self._audio_player.set_mute(self.app_settings.get("audio_muted", False))
+                self._audio_sync.start()
+                self.logger.info("Audio playback initialized")
+            except Exception as e:
+                self.logger.warning(f"Audio playback init failed: {e}", exc_info=True)
+                self._audio_player = None
+                self._audio_sync = None
 
         # --- System Scaling Detection ---
         if not self.is_cli_mode:
@@ -1238,6 +1264,14 @@ class ApplicationLogic:
                 self.project_manager.project_dirty:
             self.logger.info("Performing final autosave on exit...")
             self.project_manager.perform_autosave()
+
+        # Stop audio playback and persist volume to settings
+        if hasattr(self, '_audio_volume_live'):
+            self.app_settings.set("audio_volume", self._audio_volume_live)
+        if self._audio_sync:
+            self._audio_sync.stop()
+        if self._audio_player:
+            self._audio_player.cleanup()
 
         # Any other cleanup (e.g. closing files, releasing resources)
         # self.app_settings.save_settings() # Settings usually saved explicitly by user or before critical changes

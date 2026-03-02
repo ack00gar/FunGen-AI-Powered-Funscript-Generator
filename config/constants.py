@@ -639,6 +639,8 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/speed-realtime.png': 'https://em-content.zobj.net/source/apple/391/person-walking_1f6b6.png',  # 🚶 person walking for Real Time
     'ui/icons/speed-slowmo.png': 'https://em-content.zobj.net/source/apple/391/turtle_1f422.png',  # 🐢 turtle for Slow-mo
     'ui/icons/speed-max.png': 'https://em-content.zobj.net/source/apple/391/rabbit_1f407.png',  # 🐇 rabbit for Max Speed
+    'ui/icons/speaker-high.png': 'https://em-content.zobj.net/source/apple/391/speaker-high-volume_1f50a.png',  # 🔊 speaker high volume
+    'ui/icons/speaker-muted.png': 'https://em-content.zobj.net/source/apple/391/muted-speaker_1f507.png',  # 🔇 muted speaker
 
     # Visualization/analysis indicators
     'ui/icons/chart-increasing.png': 'https://em-content.zobj.net/source/apple/391/chart-increasing_1f4c8.png',  # 📈 chart for 3D simulator
