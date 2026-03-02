@@ -228,6 +228,7 @@ class DarkTheme:
     STATUS_STRIP_BG = (0.1, 0.1, 0.12, 1.0)
     STATUS_STRIP_TEXT = (0.7, 0.7, 0.7, 1.0)
     STATUS_STRIP_ACCENT = (0.3, 0.5, 0.9, 1.0)
+    STATUS_STRIP_WARNING = (0.9, 0.75, 0.2, 1.0)
 
 
 # Current theme (default to dark)

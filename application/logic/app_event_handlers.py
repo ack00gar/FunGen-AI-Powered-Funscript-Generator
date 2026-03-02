@@ -37,13 +37,9 @@ class AppEventHandlers:
         if action_name == "play_pause":
             is_currently_playing = processor.is_processing and not processor.pause_event.is_set()
             if is_currently_playing:
-                processor.pause_processing()
-                # Native fullscreen auto-pauses via single FFmpeg dual-output
+                processor.pause_processing()  # Both tracking and playback: preserve pipe
             else:
-                # Only start regular video playback, never restart tracking sessions
-                # Tracking sessions should only be started via the control panel
                 processor.start_processing()
-                # Native fullscreen auto-resumes via single FFmpeg dual-output
             return
         if action_name == "stop":
             processor.stop_processing()

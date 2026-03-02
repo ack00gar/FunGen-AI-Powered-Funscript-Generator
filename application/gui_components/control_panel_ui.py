@@ -524,7 +524,10 @@ class ControlPanelUI(
 
         video_loaded = proc and proc.is_video_open()
         is_offline_active = stage_proc.full_analysis_active
-        is_live_active = proc and getattr(proc, 'is_processing', False)
+        is_live_active = (proc and getattr(proc, 'is_processing', False)
+                         and getattr(proc, 'enable_tracker_processing', False))
+        is_playback_active = (proc and getattr(proc, 'is_processing', False)
+                              and not getattr(proc, 'enable_tracker_processing', False))
 
         if not video_loaded:
             # No video loaded — show Load Video
@@ -560,6 +563,16 @@ class ControlPanelUI(
             with destructive_button_style():
                 if imgui.button("Stop Tracking##PinnedAction", width=btn_w, height=32):
                     events.handle_abort_process_click()
+        elif is_playback_active:
+            # Simple video playback — show Pause/Resume button
+            is_paused = hasattr(proc, 'pause_event') and proc.pause_event.is_set()
+            if is_paused:
+                with primary_button_style():
+                    if imgui.button("Resume Playback##PinnedAction", width=-1, height=32):
+                        events.handle_playback_control("play_pause")
+            else:
+                if imgui.button("Pause Playback##PinnedAction", width=-1, height=32):
+                    events.handle_playback_control("play_pause")
         else:
             # Has results or ready to start
             has_results = False

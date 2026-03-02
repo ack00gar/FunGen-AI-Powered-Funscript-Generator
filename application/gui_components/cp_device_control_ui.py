@@ -73,7 +73,7 @@ class DeviceControlMixin:
             )
 
             self.app.logger.info("Device Control: Creating DeviceManager...")
-            self.device_manager = DeviceManager(config)
+            self.device_manager = DeviceManager(config, app_instance=self.app)
 
             # Share device manager with app for TrackerManager integration
             self.app.device_manager = self.device_manager
@@ -255,6 +255,12 @@ class DeviceControlMixin:
         # OSSM BLE Direct Control
         if imgui.collapsing_header("OSSM (Bluetooth)##OSSMDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
             self._render_ossm_controls()
+
+        # Axis Routing (shown when connected)
+        if self.device_manager.is_connected():
+            imgui.separator()
+            if imgui.collapsing_header("Axis Routing##AxisRouting")[0]:
+                self._render_axis_routing()
 
         # SIMPLIFIED: All settings in one collapsible section
         if self.device_manager.is_connected():
@@ -468,6 +474,128 @@ class DeviceControlMixin:
 
         except Exception:
             pass  # Bookmarks unavailable — silently skip
+
+    def _render_axis_routing(self):
+        """Render axis routing configuration for connected device(s)."""
+        from device_control.axis_routing import DEVICE_CHANNELS, TCODE_DEFAULT_AXIS
+
+        imgui.indent(10)
+
+        # Get current timeline axis assignments
+        axis_assignments = {}
+        if hasattr(self, 'device_video_integration') and self.device_video_integration:
+            axis_assignments = self.device_video_integration.get_axis_assignments()
+        if not axis_assignments:
+            axis_assignments = {1: "stroke"}
+
+        # Build source options: "(none)" + all assigned axes
+        source_options = ["(none)"]
+        source_labels = ["(none)"]
+        for tl_num, axis_name in sorted(axis_assignments.items()):
+            source_options.append(axis_name)
+            source_labels.append(f"{axis_name} (Timeline {tl_num})")
+
+        router = self.device_manager.axis_router
+
+        for device_id, backend in self.device_manager.connected_devices.items():
+            device_type = self.device_manager.get_device_type_for_id(device_id)
+            config = router.get_config(device_id)
+
+            if not config:
+                # Auto-detect on first render
+                config = router.auto_detect(device_id, device_type, axis_assignments)
+
+            channels = DEVICE_CHANNELS.get(device_type, ["L0"])
+            is_single = len(channels) == 1
+
+            device_name = self.device_manager.get_connected_device_name()
+            imgui.text_colored(f"{device_name}", 0.7, 0.7, 0.9)
+            imgui.same_line()
+            if imgui.small_button(f"Auto-Detect##{device_id}"):
+                router.auto_detect(device_id, device_type, axis_assignments)
+                config = router.get_config(device_id)
+                router.save_to_settings(self.app.app_settings)
+
+            if is_single:
+                # Single-axis device (Handy): just a source dropdown
+                route = config.routes.get("L0")
+                if route:
+                    current_idx = 0
+                    if route.source_axis in source_options:
+                        current_idx = source_options.index(route.source_axis)
+                    changed, new_idx = imgui.combo(
+                        f"Source##{device_id}_L0", current_idx, source_labels
+                    )
+                    if changed:
+                        route.source_axis = source_options[new_idx]
+                        route.enabled = route.source_axis != "(none)"
+                        router.save_to_settings(self.app.app_settings)
+            else:
+                # Multi-axis device (OSR/SR6): full table
+                # Table headers
+                imgui.columns(4, f"axis_routing_table_{device_id}", True)
+                imgui.set_column_width(0, 50)
+                imgui.set_column_width(1, 180)
+                imgui.set_column_width(2, 35)
+                imgui.set_column_width(3, 35)
+
+                imgui.text("Ch")
+                imgui.next_column()
+                imgui.text("Source")
+                imgui.next_column()
+                imgui.text("En")
+                imgui.next_column()
+                imgui.text("Inv")
+                imgui.next_column()
+                imgui.separator()
+
+                for ch in channels:
+                    route = config.routes.get(ch)
+                    if not route:
+                        from device_control.axis_routing import AxisRoute
+                        route = AxisRoute(device_channel=ch, source_axis="none", enabled=False)
+                        config.routes[ch] = route
+
+                    # Channel name
+                    default_axis = TCODE_DEFAULT_AXIS.get(ch, "")
+                    imgui.text(ch)
+                    if imgui.is_item_hovered() and default_axis:
+                        imgui.set_tooltip(f"Default: {default_axis}")
+                    imgui.next_column()
+
+                    # Source dropdown
+                    current_idx = 0
+                    if route.source_axis in source_options:
+                        current_idx = source_options.index(route.source_axis)
+                    imgui.push_item_width(-1)
+                    changed, new_idx = imgui.combo(
+                        f"##{device_id}_{ch}_src", current_idx, source_labels
+                    )
+                    imgui.pop_item_width()
+                    if changed:
+                        route.source_axis = source_options[new_idx]
+                        if route.source_axis == "(none)":
+                            route.enabled = False
+                        router.save_to_settings(self.app.app_settings)
+                    imgui.next_column()
+
+                    # Enable checkbox
+                    changed, new_val = imgui.checkbox(f"##{device_id}_{ch}_en", route.enabled)
+                    if changed:
+                        route.enabled = new_val
+                        router.save_to_settings(self.app.app_settings)
+                    imgui.next_column()
+
+                    # Invert checkbox
+                    changed, new_val = imgui.checkbox(f"##{device_id}_{ch}_inv", route.invert)
+                    if changed:
+                        route.invert = new_val
+                        router.save_to_settings(self.app.app_settings)
+                    imgui.next_column()
+
+                imgui.columns(1)
+
+        imgui.unindent(10)
 
     def _render_all_advanced_settings(self):
         """Render all advanced settings in one section."""
