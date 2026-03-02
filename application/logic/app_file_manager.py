@@ -7,7 +7,7 @@ import time
 from typing import List, Optional, Dict, Tuple, Any
 
 from application.utils import VideoSegment, check_write_access
-from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, FUNSCRIPT_METADATA_VERSION
+from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, APP_NAME, FUNSCRIPT_METADATA_VERSION
 from funscript.axis_registry import (
     file_suffix_for_axis, axis_from_file_suffix, axis_from_tcode, tcode_for_axis,
     all_known_suffixes, AXIS_FILE_SUFFIX, FunscriptAxis
@@ -88,6 +88,46 @@ class AppFileManager:
         # Fallback defaults
         defaults = {1: "stroke", 2: "roll"}
         return defaults.get(timeline_num, f"axis_{timeline_num}")
+
+    def _resolve_tracker_display_name(self) -> Optional[str]:
+        """Resolve the human-readable tracker name via priority chain."""
+        # 1. Active tracker instance
+        try:
+            if self.app.processor and self.app.processor.tracker:
+                return self.app.processor.tracker.metadata.display_name
+        except (AttributeError, TypeError):
+            pass
+
+        # 2/3. Batch tracker name or GUI-selected tracker — resolve via TrackerDiscovery
+        from config.tracker_discovery import DynamicTrackerDiscovery
+        discovery = DynamicTrackerDiscovery()
+
+        internal_name = getattr(self.app, 'batch_tracker_name', None)
+        if not internal_name:
+            state_ui = getattr(self.app, 'app_state_ui', None)
+            if state_ui:
+                internal_name = getattr(state_ui, 'selected_tracker_name', None)
+
+        if internal_name:
+            info = discovery.get_tracker_info(internal_name)
+            if info:
+                return info.display_name
+
+        return None
+
+    def _build_generation_metadata(self, multi_axis: bool = False) -> dict:
+        """Return FunGen generation metadata for funscript exports."""
+        from datetime import datetime
+        meta = {
+            "creator_software": APP_NAME,
+            "creator_software_version": APP_VERSION,
+            "creation_date": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "funscript_type": "multi-axis" if multi_axis else "single-axis",
+        }
+        tracker_name = self._resolve_tracker_display_name()
+        if tracker_name:
+            meta["tracker_name"] = tracker_name
+        return meta
 
     def _get_funscript_path_for_axis(self, video_path: str, axis_name: str) -> str:
         """Return the OFS-convention path for a given axis next to the video file.
@@ -510,6 +550,8 @@ class AppFileManager:
             metadata["chapters_fps"] = current_fps
             metadata["chapters"] = [chapter.to_funscript_chapter_dict(current_fps) for chapter in chapters]
 
+        metadata.update(self._build_generation_metadata())
+
         # Include project metadata if available
         project_metadata = {}
         if hasattr(self.app, 'project_manager') and hasattr(self.app.project_manager, 'get_metadata'):
@@ -574,6 +616,8 @@ class AppFileManager:
                 current_fps = self.app.processor.fps
             metadata["chapters_fps"] = current_fps
             metadata["chapters"] = [ch.to_funscript_chapter_dict(current_fps) for ch in chapters]
+
+        metadata.update(self._build_generation_metadata(multi_axis=True))
 
         funscript_data = {
             "version": "1.0",
@@ -1003,6 +1047,13 @@ class AppFileManager:
         # This part runs for both project loads and new projects.
         if self.app.processor:
             if self.app.processor.open_video(file_path, from_project_load=is_project_load):
+                # Notify audio player of new video
+                if self.app._audio_player:
+                    has_audio = self.app.processor.video_info.get("has_audio", False)
+                    fps = self.app.processor.fps
+                    self.app.logger.info(f"Audio: set_video has_audio={has_audio} fps={fps}")
+                    self.app._audio_player.set_video(file_path, has_audio, fps)
+
                 # If it was a new project, auto-discover and load adjacent funscripts.
                 if not is_project_load:
                     # Discover all axis funscripts next to the video
@@ -1055,6 +1106,10 @@ class AppFileManager:
             self.app.stage3_mixed_debug_data = None
         if hasattr(self.app, 'stage3_mixed_debug_frame_map'):
             self.app.stage3_mixed_debug_frame_map = None
+
+        # Stop audio playback
+        if self.app._audio_player:
+            self.app._audio_player.stop()
 
         # Clear audio waveform data
         self.app.audio_waveform_data = None
@@ -1211,6 +1266,15 @@ class AppFileManager:
             self.app.app_state_ui.force_timeline_pan_to_current_frame = True
             self.app.funscript_processor.update_funscript_stats_for_timeline(1, "Video Loaded")
             self.app.funscript_processor.update_funscript_stats_for_timeline(2, "Video Loaded")
+
+            # Notify audio player of new video
+            if self.app._audio_player:
+                has_audio = self.app.processor.video_info.get("has_audio", False)
+                fps = self.app.processor.fps
+                self.app.logger.info(f"Audio: set_video has_audio={has_audio} fps={fps}")
+                self.app._audio_player.set_video(file_path, has_audio, fps)
+            else:
+                self.app.logger.debug("Audio: _audio_player is None, skipping set_video")
         else:
             self.video_path = ""
             self.app.logger.error(f"Failed to open video file: {os.path.basename(file_path)}", extra={'status_message': True})
