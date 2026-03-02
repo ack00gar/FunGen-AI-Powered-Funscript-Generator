@@ -164,6 +164,7 @@ class VideoProcessor:
         self.arrow_nav_backward_buffer_lock = threading.Lock()
         self.arrow_nav_refill_threshold = max(120, buffer_size // 5)  # Refill when < 20% of buffer size
         self.arrow_nav_refilling = False  # Flag to prevent concurrent refills
+        self._arrow_nav_refill_cancelled = False  # Set by _clear_arrow_nav_state to discard stale refills
         
         # Single FFmpeg dual-output processor integration
         from video.dual_frame_processor import SingleFFmpegDualOutputProcessor
@@ -297,6 +298,7 @@ class VideoProcessor:
                 if cache_len > 0:
                     self.logger.debug(f"Clearing frame cache (had {cache_len} items).")
                     self.frame_cache.clear()
+        self._clear_arrow_nav_state()
 
     def set_active_video_type_setting(self, video_type: str):
         if video_type not in ['auto', '2D', 'VR']:
@@ -448,17 +450,12 @@ class VideoProcessor:
         self.current_stream_start_frame_abs = 0
         self.stop_event.clear()
         self.seek_request_frame_index = None
-        # OPTIMIZATION: Load first frame with minimal processing to avoid startup delay
-        # Use a smaller batch size for initial frame to speed up video opening
-        original_batch_size = self.batch_fetch_size
-        self.batch_fetch_size = 1  # Fetch only 1 frame for startup
+        # OPTIMIZATION: Load first frame with thumbnail for instant startup
         try:
-            self.current_frame = self._get_specific_frame(0)
+            self.current_frame = self._get_specific_frame(0, use_thumbnail=True)
         except Exception as e:
             self.logger.warning(f"Could not load initial frame: {e}")
             self.current_frame = None
-        finally:
-            self.batch_fetch_size = original_batch_size  # Restore normal batch size
 
         if self.tracker:
             reset_reason = "project_load_preserve_actions" if from_project_load else None
@@ -990,7 +987,7 @@ class VideoProcessor:
             f"get_frames_batch: Complete. Got {len(frames_batch)} frames for start {start_frame_num} (requested {num_frames_to_fetch}). Decode time: {decode_time:.2f}ms")
         return frames_batch
 
-    def _get_specific_frame(self, frame_index_abs: int, update_current_index: bool = True, immediate_display: bool = False) -> Optional[np.ndarray]:
+    def _get_specific_frame(self, frame_index_abs: int, update_current_index: bool = True, immediate_display: bool = False, use_thumbnail: bool = False) -> Optional[np.ndarray]:
         if not self.video_path or not self.video_info or self.video_info.get('fps', 0) <= 0:
             self.logger.warning("Cannot get frame: video not loaded/invalid FPS.")
             if update_current_index:
@@ -1006,9 +1003,9 @@ class VideoProcessor:
                     self.current_frame_index = frame_index_abs
                 return frame
 
-        # For instant seek preview (batch_size=1), use fast thumbnail extractor
+        # For instant seek preview, use fast thumbnail extractor
         # This provides immediate visual feedback (~20ms) while batch buffer loads in background
-        if self.batch_fetch_size == 1 and self.thumbnail_extractor is not None:
+        if use_thumbnail and self.thumbnail_extractor is not None:
             self.logger.debug(f"Using fast thumbnail extractor for instant seek preview of frame {frame_index_abs}")
             frame = self.thumbnail_extractor.get_frame(frame_index_abs, use_gpu_unwarp=False)
 
@@ -1700,8 +1697,8 @@ class VideoProcessor:
         self.ffmpeg_pipe1_process = None
         self._terminate_process(self.ffmpeg_process, "Main/Pipe 2")
         self.ffmpeg_process = None
-        # Also stop the arrow-nav pipe
-        self._arrow_nav_stop_pipe()
+        # Also clear all arrow-nav state (pipe + backward buffer)
+        self._clear_arrow_nav_state()
 
     def _start_ffmpeg_process(self, start_frame_abs_idx=0, num_frames_to_output_ffmpeg=None):
         self._terminate_ffmpeg_processes()
@@ -1959,8 +1956,8 @@ class VideoProcessor:
 
         target_frame = max(0, min(frame_index, self.total_frames - 1))
 
-        # Invalidate arrow-nav pipe since the user jumped to a new position
-        self._arrow_nav_stop_pipe()
+        # Invalidate arrow-nav state since the user jumped to a new position
+        self._clear_arrow_nav_state()
 
         # Notify registered observers (e.g., streamer) of seek event
         self._notify_seek_callbacks(target_frame)
@@ -2010,12 +2007,9 @@ class VideoProcessor:
 
                 # Show instant thumbnail preview only (no buffer loading for scrubbing)
                 # Rolling backward buffer is only for arrow key navigation
-                original_batch_size = self.batch_fetch_size
-                self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
                 seek_t0 = time.perf_counter()
-                new_frame = self._get_specific_frame(target_frame, immediate_display=False)
+                new_frame = self._get_specific_frame(target_frame, immediate_display=False, use_thumbnail=True)
                 seek_ms = (time.perf_counter() - seek_t0) * 1000
-                self.batch_fetch_size = original_batch_size
 
                 # Report scrub decode cost to perf monitor
                 if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
@@ -2100,8 +2094,21 @@ class VideoProcessor:
             self.arrow_nav_in_progress = False
 
     def _arrow_nav_read_frame(self, target_frame: int) -> Optional[np.ndarray]:
-        """Read one frame from the arrow-nav FFmpeg pipe, (re)starting it if needed."""
-        # Fast path: pipe exists and is positioned at target_frame
+        """Read one frame from backward buffer or FFmpeg pipe.
+
+        After going backward then forward again, frames we already visited
+        are still in the backward deque. Serve those instantly instead of
+        respawning the FFmpeg pipe (avoids 120ms startup penalty).
+        Once we pass beyond the buffered range, resume the pipe.
+        """
+        # 1. Check backward buffer first (instant, no I/O)
+        with self.arrow_nav_backward_buffer_lock:
+            for frame_index, frame_data in self.arrow_nav_backward_buffer:
+                if frame_index == target_frame:
+                    self.logger.debug(f"Arrow nav forward: frame {target_frame} served from backward buffer")
+                    return frame_data
+
+        # 2. Fast path: pipe exists and is positioned at target_frame
         if (self._arrow_nav_ffmpeg_proc is not None
                 and self._arrow_nav_ffmpeg_proc.poll() is None
                 and self._arrow_nav_next_frame == target_frame):
@@ -2111,21 +2118,16 @@ class VideoProcessor:
                 return frame
             # Pipe exhausted / broken — fall through to restart
 
-        # (Re)start the pipe at target_frame
+        # 3. (Re)start the pipe at target_frame
         if self._arrow_nav_start_pipe(target_frame):
             frame = self._arrow_nav_pipe_read_one()
             if frame is not None:
                 self._arrow_nav_next_frame = target_frame + 1
                 return frame
 
-        # Fallback to ThumbnailExtractor (cv2) for resilience
+        # 4. Fallback to ThumbnailExtractor (cv2) for resilience
         self.logger.debug(f"Arrow nav FFmpeg pipe failed for frame {target_frame}, falling back to thumbnail extractor")
-        original_batch_size = self.batch_fetch_size
-        self.batch_fetch_size = 1
-        try:
-            return self._get_specific_frame(target_frame, update_current_index=False)
-        finally:
-            self.batch_fetch_size = original_batch_size
+        return self._get_specific_frame(target_frame, update_current_index=False, use_thumbnail=True)
 
     def _arrow_nav_start_pipe(self, start_frame: int) -> bool:
         """Spawn a dedicated FFmpeg pipe at *start_frame* for arrow navigation."""
@@ -2188,6 +2190,18 @@ class VideoProcessor:
             self._arrow_nav_ffmpeg_proc = None
             self._arrow_nav_next_frame = -1
 
+    def _clear_arrow_nav_state(self):
+        """Clear all arrow-nav state: backward buffer, FFmpeg pipe, and pending refills.
+
+        Called on position jumps (seek, cache clear, FFmpeg teardown) so stale
+        frames from a previous position are never served.
+        """
+        self._arrow_nav_refill_cancelled = True
+        self._arrow_nav_stop_pipe()
+        with self.arrow_nav_backward_buffer_lock:
+            self.arrow_nav_backward_buffer.clear()
+        self.arrow_nav_refilling = False
+
     def arrow_nav_backward(self, target_frame: int) -> Optional[np.ndarray]:
         """
         Navigate backward using rolling buffer.
@@ -2211,33 +2225,21 @@ class VideoProcessor:
                 if frames_behind < self.arrow_nav_refill_threshold and not self.arrow_nav_refilling:
                     self._trigger_backward_buffer_refill(oldest_frame_index)
 
-        # Frame not in buffer, fetch it using fast thumbnail path
-        # This shouldn't happen often but when it does, we need instant response
-        # Skip if already fetching (prevents CPU overload when holding arrow keys)
-        if self.arrow_nav_in_progress:
-            return None
-
-        self.arrow_nav_in_progress = True
-        try:
-            self.logger.debug(f"Frame {target_frame} not in backward buffer, fetching via fast path")
-            original_batch_size = self.batch_fetch_size
-            self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
-            try:
-                return self._get_specific_frame(target_frame, update_current_index=True)
-            finally:
-                self.batch_fetch_size = original_batch_size
-        finally:
-            self.arrow_nav_in_progress = False
+        # Frame not in buffer — fire an async seek instead of blocking the UI.
+        # seek_video() runs in SeekThread, and _perform_frame_seek handles None gracefully.
+        self.logger.debug(f"Frame {target_frame} not in backward buffer, dispatching async seek")
+        self.seek_video(target_frame)
+        return None
 
     def _trigger_backward_buffer_refill(self, oldest_frame_index: int):
-        """Async refill backward buffer with 480 frames."""
+        """Async refill backward buffer with 120 frames."""
         self.arrow_nav_refilling = True
+        self._arrow_nav_refill_cancelled = False
 
         def refill_worker():
             try:
-                # Fetch 480 frames backward from oldest buffered frame
                 refill_end = oldest_frame_index - 1
-                refill_start = max(0, refill_end - 479)  # 480 frames
+                refill_start = max(0, refill_end - 119)  # 120 frames
                 num_frames = refill_end - refill_start + 1
 
                 if num_frames <= 0:
@@ -2249,12 +2251,15 @@ class VideoProcessor:
                 # Fetch batch
                 fetched_batch = self.get_frames_batch(refill_start, num_frames)
 
+                # Discard results if a seek/clear happened while we were fetching
+                if self._arrow_nav_refill_cancelled:
+                    self.logger.debug("Backward buffer refill cancelled (position changed), discarding results")
+                    return
+
                 # Add to front of backward buffer (in correct order)
                 with self.arrow_nav_backward_buffer_lock:
-                    # Convert to list of tuples sorted by frame index
                     new_frames = sorted([(idx, frame) for idx, frame in fetched_batch.items()])
 
-                    # Add to front of buffer (prepend in order)
                     for frame_tuple in new_frames:
                         self.arrow_nav_backward_buffer.appendleft(frame_tuple)
 

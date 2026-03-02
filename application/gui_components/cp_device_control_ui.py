@@ -252,6 +252,10 @@ class DeviceControlMixin:
         if imgui.collapsing_header("Handy (Direct)##HandyDirect", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
             self._render_handy_controls()
 
+        # OSSM BLE Direct Control
+        if imgui.collapsing_header("OSSM (Bluetooth)##OSSMDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+            self._render_ossm_controls()
+
         # SIMPLIFIED: All settings in one collapsible section
         if self.device_manager.is_connected():
             imgui.separator()
@@ -339,6 +343,16 @@ class DeviceControlMixin:
 
         imgui.spacing()
 
+        # Movement recording
+        self._render_recording_controls()
+
+        imgui.spacing()
+
+        # Bookmark navigation
+        self._render_bookmark_nav()
+
+        imgui.spacing()
+
         # Quick position test
         imgui.text("Test Position:")
         current_pos = self.device_manager.current_position
@@ -355,6 +369,105 @@ class DeviceControlMixin:
             self.device_manager.update_position(percentage, 50.0)
         except Exception as e:
             self.app.logger.error(f"Error previewing global extent: {e}")
+
+    def _render_recording_controls(self):
+        """Render movement recording controls in Quick Controls."""
+        try:
+            recorder = getattr(self.device_manager, 'recorder', None)
+            if not recorder:
+                return
+
+            if recorder.is_recording:
+                # Recording active — show red indicator + elapsed time + stop button
+                elapsed_s = recorder.duration_ms / 1000.0
+                imgui.text_colored("REC", 1.0, 0.2, 0.2)
+                imgui.same_line()
+                imgui.text(f"{elapsed_s:.1f}s ({recorder.action_count} pts)")
+                imgui.same_line()
+                if imgui.small_button("Stop Recording##RecStop"):
+                    recorder.stop()
+                    self._export_recording()
+            else:
+                if imgui.small_button("Record Movement##RecStart"):
+                    proc = self.app.processor
+                    video_time_ms = 0
+                    if proc and proc.is_video_open():
+                        fps = proc.fps or 30.0
+                        video_time_ms = int((proc.current_frame_index / fps) * 1000)
+                    recorder.start(video_time_ms)
+                _tooltip_if_hovered("Record device positions during playback and export as .funscript")
+        except Exception:
+            pass
+
+    def _export_recording(self):
+        """Export recorded movement as funscript file."""
+        try:
+            recorder = self.device_manager.recorder
+            if recorder.action_count == 0:
+                self.app.logger.warning("No actions recorded — nothing to export")
+                return
+
+            # Build default filename from video name
+            import os
+            proc = self.app.processor
+            base_name = "recorded"
+            if proc and proc.is_video_open() and hasattr(proc, 'video_path'):
+                base_name = os.path.splitext(os.path.basename(proc.video_path))[0]
+
+            default_path = os.path.join(
+                os.path.dirname(getattr(proc, 'video_path', '.') or '.'),
+                f"{base_name}_recorded.funscript"
+            )
+
+            recorder.save_funscript(default_path)
+            self.app.logger.info(
+                f"Recording exported: {default_path} ({recorder.action_count} actions)",
+                extra={'status_message': True, 'duration': 5.0}
+            )
+        except Exception as e:
+            self.app.logger.error(f"Failed to export recording: {e}")
+
+    def _render_bookmark_nav(self):
+        """Render prev/next bookmark navigation buttons."""
+        try:
+            # Get bookmark manager from primary timeline editor
+            bm_mgr = None
+            gui = getattr(self.app, 'gui', None)
+            if gui and hasattr(gui, 'timeline_editors'):
+                editors = gui.timeline_editors
+                if editors:
+                    bm_mgr = getattr(editors[0], '_bookmark_manager', None)
+
+            if not bm_mgr or not bm_mgr.bookmarks:
+                return
+
+            proc = self.app.processor
+            if not proc or not proc.is_video_open():
+                return
+
+            fps = proc.fps or 30.0
+            current_time_ms = (proc.current_frame_index / fps) * 1000.0
+
+            imgui.text("Bookmarks:")
+            imgui.same_line()
+
+            if imgui.small_button("<< Prev##BmkPrev"):
+                bm = bm_mgr.get_nearest(current_time_ms, direction=-1)
+                if bm:
+                    frame_idx = int(bm.time_ms / 1000.0 * fps)
+                    self.app.event_handlers.seek_video_with_sync(frame_idx)
+            _tooltip_if_hovered("Jump to previous bookmark")
+
+            imgui.same_line()
+            if imgui.small_button("Next >>##BmkNext"):
+                bm = bm_mgr.get_nearest(current_time_ms, direction=1)
+                if bm:
+                    frame_idx = int(bm.time_ms / 1000.0 * fps)
+                    self.app.event_handlers.seek_video_with_sync(frame_idx)
+            _tooltip_if_hovered("Jump to next bookmark")
+
+        except Exception:
+            pass  # Bookmarks unavailable — silently skip
 
     def _render_all_advanced_settings(self):
         """Render all advanced settings in one section."""
@@ -401,6 +514,84 @@ class DeviceControlMixin:
             self.app.app_settings.save_settings()
             self._update_video_playback_control(new_video_playback)
         _tooltip_if_hovered("Sync device with video timeline and funscript playback")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Speed Limiting
+        imgui.text_colored("Speed Limiting:", 0.8, 0.8, 0.2)
+
+        speed_limit_enabled = getattr(self.device_manager, '_speed_limit_enabled', False)
+        changed, new_enabled = imgui.checkbox("Enable Speed Limit##SpeedLimit", speed_limit_enabled)
+        if changed:
+            self.device_manager._speed_limit_enabled = new_enabled
+        _tooltip_if_hovered("Limit maximum device movement speed to prevent dangerous acceleration")
+
+        if speed_limit_enabled:
+            max_speed = getattr(self.device_manager, '_max_speed_pct_per_second', 400.0)
+            changed, new_speed = imgui.slider_float("Max Speed##SpeedLimitVal", max_speed, 50.0, 500.0, "%.0f %%/s")
+            if changed:
+                self.device_manager._max_speed_pct_per_second = new_speed
+            _tooltip_if_hovered("Maximum position change per second (400%%/s = full stroke in 0.25s)")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Interpolation Mode
+        imgui.text_colored("Interpolation:", 0.8, 0.8, 0.2)
+
+        try:
+            from device_control.bridges.funscript_player_bridge import InterpolationMode
+            mode_names = ["Linear", "Cosine", "PCHIP (Recommended)", "Step"]
+            mode_values = [InterpolationMode.LINEAR, InterpolationMode.COSINE,
+                           InterpolationMode.PCHIP, InterpolationMode.STEP]
+
+            # Get current mode from video bridge config
+            bridge = getattr(self, 'device_video_bridge', None)
+            current_mode = InterpolationMode.PCHIP
+            if bridge:
+                current_mode = getattr(bridge.config, 'interpolation_mode', InterpolationMode.PCHIP)
+
+            current_idx = mode_values.index(current_mode) if current_mode in mode_values else 2
+            changed, new_idx = imgui.combo("##InterpMode", current_idx, mode_names)
+            if changed and bridge:
+                bridge.config.interpolation_mode = mode_values[new_idx]
+            _tooltip_if_hovered(
+                "LINEAR: Simple straight-line interpolation\n"
+                "COSINE: Smoother acceleration/deceleration\n"
+                "PCHIP: Best quality, prevents overshoot\n"
+                "STEP: No interpolation, snap to keyframes"
+            )
+        except Exception:
+            pass
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Auto-Home Settings
+        imgui.text_colored("Auto-Home:", 0.8, 0.8, 0.2)
+
+        auto_home_enabled = getattr(self.device_manager, '_auto_home_enabled', True)
+        changed, new_enabled = imgui.checkbox("Enable Auto-Home##AutoHome", auto_home_enabled)
+        if changed:
+            self.device_manager._auto_home_enabled = new_enabled
+        _tooltip_if_hovered("Return device to center position after idle period")
+
+        if auto_home_enabled:
+            auto_home_delay = getattr(self.device_manager, '_auto_home_delay_s', 5.0)
+            changed, new_delay = imgui.slider_float("Idle Delay##AutoHomeDelay", auto_home_delay, 1.0, 30.0, "%.1f s")
+            if changed:
+                self.device_manager._auto_home_delay_s = new_delay
+            _tooltip_if_hovered("How long to wait after last movement before homing starts")
+
+            auto_home_duration = getattr(self.device_manager, '_auto_home_duration_s', 3.0)
+            changed, new_duration = imgui.slider_float("Home Duration##AutoHomeDur", auto_home_duration, 0.5, 10.0, "%.1f s")
+            if changed:
+                self.device_manager._auto_home_duration_s = new_duration
+            _tooltip_if_hovered("How long the homing transition takes (ease-in curve)")
 
         imgui.spacing()
         imgui.separator()
@@ -532,8 +723,32 @@ class DeviceControlMixin:
         is_handy_connected = connected_device and "handy" in connected_device.device_id.lower()
 
         if is_handy_connected:
-            # Connected state
-            self._status_indicator(f"Connected to {connected_device.name}", "ready", "Handy connected and ready")
+            # Connected state + measured RTD
+            rtd_ms = self.device_manager.get_handy_rtd_ms() if hasattr(self.device_manager, 'get_handy_rtd_ms') else 0
+            rtd_label = f"  (RTD: {rtd_ms}ms)" if rtd_ms > 0 else ""
+            self._status_indicator(f"Connected to {connected_device.name}{rtd_label}", "ready", "Handy connected and ready")
+
+            # Mode selector (HDSP vs HSSP)
+            handy_mode = self.app.app_settings.get("device_control_handy_mode", "HDSP (Direct)")
+            mode_options = ["HDSP (Direct)", "HSSP (Script Sync)"]
+            mode_idx = mode_options.index(handy_mode) if handy_mode in mode_options else 0
+            imgui.text("Mode:")
+            imgui.same_line()
+            avail_w = imgui.get_content_region_available()[0]
+            imgui.push_item_width(avail_w)
+            changed_mode, new_mode_idx = imgui.combo("##HandyMode", mode_idx, mode_options)
+            imgui.pop_item_width()
+            if changed_mode:
+                self.app.app_settings.set("device_control_handy_mode", mode_options[new_mode_idx])
+                self.app.app_settings.save_settings()
+                # Reset preparation state so the new mode starts fresh
+                if hasattr(self, 'device_video_integration') and self.device_video_integration:
+                    self.device_video_integration.reset_handy_preparation()
+            _tooltip_if_hovered("HDSP: sends positions in real-time (recommended)\nHSSP: uploads script to device (use if HDSP has issues)")
+
+            is_hdsp_mode = mode_options[new_mode_idx if changed_mode else mode_idx].startswith("HDSP")
+
+            imgui.spacing()
 
             # Upload only applies to direct Handy (HSSP), not BT/Intiface (Buttplug)
             is_direct_handy = getattr(self.device_manager, '_handy_backend', None) is not None
@@ -543,7 +758,7 @@ class DeviceControlMixin:
                            self.app.funscript_processor and
                            self.app.funscript_processor.get_actions('primary'))
 
-            if is_direct_handy:
+            if is_direct_handy and not is_hdsp_mode:
                 if has_funscript:
                     # Timeline selector for upload (Handy is single-axis, let user choose which)
                     axis_assignments = {}
@@ -630,88 +845,89 @@ class DeviceControlMixin:
             imgui.separator()
             imgui.spacing()
 
-            # Sync settings
-            imgui.text("Sync Settings:")
-            imgui.indent(10)
+            # Sync settings (HSSP only — not applicable to HDSP mode)
+            if not is_hdsp_mode:
+                imgui.text("Sync Settings:")
+                imgui.indent(10)
 
-            current_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
+                current_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
 
-            # Row 1: -50 / -10 / -1 buttons, then slider, then +1 / +10 / +50 buttons
-            # Fine adjustment buttons (left side)
-            if imgui.button("-50##SyncMinus50"):
-                new_offset = max(-1000, current_offset - 50)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("-50ms")
-            imgui.same_line()
+                # Row 1: -50 / -10 / -1 buttons, then slider, then +1 / +10 / +50 buttons
+                # Fine adjustment buttons (left side - decrease compensation)
+                if imgui.button("-50##SyncMinus50"):
+                    new_offset = max(0, current_offset - 50)
+                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                    self._apply_handy_hstp_offset(new_offset)
+                _tooltip_if_hovered("-50ms")
+                imgui.same_line()
 
-            if imgui.button("-10##SyncMinus10"):
-                new_offset = max(-1000, current_offset - 10)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("-10ms")
-            imgui.same_line()
+                if imgui.button("-10##SyncMinus10"):
+                    new_offset = max(0, current_offset - 10)
+                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                    self._apply_handy_hstp_offset(new_offset)
+                _tooltip_if_hovered("-10ms")
+                imgui.same_line()
 
-            if imgui.button("-1##SyncMinus1"):
-                new_offset = max(-1000, current_offset - 1)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("-1ms")
-            imgui.same_line()
+                if imgui.button("-1##SyncMinus1"):
+                    new_offset = max(0, current_offset - 1)
+                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                    self._apply_handy_hstp_offset(new_offset)
+                _tooltip_if_hovered("-1ms")
+                imgui.same_line()
 
-            # Sync offset slider
-            imgui.push_item_width(100)
-            changed, value = imgui.slider_int(
-                "##HandySyncOffset",
-                current_offset,
-                -1000, 1000
-            )
-            imgui.pop_item_width()
-            if changed:
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", value)
-                self._apply_handy_hstp_offset(value)
-            _tooltip_if_hovered("Sync Offset (ms): + = Handy moves later, - = Handy moves earlier\nChanges apply instantly via Handy API")
-            imgui.same_line()
+                # Sync offset slider
+                imgui.push_item_width(100)
+                changed, value = imgui.slider_int(
+                    "##HandySyncOffset",
+                    current_offset,
+                    0, 2500
+                )
+                imgui.pop_item_width()
+                if changed:
+                    self.app.app_settings.set("device_control_handy_sync_offset_ms", value)
+                    self._apply_handy_hstp_offset(value)
+                _tooltip_if_hovered("Fine-tune sync feel (ms): higher = device moves earlier\nNetwork latency is auto-compensated; adjust if movement feels late")
+                imgui.same_line()
 
-            # Fine adjustment buttons (right side)
-            if imgui.button("+1##SyncPlus1"):
-                new_offset = min(1000, current_offset + 1)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("+1ms")
-            imgui.same_line()
+                # Fine adjustment buttons (right side - increase compensation)
+                if imgui.button("+1##SyncPlus1"):
+                    new_offset = min(2500, current_offset + 1)
+                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                    self._apply_handy_hstp_offset(new_offset)
+                _tooltip_if_hovered("+1ms")
+                imgui.same_line()
 
-            if imgui.button("+10##SyncPlus10"):
-                new_offset = min(1000, current_offset + 10)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("+10ms")
-            imgui.same_line()
+                if imgui.button("+10##SyncPlus10"):
+                    new_offset = min(2500, current_offset + 10)
+                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                    self._apply_handy_hstp_offset(new_offset)
+                _tooltip_if_hovered("+10ms")
+                imgui.same_line()
 
-            if imgui.button("+50##SyncPlus50"):
-                new_offset = min(1000, current_offset + 50)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("+50ms")
+                if imgui.button("+50##SyncPlus50"):
+                    new_offset = min(2500, current_offset + 50)
+                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                    self._apply_handy_hstp_offset(new_offset)
+                _tooltip_if_hovered("+50ms")
 
-            # Row 2: Direct numeric input + current value display
-            imgui.push_item_width(80)
-            changed, input_value = imgui.input_int("##SyncOffsetInput", current_offset, 0, 0)
-            imgui.pop_item_width()
-            if changed:
-                clamped_value = max(-1000, min(1000, input_value))
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", clamped_value)
-                self._apply_handy_hstp_offset(clamped_value)
-            _tooltip_if_hovered("Enter offset directly (ms)\n-1000 to +1000")
-            imgui.same_line()
-            imgui.text("ms")
-            imgui.same_line()
-            if current_offset >= 0:
-                imgui.text_colored(f"(Handy +{current_offset}ms later)", 0.5, 0.8, 0.5, 1.0)
-            else:
-                imgui.text_colored(f"(Handy {current_offset}ms earlier)", 0.8, 0.5, 0.5, 1.0)
+                # Row 2: Direct numeric input + current value display
+                imgui.push_item_width(80)
+                changed, input_value = imgui.input_int("##SyncOffsetInput", current_offset, 0, 0)
+                imgui.pop_item_width()
+                if changed:
+                    clamped_value = max(0, min(2500, input_value))
+                    self.app.app_settings.set("device_control_handy_sync_offset_ms", clamped_value)
+                    self._apply_handy_hstp_offset(clamped_value)
+                _tooltip_if_hovered("Enter lag compensation directly (ms)\n0 to 2500")
+                imgui.same_line()
+                imgui.text("ms")
+                imgui.same_line()
+                if current_offset > 0:
+                    imgui.text_colored(f"(compensating {current_offset}ms lag)", 0.5, 0.8, 0.5, 1.0)
+                else:
+                    imgui.text_colored("(no compensation)", 0.6, 0.6, 0.6, 1.0)
 
-            imgui.unindent(10)
+                imgui.unindent(10)
 
         else:
             # Disconnected state - show connection controls
@@ -1717,8 +1933,8 @@ class DeviceControlMixin:
                     imgui.text(f"{axis_label} Pattern Generation:")
 
                     # Pattern type dropdown (generalized for all axes)
-                    pattern_types = ["disabled", "wave", "follow", "auto"]
-                    pattern_labels = ["Disabled", "Wave (Smooth)", "Follow Primary", "Auto-Select"]
+                    pattern_types = ["disabled", "wave", "follow", "auto", "random_noise"]
+                    pattern_labels = ["Disabled", "Wave (Smooth)", "Follow Primary", "Auto-Select", "Random Noise"]
                     current_pattern = axis_data.get("pattern_type", "disabled")
                     current_pattern_index = pattern_types.index(current_pattern) if current_pattern in pattern_types else 0
 
@@ -1735,12 +1951,20 @@ class DeviceControlMixin:
                             axis_data["pattern_intensity"] = new_intensity
                             settings_changed = True
 
-                        # Pattern frequency (only if not disabled)
                         frequency = axis_data.get("pattern_frequency", 1.0)
                         changed, new_frequency = imgui.slider_float(f"Pattern Frequency##{axis_key}", frequency, 0.1, 5.0, "%.2f")
                         if changed:
                             axis_data["pattern_frequency"] = new_frequency
                             settings_changed = True
+
+                        # Follow strength (only for follow and auto modes)
+                        if axis_data.get("pattern_type") in ("follow", "auto"):
+                            follow_strength = axis_data.get("follow_strength", 0.5)
+                            changed, new_fs = imgui.slider_float(f"Follow Strength##{axis_key}", follow_strength, 0.0, 1.0, "%.2f")
+                            if changed:
+                                axis_data["follow_strength"] = new_fs
+                                settings_changed = True
+                            _tooltip_if_hovered("How closely this axis follows the primary axis movement")
 
                     imgui.unindent(20)
 
@@ -2266,3 +2490,301 @@ class DeviceControlMixin:
                 loop.close()
 
         threading.Thread(target=upload_async, daemon=True).start()
+
+    # ── OSSM BLE Controls ───────────────────────────────────────────────
+
+    def _render_ossm_controls(self):
+        """Render OSSM BLE device controls."""
+        imgui.indent(10)
+
+        try:
+            # Check if bleak is available
+            ossm_available = 'ossm' in (self.device_manager.available_backends if self.device_manager else {})
+
+            if not ossm_available:
+                imgui.text_colored("OSSM backend unavailable", 0.7, 0.5, 0.0)
+                imgui.text("Install bleak: pip install bleak>=0.21.0")
+                imgui.unindent(10)
+                return
+
+            # Check connection status
+            connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
+            is_ossm_connected = connected_device and connected_device.device_id.startswith("ossm_")
+
+            if is_ossm_connected:
+                self._render_ossm_connected(connected_device)
+            else:
+                self._render_ossm_disconnected()
+
+        except Exception as e:
+            imgui.text_colored(f"OSSM error: {e}", 1.0, 0.3, 0.3)
+
+        imgui.unindent(10)
+
+    def _render_ossm_connected(self, device_info):
+        """Render OSSM controls when connected."""
+        self._status_indicator(f"Connected to {device_info.name}", "ready", "OSSM connected via BLE")
+
+        # Device state from BLE notifications
+        ossm_backend = self.device_manager.available_backends.get('ossm')
+        if ossm_backend and hasattr(ossm_backend, 'device_state'):
+            state = ossm_backend.device_state
+            imgui.text(f"Mode: {state.mode}")
+            imgui.same_line(150)
+            imgui.text(f"Speed: {state.speed}")
+            imgui.same_line(250)
+            imgui.text(f"Stroke: {state.stroke}")
+
+        imgui.spacing()
+
+        # Speed knob override checkbox
+        knob_override = self.app.app_settings.get("ossm_speed_knob_override", True)
+        changed_knob, new_knob = imgui.checkbox("Speed Knob Override##OSSMKnob", knob_override)
+        if changed_knob:
+            self.app.app_settings.set("ossm_speed_knob_override", new_knob)
+            self._set_ossm_speed_knob(new_knob)
+        _tooltip_if_hovered("When enabled, BLE has full speed control.\nWhen disabled, the physical knob limits BLE speed.")
+
+        imgui.spacing()
+
+        # Manual sliders
+        imgui.text("Manual Controls:")
+
+        # Speed slider
+        speed_val = getattr(self, '_ossm_manual_speed', 50)
+        changed_s, new_speed = imgui.slider_int("Speed##OSSMSpeed", speed_val, 0, 100)
+        if changed_s:
+            self._ossm_manual_speed = new_speed
+            self._send_ossm_command(f"set:speed:{new_speed}")
+
+        # Stroke slider
+        stroke_val = getattr(self, '_ossm_manual_stroke', 50)
+        changed_st, new_stroke = imgui.slider_int("Stroke##OSSMStroke", stroke_val, 0, 100)
+        if changed_st:
+            self._ossm_manual_stroke = new_stroke
+            self._send_ossm_command(f"set:stroke:{new_stroke}")
+
+        # Depth slider
+        depth_val = getattr(self, '_ossm_manual_depth', 50)
+        changed_d, new_depth = imgui.slider_int("Depth##OSSMDepth", depth_val, 0, 100)
+        if changed_d:
+            self._ossm_manual_depth = new_depth
+            self._send_ossm_command(f"set:depth:{new_depth}")
+
+        # Sensation slider
+        sens_val = getattr(self, '_ossm_manual_sensation', 0)
+        changed_sn, new_sens = imgui.slider_int("Sensation##OSSMSensation", sens_val, 0, 100)
+        if changed_sn:
+            self._ossm_manual_sensation = new_sens
+            self._send_ossm_command(f"set:sensation:{new_sens}")
+
+        imgui.spacing()
+
+        # Movement test button
+        if imgui.button("Test Movement##OSSMTest"):
+            self._test_ossm_movement()
+        _tooltip_if_hovered("Run a short streaming mode test sequence")
+
+        imgui.same_line()
+
+        # Disconnect button
+        if imgui.button("Disconnect##OSSMDisconnect"):
+            self._disconnect_ossm()
+        _tooltip_if_hovered("Disconnect from OSSM device")
+
+    def _render_ossm_disconnected(self):
+        """Render OSSM controls when disconnected."""
+        # Scan button
+        if imgui.button("Scan for OSSM Devices##OSSMScan", width=-1):
+            self._scan_ossm_devices()
+
+        imgui.spacing()
+
+        # Show discovered devices
+        if self._ossm_scan_performed:
+            if self._discovered_ossm_devices:
+                for i, device in enumerate(self._discovered_ossm_devices):
+                    name = device.get('name', 'Unknown')
+                    rssi = device.get('rssi', '')
+                    rssi_text = f" (RSSI: {rssi})" if rssi else ""
+                    imgui.bullet_text(f"{name}{rssi_text}")
+                    imgui.same_line()
+                    if imgui.small_button(f"Connect##{i}"):
+                        address = device.get('address', '')
+                        if address:
+                            self._connect_ossm_device(address)
+            else:
+                imgui.text_colored("No OSSM devices found", 0.7, 0.5, 0.0)
+                imgui.spacing()
+                imgui.text("Troubleshooting:")
+                imgui.bullet_text("Ensure OSSM is powered on")
+                imgui.bullet_text("Check Bluetooth is enabled")
+                imgui.bullet_text("Move closer to the device")
+                imgui.bullet_text("Try scanning again")
+
+        imgui.spacing()
+
+        # Advanced settings
+        rate_hz = self.app.app_settings.get("ossm_max_command_rate_hz", 40)
+        changed_rate, new_rate = imgui.slider_int("Max Rate (Hz)##OSSMRate", rate_hz, 10, 50)
+        if changed_rate:
+            self.app.app_settings.set("ossm_max_command_rate_hz", new_rate)
+        _tooltip_if_hovered("Maximum BLE command rate. Higher = smoother movement.")
+
+        auto_reconnect = self.app.app_settings.get("ossm_auto_reconnect", True)
+        changed_ar, new_ar = imgui.checkbox("Auto-Reconnect##OSSMAuto", auto_reconnect)
+        if changed_ar:
+            self.app.app_settings.set("ossm_auto_reconnect", new_ar)
+        _tooltip_if_hovered("Automatically reconnect if BLE connection drops")
+
+    # ── OSSM helper methods ──────────────────────────────────────────────
+
+    def _scan_ossm_devices(self):
+        """Scan for OSSM devices via BLE."""
+        import threading
+
+        def run_ossm_scan():
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                ossm_backend = self.device_manager.available_backends.get('ossm')
+                if ossm_backend:
+                    devices = loop.run_until_complete(ossm_backend.discover_devices())
+                    self._discovered_ossm_devices = []
+                    for device in devices:
+                        self._discovered_ossm_devices.append({
+                            'name': device.name,
+                            'address': device.metadata.get('ble_address', ''),
+                            'rssi': device.metadata.get('rssi', ''),
+                            'device_id': device.device_id,
+                        })
+                    self.app.logger.info(f"Found {len(devices)} OSSM devices")
+                    self._ossm_scan_performed = True
+            except Exception as e:
+                self.app.logger.error(f"OSSM scan failed: {e}")
+                self._ossm_scan_performed = True
+            finally:
+                loop.close()
+
+        threading.Thread(target=run_ossm_scan, daemon=True).start()
+
+    def _connect_ossm_device(self, ble_address):
+        """Connect to an OSSM device by BLE address."""
+        import threading
+
+        def connect_async():
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Apply settings to backend before connecting
+                ossm_backend = self.device_manager.available_backends.get('ossm')
+                if ossm_backend:
+                    rate_hz = self.app.app_settings.get("ossm_max_command_rate_hz", 40)
+                    ossm_backend.set_max_rate_hz(rate_hz)
+                    ossm_backend._reconnect_enabled = self.app.app_settings.get("ossm_auto_reconnect", True)
+
+                success = loop.run_until_complete(self.device_manager.connect_ossm(ble_address))
+                if success:
+                    self.app.logger.info(
+                        "Connected to OSSM",
+                        extra={'status_message': True})
+                    # Apply speed knob override
+                    knob_override = self.app.app_settings.get("ossm_speed_knob_override", True)
+                    if ossm_backend:
+                        loop.run_until_complete(ossm_backend.set_speed_knob_override(knob_override))
+                else:
+                    self.app.logger.error(
+                        "Failed to connect to OSSM - is it powered on?",
+                        extra={'status_message': True, 'duration': 5.0})
+            except Exception as e:
+                self.app.logger.error(
+                    f"OSSM connection error: {e}",
+                    extra={'status_message': True, 'duration': 5.0})
+            finally:
+                loop.close()
+
+        threading.Thread(target=connect_async, daemon=True).start()
+
+    def _disconnect_ossm(self):
+        """Disconnect from OSSM device."""
+        import threading
+
+        def disconnect_async():
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.device_manager.disconnect_ossm())
+            finally:
+                loop.close()
+
+        threading.Thread(target=disconnect_async, daemon=True).start()
+
+    def _send_ossm_command(self, cmd):
+        """Send a command to the OSSM device."""
+        import threading
+
+        def send_async():
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                ossm_backend = self.device_manager.available_backends.get('ossm')
+                if ossm_backend:
+                    loop.run_until_complete(ossm_backend._send_command(cmd))
+            finally:
+                loop.close()
+
+        threading.Thread(target=send_async, daemon=True).start()
+
+    def _set_ossm_speed_knob(self, enabled):
+        """Set OSSM speed knob override."""
+        import threading
+
+        def set_async():
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                ossm_backend = self.device_manager.available_backends.get('ossm')
+                if ossm_backend:
+                    loop.run_until_complete(ossm_backend.set_speed_knob_override(enabled))
+            finally:
+                loop.close()
+
+        threading.Thread(target=set_async, daemon=True).start()
+
+    def _test_ossm_movement(self):
+        """Run a short streaming mode test sequence on the OSSM."""
+        import threading
+
+        def test_async():
+            import asyncio
+
+            async def run_test():
+                ossm_backend = self.device_manager.available_backends.get('ossm')
+                if not ossm_backend or not ossm_backend.is_connected():
+                    self.app.logger.error("OSSM not connected")
+                    return
+
+                self.app.logger.info("OSSM test: starting streaming sequence...")
+                # Enter streaming mode and do a few movements
+                positions = [(10, 500), (90, 500), (50, 300), (80, 400), (20, 400), (50, 500)]
+                for pos, dur in positions:
+                    await ossm_backend.set_position_enhanced(pos, duration_ms=dur)
+                    await asyncio.sleep(dur / 1000.0)
+
+                # Return to center
+                await ossm_backend.set_position_enhanced(50, duration_ms=500)
+                self.app.logger.info("OSSM test: complete")
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(run_test())
+            finally:
+                loop.close()
+
+        threading.Thread(target=test_async, daemon=True).start()
