@@ -264,16 +264,27 @@ class BaseTracker(ABC):
         """
         pass
     
+    def reset(self, reason: Optional[str] = None, **kwargs):
+        """
+        Reset session-specific state for a new video or project.
+
+        Called when the user closes a project or loads a new video.
+        Subclasses should override to clear cached video-specific state
+        (e.g. VR detection, ROI, flow history) while keeping expensive
+        resources like loaded models intact.
+        """
+        self.tracking_active = False
+
     def validate_settings(self, settings: Dict[str, Any]) -> bool:
         """
         Validate tracker-specific settings.
-        
+
         Override this method to validate custom settings before they are
         applied to the tracker. This is called when settings change.
-        
+
         Args:
             settings: Dictionary of setting name -> value pairs
-        
+
         Returns:
             bool: True if settings are valid, False otherwise
         """

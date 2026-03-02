@@ -529,14 +529,62 @@ class YoloRoiTracker(BaseTracker):
         """Stop YOLO ROI tracking."""
         self.tracking_active = False
         self.prev_gray_main_roi, self.prev_features_main_roi = None, None
-        
+
         # Reset motion mode to undetermined when stopping
         self.motion_mode = 'undetermined'
         self.motion_mode_history.clear()
-        
+
         self.logger.info("YOLO ROI tracking stopped")
         return True
-    
+
+    def reset(self, reason: Optional[str] = None, **kwargs):
+        """Reset all session-specific state for a new video/project.
+
+        Clears cached VR detection, ROI, flow history, and counters
+        while keeping the YOLO model and optical flow algorithm loaded.
+        """
+        super().reset(reason=reason, **kwargs)
+
+        # VR detection cache — must be recalculated per video
+        self._is_vr_video_cached = None
+
+        # ROI and detection state
+        self.roi = None
+        self.previous_roi = None
+        self.penis_last_known_box = None
+        self.main_interaction_class = None
+        self.frames_since_target_lost = 0
+        self.internal_frame_counter = 0
+
+        # Optical flow state
+        self.prev_gray_main_roi = None
+        self.prev_features_main_roi = None
+        self.primary_flow_history_smooth.clear()
+        self.secondary_flow_history_smooth.clear()
+
+        # Position tracking
+        self.last_primary_position = None
+        self.last_secondary_position = None
+        self.first_valid_position_captured = False
+        self.position_history_smooth.clear()
+
+        # Adaptive flow range
+        self.flow_min_primary_adaptive = -0.1
+        self.flow_max_primary_adaptive = 0.1
+        self.flow_min_secondary_adaptive = -0.1
+        self.flow_max_secondary_adaptive = 0.1
+
+        # Motion mode and class history
+        self.motion_mode = 'undetermined'
+        self.motion_mode_history.clear()
+        self.class_history = []
+        self.penis_max_size_history.clear()
+
+        # Signal amplifier
+        self.signal_amplifier.reset()
+
+        self.logger.info(f"YOLO ROI tracker reset (reason={reason})")
+
     def validate_settings(self, settings: Dict[str, Any]) -> bool:
         """Validate YOLO ROI settings."""
         try:
