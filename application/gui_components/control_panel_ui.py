@@ -88,6 +88,10 @@ class ControlPanelUI(
         self._discovered_buttplug_devices = []
         self._buttplug_discovery_performed = False
 
+        # OSSM BLE device discovery UI state
+        self._discovered_ossm_devices = []
+        self._ossm_scan_performed = False
+
         # Streamer attributes (supporter feature)
         self._native_sync_manager = None
         self._prev_client_count = 0
