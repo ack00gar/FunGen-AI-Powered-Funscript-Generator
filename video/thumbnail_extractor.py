@@ -47,6 +47,7 @@ class ThumbnailExtractor:
         self.lock = Lock()
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_open = False
+        self._last_read_index: int = -1  # Tracks cap position for sequential-read optimisation
 
         # Video properties
         self.fps = 0.0
@@ -121,15 +122,25 @@ class ThumbnailExtractor:
 
         try:
             with self.lock:
-                # Seek to frame - this is much faster than spawning FFmpeg!
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-
-                # Read frame
-                ret, frame = self.cap.read()
+                # Fast path: if we just read frame N-1, the cap is already at N
+                # so we can skip the expensive seek (huge win for HEVC / 8K).
+                if frame_index == self._last_read_index + 1:
+                    ret, frame = self.cap.read()
+                    self.logger.debug(f"ThumbnailExtractor: sequential read frame {frame_index}")
+                else:
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                    ret, frame = self.cap.read()
+                    self.logger.debug(
+                        f"ThumbnailExtractor: seek+read frame {frame_index} "
+                        f"(last was {self._last_read_index})"
+                    )
 
                 if not ret or frame is None:
                     self.logger.warning(f"ThumbnailExtractor: Failed to read frame {frame_index}")
+                    self._last_read_index = -1  # Reset on failure
                     return None
+
+                self._last_read_index = frame_index
 
             # Crop VR panel if needed (left/right for SBS, top for TB)
             if self.is_sbs_left and frame.shape[1] > 0:
