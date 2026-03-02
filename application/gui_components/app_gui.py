@@ -144,6 +144,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             'initial_press_time': current_time,
             'continuous_delay': 0.2,  # 200ms delay before continuous playback (allows frame-by-frame taps)
             'last_direction': 0,  # Track direction to prevent double-navigation
+            'playback_active': False,  # True when hold-forward has engaged the processing loop
         }
 
         self.batch_videos_data: List[Dict] = []
@@ -953,11 +954,28 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             else:
                 if not proc or not proc.is_video_open():
                     state_text = "No video loaded"
+                    state_color = text_color
                 elif stage_proc.full_analysis_active:
                     state_text = "Tracking..."
+                    state_color = StatusStripColors.ACCENT
+                elif proc and getattr(proc, 'is_processing', False) and getattr(proc, 'enable_tracker_processing', False):
+                    if hasattr(proc, 'pause_event') and proc.pause_event.is_set():
+                        state_text = "Live Tracking Paused"
+                        state_color = StatusStripColors.WARNING
+                    else:
+                        state_text = "Live Tracking"
+                        state_color = StatusStripColors.ACCENT
+                elif proc and getattr(proc, 'is_processing', False) and not getattr(proc, 'enable_tracker_processing', False):
+                    if hasattr(proc, 'pause_event') and proc.pause_event.is_set():
+                        state_text = "Paused"
+                        state_color = text_color
+                    else:
+                        state_text = "Playing"
+                        state_color = StatusStripColors.ACCENT
                 else:
                     state_text = "Ready"
-                imgui.push_style_color(imgui.COLOR_TEXT, *text_color)
+                    state_color = text_color
+                imgui.push_style_color(imgui.COLOR_TEXT, *state_color)
                 imgui.text(state_text)
                 imgui.pop_style_color()
 
@@ -1050,10 +1068,24 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                     if imgui.is_item_hovered():
                         imgui.set_tooltip("Press F1 to see all keyboard shortcuts")
 
-            # Right: FPS
+            # Right: Buffer info + FPS
             io = imgui.get_io()
             fps_text = f"{io.framerate:.0f} FPS"
             fps_w = imgui.calc_text_size(fps_text)[0]
+
+            # Show buffer info when available
+            buf_w = 0
+            proc = self.app.processor
+            if proc and proc.is_video_open() and hasattr(proc, 'buffer_info'):
+                buf = proc.buffer_info
+                if buf['size'] > 0:
+                    buf_text = f"Buf {buf['size']}/{buf['capacity']}"
+                    buf_w = imgui.calc_text_size(buf_text)[0]
+                    imgui.same_line(position=self.window_width - fps_w - buf_w - 28)
+                    imgui.push_style_color(imgui.COLOR_TEXT, 0.50, 0.50, 0.55, 0.75)
+                    imgui.text(buf_text)
+                    imgui.pop_style_color()
+
             imgui.same_line(position=self.window_width - fps_w - 16)
             imgui.push_style_color(imgui.COLOR_TEXT, *text_color)
             imgui.text(fps_text)

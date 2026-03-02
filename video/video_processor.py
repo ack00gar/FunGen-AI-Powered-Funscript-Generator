@@ -10,7 +10,7 @@ import sys
 from typing import Optional, Iterator, Tuple, List, Dict, Any
 import logging
 import os
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 from config import constants
 
@@ -85,12 +85,10 @@ class VideoProcessor:
         self.seek_thread = None  # Thread for async seek operations
         self.arrow_nav_in_progress = False  # Flag to prevent arrow nav overload
 
-        # Dedicated FFmpeg pipe for arrow key navigation.
-        # Uses the same filter chain as _processing_loop for visual consistency
-        # (especially VR v360 projection). Sequential forward reads are instant.
-        self._arrow_nav_ffmpeg_proc: Optional[subprocess.Popen] = None
-        self._arrow_nav_next_frame: int = -1  # Next frame the pipe will yield
-        self._arrow_nav_frame_bytes: int = 0
+        # Unified FFmpeg pipe for arrow key navigation and pipe reuse.
+        # Single pipe survives across play/pause; buffer provides O(1) lookups.
+        self._ffmpeg_pipe: Optional[subprocess.Popen] = None
+        self._ffmpeg_read_position: int = 0  # Next frame the pipe will yield
         self.frame_buffer_progress = 0.0  # Progress of frame buffer creation (0.0 to 1.0)
         self.frame_buffer_total = 0  # Total frames to buffer
         self.frame_buffer_current = 0  # Current frames buffered
@@ -154,17 +152,12 @@ class VideoProcessor:
         self.frame_cache_lock = threading.Lock()
         self.batch_fetch_size = 600  # For explicit batch fetches only
 
-        # Rolling backward buffer for arrow key navigation (deque for efficient FIFO)
-        from collections import deque
-        # Get buffer size from settings (default 600)
-        buffer_size = 600  # Default
-        if self.app and hasattr(self.app, 'app_settings'):
-            buffer_size = self.app.app_settings.get('arrow_nav_buffer_size', 600)
-        self.arrow_nav_backward_buffer = deque(maxlen=buffer_size)
-        self.arrow_nav_backward_buffer_lock = threading.Lock()
-        self.arrow_nav_refill_threshold = max(120, buffer_size // 5)  # Refill when < 20% of buffer size
-        self.arrow_nav_refilling = False  # Flag to prevent concurrent refills
-        self._arrow_nav_refill_cancelled = False  # Set by _clear_arrow_nav_state to discard stale refills
+        # Unified frame buffer for arrow key navigation (deque for efficient FIFO)
+        # Populated by BOTH arrow-nav pipe reads AND the processing loop,
+        # so backward nav works seamlessly regardless of how frames were produced.
+        # Buffer miss = pipe restart at new position.
+        self._frame_buffer: deque = deque(maxlen=self._compute_nav_buffer_size())
+        self._frame_buffer_lock = threading.Lock()
         
         # Single FFmpeg dual-output processor integration
         from video.dual_frame_processor import SingleFFmpegDualOutputProcessor
@@ -285,6 +278,132 @@ class VideoProcessor:
 
             self._last_timing_update = current_time
 
+    def _compute_nav_buffer_size(self) -> int:
+        """Compute arrow-nav buffer size based on available RAM.
+
+        Each frame is yolo_input_size^2 * 3 bytes.  We cap the buffer at
+        ~10 % of available RAM, with a floor of 120 frames.
+        """
+        frame_bytes = self.yolo_input_size * self.yolo_input_size * 3
+        try:
+            import psutil
+            avail = psutil.virtual_memory().available
+            budget = int(avail * 0.10)  # 10 % of free RAM
+            max_frames = max(120, budget // frame_bytes)
+            # Cap at a reasonable upper bound (1800 = ~1 min at 30fps)
+            max_frames = min(max_frames, 1800)
+        except Exception:
+            max_frames = 300  # Safe default (~360 MB at 640px)
+        self.logger.info(f"Arrow-nav buffer: {max_frames} frames "
+                         f"({max_frames * frame_bytes / (1024*1024):.0f} MB)")
+        return max_frames
+
+    def _start_unified_pipe(self, start_frame: int) -> bool:
+        """Spawn a unified FFmpeg pipe at *start_frame* for arrow nav / pipe reuse.
+
+        Uses the same filter chain as the processing loop so VR projection,
+        scaling, etc. are visually identical to playback.
+        """
+        self._stop_unified_pipe()
+
+        if not self.video_path or not self.video_info or self.fps <= 0:
+            return False
+
+        start_sec = start_frame / self.fps
+        common_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
+
+        effective_vf = self.ffmpeg_filter_string or (
+            f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            f":force_original_aspect_ratio=decrease,"
+            f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
+        )
+
+        hwaccel_args = self._get_ffmpeg_hwaccel_args()
+        cmd = common_prefix + hwaccel_args[:]
+        if start_sec > 0.001:
+            cmd.extend(['-ss', str(start_sec)])
+        cmd.extend(['-i', self._active_video_source_path, '-an', '-sn'])
+        cmd.extend(['-vf', effective_vf])
+        cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
+
+        try:
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            self._ffmpeg_pipe = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                bufsize=-1, creationflags=creation_flags,
+            )
+            self._ffmpeg_read_position = start_frame
+            self.logger.debug(f"Unified FFmpeg pipe started at frame {start_frame}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to start unified FFmpeg pipe: {e}")
+            self._ffmpeg_pipe = None
+            return False
+
+    def _stop_unified_pipe(self):
+        """Terminate the unified FFmpeg pipe if running."""
+        if self._ffmpeg_pipe is not None:
+            self._terminate_process(self._ffmpeg_pipe, "UnifiedPipe")
+            self._ffmpeg_pipe = None
+
+    def _pipe_read_one(self) -> Optional[np.ndarray]:
+        """Read exactly one frame from the unified FFmpeg pipe."""
+        if self._ffmpeg_pipe is None or self._ffmpeg_pipe.stdout is None:
+            return None
+        try:
+            raw = self._ffmpeg_pipe.stdout.read(self.frame_size_bytes)
+            if len(raw) < self.frame_size_bytes:
+                return None
+            frame = np.frombuffer(raw, dtype=np.uint8).reshape(
+                self.yolo_input_size, self.yolo_input_size, 3
+            ).copy()
+            self._ffmpeg_read_position += 1
+            return frame
+        except Exception:
+            return None
+
+    def _buffer_lookup(self, target_frame: int) -> Optional[np.ndarray]:
+        """O(1) lookup in the frame buffer by computing offset from first entry."""
+        with self._frame_buffer_lock:
+            if not self._frame_buffer:
+                return None
+            first_idx = self._frame_buffer[0][0]
+            offset = target_frame - first_idx
+            if 0 <= offset < len(self._frame_buffer):
+                stored_idx, frame_data = self._frame_buffer[offset]
+                if stored_idx == target_frame:
+                    return frame_data
+            return None
+
+    def _buffer_append(self, frame_index: int, frame_data: np.ndarray):
+        """Append a frame to the buffer. Clear if non-contiguous."""
+        with self._frame_buffer_lock:
+            if self._frame_buffer:
+                last_idx = self._frame_buffer[-1][0]
+                if frame_index != last_idx + 1:
+                    self._frame_buffer.clear()
+            self._frame_buffer.append((frame_index, frame_data))
+
+    def _clear_nav_state(self):
+        """Clear all navigation state: buffer + pipe.
+
+        Called on position jumps (seek, cache clear, FFmpeg teardown) so stale
+        frames from a previous position are never served.
+        """
+        self._stop_unified_pipe()
+        with self._frame_buffer_lock:
+            self._frame_buffer.clear()
+
+    @property
+    def buffer_info(self) -> dict:
+        """Return buffer stats for status strip display."""
+        with self._frame_buffer_lock:
+            size = len(self._frame_buffer)
+            capacity = self._frame_buffer.maxlen or 0
+            start = self._frame_buffer[0][0] if self._frame_buffer else -1
+            end = self._frame_buffer[-1][0] if self._frame_buffer else -1
+        return {'size': size, 'capacity': capacity, 'start': start, 'end': end}
+
     def _clear_cache(self):
         with self.frame_cache_lock:
             if self.frame_cache is not None:
@@ -298,7 +417,7 @@ class VideoProcessor:
                 if cache_len > 0:
                     self.logger.debug(f"Clearing frame cache (had {cache_len} items).")
                     self.frame_cache.clear()
-        self._clear_arrow_nav_state()
+        self._clear_nav_state()
 
     def set_active_video_type_setting(self, video_type: str):
         if video_type not in ['auto', '2D', 'VR']:
@@ -817,7 +936,7 @@ class VideoProcessor:
         self._init_gpu_unwarp_worker()
 
         self.logger.info(f"Attempting to fetch frame {stored_frame_index} with new settings.")
-        new_frame = self._get_specific_frame(stored_frame_index)
+        new_frame = self._get_specific_frame(stored_frame_index, use_thumbnail=True)
         if new_frame is not None:
             with self.frame_lock:
                 self.current_frame = new_frame
@@ -921,9 +1040,12 @@ class VideoProcessor:
             frame_size = self.yolo_input_size * self.yolo_input_size * 3
 
             # Initialize progress tracking for frame buffer creation
-            self.frame_buffer_total = num_frames_to_fetch
-            self.frame_buffer_current = 0
-            self.frame_buffer_progress = 0.0
+            # Only show overlay for large batches — single-frame seeks should be invisible
+            show_progress = num_frames_to_fetch > 2
+            if show_progress:
+                self.frame_buffer_total = num_frames_to_fetch
+                self.frame_buffer_current = 0
+                self.frame_buffer_progress = 0.0
 
             for i in range(num_frames_to_fetch):
                 raw_frame_data = local_p2_proc.stdout.read(frame_size)
@@ -961,8 +1083,9 @@ class VideoProcessor:
                         self.current_frame_index = immediate_display_frame
 
                 # Update frame buffer progress
-                self.frame_buffer_current = i + 1
-                self.frame_buffer_progress = self.frame_buffer_current / self.frame_buffer_total if self.frame_buffer_total > 0 else 1.0
+                if show_progress:
+                    self.frame_buffer_current = i + 1
+                    self.frame_buffer_progress = self.frame_buffer_current / self.frame_buffer_total if self.frame_buffer_total > 0 else 1.0
 
         except Exception as e:
             self.logger.error(f"get_frames_batch: Error fetching batch @{start_frame_num}: {e}", exc_info=True)
@@ -1026,25 +1149,29 @@ class VideoProcessor:
             else:
                 self.logger.warning(f"Thumbnail extractor failed for frame {frame_index_abs}, falling back to FFmpeg")
 
-        # Standard FFmpeg batch fetch for all other cases
+        # When use_thumbnail was requested but extractor failed, fetch just 1 frame
+        # instead of the full batch_fetch_size (600) to avoid long stalls
+        fetch_size = 1 if use_thumbnail else self.batch_fetch_size
+
+        # Standard FFmpeg fetch for cache misses
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(
-                f"Cache MISS for frame {frame_index_abs}. Attempting batch fetch using get_frames_batch (batch size: {self.batch_fetch_size}).")
+                f"Cache MISS for frame {frame_index_abs}. Attempting batch fetch using get_frames_batch (batch size: {fetch_size}).")
 
-        batch_start_frame = max(0, frame_index_abs - self.batch_fetch_size // 2)
+        batch_start_frame = max(0, frame_index_abs - fetch_size // 2)
         if self.total_frames > 0:
             effective_end_frame_for_batch_calc = self.total_frames - 1
-            if batch_start_frame + self.batch_fetch_size - 1 > effective_end_frame_for_batch_calc:
-                batch_start_frame = max(0, effective_end_frame_for_batch_calc - self.batch_fetch_size + 1)
+            if batch_start_frame + fetch_size - 1 > effective_end_frame_for_batch_calc:
+                batch_start_frame = max(0, effective_end_frame_for_batch_calc - fetch_size + 1)
 
-        num_frames_to_fetch_actual = self.batch_fetch_size
+        num_frames_to_fetch_actual = fetch_size
         if self.total_frames > 0:
-            num_frames_to_fetch_actual = min(self.batch_fetch_size, self.total_frames - batch_start_frame)
+            num_frames_to_fetch_actual = min(fetch_size, self.total_frames - batch_start_frame)
 
         if num_frames_to_fetch_actual < 1 and self.total_frames > 0:
             num_frames_to_fetch_actual = 1
         elif num_frames_to_fetch_actual < 1 and self.total_frames == 0:
-            num_frames_to_fetch_actual = self.batch_fetch_size
+            num_frames_to_fetch_actual = fetch_size
 
         # Pass immediate_display flag for responsive seeking
         immediate_frame = frame_index_abs if immediate_display else None
@@ -1487,7 +1614,7 @@ class VideoProcessor:
         if self.thumbnail_extractor is None:
             # Fallback to FFmpeg-based extraction if thumbnail extractor not available
             self.logger.debug("Thumbnail extractor not available, falling back to FFmpeg")
-            return self._get_specific_frame(frame_index, update_current_index=False)
+            return self._get_specific_frame(frame_index, update_current_index=False, use_thumbnail=True)
 
         try:
             frame = self.thumbnail_extractor.get_frame(frame_index, use_gpu_unwarp=use_gpu_unwarp)
@@ -1496,7 +1623,7 @@ class VideoProcessor:
         except Exception as e:
             self.logger.warning(f"Thumbnail extraction failed: {e}, falling back to FFmpeg")
             # Fallback to FFmpeg if OpenCV fails
-            return self._get_specific_frame(frame_index, update_current_index=False)
+            return self._get_specific_frame(frame_index, update_current_index=False, use_thumbnail=True)
 
     def _get_vr_video_filters(self) -> List[str]:
         """Builds the list of FFmpeg filter segments for VR video, including cropping and v360."""
@@ -1697,8 +1824,7 @@ class VideoProcessor:
         self.ffmpeg_pipe1_process = None
         self._terminate_process(self.ffmpeg_process, "Main/Pipe 2")
         self.ffmpeg_process = None
-        # Also clear all arrow-nav state (pipe + backward buffer)
-        self._clear_arrow_nav_state()
+        self._stop_unified_pipe()
 
     def _start_ffmpeg_process(self, start_frame_abs_idx=0, num_frames_to_output_ffmpeg=None):
         self._terminate_ffmpeg_processes()
@@ -1807,9 +1933,12 @@ class VideoProcessor:
                 return False
 
     def start_processing(self, start_frame=None, end_frame=None, cli_progress_callback=None):
-        # If we are already processing but are in a paused state, just un-pause.
+        # If already processing but paused, just clear the pause event.
+        # The GUI thread NEVER touches FFmpeg processes.
+        # The processing thread self-heals: after waking from pause it checks
+        # cursor vs pipe position and skips/restarts as needed.
         if self.is_processing and self.pause_event.is_set():
-            self.logger.info("Resuming video processing...")
+            self.logger.info(f"Resuming playback from frame {self.current_frame_index}")
             self.pause_event.clear()
 
             # Notify playback state observers (e.g., device_control) that playback resumed
@@ -1817,7 +1946,6 @@ class VideoProcessor:
                 current_time_ms = (self.current_frame_index / self.fps) * 1000.0 if self.fps > 0 else 0.0
                 self._notify_playback_state_callbacks(True, current_time_ms)
 
-            # Optional: callback to notify the main app UI
             if self.app and hasattr(self.app, 'on_processing_resumed'):
                 self.app.on_processing_resumed()
             return
@@ -1851,9 +1979,35 @@ class VideoProcessor:
         if self.processing_end_frame_limit != -1:
             num_frames_to_process = self.processing_end_frame_limit - self.processing_start_frame_limit + 1
 
-        if not self._start_ffmpeg_process(start_frame_abs_idx=self.processing_start_frame_limit, num_frames_to_output_ffmpeg=num_frames_to_process):
-            self.logger.error("Failed to start FFmpeg for processing start.")
-            return
+        # Try to adopt the unified pipe for zero-startup processing.
+        # The unified pipe uses the same filter chain (v360, scale, etc.),
+        # so frames are identical. Only works for single-pipe (non-10-bit-CUDA).
+        adopted = False
+        if (self._ffmpeg_pipe is not None
+                and self._ffmpeg_pipe.poll() is None
+                and not self._is_10bit_cuda_pipe_needed()
+                and not self.dual_output_enabled):
+            # Check if pipe is positioned at the effective start frame
+            if self._ffmpeg_read_position == effective_start_frame:
+                # Clean up any stale processing pipes
+                self._terminate_process(self.ffmpeg_pipe1_process, "Pipe 1")
+                self.ffmpeg_pipe1_process = None
+                self._terminate_process(self.ffmpeg_process, "Main/Pipe 2")
+                # Transfer unified pipe → processing pipe
+                self.ffmpeg_process = self._ffmpeg_pipe
+                self._ffmpeg_pipe = None
+                self.current_stream_start_frame_abs = self._ffmpeg_read_position
+                self.frames_read_from_current_stream = 0
+                adopted = True
+                self.logger.info(f"Adopted unified pipe for processing (continuing from frame {self.current_stream_start_frame_abs})")
+            else:
+                # Pipe exists but at wrong position — kill it
+                self._stop_unified_pipe()
+
+        if not adopted:
+            if not self._start_ffmpeg_process(start_frame_abs_idx=self.processing_start_frame_limit, num_frames_to_output_ffmpeg=num_frames_to_process):
+                self.logger.error("Failed to start FFmpeg for processing start.")
+                return
 
         # Initialize GPU unwarp worker for VR if enabled
         self._init_gpu_unwarp_worker()
@@ -1865,7 +2019,7 @@ class VideoProcessor:
         self.processing_thread.daemon = True
         self.processing_thread.start()
 
-        self.logger.info(
+        self.logger.debug(
             f"Started GUI processing. Range: {self.processing_start_frame_limit} to "
             f"{self.processing_end_frame_limit if self.processing_end_frame_limit != -1 else 'EOS'}")
 
@@ -1873,7 +2027,7 @@ class VideoProcessor:
         if not self.is_processing or self.pause_event.is_set():
             return
 
-        self.logger.info("Pausing video processing...")
+        self.logger.info(f"Pausing playback at frame {self.current_frame_index}")
         self.pause_event.set()
 
         # Notify playback state observers (e.g., device_control) that playback stopped
@@ -1886,10 +2040,6 @@ class VideoProcessor:
             self.app.on_processing_paused()
 
     def stop_processing(self, join_thread=True):
-        # Ensure dual output is disabled to kill any hanging pipe readers/processes
-        if hasattr(self, 'dual_output_processor'):
-            self.dual_output_processor.disable_dual_output_mode()
-
         is_currently_processing = self.is_processing
         is_thread_alive = self.processing_thread and self.processing_thread.is_alive()
 
@@ -1897,7 +2047,7 @@ class VideoProcessor:
             self._terminate_ffmpeg_processes()
             return
 
-        self.logger.info("Stopping GUI processing...")
+        self.logger.debug("Stopping GUI processing...")
         was_scripting_session = self.tracker and self.tracker.tracking_active
         scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
 
@@ -1910,9 +2060,13 @@ class VideoProcessor:
         self.pause_event.clear()
         self.stop_event.set()
 
-        self._terminate_ffmpeg_processes()
-
         if join_thread:
+            # Full blocking cleanup — used for tracking stop, app shutdown, etc.
+            if hasattr(self, 'dual_output_processor'):
+                self.dual_output_processor.disable_dual_output_mode()
+
+            self._terminate_ffmpeg_processes()
+
             thread_to_join = self.processing_thread
             if thread_to_join and thread_to_join.is_alive():
                 if threading.current_thread() is not thread_to_join:
@@ -1920,31 +2074,36 @@ class VideoProcessor:
                     thread_to_join.join(timeout=2.0)
                     if thread_to_join.is_alive():
                         self.logger.warning("Processing thread did not join cleanly after stop signal.")
-        self.processing_thread = None
+            self.processing_thread = None
 
-        # Stop GPU unwarp worker if active
-        if self.gpu_unwarp_worker:
-            self.logger.info("Stopping GPU unwarp worker...")
-            self.gpu_unwarp_worker.stop()
-            self.gpu_unwarp_worker = None
-            self.gpu_unwarp_enabled = False
+            # Stop GPU unwarp worker if active
+            if self.gpu_unwarp_worker:
+                self.logger.info("Stopping GPU unwarp worker...")
+                self.gpu_unwarp_worker.stop()
+                self.gpu_unwarp_worker = None
+                self.gpu_unwarp_enabled = False
 
-        # Close thumbnail extractor if active
-        if self.thumbnail_extractor:
-            self.logger.info("Closing thumbnail extractor...")
-            self.thumbnail_extractor.close()
-            self.thumbnail_extractor = None
+            if self.tracker:
+                self.logger.debug("Signaling tracker to stop.")
+                self.tracker.stop_tracking()
 
-        if self.tracker:
-            self.logger.info("Signaling tracker to stop.")
-            self.tracker.stop_tracking()
+            self.enable_tracker_processing = False
 
-        self.enable_tracker_processing = False
+            if self.app and hasattr(self.app, 'on_processing_stopped'):
+                self.app.on_processing_stopped(was_scripting_session=was_scripting_session, scripted_frame_range=scripted_range)
+        else:
+            # Non-blocking path (used by _seek_video_worker during seek-while-playing):
+            # Send SIGTERM to unblock the processing thread's stdout.read().
+            # Pre-spawn unified pipe at cursor position for immediate arrow nav.
+            for proc in (self.ffmpeg_pipe1_process, self.ffmpeg_process):
+                if proc is not None and proc.poll() is None:
+                    try:
+                        proc.terminate()
+                    except OSError:
+                        pass
+            self.enable_tracker_processing = False
 
-        if self.app and hasattr(self.app, 'on_processing_stopped'):
-            self.app.on_processing_stopped(was_scripting_session=was_scripting_session, scripted_frame_range=scripted_range)
-
-        self.logger.info("GUI processing stopped.")
+        self.logger.debug("GUI processing stopped.")
 
     def seek_video(self, frame_index: int):
         """
@@ -1955,16 +2114,17 @@ class VideoProcessor:
             return
 
         target_frame = max(0, min(frame_index, self.total_frames - 1))
+        self.logger.debug(f"Seek to frame {target_frame} (from {self.current_frame_index})")
 
         # Invalidate arrow-nav state since the user jumped to a new position
-        self._clear_arrow_nav_state()
+        self._clear_nav_state()
 
         # Notify registered observers (e.g., streamer) of seek event
         self._notify_seek_callbacks(target_frame)
 
         # If a seek is already in progress, wait for it to finish (or cancel it)
         if self.seek_in_progress and self.seek_thread and self.seek_thread.is_alive():
-            self.logger.debug(f"Seek already in progress, new seek to frame {target_frame} will wait")
+            self.logger.debug(f"Seek coalesced: target={target_frame}")
             # Don't block - just set the new target and let the existing thread handle it
             self.seek_request_frame_index = target_frame
             return
@@ -1996,17 +2156,11 @@ class VideoProcessor:
             was_tracking = self.tracker and self.tracker.tracking_active
 
             if was_processing:
-                # Stop processing without joining thread to avoid blocking
                 self.stop_processing(join_thread=False)
-                # Give it a moment to stop gracefully
-                time.sleep(0.05)
 
             # Coalesce loop: drain any pending seek requests that arrived during decode
             while True:
-                self.logger.info(f"Seeking to frame {target_frame}")
-
                 # Show instant thumbnail preview only (no buffer loading for scrubbing)
-                # Rolling backward buffer is only for arrow key navigation
                 seek_t0 = time.perf_counter()
                 new_frame = self._get_specific_frame(target_frame, immediate_display=False, use_thumbnail=True)
                 seek_ms = (time.perf_counter() - seek_t0) * 1000
@@ -2019,7 +2173,7 @@ class VideoProcessor:
                     self.current_frame = new_frame
 
                 if new_frame is None:
-                    self.logger.warning(f"Seek to frame {target_frame} failed to retrieve frame.")
+                    self.logger.warning(f"Seek frame {target_frame} decode failed ({seek_ms:.1f}ms)")
                     self.current_frame_index = target_frame
 
                 # Check if a newer seek target arrived while we were decoding
@@ -2034,9 +2188,7 @@ class VideoProcessor:
                 self.start_processing(start_frame=self.current_frame_index, end_frame=stored_end_limit)
                 # Restart tracker if it was active before seeking (e.g., in streamer mode without chapters)
                 if was_tracking and self.tracker and not self.tracker.tracking_active:
-                    self.logger.info("Restarting tracker after seek")
                     self.tracker.start_tracking()
-            # If was_paused, do not restart processing (remain paused after seek)
 
         except Exception as e:
             self.logger.error(f"Error during seek operation: {e}", exc_info=True)
@@ -2070,215 +2222,81 @@ class VideoProcessor:
                 self.logger.error(f"Error processing frame with tracker in display_current_frame: {e}", exc_info=True)
 
     def arrow_nav_forward(self, target_frame: int) -> Optional[np.ndarray]:
-        """
-        Navigate forward by reading next frame from a dedicated FFmpeg pipe.
+        """Navigate forward using unified buffer + pipe.
 
-        Uses the same filter chain as the processing loop so VR projection,
-        scaling, etc. are visually identical to playback.  Sequential reads
-        are instant (just a pipe read); only the first frame after a jump
-        requires spawning a new FFmpeg process.
-
-        Falls back to ThumbnailExtractor if FFmpeg pipe fails.
+        3-tier lookup (no cv2 fallback):
+        1. Buffer hit — O(1), instant
+        2. Pipe at correct position — read + append
+        3. Restart pipe at target — read + append
         """
-        # Skip if already fetching a frame (prevents CPU overload when holding arrow keys)
         if self.arrow_nav_in_progress:
             return None
 
         self.arrow_nav_in_progress = True
         try:
-            frame = self._arrow_nav_read_frame(target_frame)
+            # 1. Buffer lookup (O(1))
+            frame = self._buffer_lookup(target_frame)
             if frame is not None:
                 self.current_frame_index = target_frame
-            return frame
+                return frame
+
+            # 2. Pipe at correct position — sequential read
+            if (self._ffmpeg_pipe is not None
+                    and self._ffmpeg_pipe.poll() is None
+                    and self._ffmpeg_read_position == target_frame):
+                frame = self._pipe_read_one()
+                if frame is not None:
+                    self._buffer_append(target_frame, frame)
+                    self.current_frame_index = target_frame
+                    return frame
+                else:
+                    self.logger.warning(f"Forward nav pipe read failed at frame {target_frame}")
+
+            # 3. Restart pipe at target
+            if self._start_unified_pipe(target_frame):
+                frame = self._pipe_read_one()
+                if frame is not None:
+                    self._buffer_append(target_frame, frame)
+                    self.current_frame_index = target_frame
+                    return frame
+                else:
+                    self.logger.warning(f"Forward nav pipe restart read failed at frame {target_frame}")
+            else:
+                self.logger.warning(f"Forward nav pipe restart failed at frame {target_frame}")
+
+            return None
         finally:
             self.arrow_nav_in_progress = False
 
-    def _arrow_nav_read_frame(self, target_frame: int) -> Optional[np.ndarray]:
-        """Read one frame from backward buffer or FFmpeg pipe.
-
-        After going backward then forward again, frames we already visited
-        are still in the backward deque. Serve those instantly instead of
-        respawning the FFmpeg pipe (avoids 120ms startup penalty).
-        Once we pass beyond the buffered range, resume the pipe.
-        """
-        # 1. Check backward buffer first (instant, no I/O)
-        with self.arrow_nav_backward_buffer_lock:
-            for frame_index, frame_data in self.arrow_nav_backward_buffer:
-                if frame_index == target_frame:
-                    self.logger.debug(f"Arrow nav forward: frame {target_frame} served from backward buffer")
-                    return frame_data
-
-        # 2. Fast path: pipe exists and is positioned at target_frame
-        if (self._arrow_nav_ffmpeg_proc is not None
-                and self._arrow_nav_ffmpeg_proc.poll() is None
-                and self._arrow_nav_next_frame == target_frame):
-            frame = self._arrow_nav_pipe_read_one()
-            if frame is not None:
-                self._arrow_nav_next_frame = target_frame + 1
-                return frame
-            # Pipe exhausted / broken — fall through to restart
-
-        # 3. (Re)start the pipe at target_frame
-        if self._arrow_nav_start_pipe(target_frame):
-            frame = self._arrow_nav_pipe_read_one()
-            if frame is not None:
-                self._arrow_nav_next_frame = target_frame + 1
-                return frame
-
-        # 4. Fallback to ThumbnailExtractor (cv2) for resilience
-        self.logger.debug(f"Arrow nav FFmpeg pipe failed for frame {target_frame}, falling back to thumbnail extractor")
-        return self._get_specific_frame(target_frame, update_current_index=False, use_thumbnail=True)
-
-    def _arrow_nav_start_pipe(self, start_frame: int) -> bool:
-        """Spawn a dedicated FFmpeg pipe at *start_frame* for arrow navigation."""
-        self._arrow_nav_stop_pipe()
-
-        if not self.video_path or not self.video_info or self.fps <= 0:
-            return False
-
-        start_sec = start_frame / self.fps
-        common_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
-
-        # Use the same filter chain the processing loop uses
-        effective_vf = self.ffmpeg_filter_string or (
-            f"scale={self.yolo_input_size}:{self.yolo_input_size}"
-            f":force_original_aspect_ratio=decrease,"
-            f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-        )
-
-        hwaccel_args = self._get_ffmpeg_hwaccel_args()
-        cmd = common_prefix + hwaccel_args[:]
-        if start_sec > 0.001:
-            cmd.extend(['-ss', str(start_sec)])
-        cmd.extend(['-i', self._active_video_source_path, '-an', '-sn'])
-        cmd.extend(['-vf', effective_vf])
-        cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
-
-        try:
-            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            self._arrow_nav_ffmpeg_proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                bufsize=-1, creationflags=creation_flags,
-            )
-            self._arrow_nav_next_frame = start_frame
-            self._arrow_nav_frame_bytes = self.yolo_input_size * self.yolo_input_size * 3
-            self.logger.debug(f"Arrow nav FFmpeg pipe started at frame {start_frame}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to start arrow nav FFmpeg pipe: {e}")
-            self._arrow_nav_ffmpeg_proc = None
-            return False
-
-    def _arrow_nav_pipe_read_one(self) -> Optional[np.ndarray]:
-        """Read exactly one frame from the arrow-nav FFmpeg pipe."""
-        if self._arrow_nav_ffmpeg_proc is None or self._arrow_nav_ffmpeg_proc.stdout is None:
-            return None
-        try:
-            raw = self._arrow_nav_ffmpeg_proc.stdout.read(self._arrow_nav_frame_bytes)
-            if len(raw) < self._arrow_nav_frame_bytes:
-                return None
-            return np.frombuffer(raw, dtype=np.uint8).reshape(
-                self.yolo_input_size, self.yolo_input_size, 3
-            ).copy()  # copy() so the buffer can be reused
-        except Exception:
-            return None
-
-    def _arrow_nav_stop_pipe(self):
-        """Terminate the arrow-nav FFmpeg pipe if running."""
-        if self._arrow_nav_ffmpeg_proc is not None:
-            self._terminate_process(self._arrow_nav_ffmpeg_proc, "ArrowNav")
-            self._arrow_nav_ffmpeg_proc = None
-            self._arrow_nav_next_frame = -1
-
-    def _clear_arrow_nav_state(self):
-        """Clear all arrow-nav state: backward buffer, FFmpeg pipe, and pending refills.
-
-        Called on position jumps (seek, cache clear, FFmpeg teardown) so stale
-        frames from a previous position are never served.
-        """
-        self._arrow_nav_refill_cancelled = True
-        self._arrow_nav_stop_pipe()
-        with self.arrow_nav_backward_buffer_lock:
-            self.arrow_nav_backward_buffer.clear()
-        self.arrow_nav_refilling = False
-
     def arrow_nav_backward(self, target_frame: int) -> Optional[np.ndarray]:
+        """Navigate backward using unified buffer + pipe.
+
+        2-tier lookup (no cv2 fallback):
+        1. Buffer hit — O(1), instant
+        2. Buffer miss — clear buffer, restart pipe at target, read + append
         """
-        Navigate backward using rolling buffer.
-        Returns frame from buffer if available, triggers async refill if needed.
-        """
-        # Check if frame is in backward buffer
-        with self.arrow_nav_backward_buffer_lock:
-            # Buffer stores (frame_index, frame_data) tuples
-            for frame_index, frame_data in reversed(self.arrow_nav_backward_buffer):
-                if frame_index == target_frame:
-                    self.current_frame_index = target_frame
-                    return frame_data
+        # 1. Buffer lookup (O(1))
+        frame = self._buffer_lookup(target_frame)
+        if frame is not None:
+            self.current_frame_index = target_frame
+            return frame
 
-            # Check buffer size for refill trigger
-            buffer_size = len(self.arrow_nav_backward_buffer)
-            if buffer_size > 0:
-                oldest_frame_index = self.arrow_nav_backward_buffer[0][0]
-                frames_behind = target_frame - oldest_frame_index
+        # 2. Buffer miss: restart pipe at target_frame
+        with self._frame_buffer_lock:
+            self._frame_buffer.clear()
 
-                # Trigger async refill if < 120 frames in buffer behind us
-                if frames_behind < self.arrow_nav_refill_threshold and not self.arrow_nav_refilling:
-                    self._trigger_backward_buffer_refill(oldest_frame_index)
+        if self._start_unified_pipe(target_frame):
+            frame = self._pipe_read_one()
+            if frame is not None:
+                self._buffer_append(target_frame, frame)
+                self.current_frame_index = target_frame
+                return frame
+            else:
+                self.logger.warning(f"Backward nav pipe read failed at frame {target_frame}")
+        else:
+            self.logger.warning(f"Backward nav pipe restart failed at frame {target_frame}")
 
-        # Frame not in buffer — fire an async seek instead of blocking the UI.
-        # seek_video() runs in SeekThread, and _perform_frame_seek handles None gracefully.
-        self.logger.debug(f"Frame {target_frame} not in backward buffer, dispatching async seek")
-        self.seek_video(target_frame)
         return None
-
-    def _trigger_backward_buffer_refill(self, oldest_frame_index: int):
-        """Async refill backward buffer with 120 frames."""
-        self.arrow_nav_refilling = True
-        self._arrow_nav_refill_cancelled = False
-
-        def refill_worker():
-            try:
-                refill_end = oldest_frame_index - 1
-                refill_start = max(0, refill_end - 119)  # 120 frames
-                num_frames = refill_end - refill_start + 1
-
-                if num_frames <= 0:
-                    self.arrow_nav_refilling = False
-                    return
-
-                self.logger.debug(f"Refilling backward buffer: {num_frames} frames from {refill_start}")
-
-                # Fetch batch
-                fetched_batch = self.get_frames_batch(refill_start, num_frames)
-
-                # Discard results if a seek/clear happened while we were fetching
-                if self._arrow_nav_refill_cancelled:
-                    self.logger.debug("Backward buffer refill cancelled (position changed), discarding results")
-                    return
-
-                # Add to front of backward buffer (in correct order)
-                with self.arrow_nav_backward_buffer_lock:
-                    new_frames = sorted([(idx, frame) for idx, frame in fetched_batch.items()])
-
-                    for frame_tuple in new_frames:
-                        self.arrow_nav_backward_buffer.appendleft(frame_tuple)
-
-                    self.logger.debug(f"Backward buffer refilled: {len(new_frames)} frames added, buffer size: {len(self.arrow_nav_backward_buffer)}")
-
-            except Exception as e:
-                self.logger.error(f"Error refilling backward buffer: {e}", exc_info=True)
-            finally:
-                self.arrow_nav_refilling = False
-
-        # Run in background thread
-        refill_thread = threading.Thread(target=refill_worker, daemon=True)
-        refill_thread.start()
-
-    def add_frame_to_backward_buffer(self, frame_index: int, frame_data: np.ndarray):
-        """Add a frame to the rolling backward buffer (used during forward navigation)."""
-        with self.arrow_nav_backward_buffer_lock:
-            # Deque automatically removes oldest when at maxlen
-            self.arrow_nav_backward_buffer.append((frame_index, frame_data))
 
     def _processing_loop(self):
         if not self.ffmpeg_process or self.ffmpeg_process.stdout is None:
@@ -2288,20 +2306,97 @@ class VideoProcessor:
 
         start_time = time.time()  # For calculating FPS and ETA in the callback
 
-        loop_ffmpeg_process = self.ffmpeg_process
         next_frame_target_time = time.perf_counter()
         self.last_processed_chapter_id = None
 
+        _SKIP_THRESHOLD = 90  # Frames: skip via read-discard if cursor ahead by <= this
+
         try:
             # The main processing loop
+            was_paused = False
             while not self.stop_event.is_set():
+                # --- Entering pause: hand off pipe for arrow nav ---
+                if self.pause_event.is_set() and not was_paused:
+                    was_paused = True
+                    # Transfer processing pipe → unified pipe so arrow nav can use it
+                    if self.ffmpeg_process is not None:
+                        self._ffmpeg_pipe = self.ffmpeg_process
+                        self._ffmpeg_read_position = (
+                            self.current_stream_start_frame_abs + self.frames_read_from_current_stream)
+                        self.ffmpeg_process = None
+                        self.logger.info(
+                            f"Pause at frame {self.current_frame_index}, "
+                            f"pipe handed off (read_pos={self._ffmpeg_read_position})")
+                    else:
+                        self.logger.info(f"Pause at frame {self.current_frame_index} (no pipe to hand off)")
+
                 while self.pause_event.is_set():
                     if self.stop_event.is_set():
                         break
                     time.sleep(0.01)
 
-                # If a stop was requested while we were paused, break the main loop.
                 if self.stop_event.is_set():
+                    break
+
+                # --- Waking from pause: reclaim pipe, self-heal cursor divergence ---
+                if was_paused:
+                    was_paused = False
+                    cursor = self.current_frame_index
+                    heal_t0 = time.perf_counter()
+
+                    # Try to reclaim the unified pipe (arrow nav may have used/replaced it)
+                    if self._ffmpeg_pipe is not None and self._ffmpeg_pipe.poll() is None:
+                        self.ffmpeg_process = self._ffmpeg_pipe
+                        self._ffmpeg_pipe = None
+                        pipe_pos = self._ffmpeg_read_position
+                        gap = cursor - pipe_pos  # Normal is -1 (pipe 1 ahead of cursor)
+
+                        if -1 <= gap <= 0:
+                            # Normal: pipe is at or 1 ahead of cursor. Just sync tracking.
+                            self.current_stream_start_frame_abs = pipe_pos
+                            self.frames_read_from_current_stream = 0
+                            heal_ms = (time.perf_counter() - heal_t0) * 1000
+                            self.logger.info(
+                                f"Resumed at frame {cursor} (gap={gap}, pipe at {pipe_pos}, {heal_ms:.1f}ms)")
+                        elif 0 < gap <= _SKIP_THRESHOLD:
+                            # Cursor ahead of pipe: skip-discard frames (fast)
+                            self.current_stream_start_frame_abs = pipe_pos
+                            self.frames_read_from_current_stream = 0
+                            skipped = 0
+                            if self.ffmpeg_process.stdout:
+                                for _ in range(gap):
+                                    d = self.ffmpeg_process.stdout.read(self.frame_size_bytes)
+                                    if not d or len(d) < self.frame_size_bytes:
+                                        break
+                                    self.frames_read_from_current_stream += 1
+                                    skipped += 1
+                            heal_ms = (time.perf_counter() - heal_t0) * 1000
+                            self.logger.info(
+                                f"Resumed: skipped {skipped}/{gap} frames ({heal_ms:.1f}ms)")
+                        else:
+                            # Large backward or forward: kill reclaimed pipe, start fresh
+                            self._terminate_process(self.ffmpeg_process, "Main")
+                            self.ffmpeg_process = None
+                            if not self._start_ffmpeg_process(start_frame_abs_idx=cursor):
+                                self.logger.error("Pipe restart failed after pause, ending loop.")
+                                break
+                            heal_ms = (time.perf_counter() - heal_t0) * 1000
+                            self.logger.info(
+                                f"Resumed: pipe restarted at frame {cursor} (gap={gap}, {heal_ms:.1f}ms)")
+                    else:
+                        # Pipe died or was replaced — start fresh
+                        self._stop_unified_pipe()
+                        if not self._start_ffmpeg_process(start_frame_abs_idx=cursor):
+                            self.logger.error("Fresh pipe failed after pause, ending loop.")
+                            break
+                        heal_ms = (time.perf_counter() - heal_t0) * 1000
+                        self.logger.info(
+                            f"Resumed: fresh pipe at frame {cursor} ({heal_ms:.1f}ms)")
+
+                # Re-read pipe ref after potential restart
+                loop_ffmpeg_process = self.ffmpeg_process
+                if loop_ffmpeg_process is None or loop_ffmpeg_process.stdout is None:
+                    self.logger.info("Processing pipe is None, ending loop.")
                     break
 
                 # The original logic of the loop continues below
@@ -2380,8 +2475,8 @@ class VideoProcessor:
                 if loop_ffmpeg_process.poll() is not None:
                     stderr_output = loop_ffmpeg_process.stderr.read(4096).decode(
                         errors='ignore') if loop_ffmpeg_process.stderr else ""
-                    self.logger.info(
-                        f"FFmpeg output process died unexpectedly. Exit: {loop_ffmpeg_process.returncode}. Stderr: {stderr_output.strip()}. Stopping.")
+                    self.logger.warning(
+                        f"FFmpeg process died (pid={loop_ffmpeg_process.pid}). Exit: {loop_ffmpeg_process.returncode}. Stderr: {stderr_output.strip()}. Stopping.")
                     self.is_processing = False
                     break
 
@@ -2404,6 +2499,8 @@ class VideoProcessor:
                         raw_frame_bytes = loop_ffmpeg_process.stdout.read(self.frame_size_bytes)
                         decode_time = (time.perf_counter() - decode_start) * 1000.0
                         self._decode_samples.append(decode_time)
+                        if decode_time > 200:
+                            self.logger.warning(f"Slow frame read: {decode_time:.0f}ms at frame {self.current_frame_index}")
                     else:
                         raw_frame_bytes = None
 
@@ -2425,6 +2522,7 @@ class VideoProcessor:
 
                 self.current_frame_index = self.current_stream_start_frame_abs + self.frames_read_from_current_stream
                 self.frames_read_from_current_stream += 1
+                self._ffmpeg_read_position = self.current_frame_index + 1
 
                 # Notify playback state observers (e.g., device_control)
                 if self._playback_state_callbacks:
@@ -2492,6 +2590,10 @@ class VideoProcessor:
                     unwarp_time = (time.perf_counter() - unwarp_start) * 1000.0
                     self._unwarp_samples.append(unwarp_time)
 
+                # Feed clean decoded frame into unified buffer (before tracker overlays)
+                # so arrow-key backward nav works seamlessly after play stops.
+                self._buffer_append(self.current_frame_index, frame_np.copy())
+
                 processed_frame_for_gui = frame_np
                 if self.tracker and self.tracker.tracking_active:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
@@ -2543,7 +2645,20 @@ class VideoProcessor:
                         next_frame_target_time = current_time + target_delay
         finally:
             self.logger.info(f"_processing_loop ending. is_processing: {self.is_processing}, stop_event: {self.stop_event.is_set()}")
-            self._terminate_ffmpeg_processes()
+            self._terminate_process(self.ffmpeg_pipe1_process, "Pipe 1")
+            self.ffmpeg_pipe1_process = None
+            # Transfer processing pipe to unified pipe for reuse if still alive.
+            # If pipe was already handed off during pause, ffmpeg_process is None
+            # and _ffmpeg_pipe already has the pipe — leave it alone.
+            if self.ffmpeg_process is not None:
+                if self.ffmpeg_process.poll() is None:
+                    self._ffmpeg_pipe = self.ffmpeg_process
+                    self._ffmpeg_read_position = (
+                        self.current_stream_start_frame_abs + self.frames_read_from_current_stream)
+                    self.logger.debug("Transferred processing pipe to unified pipe for arrow nav reuse")
+                else:
+                    self._terminate_process(self.ffmpeg_process, "Main")
+            self.ffmpeg_process = None
             self.is_processing = False
             self.last_processed_chapter_id = None
 
@@ -2891,6 +3006,9 @@ class VideoProcessor:
         if self.tracker and not skip_tracker_reset:
             self.tracker.reset()
         if close_video:
+            if self.thumbnail_extractor:
+                self.thumbnail_extractor.close()
+                self.thumbnail_extractor = None
             self.video_path = ""
             self._active_video_source_path = ""
             self.video_info = {}
@@ -2901,7 +3019,7 @@ class VideoProcessor:
             self.current_frame = None
         if self.video_path and self.video_info and not close_video:
             self.logger.info("Fetching frame 0 after reset (video still loaded).")
-            self.current_frame = self._get_specific_frame(0)
+            self.current_frame = self._get_specific_frame(0, use_thumbnail=True)
         else:
             self.current_frame = None
         if self.app and hasattr(self.app, 'on_processing_stopped'):

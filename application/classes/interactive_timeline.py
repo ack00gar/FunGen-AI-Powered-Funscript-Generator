@@ -1731,9 +1731,13 @@ class InteractiveFunscriptTimeline:
         dl.add_line(center_x, tf.y_offset, center_x, tf.y_offset + tf.height, 
                     imgui.get_color_u32_rgba(*TimelineColors.CENTER_MARKER), 2.0)
         
-        # Playhead Time Info
+        # Playhead Time Info (timecode + frame number)
         time_ms = tf.x_to_time(center_x)
         txt = _format_time(self.app, time_ms/1000.0)
+        proc = self.app.processor
+        if proc and proc.fps and proc.fps > 0:
+            frame_num = int(round((time_ms / 1000.0) * proc.fps))
+            txt = f"{txt}  ({frame_num})"
         dl.add_text(center_x + 6, tf.y_offset + 6, imgui.get_color_u32_rgba(*TimelineColors.TIME_DISPLAY_TEXT), txt)
         
         # 2. Marquee Box
