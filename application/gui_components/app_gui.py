@@ -243,6 +243,16 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.video_decode_times.append(decode_time_ms)
         self.component_render_times["VideoDecoding"] = decode_time_ms
 
+    def track_frame_seek_time(self, seek_time_ms, path: str = "arrow"):
+        """Track frame seek/decode time for arrow nav and scrubbing.
+
+        Args:
+            seek_time_ms: Time in milliseconds for the seek+decode operation.
+            path: "arrow" for arrow-key navigation, "scrub" for timeline scrub.
+        """
+        key = "ArrowNavDecode" if path == "arrow" else "ScrubDecode"
+        self.component_render_times[key] = seek_time_ms
+
     def track_disk_io_time(self, operation_name, io_time_ms):
         """Track disk I/O operations."""
         self.disk_io_times.append(io_time_ms)

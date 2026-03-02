@@ -84,6 +84,13 @@ class VideoProcessor:
         self.seek_in_progress = False  # Flag to track if seek operation is running
         self.seek_thread = None  # Thread for async seek operations
         self.arrow_nav_in_progress = False  # Flag to prevent arrow nav overload
+
+        # Dedicated FFmpeg pipe for arrow key navigation.
+        # Uses the same filter chain as _processing_loop for visual consistency
+        # (especially VR v360 projection). Sequential forward reads are instant.
+        self._arrow_nav_ffmpeg_proc: Optional[subprocess.Popen] = None
+        self._arrow_nav_next_frame: int = -1  # Next frame the pipe will yield
+        self._arrow_nav_frame_bytes: int = 0
         self.frame_buffer_progress = 0.0  # Progress of frame buffer creation (0.0 to 1.0)
         self.frame_buffer_total = 0  # Total frames to buffer
         self.frame_buffer_current = 0  # Current frames buffered
@@ -1693,6 +1700,8 @@ class VideoProcessor:
         self.ffmpeg_pipe1_process = None
         self._terminate_process(self.ffmpeg_process, "Main/Pipe 2")
         self.ffmpeg_process = None
+        # Also stop the arrow-nav pipe
+        self._arrow_nav_stop_pipe()
 
     def _start_ffmpeg_process(self, start_frame_abs_idx=0, num_frames_to_output_ffmpeg=None):
         self._terminate_ffmpeg_processes()
@@ -1950,6 +1959,9 @@ class VideoProcessor:
 
         target_frame = max(0, min(frame_index, self.total_frames - 1))
 
+        # Invalidate arrow-nav pipe since the user jumped to a new position
+        self._arrow_nav_stop_pipe()
+
         # Notify registered observers (e.g., streamer) of seek event
         self._notify_seek_callbacks(target_frame)
 
@@ -2000,8 +2012,14 @@ class VideoProcessor:
                 # Rolling backward buffer is only for arrow key navigation
                 original_batch_size = self.batch_fetch_size
                 self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
+                seek_t0 = time.perf_counter()
                 new_frame = self._get_specific_frame(target_frame, immediate_display=False)
+                seek_ms = (time.perf_counter() - seek_t0) * 1000
                 self.batch_fetch_size = original_batch_size
+
+                # Report scrub decode cost to perf monitor
+                if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+                    self.app.gui_instance.track_frame_seek_time(seek_ms, path="scrub")
 
                 with self.frame_lock:
                     self.current_frame = new_frame
@@ -2059,9 +2077,14 @@ class VideoProcessor:
 
     def arrow_nav_forward(self, target_frame: int) -> Optional[np.ndarray]:
         """
-        Navigate forward by reading next frame sequentially.
-        Adds frame to rolling backward buffer as we go.
-        Returns the frame at target_frame.
+        Navigate forward by reading next frame from a dedicated FFmpeg pipe.
+
+        Uses the same filter chain as the processing loop so VR projection,
+        scaling, etc. are visually identical to playback.  Sequential reads
+        are instant (just a pipe read); only the first frame after a jump
+        requires spawning a new FFmpeg process.
+
+        Falls back to ThumbnailExtractor if FFmpeg pipe fails.
         """
         # Skip if already fetching a frame (prevents CPU overload when holding arrow keys)
         if self.arrow_nav_in_progress:
@@ -2069,17 +2092,101 @@ class VideoProcessor:
 
         self.arrow_nav_in_progress = True
         try:
-            # Use fast thumbnail path for instant response during arrow navigation
-            # This avoids the 600-frame batch fetch which is very slow for VR videos
-            original_batch_size = self.batch_fetch_size
-            self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
-            try:
-                frame = self._get_specific_frame(target_frame, update_current_index=True)
-            finally:
-                self.batch_fetch_size = original_batch_size
+            frame = self._arrow_nav_read_frame(target_frame)
+            if frame is not None:
+                self.current_frame_index = target_frame
             return frame
         finally:
             self.arrow_nav_in_progress = False
+
+    def _arrow_nav_read_frame(self, target_frame: int) -> Optional[np.ndarray]:
+        """Read one frame from the arrow-nav FFmpeg pipe, (re)starting it if needed."""
+        # Fast path: pipe exists and is positioned at target_frame
+        if (self._arrow_nav_ffmpeg_proc is not None
+                and self._arrow_nav_ffmpeg_proc.poll() is None
+                and self._arrow_nav_next_frame == target_frame):
+            frame = self._arrow_nav_pipe_read_one()
+            if frame is not None:
+                self._arrow_nav_next_frame = target_frame + 1
+                return frame
+            # Pipe exhausted / broken — fall through to restart
+
+        # (Re)start the pipe at target_frame
+        if self._arrow_nav_start_pipe(target_frame):
+            frame = self._arrow_nav_pipe_read_one()
+            if frame is not None:
+                self._arrow_nav_next_frame = target_frame + 1
+                return frame
+
+        # Fallback to ThumbnailExtractor (cv2) for resilience
+        self.logger.debug(f"Arrow nav FFmpeg pipe failed for frame {target_frame}, falling back to thumbnail extractor")
+        original_batch_size = self.batch_fetch_size
+        self.batch_fetch_size = 1
+        try:
+            return self._get_specific_frame(target_frame, update_current_index=False)
+        finally:
+            self.batch_fetch_size = original_batch_size
+
+    def _arrow_nav_start_pipe(self, start_frame: int) -> bool:
+        """Spawn a dedicated FFmpeg pipe at *start_frame* for arrow navigation."""
+        self._arrow_nav_stop_pipe()
+
+        if not self.video_path or not self.video_info or self.fps <= 0:
+            return False
+
+        start_sec = start_frame / self.fps
+        common_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
+
+        # Use the same filter chain the processing loop uses
+        effective_vf = self.ffmpeg_filter_string or (
+            f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            f":force_original_aspect_ratio=decrease,"
+            f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
+        )
+
+        hwaccel_args = self._get_ffmpeg_hwaccel_args()
+        cmd = common_prefix + hwaccel_args[:]
+        if start_sec > 0.001:
+            cmd.extend(['-ss', str(start_sec)])
+        cmd.extend(['-i', self._active_video_source_path, '-an', '-sn'])
+        cmd.extend(['-vf', effective_vf])
+        cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
+
+        try:
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            self._arrow_nav_ffmpeg_proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                bufsize=-1, creationflags=creation_flags,
+            )
+            self._arrow_nav_next_frame = start_frame
+            self._arrow_nav_frame_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            self.logger.debug(f"Arrow nav FFmpeg pipe started at frame {start_frame}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to start arrow nav FFmpeg pipe: {e}")
+            self._arrow_nav_ffmpeg_proc = None
+            return False
+
+    def _arrow_nav_pipe_read_one(self) -> Optional[np.ndarray]:
+        """Read exactly one frame from the arrow-nav FFmpeg pipe."""
+        if self._arrow_nav_ffmpeg_proc is None or self._arrow_nav_ffmpeg_proc.stdout is None:
+            return None
+        try:
+            raw = self._arrow_nav_ffmpeg_proc.stdout.read(self._arrow_nav_frame_bytes)
+            if len(raw) < self._arrow_nav_frame_bytes:
+                return None
+            return np.frombuffer(raw, dtype=np.uint8).reshape(
+                self.yolo_input_size, self.yolo_input_size, 3
+            ).copy()  # copy() so the buffer can be reused
+        except Exception:
+            return None
+
+    def _arrow_nav_stop_pipe(self):
+        """Terminate the arrow-nav FFmpeg pipe if running."""
+        if self._arrow_nav_ffmpeg_proc is not None:
+            self._terminate_process(self._arrow_nav_ffmpeg_proc, "ArrowNav")
+            self._arrow_nav_ffmpeg_proc = None
+            self._arrow_nav_next_frame = -1
 
     def arrow_nav_backward(self, target_frame: int) -> Optional[np.ndarray]:
         """
