@@ -2,16 +2,11 @@
 import imgui
 from collections import OrderedDict
 from application.utils import primary_button_style, destructive_button_style
-from application.utils.imgui_helpers import DisabledScope as _DisabledScope
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
 from application.utils.section_card import section_card
 
 # Category display order — General is a catch-all at the end
 _CATEGORY_ORDER = ["Autotune", "Quickfix Tools", "Transform", "Smoothing", "Timing & Generation", "General"]
-
-
-def _tooltip_if_hovered(text):
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(text)
 
 
 class PostProcessingMixin:

@@ -19,9 +19,13 @@ from application.gui_components.bookmark_list_window import BookmarkListWindow
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority, get_icon_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
+from application.utils.timeline_modes import TimelineMode
 from application.gui_components.gui_preview_manager import PreviewManagerMixin
 from application.gui_components.gui_shortcut_handler import ShortcutHandlerMixin
 from application.gui_components.gui_dialog_renderer import DialogRendererMixin
+
+_STATUS_STRIP_HEIGHT = 22
+_HINT_ROTATION_INTERVAL_S = 10.0
 
 
 class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
@@ -145,7 +149,12 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             'continuous_delay': 0.2,  # 200ms delay before continuous playback (allows frame-by-frame taps)
             'last_direction': 0,  # Track direction to prevent double-navigation
             'playback_active': False,  # True when hold-forward has engaged the processing loop
+            'continuous_start_time': 0,  # When continuous (accelerating) mode began
         }
+        self.arrow_nav_reading_fps = 0.0    # instantaneous frames/sec during arrow key seeking
+        self._reading_fps_frames = []     # (timestamp, frame_count) per tick
+        self._reading_fps_display = 0.0   # value shown in status bar (updated once/sec)
+        self._reading_fps_last_update = 0.0  # last time display value was refreshed
 
         self.batch_videos_data: List[Dict] = []
         self.batch_overwrite_mode_ui: int = 0  # 0: Skip own, 1: Skip any, 2: Overwrite all
@@ -155,6 +164,11 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.batch_apply_ultimate_autotune_ui: bool = True
         self.batch_adaptive_tuning_ui: bool = True
         self.last_overwrite_mode_ui: int = -1 # Used to trigger auto-selection logic
+
+        # Go to Frame popup
+        self._go_to_frame_open = False
+        self._go_to_frame_input = ""
+        self._go_to_frame_focus = False
 
         # TODO: Move this to a separate class/error management module
         self.error_popup_active = False
@@ -838,7 +852,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         d = d.replace("MINUS", "-")
         return d
 
-    def _get_contextual_hints(self, shortcuts, timeline_hovered, has_selection):
+    def _get_contextual_hints(self, shortcuts, timeline_hovered, has_selection, active_mode=None):
         """Return 1-2 fixed hints based on current app state.
 
         Each hint is (formatted_key, label).
@@ -865,10 +879,21 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 hints.append((self._format_shortcut_hint(k), "Copy"))
             return hints
 
-        # Timeline hovered, no selection → canvas interaction hints
+        # Timeline hovered, no selection → mode-specific or canvas interaction hints
         if timeline_hovered:
+            if active_mode == TimelineMode.ALTERNATING:
+                return [("Click", "Add Alt Point"), ("Alt+Drag", "Range Select")]
+            elif active_mode == TimelineMode.RECORDING:
+                k = shortcuts.get("toggle_playback", "")
+                hints = [("Record", "Start/Stop")]
+                if k:
+                    hints.append((self._format_shortcut_hint(k), "Play/Pause"))
+                return hints
+            elif active_mode == TimelineMode.INJECTION:
+                return [("Right-click", "Inject Points"), ("Alt+Drag", "Range Select")]
+
+            # Default Select mode
             hints = []
-            mod = "Cmd" if platform.system() == "Darwin" else "Ctrl"
             hints.append(("Alt+Drag", "Range Select"))
             hints.append(("Click", "Add Point"))
             k = shortcuts.get("select_all_points", "")
@@ -1006,26 +1031,30 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 # Dynamic shortcut hints
                 shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
 
-                # Detect context: video, timeline hover, selection
+                # Detect context: video, timeline hover, selection, active mode
                 has_video = proc and proc.is_video_open()
                 tl_hovered = False
                 has_sel = False
+                active_tl_mode = TimelineMode.SELECT
                 try:
                     t1 = self.timeline_editor1
                     t2 = self.timeline_editor2
                     if t1 and t1.is_hovered:
                         tl_hovered = True
+                        active_tl_mode = getattr(t1, '_mode', TimelineMode.SELECT)
                     if t2 and t2.is_hovered:
                         tl_hovered = True
+                        active_tl_mode = getattr(t2, '_mode', TimelineMode.SELECT)
                     if t1 and t1.multi_selected_action_indices:
                         has_sel = True
                     if not has_sel and t2 and t2.multi_selected_action_indices:
                         has_sel = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).debug(f"Timeline hover detection error: {e}")
 
-                fixed_hints = self._get_contextual_hints(shortcuts, tl_hovered, has_sel)
-                ctx_key = (has_video, tl_hovered, has_sel)
+                fixed_hints = self._get_contextual_hints(shortcuts, tl_hovered, has_sel, active_tl_mode)
+                ctx_key = (has_video, tl_hovered, has_sel, active_tl_mode)
 
                 # Rebuild rotating pool on context change
                 if ctx_key != self._hint_last_context:
@@ -1045,7 +1074,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
                 # Rotate discovery tip every 10s
                 now = time.time()
-                if self._hint_pool_cache and now - self._hint_last_rotate >= 10.0:
+                if self._hint_pool_cache and now - self._hint_last_rotate >= _HINT_ROTATION_INTERVAL_S:
                     self._hint_rotate_index = (self._hint_rotate_index + 1) % len(self._hint_pool_cache)
                     self._hint_last_rotate = now
 
@@ -1068,32 +1097,215 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                     if imgui.is_item_hovered():
                         imgui.set_tooltip("Press F1 to see all keyboard shortcuts")
 
-            # Right: Buffer info + FPS
+            # Right section: GUI FPS xx - Video FPS xxx - Frame Buffer [bar]
             io = imgui.get_io()
-            fps_text = f"{io.framerate:.0f} FPS"
-            fps_w = imgui.calc_text_size(fps_text)[0]
-
-            # Show buffer info when available
-            buf_w = 0
+            dim_color = (0.50, 0.50, 0.55, 0.75)
+            sep = "  -  "
+            sep_w = imgui.calc_text_size(sep)[0]
             proc = self.app.processor
-            if proc and proc.is_video_open() and hasattr(proc, 'buffer_info'):
-                buf = proc.buffer_info
-                if buf['size'] > 0:
-                    buf_text = f"Buf {buf['size']}/{buf['capacity']}"
-                    buf_w = imgui.calc_text_size(buf_text)[0]
-                    imgui.same_line(position=self.window_width - fps_w - buf_w - 28)
-                    imgui.push_style_color(imgui.COLOR_TEXT, 0.50, 0.50, 0.55, 0.75)
-                    imgui.text(buf_text)
-                    imgui.pop_style_color()
 
-            imgui.same_line(position=self.window_width - fps_w - 16)
-            imgui.push_style_color(imgui.COLOR_TEXT, *text_color)
-            imgui.text(fps_text)
+            # --- Compute Video FPS (1-second windowed, updated once/sec) ---
+            now_t = time.time()
+            # Prune frame samples older than 1 second
+            samples = self._reading_fps_frames
+            self._reading_fps_frames = [(t, n) for t, n in samples if now_t - t < 1.0]
+            # Update display value once per second for stability
+            if now_t - self._reading_fps_last_update >= 1.0:
+                if self._reading_fps_frames:
+                    total_frames = sum(n for _, n in self._reading_fps_frames)
+                    window = now_t - self._reading_fps_frames[0][0]
+                    self._reading_fps_display = total_frames / window if window > 0.01 else 0.0
+                else:
+                    self._reading_fps_display = 0.0
+                self._reading_fps_last_update = now_t
+
+            # If video open, show native fps; during seeking show reading rate instead
+            video_fps_text = ""
+            if proc and proc.is_video_open():
+                if self._reading_fps_display > 0.5:
+                    video_fps_text = f"Video FPS {self._reading_fps_display:.0f}"
+                elif proc.fps > 0:
+                    video_fps_text = f"Video FPS {proc.fps:.0f}"
+
+            # --- Compute Frame Buffer bar (always shown when video open) ---
+            buf_label = "Frame Buffer "
+            buf_label_w = imgui.calc_text_size(buf_label)[0]
+            bar_w = 60
+            has_buf = False
+            green_start_frac = 0.0
+            green_end_frac = 0.0
+            cursor_frac = 0.0
+            buf_size = 0
+            buf_capacity = 1
+            buf_start = buf_end = buf_current = 0
+            if proc and proc.is_video_open():
+                has_buf = True
+                if hasattr(proc, 'buffer_info'):
+                    buf = proc.buffer_info
+                    buf_size = buf['size']
+                    buf_capacity = buf['capacity'] if buf['capacity'] > 0 else 1
+                    if buf_size > 0:
+                        buf_start = buf['start']
+                        buf_end = buf['end']
+                        buf_current = buf.get('current', buf_start)
+                        bar_left = buf_end - buf_capacity + 1
+                        green_start_frac = max(0.0, (buf_start - bar_left) / buf_capacity)
+                        green_end_frac = min(1.0, (buf_end - bar_left + 1) / buf_capacity)
+                        cursor_frac = max(0.0, min(1.0, (buf_current - bar_left + 0.5) / buf_capacity))
+
+            # --- Layout: measure total width from right edge ---
+            right_margin = 28
+            total_w = 0
+            gui_fps_text = f"GUI FPS {io.framerate:.0f}"
+            gui_fps_w = imgui.calc_text_size(gui_fps_text)[0]
+            total_w += gui_fps_w
+            if video_fps_text:
+                total_w += sep_w + imgui.calc_text_size(video_fps_text)[0]
+            if has_buf:
+                total_w += sep_w + buf_label_w + bar_w
+
+            start_x = self.window_width - total_w - right_margin
+
+            # --- Render left to right ---
+            imgui.same_line(position=start_x)
+            imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
+            imgui.text(gui_fps_text)
             imgui.pop_style_color()
+
+            if video_fps_text:
+                imgui.same_line()
+                imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
+                imgui.text(sep + video_fps_text)
+                imgui.pop_style_color()
+
+            if has_buf:
+                imgui.same_line()
+                imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
+                imgui.text(sep + buf_label)
+                imgui.pop_style_color()
+
+                # Mini bar via draw_list
+                imgui.same_line()
+                bar_cursor = imgui.get_cursor_screen_pos()
+                bar_h = imgui.get_text_line_height() - 2
+                bar_y = bar_cursor[1] + 1
+                bx = bar_cursor[0]
+                draw_list = imgui.get_window_draw_list()
+
+                bg_color = imgui.get_color_u32_rgba(0.25, 0.25, 0.28, 1.0)
+                draw_list.add_rect_filled(bx, bar_y, bx + bar_w, bar_y + bar_h, bg_color, 3.0)
+
+                gx0 = bx + bar_w * green_start_frac
+                gx1 = bx + bar_w * green_end_frac
+                if gx1 - gx0 > 0.5:
+                    fill_color = imgui.get_color_u32_rgba(0.2, 0.7, 0.3, 0.8)
+                    draw_list.add_rect_filled(gx0, bar_y, gx1, bar_y + bar_h, fill_color, 3.0)
+
+                mx = bx + bar_w * cursor_frac
+                marker_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.9)
+                draw_list.add_line(mx, bar_y, mx, bar_y + bar_h, marker_color, 1.5)
+
+                imgui.dummy(bar_w, bar_h)
+
+                if imgui.is_item_hovered():
+                    if buf_size > 0:
+                        buf_pct = int(100 * (buf_current - (buf_end - buf_capacity + 1)) / buf_capacity) if buf_capacity > 0 else 0
+                        imgui.set_tooltip(
+                            f"Frame Buffer: {buf_size}/{buf_capacity}\n"
+                            f"Range: {buf_start}\u2013{buf_end}\n"
+                            f"Current Frame: {buf_current}\n"
+                            f"Position: {buf_pct}%"
+                        )
+                    else:
+                        imgui.set_tooltip(f"Frame Buffer: empty ({buf_capacity} capacity)")
 
         imgui.end()
         imgui.pop_style_var()
         imgui.pop_style_color()
+
+    def _render_go_to_frame_popup(self):
+        """Render the Go to Frame popup (Ctrl+G)."""
+        if not self._go_to_frame_open:
+            return
+
+        from application.utils.video_segment import VideoSegment
+
+        # Center the popup
+        main_vp = imgui.get_main_viewport()
+        cx = main_vp.pos[0] + main_vp.size[0] * 0.5
+        cy = main_vp.pos[1] + main_vp.size[1] * 0.4
+        imgui.set_next_window_position(cx, cy, imgui.APPEARING, 0.5, 0.5)
+        imgui.set_next_window_size(320, 0)
+
+        flags = imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_NO_SAVED_SETTINGS
+        _, self._go_to_frame_open = imgui.begin("Go to Frame##GoToFrame", closable=True, flags=flags)
+
+        if not self._go_to_frame_open:
+            imgui.end()
+            return
+
+        proc = self.app.processor
+        fps = proc.fps if proc and proc.fps > 0 else 30.0
+
+        imgui.text("Frame number or timecode (MM:SS.ms):")
+        imgui.spacing()
+
+        # Auto-focus input on first frame
+        if self._go_to_frame_focus:
+            imgui.set_keyboard_focus_here()
+            self._go_to_frame_focus = False
+
+        enter_pressed = False
+        changed, self._go_to_frame_input = imgui.input_text(
+            "##go_to_frame_input", self._go_to_frame_input, 64,
+            imgui.INPUT_TEXT_ENTER_RETURNS_TRUE
+        )
+        if changed:
+            enter_pressed = True
+
+        imgui.same_line()
+        if imgui.button("Go"):
+            enter_pressed = True
+
+        # Live preview: show what the input resolves to
+        input_text = self._go_to_frame_input.strip()
+        if input_text and proc and proc.video_info:
+            resolved = VideoSegment.parse_time_input_to_frames(input_text, fps)
+            if resolved >= 0:
+                total = proc.total_frames
+                clamped = max(0, min(resolved, total - 1 if total > 0 else 0))
+                timecode = VideoSegment._frames_to_timecode(clamped, fps)
+                imgui.text_disabled(f"-> Frame {clamped}  |  {timecode}")
+            else:
+                imgui.text_colored("Invalid input", 1.0, 0.4, 0.4, 1.0)
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Show current position
+        if proc and proc.video_info:
+            total = proc.total_frames
+            current = proc.current_frame_index
+            cur_tc = VideoSegment._frames_to_timecode(current, fps)
+            total_tc = VideoSegment._frames_to_timecode(total - 1 if total > 0 else 0, fps)
+            imgui.text_disabled(f"Current: {current} ({cur_tc})")
+            imgui.text_disabled(f"Total:   {total} ({total_tc})")
+
+        if enter_pressed and input_text:
+            if proc and proc.video_info:
+                target = VideoSegment.parse_time_input_to_frames(input_text, fps)
+                if target >= 0:
+                    total = proc.total_frames
+                    target = max(0, min(target, total - 1 if total > 0 else 0))
+                    self.app.event_handlers.seek_video_with_sync(target)
+                    self._go_to_frame_open = False
+
+        # Escape to close
+        if imgui.is_key_pressed(imgui.KEY_ESCAPE):
+            self._go_to_frame_open = False
+
+        imgui.end()
 
     def render_gui(self):
         self.component_render_times.clear()
@@ -1149,7 +1361,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         app_state.update_current_script_display_values()
 
-        status_strip_h = 22  # Bottom status strip height
+        status_strip_h = _STATUS_STRIP_HEIGHT
 
         if app_state.ui_layout_mode == 'fixed':
             panel_y_start = self.main_menu_bar_height + toolbar_height
@@ -1352,6 +1564,9 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # --- Render AI Models Dialog ---
         if hasattr(app_state, 'show_ai_models_dialog') and app_state.show_ai_models_dialog:
             self._time_render("AIModelsDialog", self._render_ai_models_dialog)
+
+        # Go to Frame popup (Ctrl+G)
+        self._render_go_to_frame_popup()
 
         # Render status strip at bottom of window
         self._render_status_strip(status_strip_h)

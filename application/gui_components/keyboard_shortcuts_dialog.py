@@ -61,6 +61,7 @@ class KeyboardShortcutsDialog:
             "Video Navigation": [
                 ("jump_to_start", "Jump to Start"),
                 ("jump_to_end", "Jump to End"),
+                ("go_to_frame", "Go to Frame"),
                 ("pan_timeline_left", "Pan Timeline Left"),
                 ("pan_timeline_right", "Pan Timeline Right"),
             ],

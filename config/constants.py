@@ -143,6 +143,7 @@ DEFAULT_SHORTCUTS = {
     "pan_timeline_right": "ALT+RIGHT_ARROW",
     "jump_to_start": "HOME",
     "jump_to_end": "END",
+    "go_to_frame": f"{MOD_KEY}+G",
 
     # Point Navigation
     "jump_to_next_point": "UP_ARROW",     # Up arrow for next point

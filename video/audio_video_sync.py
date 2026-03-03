@@ -125,9 +125,6 @@ class AudioVideoSync:
             tempo = self._get_tempo_for_mode()
             if tempo > 0:
                 self._ap.seek(position_ms, tempo)
-        else:
-            # Paused / stopped — frame stepping, play short scrub burst
-            self._ap.scrub(position_ms, duration_ms=100)
 
     def _get_tempo_for_mode(self) -> float:
         """Return audio tempo factor for the current speed mode.

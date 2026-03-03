@@ -1,4 +1,5 @@
 """Streamer/Native Sync tab UI mixin for ControlPanelUI."""
+import time
 import imgui
 from application.utils import get_icon_texture_manager, primary_button_style, destructive_button_style
 
@@ -28,7 +29,6 @@ class StreamerMixin:
                     )
 
             # Cache status to avoid expensive lookups every frame (throttle to 500ms)
-            import time
             current_time = time.time()
 
             # Update cache if stale (> 500ms)
@@ -42,13 +42,7 @@ class StreamerMixin:
             client_count = status.get('connected_clients', 0)
 
             # Version info (top of tab, consistent with other supporter modules)
-            try:
-                import streamer
-                version = getattr(streamer, '__version__', 'unknown')
-                imgui.text_colored(f"Streamer v{version}", 0.5, 0.5, 0.5, 1.0)
-                imgui.spacing()
-            except Exception:
-                pass
+            self._render_addon_version_label("streamer", "Streamer")
 
             # Auto-hide/show video feed based on client connections
             if is_running:
@@ -320,7 +314,6 @@ class StreamerMixin:
 
                                 # Also check HereSphere connections (active within last 30 seconds)
                                 if not clients_connected and self._native_sync_manager.heresphere_event_bridge:
-                                    import time
                                     heresphere = self._native_sync_manager.heresphere_event_bridge
                                     if heresphere.is_running and heresphere.last_event_time > 0:
                                         time_since_last_event = time.time() - heresphere.last_event_time
@@ -452,61 +445,60 @@ class StreamerMixin:
                 xbvr_host = self.app.app_settings.get('xbvr_host', 'localhost')
                 xbvr_port = self.app.app_settings.get('xbvr_port', 9999)
 
-                if True:
-                    imgui.spacing()
+                imgui.spacing()
 
-                    # XBVR Host
-                    imgui.text("XBVR Host/IP:")
-                    imgui.push_item_width(200)
-                    changed, new_host = imgui.input_text(
-                        "##xbvr_host",
-                        str(xbvr_host),
-                        256
-                    )
-                    imgui.pop_item_width()
-                    if changed or imgui.is_item_deactivated_after_edit():
-                        self.app.app_settings.set('xbvr_host', new_host)
+                # XBVR Host
+                imgui.text("XBVR Host/IP:")
+                imgui.push_item_width(200)
+                changed, new_host = imgui.input_text(
+                    "##xbvr_host",
+                    str(xbvr_host),
+                    256
+                )
+                imgui.pop_item_width()
+                if changed or imgui.is_item_deactivated_after_edit():
+                    self.app.app_settings.set('xbvr_host', new_host)
+                    self.app.app_settings.save_settings()
+
+                # XBVR Port
+                imgui.text("XBVR Port:")
+                imgui.push_item_width(100)
+                changed, new_port_str = imgui.input_text(
+                    "##xbvr_port",
+                    str(xbvr_port),
+                    256
+                )
+                imgui.pop_item_width()
+                if changed or imgui.is_item_deactivated_after_edit():
+                    try:
+                        new_port = int(new_port_str)
+                        self.app.app_settings.set('xbvr_port', new_port)
                         self.app.app_settings.save_settings()
+                    except ValueError:
+                        pass  # Ignore invalid port input
 
-                    # XBVR Port
-                    imgui.text("XBVR Port:")
-                    imgui.push_item_width(100)
-                    changed, new_port_str = imgui.input_text(
-                        "##xbvr_port",
-                        str(xbvr_port),
-                        256
-                    )
-                    imgui.pop_item_width()
-                    if changed or imgui.is_item_deactivated_after_edit():
-                        try:
-                            new_port = int(new_port_str)
-                            self.app.app_settings.set('xbvr_port', new_port)
-                            self.app.app_settings.save_settings()
-                        except ValueError:
-                            pass  # Ignore invalid port input
+                imgui.spacing()
+                imgui.text_colored(
+                    f"XBVR URL: http://{xbvr_host}:{xbvr_port}",
+                    0.5, 0.8, 1.0
+                )
 
-                    imgui.spacing()
-                    imgui.text_colored(
-                        f"XBVR URL: http://{xbvr_host}:{xbvr_port}",
-                        0.5, 0.8, 1.0
-                    )
+                imgui.spacing()
+                # Discover XBVR button (PRIMARY - positive action)
+                with primary_button_style():
+                    if imgui.button("Discover XBVR Address", width=-1):
+                        self._discover_xbvr_address()
 
-                    imgui.spacing()
-                    # Discover XBVR button (PRIMARY - positive action)
-                    with primary_button_style():
-                        if imgui.button("Discover XBVR Address", width=-1):
-                            self._discover_xbvr_address()
-
-                    imgui.spacing()
-                    # Open XBVR Browser button (PRIMARY - positive action)
-                    with primary_button_style():
-                        if imgui.button("Open XBVR Browser", width=-1):
-                            # Open XBVR browser in default browser
-                            import webbrowser
-                            local_ip = self._get_local_ip()
-                            xbvr_browser_url = f"http://{local_ip}:8080/xbvr"
-                            webbrowser.open(xbvr_browser_url)
-                            self.app.logger.info(f"Opening XBVR browser: {xbvr_browser_url}")
+                imgui.spacing()
+                # Open XBVR Browser button (PRIMARY - positive action)
+                with primary_button_style():
+                    if imgui.button("Open XBVR Browser", width=-1):
+                        # Open XBVR browser in default browser
+                        import webbrowser
+                        local_ip = self._get_local_ip()
+                        xbvr_browser_url = f"http://{local_ip}:8080/xbvr"
+                        webbrowser.open(xbvr_browser_url)
+                        self.app.logger.info(f"Opening XBVR browser: {xbvr_browser_url}")
 
             # Stash Configuration Section
             imgui.spacing()

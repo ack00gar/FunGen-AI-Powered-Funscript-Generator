@@ -2,6 +2,10 @@
 import imgui
 import time
 
+# Arrow key forward hold: ramp from real-time to max decode speed over this duration
+_ARROW_ACCEL_RAMP_S = 3.0
+_ARROW_TICK_BUDGET_S = 0.006  # max time to spend reading frames per GUI tick (6ms)
+
 
 class ShortcutHandlerMixin:
     """Mixin providing keyboard shortcut handling methods."""
@@ -100,6 +104,8 @@ class ShortcutHandlerMixin:
         elif video_loaded and check_and_run_shortcut("jump_to_start", self._handle_jump_to_start_shortcut):
             pass
         elif video_loaded and check_and_run_shortcut("jump_to_end", self._handle_jump_to_end_shortcut):
+            pass
+        elif video_loaded and check_and_run_shortcut("go_to_frame", self._handle_go_to_frame_shortcut):
             pass
 
         # Timeline View Controls
@@ -235,9 +241,12 @@ class ShortcutHandlerMixin:
         elif right_held and not left_held:
             seek_direction = 1
 
-        # Reset direction tracking when key is released
+        # Reset direction tracking and acceleration when key is released
         if seek_direction == 0:
             self.arrow_key_state['last_direction'] = 0
+            self.arrow_key_state['continuous_start_time'] = 0
+            self._reading_fps_frames.clear()
+            self._reading_fps_display = 0.0
 
         # Apply navigation with proper frame-by-frame then continuous logic
         if seek_direction != 0:
@@ -245,6 +254,7 @@ class ShortcutHandlerMixin:
             key_just_pressed = (left_held and imgui.is_key_pressed(left_key)) or (right_held and imgui.is_key_pressed(right_key))
 
             should_navigate = False
+            frames_this_tick = 1  # how many frames to read this GUI tick
 
             if key_just_pressed:
                 # INITIAL KEY PRESS: Only navigate if this is a new direction
@@ -252,20 +262,96 @@ class ShortcutHandlerMixin:
                     should_navigate = True
                     self.arrow_key_state['initial_press_time'] = current_time
                     self.arrow_key_state['last_direction'] = seek_direction
+                    self.arrow_key_state['continuous_start_time'] = 0
             else:
-                # KEY HELD DOWN: Only allow if already in an active key session
-                if self.arrow_key_state['last_direction'] == seek_direction:
+                if self.arrow_key_state['last_direction'] != seek_direction:
+                    # DIRECTION CHANGED while key already held (e.g., released one of two held keys)
+                    should_navigate = True
+                    self.arrow_key_state['initial_press_time'] = current_time
+                    self.arrow_key_state['last_direction'] = seek_direction
+                    self.arrow_key_state['continuous_start_time'] = 0
+                else:
+                    # KEY HELD DOWN in same direction: continuous navigation
                     time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
 
                     if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
-                        # Both forward and backward hold: frame-by-frame from pipe/buffer
-                        if time_since_last >= self.arrow_key_state['seek_interval']:
+                        # Mark when continuous mode begins
+                        if self.arrow_key_state['continuous_start_time'] == 0:
+                            self.arrow_key_state['continuous_start_time'] = current_time
+
+                        base_interval = self.arrow_key_state['seek_interval']
+
+                        if seek_direction > 0:
+                            # Forward: ramp from 1 frame/tick to many frames/tick
+                            # over _ARROW_ACCEL_RAMP_S seconds (pipe decode is the ceiling)
+                            hold_duration = current_time - self.arrow_key_state['continuous_start_time']
+                            t = min(1.0, hold_duration / _ARROW_ACCEL_RAMP_S)
+                            # Speed multiplier: 1x at t=0, unbounded at t=1
+                            # Use 1/(1-t) curve: 1→2→5→∞ (clamped by time budget)
+                            speed = 1.0 / max(0.01, 1.0 - t)
+                            video_fps = 60.0
+                            if self.app.processor and self.app.processor.fps > 0:
+                                video_fps = self.app.processor.fps
+                            frames_this_tick = max(1, round(speed * video_fps * time_since_last))
                             should_navigate = True
+                        else:
+                            # Backward: 1 frame/tick at real-time (buffer is small)
+                            if time_since_last >= base_interval:
+                                should_navigate = True
                     # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
 
             if should_navigate:
-                self._perform_frame_seek(seek_direction)
+                if frames_this_tick <= 1:
+                    self._perform_frame_seek(seek_direction)
+                else:
+                    # Read multiple frames from pipe, display only the last
+                    self._perform_accelerated_forward_seek(frames_this_tick)
                 self.arrow_key_state['last_seek_time'] = current_time
+
+    def _perform_accelerated_forward_seek(self, frames_target):
+        """Read multiple frames from pipe in one GUI tick for accelerated seeking."""
+        proc = self.app.processor
+        if not proc or not proc.video_info or proc.seek_in_progress:
+            return
+
+        is_actively_playing = (proc.is_processing and not proc.pause_event.is_set())
+        is_tracking = self.app.tracker and self.app.tracker.tracking_active
+        if is_actively_playing or is_tracking:
+            # Fall back to single frame during playback/tracking
+            self._perform_frame_seek(1)
+            return
+
+        total_frames = proc.total_frames
+        max_frame = total_frames - 1 if total_frames > 0 else 0
+        t0 = time.perf_counter()
+        budget_end = t0 + _ARROW_TICK_BUDGET_S
+        last_frame = None
+        frames_read = 0
+
+        for _ in range(frames_target):
+            new_frame = proc.current_frame_index + 1
+            if new_frame > max_frame:
+                break
+            frame = proc.arrow_nav_forward(new_frame)
+            if frame is None:
+                break
+            last_frame = frame
+            frames_read += 1
+            # Check time budget — don't block GUI too long
+            if time.perf_counter() > budget_end:
+                break
+
+        if last_frame is not None:
+            proc.current_frame = last_frame
+
+        elapsed = time.perf_counter() - t0
+        self.track_frame_seek_time(elapsed * 1000, path="arrow")
+        # Report frames read this tick for status bar averaging
+        self._reading_fps_frames.append((time.time(), frames_read))
+        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        self.app.energy_saver.reset_activity_timer()
 
     def _perform_frame_seek(self, delta_frames):
         """Arrow key navigation with rolling backward buffer"""
@@ -317,8 +403,10 @@ class ShortcutHandlerMixin:
 
         # Report to perf monitor so it shows as "ArrowNavDecode" instead of
         # being lumped into "GlobalShortcuts"
-        decode_ms = (time.perf_counter() - t0) * 1000
-        self.track_frame_seek_time(decode_ms, path="arrow")
+        elapsed = time.perf_counter() - t0
+        self.track_frame_seek_time(elapsed * 1000, path="arrow")
+        # Report 1 frame read this tick for status bar averaging
+        self._reading_fps_frames.append((time.time(), 1))
 
         # Update UI
         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
@@ -458,9 +546,12 @@ class ShortcutHandlerMixin:
             last_frame = max(0, self.app.processor.total_frames - 1) if self.app.processor.total_frames > 0 else 0
             self.app.processor.seek_video(last_frame)
             self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-            if self.app.project_manager:
-                self.app.project_manager.project_dirty = True
-            self.app.energy_saver.reset_activity_timer()
+
+    def _handle_go_to_frame_shortcut(self):
+        """Open Go to Frame popup (Ctrl+G)."""
+        self._go_to_frame_open = True
+        self._go_to_frame_input = ""
+        self._go_to_frame_focus = True
 
     def _handle_zoom_in_timeline_shortcut(self):
         """Handle keyboard shortcut for zooming in timeline (CMD+= / CTRL+=)"""
