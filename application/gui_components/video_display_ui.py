@@ -1,3 +1,5 @@
+import time
+
 import imgui
 import logging
 from typing import Optional, Tuple
@@ -53,8 +55,12 @@ class VideoDisplayUI:
         self.handy_last_funscript_path = None
         self.saved_processing_speed_mode = None  # Store original speed mode when Handy starts
         
-        # Fullscreen process state
-        self._fullscreen_process = None
+        # Fullscreen state removed — native fullscreen is managed by NativeFullscreenManager
+
+        # Video controls overlay auto-hide
+        self._controls_last_activity_time = 0.0
+        self._controls_last_mouse_pos = (0.0, 0.0)
+        self._CONTROLS_HIDE_TIMEOUT = 3.0
 
     def _update_actual_video_image_rect(self, display_w, display_h, cursor_x_offset, cursor_y_offset):
         win_pos_x, win_pos_y = imgui.get_window_position()
@@ -148,18 +154,51 @@ class VideoDisplayUI:
 
         return screen_x, screen_y
 
-    def _render_playback_controls_overlay(self):
-        """Renders playback controls as an overlay on the video."""
-        style = imgui.get_style()
+    def _render_video_controls_with_autohide(self, app_state):
+        """Wrapper that handles auto-hide logic for video overlay controls."""
+        img_rect = self._actual_video_image_rect_on_screen
+        if img_rect['w'] <= 0 or img_rect['h'] <= 0:
+            return
+
+        io = imgui.get_io()
+        mouse_x, mouse_y = io.mouse_pos
+        now = time.monotonic()
+
+        # Detect mouse movement
+        if (mouse_x, mouse_y) != self._controls_last_mouse_pos:
+            self._controls_last_mouse_pos = (mouse_x, mouse_y)
+            # Reset timer if mouse is hovering over the video area
+            is_hovering_video = (img_rect['min_x'] <= mouse_x <= img_rect['max_x'] and
+                                 img_rect['min_y'] <= mouse_y <= img_rect['max_y'])
+            if is_hovering_video:
+                self._controls_last_activity_time = now
+
+        # Show controls if within timeout
+        elapsed = now - self._controls_last_activity_time
+        if elapsed > self._CONTROLS_HIDE_TIMEOUT:
+            return
+
+        # Fade alpha: full opacity for first 2s, then fade over the last 1s
+        fade_start = self._CONTROLS_HIDE_TIMEOUT - 1.0
+        if elapsed > fade_start:
+            alpha = 1.0 - (elapsed - fade_start) / 1.0
+        else:
+            alpha = 1.0
+
+        self._render_video_zoom_pan_controls(app_state, alpha)
+        self._render_playback_controls_overlay(alpha)
+
+    def _render_playback_controls_overlay(self, alpha=1.0):
+        """Renders playback controls as a floating overlay window on the video."""
         event_handlers = self.app.event_handlers
         stage_proc = self.app.stage_processor
         file_mgr = self.app.file_manager
 
-        # Check if live tracking is running  
+        # Check if live tracking is running
         is_live_tracking_running = (self.app.processor and
                                     self.app.processor.is_processing and
                                     self.app.processor.enable_tracker_processing)
-        
+
         controls_disabled = stage_proc.full_analysis_active or is_live_tracking_running or not file_mgr.video_path
 
         # Get icon texture manager for playback controls
@@ -169,19 +208,50 @@ class VideoDisplayUI:
         button_h_ref = imgui.get_frame_height()
         pb_icon_w, pb_play_w, pb_stop_w, pb_btn_spacing = button_h_ref, button_h_ref, button_h_ref, 4.0
 
-        total_controls_width = (pb_icon_w * 7) + (pb_btn_spacing * 6)
+        # Account for handy + fullscreen buttons in width calculation
+        total_controls_width = (pb_icon_w * 9) + (pb_btn_spacing * 8) + (button_h_ref * 2.8)
 
         img_rect = self._actual_video_image_rect_on_screen
         if img_rect['w'] <= 0 or img_rect['h'] <= 0:
             return
 
-        overlay_x = img_rect['min_x'] + (img_rect['w'] - total_controls_width) / 2
-        overlay_y = img_rect['max_y'] - button_h_ref - style.item_spacing[1] * 2
-        overlay_y = max(img_rect['min_y'] + style.item_spacing[1], overlay_y)
-        overlay_x = max(img_rect['min_x'] + style.item_spacing[1], overlay_x)
-        imgui.set_cursor_screen_pos((overlay_x, overlay_y))
+        padding = 6.0
+        overlay_x = img_rect['min_x'] + (img_rect['w'] - total_controls_width) / 2 - padding
+        overlay_y = img_rect['max_y'] - button_h_ref - padding * 3
+        # Clamp both edges so the overlay stays within the video panel.
+        # Without the right clamp the rightmost buttons can overlap the adjacent
+        # panel, which captures their mouse events and makes them unresponsive.
+        overlay_x = max(img_rect['min_x'], overlay_x)
+        overlay_x = min(overlay_x, max(img_rect['min_x'],
+                                       img_rect['max_x'] - total_controls_width - 2 * padding))
+        overlay_y = max(img_rect['min_y'], overlay_y)
 
-        imgui.begin_group()
+        flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE |
+                 imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SAVED_SETTINGS |
+                 imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_NO_FOCUS_ON_APPEARING |
+                 imgui.WINDOW_NO_NAV | imgui.WINDOW_NO_BACKGROUND)
+
+        imgui.set_next_window_position(overlay_x, overlay_y)
+        imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (padding, padding))
+
+        imgui.begin("##VideoPlaybackOverlay", flags=flags)
+
+        # Semi-transparent background behind buttons
+        draw_list = imgui.get_window_draw_list()
+        win_pos = imgui.get_window_position()
+        win_size = imgui.get_window_size()
+        draw_list.add_rect_filled(
+            win_pos[0], win_pos[1],
+            win_pos[0] + win_size[0], win_pos[1] + win_size[1],
+            imgui.get_color_u32_rgba(0.0, 0.0, 0.0, 0.5 * alpha),
+            rounding=6.0
+        )
+
+        # Keep controls visible while hovering the overlay itself
+        if imgui.is_window_hovered(imgui.HOVERED_ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM):
+            self._controls_last_activity_time = time.monotonic()
+
+        imgui.push_style_var(imgui.STYLE_ALPHA, alpha)
 
         with _DisabledScope(controls_disabled):
             # Jump Start button
@@ -219,7 +289,7 @@ class VideoDisplayUI:
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Toggle Play/Pause (SPACE)")
 
-            imgui.same_line(spacing=2)
+            imgui.same_line(spacing=pb_btn_spacing)
 
             # Stop button
             stop_tex, _, _ = icon_mgr.get_icon_texture('stop.png')
@@ -256,7 +326,9 @@ class VideoDisplayUI:
         self._render_handy_control_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
         self._render_fullscreen_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
 
-        imgui.end_group()
+        imgui.pop_style_var()  # STYLE_ALPHA
+        imgui.end()
+        imgui.pop_style_var()  # STYLE_WINDOW_PADDING
 
     
 
@@ -333,6 +405,26 @@ class VideoDisplayUI:
             if (text_pos_x + text_size[0]) < img_rect['max_x'] and (text_pos_y + text_size[1]) < img_rect['max_y']:
                 draw_list.add_text(text_pos_x, text_pos_y, mode_color, mode_text)
 
+
+    def update_frame_texture_if_needed(self):
+        """Upload the current video frame to GPU if it changed.
+
+        Call this every frame so the texture stays fresh even when the
+        normal video panel is not rendered (e.g. during fullscreen).
+        """
+        current_frame_index = getattr(self.app.processor, 'current_frame_index', None)
+        frame_changed = (current_frame_index != self._last_uploaded_frame_index)
+
+        if not frame_changed:
+            return
+
+        if self.app.processor and self.app.processor.current_frame is not None:
+            with self.app.processor.frame_lock:
+                if self.app.processor.current_frame is not None and hasattr(self.app.processor.current_frame, 'copy'):
+                    current_frame_for_texture = self.app.processor.current_frame.copy()
+                    self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame_for_texture)
+                    self._last_uploaded_frame_index = current_frame_index
+                    self._texture_update_count += 1
 
     def render(self):
         app_state = self.app.app_state_ui
@@ -716,9 +808,9 @@ class VideoDisplayUI:
                             # --- Render Component Overlays (if enabled) ---
                             self._render_component_overlays(app_state)
 
-                            # REMOVED: Gauge/Simulator buttons moved to View menu
-                            # REMOVED: Zoom/Pan controls moved to View menu
-                            # REMOVED: Playback controls moved to toolbar
+                            # Video control overlays (zoom/pan buttons + playback controls)
+                            if app_state.show_video_controls_overlay:
+                                self._render_video_controls_with_autohide(app_state)
 
                 # --- Interactive Refinement Overlay and Click Handling ---
                 if self.app.app_state_ui.interactive_refinement_mode_enabled:
@@ -949,22 +1041,41 @@ class VideoDisplayUI:
 
         draw_list.pop_clip_rect()
 
-    def _render_video_zoom_pan_controls(self, app_state):
-        style = imgui.get_style()
+    def _render_video_zoom_pan_controls(self, app_state, alpha=1.0):
         button_h_ref = imgui.get_frame_height()
         img_rect = self._actual_video_image_rect_on_screen
         if img_rect['w'] <= 0 or img_rect['h'] <= 0: return
-        num_control_lines = 1
-        pan_buttons_active = app_state.video_zoom_factor > 1.0
-        if pan_buttons_active: num_control_lines = 2
-        group_height = (button_h_ref * num_control_lines) + (style.item_spacing[1] * (num_control_lines - 1 if num_control_lines > 1 else 0))
-        overlay_ctrl_y = img_rect['min_y'] - group_height - (style.item_spacing[1] * 2)
-        overlay_ctrl_x = img_rect['min_x'] + style.item_spacing[1]
-        overlay_ctrl_y = max(img_rect['min_y'] + style.item_spacing[1], overlay_ctrl_y)
-        overlay_ctrl_x = max(img_rect['min_x'] + style.item_spacing[1], overlay_ctrl_x)
-        imgui.set_cursor_screen_pos((overlay_ctrl_x, overlay_ctrl_y))
 
-        imgui.begin_group()
+        padding = 6.0
+        overlay_x = img_rect['min_x'] + padding
+        overlay_y = img_rect['min_y'] + padding
+
+        flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE |
+                 imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SAVED_SETTINGS |
+                 imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_NO_FOCUS_ON_APPEARING |
+                 imgui.WINDOW_NO_NAV | imgui.WINDOW_NO_BACKGROUND)
+
+        imgui.set_next_window_position(overlay_x, overlay_y)
+        imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (padding, padding))
+
+        imgui.begin("##VideoZoomPanOverlay", flags=flags)
+
+        # Semi-transparent background
+        draw_list = imgui.get_window_draw_list()
+        win_pos = imgui.get_window_position()
+        win_size = imgui.get_window_size()
+        draw_list.add_rect_filled(
+            win_pos[0], win_pos[1],
+            win_pos[0] + win_size[0], win_pos[1] + win_size[1],
+            imgui.get_color_u32_rgba(0.0, 0.0, 0.0, 0.5 * alpha),
+            rounding=6.0
+        )
+
+        # Keep controls visible while hovering the overlay itself
+        if imgui.is_window_hovered(imgui.HOVERED_ALLOW_WHEN_BLOCKED_BY_ACTIVE_ITEM):
+            self._controls_last_activity_time = time.monotonic()
+
+        imgui.push_style_var(imgui.STYLE_ALPHA, alpha)
 
         # Get icon texture manager for zoom controls
         icon_mgr = get_icon_texture_manager()
@@ -1004,6 +1115,7 @@ class VideoDisplayUI:
         imgui.same_line(spacing=4)
         imgui.text(f"{app_state.video_zoom_factor:.1f}x")
 
+        pan_buttons_active = app_state.video_zoom_factor > 1.0
         if pan_buttons_active:
             # Pan Arrows Block (Left, Right, Up, Down on one line)
             if imgui.arrow_button("##VidOverPanLeft", imgui.DIRECTION_LEFT):
@@ -1026,7 +1138,9 @@ class VideoDisplayUI:
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Pan Video Down")
 
-        imgui.end_group()
+        imgui.pop_style_var()  # STYLE_ALPHA
+        imgui.end()
+        imgui.pop_style_var()  # STYLE_WINDOW_PADDING
 
     def _render_reactivate_feed_button(self):
         """Renders logo and button to re-activate the video feed."""
@@ -1321,48 +1435,29 @@ class VideoDisplayUI:
     
     def _render_fullscreen_button_inline(self, spacing: float, button_height: float, controls_disabled: bool):
         """Render fullscreen button inline with playback controls."""
-        button_width = button_height  # Square button for consistency with other playback controls
+        button_width = button_height
 
-        # Add spacing and render inline with other controls
         imgui.same_line(spacing=spacing)
 
-        # Check if live tracking is active (when FS button should be enabled)
-        is_live_tracking = (self.app.processor and
-                           self.app.processor.is_processing and
-                           self.app.processor.enable_tracker_processing)
-
-        # Determine if video is loaded and ready for fullscreen
-        video_loaded = (hasattr(self.app, 'processor') and
-                       self.app.processor and
+        video_loaded = (self.app.processor and
                        hasattr(self.app.processor, 'video_path') and
                        self.app.processor.video_path)
 
-        # Check if fullscreen is currently active
-        has_fullscreen_process = (hasattr(self, '_fullscreen_process') and
-                                 self._fullscreen_process and
-                                 self._fullscreen_process.poll() is None)
+        fs_mgr = getattr(self.gui_instance, 'fullscreen_manager', None)
+        is_fs_active = fs_mgr and fs_mgr.is_active
 
-        # Fullscreen button should be enabled during live tracking
         fullscreen_button_disabled = not video_loaded
-        if is_live_tracking and video_loaded:
-            fullscreen_button_disabled = False
 
-        # Get icon texture manager
         icon_mgr = get_icon_texture_manager()
 
-        # Determine button state, styling, and icon
-        if has_fullscreen_process:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
+        if is_fs_active:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)
             button_icon_name = 'fullscreen-exit.png'
             button_text_fallback = "Exit FS"
         else:
-            if is_live_tracking:
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2, 1.0)  # Green
-                button_text_fallback = "FS Live"
-            else:
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.8, 1.0)  # Blue
-                button_text_fallback = "FS"
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.8, 1.0)
             button_icon_name = 'fullscreen.png'
+            button_text_fallback = "FS"
 
         with _DisabledScope(fullscreen_button_disabled):
             fs_tex, _, _ = icon_mgr.get_icon_texture(button_icon_name)
@@ -1372,162 +1467,23 @@ class VideoDisplayUI:
                 button_clicked = imgui.button(f"{button_text_fallback}##FullscreenControl", width=button_width)
 
         if button_clicked and not fullscreen_button_disabled:
-            self._handle_fullscreen_button_click()
+            if fs_mgr:
+                fs_mgr.toggle()
 
         imgui.pop_style_color()
 
-        # Show tooltip
         if imgui.is_item_hovered():
             imgui.begin_tooltip()
             if not video_loaded:
                 imgui.text("No video loaded")
-            elif has_fullscreen_process:
-                imgui.text("Exit fullscreen mode")
-                imgui.text("Press Q in fullscreen window to quit")
-            elif is_live_tracking:
-                imgui.text("Fullscreen during live tracking")
-                imgui.text("Perfect sync + audio + controls")
+            elif is_fs_active:
+                imgui.text("Exit fullscreen (ESC / F11)")
             else:
-                imgui.text("Enter fullscreen mode")
-                imgui.text("High-quality display with audio")
+                imgui.text("Enter fullscreen (F11)")
             imgui.end_tooltip()
     
-    def _handle_fullscreen_button_click(self):
-        """Handle fullscreen button click - use simple synchronized ffplay approach."""
-        try:
-            # Check if we already have a fullscreen process running
-            if hasattr(self, '_fullscreen_process') and self._fullscreen_process:
-                if self._fullscreen_process.poll() is None:  # Still running
-                    # Stop existing fullscreen
-                    self._fullscreen_process.terminate()
-                    self._fullscreen_process = None
-                    if hasattr(self.app, 'logger'):
-                        self.app.logger.info("Fullscreen mode disabled")
-                    return
-            
-            # Start new fullscreen with synchronized ffplay
-            if not hasattr(self.app.processor, 'video_path') or not self.app.processor.video_path:
-                if hasattr(self.app, 'logger'):
-                    self.app.logger.warning("No video loaded for fullscreen")
-                return
-            
-            # Get current timestamp for perfect sync
-            current_time = self._get_current_playback_time()
-            
-            # Build ffplay command with high quality and audio
-            ffplay_cmd = [
-                'ffplay',
-                '-fs',                              # Fullscreen
-                '-autoexit',                        # Auto-exit when done
-                '-ss', str(current_time),           # Start at current time for sync
-                '-vf', self._get_fullscreen_video_filter(),  # High quality filter
-                self.app.processor.video_path       # Video file
-            ]
-            
-            # Start synchronized ffplay process
-            import subprocess
-            import sys
-            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            
-            self._fullscreen_process = subprocess.Popen(
-                ffplay_cmd,
-                stderr=subprocess.DEVNULL,  # Hide ffplay output
-                creationflags=creation_flags
-            )
-            
-            if hasattr(self.app, 'logger'):
-                self.app.logger.info(f"✅ Fullscreen started with ffplay (sync time: {current_time:.2f}s)")
-                self.app.logger.info("🎮 Controls: Space=pause, ←→=seek±10s, ↑↓=seek±1min, Q=quit")
-                self.app.logger.info("🔊 Audio: Full quality audio included")
-                    
-        except Exception as e:
-            if hasattr(self.app, 'logger'):
-                self.app.logger.error(f"Error starting fullscreen: {e}")
-            import traceback
-            if hasattr(self.app, 'logger'):
-                self.app.logger.error(traceback.format_exc())
-    
-    def _initialize_dual_frame_processing(self):
-        """Initialize dual-frame processing for fullscreen display."""
-        try:
-            # Initialize dual-frame processor if needed
-            if not hasattr(self.app.processor, 'dual_frame_processor'):
-                from video.dual_frame_processor import DualFrameProcessor
-                self.app.processor.dual_frame_processor = DualFrameProcessor(self.app.processor)
-            
-            # Enable dual-frame mode
-            if not self.app.processor.dual_frame_processor.dual_frame_enabled:
-                self.app.processor.dual_frame_processor.enable_dual_frame_mode()
-                
-        except Exception as e:
-            if hasattr(self.app, 'logger'):
-                self.app.logger.error(f"Error initializing dual-frame processing: {e}")
-    
-    def _get_current_fullscreen_frame(self) -> Optional[object]:
-        """Get current frame for fullscreen display."""
-        # This would get the latest fullscreen frame from dual-frame processor
-        if (hasattr(self.app.processor, 'dual_frame_processor') and
-            self.app.processor.dual_frame_processor.dual_frame_enabled):
-            return self.app.processor.dual_frame_processor.get_latest_fullscreen_frame()
-        return None
-    
-    def _handle_fullscreen_play_pause(self):
-        """Handle play/pause from fullscreen controls."""
-        if hasattr(self.app.processor, 'is_processing'):
-            if self.app.processor.is_processing:
-                self.app.processor.pause_processing()
-            else:
-                self.app.processor.resume_processing()
-    
-    def _handle_fullscreen_stop(self):
-        """Handle stop from fullscreen controls."""
-        if hasattr(self.app.processor, 'stop_processing'):
-            self.app.processor.stop_processing()
-    
-    def _handle_fullscreen_exit(self):
-        """Handle fullscreen exit."""
-        if hasattr(self.app, 'fullscreen_manager'):
-            self.app.fullscreen_manager.stop_fullscreen_display()
-    
-    def _get_current_playback_time(self) -> float:
-        """Get current playback time in seconds for synchronization."""
-        try:
-            # Try to get current time from processor
-            if hasattr(self.app.processor, 'get_current_time'):
-                return self.app.processor.get_current_time()
-            
-            # Fallback: calculate from current frame index
-            if (hasattr(self.app.processor, 'current_frame_index') and 
-                hasattr(self.app.processor, 'video_info') and
-                self.app.processor.video_info):
-                
-                fps = self.app.processor.video_info.get('fps', 30.0)
-                current_frame = self.app.processor.current_frame_index or 0
-                return current_frame / fps
-            
-            # Default to start of video
-            return 0.0
-            
-        except Exception as e:
-            if hasattr(self.app, 'logger'):
-                self.app.logger.warning(f"Could not get current playback time: {e}")
-            return 0.0
-    
-    def _get_fullscreen_video_filter(self) -> str:
-        """Get appropriate video filter for fullscreen display."""
-        try:
-            # For VR videos, use simple crop for left eye view (full resolution)
-            if (hasattr(self.app.processor, 'is_vr_active_or_potential') and 
-                self.app.processor.is_vr_active_or_potential()):
-                return "crop=iw/2:ih:0:0"  # Left eye crop only, preserve full resolution
-            
-            # For regular videos, no scaling - preserve original resolution
-            return "null"  # No filtering, full original resolution
-            
-        except Exception as e:
-            if hasattr(self.app, 'logger'):
-                self.app.logger.warning(f"Could not determine video filter: {e}")
-            return "null"  # Safe default - no filtering
+    # Dead ffplay fullscreen code removed — native fullscreen now handled by
+    # NativeFullscreenManager in fullscreen_display.py
     
     def _is_handy_available(self):
         """Check if Handy devices are connected and device control is enabled."""
