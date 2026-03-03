@@ -16,6 +16,7 @@ from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
 from application.gui_components.bookmark_list_window import BookmarkListWindow
+from application.gui_components.fullscreen_display import NativeFullscreenManager
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority, get_icon_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
@@ -120,6 +121,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
         self.autotuner_window_ui = AutotunerWindow(app)
         self.keyboard_shortcuts_dialog = KeyboardShortcutsDialog(app)
+        self.fullscreen_manager = NativeFullscreenManager(app, self)
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
@@ -1331,6 +1333,19 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         if self.app.shortcut_manager.is_recording_shortcut_for:
             self._time_render("ShortcutRecordingInput", self.app.shortcut_manager.handle_shortcut_recording_input)
             self.app.energy_saver.reset_activity_timer()
+
+        # Keep video texture fresh even when normal video panel is skipped
+        self.video_display_ui.update_frame_texture_if_needed()
+
+        # Native fullscreen mode — render only video + controls, skip all other UI
+        if self.fullscreen_manager.is_active:
+            self._time_render("Fullscreen", self.fullscreen_manager.render)
+            self.perf_frame_count += 1
+            self._time_render("ImGuiRender", imgui.render)
+            if self.impl:
+                draw_data = imgui.get_draw_data()
+                self.impl.render(draw_data)
+            return
 
         main_viewport = imgui.get_main_viewport()
         self.window_width, self.window_height = main_viewport.size

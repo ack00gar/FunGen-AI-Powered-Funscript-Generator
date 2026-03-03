@@ -934,17 +934,18 @@ class ControlPanelUI(
             else:
                 modes_display_gated.append(display)
 
+        processor = app.processor
+        disable_combo = (
+            stage_proc.full_analysis_active
+            or app.is_setting_user_roi_mode
+            or (processor and processor.is_processing and not processor.pause_event.is_set())
+        )
+
         with section_card("Analysis Method##RunControlAnalysisMethod",
                           tier="secondary") as open_:
             if open_:
                 modes_display = modes_display_gated
 
-                processor = app.processor
-                disable_combo = (
-                    stage_proc.full_analysis_active
-                    or app.is_setting_user_roi_mode
-                    or (processor and processor.is_processing and not processor.pause_event.is_set())
-                )
                 # --- Tracker combo + settings icon button on same line ---
                 style = imgui.get_style()
                 icon_size = imgui.get_frame_height() - style.frame_padding[1] * 2

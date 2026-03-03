@@ -189,14 +189,29 @@ class AudioPlayer:
         )
         self._reader_thread.start()
 
-        # Pre-buffer: wait for enough data before starting the output stream
-        deadline = time.monotonic() + 0.5
+        # Pre-buffer: wait for enough data before starting the output stream.
+        # Track wall-clock time so we can compensate for the delay below.
+        prebuffer_start = time.monotonic()
+        deadline = prebuffer_start + 0.5
         min_bytes = BLOCK_SIZE * FRAME_BYTES * 4
         while time.monotonic() < deadline:
             with self._buf_lock:
                 if len(self._buffer) >= min_bytes:
                     break
             time.sleep(0.01)
+
+        # Compensate for pre-buffer delay: video has been advancing while we
+        # waited, so skip the equivalent amount of audio from the buffer so
+        # that playback begins at the current video position, not the position
+        # that was passed to start().
+        elapsed_ms = (time.monotonic() - prebuffer_start) * 1000.0
+        if elapsed_ms > 10.0:
+            skip_bytes = int(elapsed_ms * sr * FRAME_BYTES / 1000.0)
+            skip_bytes -= skip_bytes % FRAME_BYTES  # align to audio-frame boundary
+            with self._buf_lock:
+                # Keep at least one block available so the callback doesn't underrun
+                max_skip = max(0, len(self._buffer) - BLOCK_SIZE * FRAME_BYTES)
+                self._buf_read_pos = min(skip_bytes, max_skip)
 
         # Open sounddevice output at device native sample rate
         try:

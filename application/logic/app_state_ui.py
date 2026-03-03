@@ -61,6 +61,8 @@ class AppStateUI:
         self.show_advanced_options = self.app_settings.get("show_advanced_options", defaults.get("show_advanced_options", False))
         self.show_video_feed = self.app_settings.get("show_video_feed", defaults.get("show_video_feed", True))
 
+        self.show_video_controls_overlay = self.app_settings.get("show_video_controls_overlay", defaults.get("show_video_controls_overlay", True))
+
         self.show_generated_file_manager = False
 
         # OFS-Inspired Feature Settings
@@ -503,6 +505,7 @@ class AppStateUI:
         self.app_settings.set("show_timeline_editor_buttons", self.show_timeline_editor_buttons)
         self.app_settings.set("show_advanced_options", self.show_advanced_options)
         self.app_settings.set("show_video_feed", self.show_video_feed)
+        self.app_settings.set("show_video_controls_overlay", self.show_video_controls_overlay)
 
         self.app_settings.set("show_gauge_window_timeline1", self.show_gauge_window_timeline1)
         self.app_settings.set("show_gauge_window_timeline2", self.show_gauge_window_timeline2)
