@@ -3,14 +3,9 @@ import imgui
 import os
 import config
 from application.utils import get_icon_texture_manager, destructive_button_style
-from application.utils.imgui_helpers import DisabledScope as _DisabledScope
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
 from application.utils.section_card import section_card
 from funscript.axis_registry import FunscriptAxis, AXIS_FILE_SUFFIX, AXIS_TCODE, file_suffix_for_axis, tcode_for_axis
-
-
-def _tooltip_if_hovered(text):
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(text)
 
 
 def _readonly_input(label_id, value, width=-1):

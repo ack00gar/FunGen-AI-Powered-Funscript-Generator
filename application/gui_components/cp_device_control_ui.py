@@ -1,24 +1,6 @@
 """Device Control tab UI mixin for ControlPanelUI."""
 import imgui
-from funscript.axis_registry import AXIS_TCODE
-
-# Shared TCode axis mapping derived from the canonical axis registry.
-# Maps UI axis keys (matching OSRControlProfile field names) to TCode IDs.
-_DEVICE_AXIS_TCODE = {
-    'up_down': 'L0',
-    'left_right': 'L1',
-    'front_back': 'L2',
-    'twist': 'R0',
-    'roll': 'R1',
-    'pitch': 'R2',
-    'vibration': 'V0',
-    'aux_vibration': 'V1',
-}
-
-# Module-level helper used by methods in the mixin
-def _tooltip_if_hovered(text):
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(text)
+from application.utils.imgui_helpers import tooltip_if_hovered as _tooltip_if_hovered
 
 
 class DeviceControlMixin:
@@ -217,13 +199,7 @@ class DeviceControlMixin:
     def _render_device_control_content(self):
         """Render the main device control interface with improved UX."""
         # Version info (top of tab, consistent with other supporter modules)
-        try:
-            import device_control
-            version = getattr(device_control, '__version__', 'unknown')
-            imgui.text_colored(f"Device Control v{version}", 0.5, 0.5, 0.5, 1.0)
-            imgui.spacing()
-        except Exception:
-            pass
+        self._render_addon_version_label("device_control", "Device Control")
 
         # SIMPLIFIED: Compact connection status (always visible)
         self._render_compact_connection_status()
@@ -256,11 +232,11 @@ class DeviceControlMixin:
         if imgui.collapsing_header("OSSM (Bluetooth)##OSSMDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
             self._render_ossm_controls()
 
-        # Axis Routing (shown when connected)
+        # Axis Configuration (shown when connected — unified panel)
         if self.device_manager.is_connected():
             imgui.separator()
-            if imgui.collapsing_header("Axis Routing##AxisRouting")[0]:
-                self._render_axis_routing()
+            if imgui.collapsing_header("Axis Configuration##AxisConfig", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_axis_configuration()
 
         # SIMPLIFIED: All settings in one collapsible section
         if self.device_manager.is_connected():
@@ -302,50 +278,50 @@ class DeviceControlMixin:
         imgui.text("Quick Controls:")
         imgui.spacing()
 
-        # Global stroke range for all active axes
-        imgui.text("Stroke Range (All Active Axes):")
+        # Global stroke range — device-agnostic via AxisRoutes (0-100%)
+        imgui.text("Global Range (All Active Axes):")
 
-        # Get current profile settings
-        current_profile_name = self.app.app_settings.get("device_control_selected_profile", "Balanced")
-        osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
+        router = self.device_manager.axis_router
+        # Collect enabled routes from all connected devices
+        enabled_routes = []
+        connected_device_id = None
+        is_osr = False
+        for device_id, _backend in self.device_manager.connected_devices.items():
+            connected_device_id = device_id
+            device_type = self.device_manager.get_device_type_for_id(device_id)
+            is_osr = device_type == "osr"
+            config = router.get_config(device_id)
+            if config:
+                for _ch, route in config.get_enabled_routes().items():
+                    enabled_routes.append(route)
 
-        if current_profile_name in osr_profiles:
-            profile_data = osr_profiles[current_profile_name]
+        if enabled_routes:
+            avg_min = sum(getattr(r, 'min_value', 0.0) for r in enabled_routes) / len(enabled_routes)
+            avg_max = sum(getattr(r, 'max_value', 100.0) for r in enabled_routes) / len(enabled_routes)
 
-            # Calculate global min/max from enabled axes
-            active_axes = []
-            for axis_key in ["up_down", "left_right", "front_back", "twist", "roll", "pitch"]:
-                if axis_key in profile_data and profile_data[axis_key].get("enabled", False):
-                    active_axes.append(axis_key)
+            changed_min, new_min = imgui.slider_float("Global Min %##GlobalMin", avg_min, 0.0, 50.0, "%.0f%%")
+            if changed_min:
+                for route in enabled_routes:
+                    if hasattr(route, 'min_value'):
+                        route.min_value = new_min
+                router.save_to_settings(self.app.app_settings)
+                if is_osr and connected_device_id:
+                    self._save_routes_to_osr_profile(connected_device_id)
+                self.device_manager.update_position(new_min, 50.0)
 
-            if active_axes:
-                # Get average min/max from active axes
-                avg_min = int(sum(profile_data[axis].get("min_position", 0) for axis in active_axes) / len(active_axes))
-                avg_max = int(sum(profile_data[axis].get("max_position", 9999) for axis in active_axes) / len(active_axes))
+            changed_max, new_max = imgui.slider_float("Global Max %##GlobalMax", avg_max, 50.0, 100.0, "%.0f%%")
+            if changed_max:
+                for route in enabled_routes:
+                    if hasattr(route, 'max_value'):
+                        route.max_value = new_max
+                router.save_to_settings(self.app.app_settings)
+                if is_osr and connected_device_id:
+                    self._save_routes_to_osr_profile(connected_device_id)
+                self.device_manager.update_position(new_max, 50.0)
 
-                # Global min slider
-                changed_min, new_min = imgui.slider_int("Min Extent##GlobalMin", avg_min, 0, 5000, "%d")
-                if changed_min:
-                    # Apply to all active axes
-                    for axis_key in active_axes:
-                        profile_data[axis_key]["min_position"] = new_min
-                    osr_profiles[current_profile_name] = profile_data
-                    self.app.app_settings.set("device_control_osr_profiles", osr_profiles)
-                    self._preview_global_extent(new_min, "min")
-
-                # Global max slider
-                changed_max, new_max = imgui.slider_int("Max Extent##GlobalMax", avg_max, 5000, 9999, "%d")
-                if changed_max:
-                    # Apply to all active axes
-                    for axis_key in active_axes:
-                        profile_data[axis_key]["max_position"] = new_max
-                    osr_profiles[current_profile_name] = profile_data
-                    self.app.app_settings.set("device_control_osr_profiles", osr_profiles)
-                    self._preview_global_extent(new_max, "max")
-
-                _tooltip_if_hovered("Adjust min/max for all active axes at once. Drag to feel the limits in real-time.")
-            else:
-                imgui.text_colored("No active axes configured", 0.7, 0.5, 0.0)
+            _tooltip_if_hovered("Adjust min/max for all active axes at once. Drag to feel the limits in real-time.")
+        else:
+            imgui.text_colored("No active axes configured", 0.7, 0.5, 0.0)
 
         imgui.spacing()
 
@@ -366,15 +342,6 @@ class DeviceControlMixin:
         if changed:
             self.device_manager.update_position(new_pos, 50.0)
         _tooltip_if_hovered("Drag to test device movement")
-
-    def _preview_global_extent(self, value, extent_type):
-        """Preview global min or max extent by moving device to that position."""
-        try:
-            # Convert T-code value (0-9999) to percentage (0-100)
-            percentage = (value / 9999.0) * 100.0
-            self.device_manager.update_position(percentage, 50.0)
-        except Exception as e:
-            self.app.logger.error(f"Error previewing global extent: {e}")
 
     def _render_recording_controls(self):
         """Render movement recording controls in Quick Controls."""
@@ -475,9 +442,22 @@ class DeviceControlMixin:
         except Exception:
             pass  # Bookmarks unavailable — silently skip
 
-    def _render_axis_routing(self):
-        """Render axis routing configuration for connected device(s)."""
-        from device_control.axis_routing import DEVICE_CHANNELS, TCODE_DEFAULT_AXIS
+    # ── Unified Axis Configuration Panel ──────────────────────────────
+
+    def _render_axis_configuration(self):
+        """Render the unified axis configuration panel for all device types."""
+        from device_control.axis_routing import (
+            DEVICE_CHANNELS, TCODE_DEFAULT_AXIS, AxisRoute,
+        )
+        # Fallback for device_control < 5.4
+        try:
+            from device_control.axis_routing import CHANNEL_FRIENDLY_NAMES
+        except ImportError:
+            CHANNEL_FRIENDLY_NAMES = {
+                "L0": "Stroke", "L1": "Sway", "L2": "Surge",
+                "R0": "Twist", "R1": "Roll", "R2": "Pitch",
+                "V0": "Vibration", "V1": "Pump",
+            }
 
         imgui.indent(10)
 
@@ -493,7 +473,7 @@ class DeviceControlMixin:
         source_labels = ["(none)"]
         for tl_num, axis_name in sorted(axis_assignments.items()):
             source_options.append(axis_name)
-            source_labels.append(f"{axis_name} (Timeline {tl_num})")
+            source_labels.append(f"{axis_name} (TL {tl_num})")
 
         router = self.device_manager.axis_router
 
@@ -502,12 +482,12 @@ class DeviceControlMixin:
             config = router.get_config(device_id)
 
             if not config:
-                # Auto-detect on first render
                 config = router.auto_detect(device_id, device_type, axis_assignments)
 
             channels = DEVICE_CHANNELS.get(device_type, ["L0"])
-            is_single = len(channels) == 1
+            is_osr = device_type == "osr"
 
+            # Device header
             device_name = self.device_manager.get_connected_device_name()
             imgui.text_colored(f"{device_name}", 0.7, 0.7, 0.9)
             imgui.same_line()
@@ -516,86 +496,490 @@ class DeviceControlMixin:
                 config = router.get_config(device_id)
                 router.save_to_settings(self.app.app_settings)
 
-            if is_single:
-                # Single-axis device (Handy): just a source dropdown
-                route = config.routes.get("L0")
-                if route:
-                    current_idx = 0
-                    if route.source_axis in source_options:
-                        current_idx = source_options.index(route.source_axis)
-                    changed, new_idx = imgui.combo(
-                        f"Source##{device_id}_L0", current_idx, source_labels
+            # OSR profile selector (only for OSR devices)
+            if is_osr:
+                imgui.same_line()
+                imgui.text("Profile:")
+                imgui.same_line()
+                osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
+                profile_names = list(osr_profiles.keys())
+                current_profile_name = self.app.app_settings.get("device_control_selected_profile", "Balanced")
+                current_idx = profile_names.index(current_profile_name) if current_profile_name in profile_names else 0
+                imgui.push_item_width(120)
+                changed, new_idx = imgui.combo(f"##profile_{device_id}", current_idx, profile_names)
+                imgui.pop_item_width()
+                if changed and 0 <= new_idx < len(profile_names):
+                    new_profile = profile_names[new_idx]
+                    self.app.app_settings.set("device_control_selected_profile", new_profile)
+                    self._load_osr_profile_to_routes(device_id, new_profile)
+                    router.save_to_settings(self.app.app_settings)
+
+            # On first render for OSR: sync profile → routes if routes have defaults
+            if is_osr and not getattr(self, f'_osr_routes_synced_{device_id}', False):
+                setattr(self, f'_osr_routes_synced_{device_id}', True)
+                current_profile_name = self.app.app_settings.get("device_control_selected_profile", "Balanced")
+                osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
+                if current_profile_name in osr_profiles:
+                    # Check if routes are at defaults (0/100)
+                    all_default = all(
+                        getattr(r, 'min_value', 0.0) == 0.0 and getattr(r, 'max_value', 100.0) == 100.0
+                        for r in config.routes.values()
                     )
-                    if changed:
-                        route.source_axis = source_options[new_idx]
-                        route.enabled = route.source_axis != "(none)"
-                        router.save_to_settings(self.app.app_settings)
-            else:
-                # Multi-axis device (OSR/SR6): full table
-                # Table headers
-                imgui.columns(4, f"axis_routing_table_{device_id}", True)
-                imgui.set_column_width(0, 50)
-                imgui.set_column_width(1, 180)
-                imgui.set_column_width(2, 35)
-                imgui.set_column_width(3, 35)
+                    if all_default:
+                        self._load_osr_profile_to_routes(device_id, current_profile_name)
 
-                imgui.text("Ch")
-                imgui.next_column()
-                imgui.text("Source")
-                imgui.next_column()
-                imgui.text("En")
-                imgui.next_column()
-                imgui.text("Inv")
-                imgui.next_column()
-                imgui.separator()
+            imgui.spacing()
 
-                for ch in channels:
-                    route = config.routes.get(ch)
-                    if not route:
-                        from device_control.axis_routing import AxisRoute
-                        route = AxisRoute(device_channel=ch, source_axis="none", enabled=False)
-                        config.routes[ch] = route
+            # Column headers
+            imgui.columns(6, f"axis_config_table_{device_id}", True)
+            imgui.set_column_width(0, 80)   # Channel
+            imgui.set_column_width(1, 160)  # Source
+            imgui.set_column_width(2, 80)   # Min
+            imgui.set_column_width(3, 80)   # Max
+            imgui.set_column_width(4, 30)   # En
+            imgui.set_column_width(5, 30)   # Inv
 
-                    # Channel name
-                    default_axis = TCODE_DEFAULT_AXIS.get(ch, "")
-                    imgui.text(ch)
-                    if imgui.is_item_hovered() and default_axis:
-                        imgui.set_tooltip(f"Default: {default_axis}")
-                    imgui.next_column()
+            imgui.text("Channel")
+            imgui.next_column()
+            imgui.text("Source")
+            imgui.next_column()
+            imgui.text("Min %")
+            imgui.next_column()
+            imgui.text("Max %")
+            imgui.next_column()
+            imgui.text("En")
+            imgui.next_column()
+            imgui.text("Inv")
+            imgui.next_column()
+            imgui.separator()
 
-                    # Source dropdown
-                    current_idx = 0
-                    if route.source_axis in source_options:
-                        current_idx = source_options.index(route.source_axis)
-                    imgui.push_item_width(-1)
-                    changed, new_idx = imgui.combo(
-                        f"##{device_id}_{ch}_src", current_idx, source_labels
-                    )
-                    imgui.pop_item_width()
-                    if changed:
-                        route.source_axis = source_options[new_idx]
-                        if route.source_axis == "(none)":
-                            route.enabled = False
-                        router.save_to_settings(self.app.app_settings)
-                    imgui.next_column()
+            for ch in channels:
+                route = config.routes.get(ch)
+                if not route:
+                    route = AxisRoute(device_channel=ch, source_axis="none", enabled=False)
+                    config.routes[ch] = route
+                self._render_axis_row(device_id, ch, route, source_options, source_labels, router, is_osr)
 
-                    # Enable checkbox
-                    changed, new_val = imgui.checkbox(f"##{device_id}_{ch}_en", route.enabled)
-                    if changed:
-                        route.enabled = new_val
-                        router.save_to_settings(self.app.app_settings)
-                    imgui.next_column()
+            imgui.columns(1)
 
-                    # Invert checkbox
-                    changed, new_val = imgui.checkbox(f"##{device_id}_{ch}_inv", route.invert)
-                    if changed:
-                        route.invert = new_val
-                        router.save_to_settings(self.app.app_settings)
-                    imgui.next_column()
-
-                imgui.columns(1)
+            # Expandable details per axis
+            for ch in channels:
+                route = config.routes.get(ch)
+                if not route:
+                    continue
+                friendly = CHANNEL_FRIENDLY_NAMES.get(ch, ch)
+                detail_key = f"{device_id}_{ch}"
+                expanded = self._axis_details_expanded.get(detail_key, False)
+                if imgui.tree_node(f"{ch} {friendly} Details##{detail_key}"):
+                    self._axis_details_expanded[detail_key] = True
+                    self._render_axis_details(device_id, ch, route, router, is_osr, friendly)
+                    imgui.tree_pop()
+                else:
+                    self._axis_details_expanded[detail_key] = False
 
         imgui.unindent(10)
+
+    def _render_axis_row(self, device_id, ch, route, source_options, source_labels, router, is_osr):
+        """Render a single axis row in the configuration table."""
+        _FRIENDLY = {
+            "L0": "Stroke", "L1": "Sway", "L2": "Surge",
+            "R0": "Twist", "R1": "Roll", "R2": "Pitch",
+            "V0": "Vibration", "V1": "Pump",
+        }
+        friendly = _FRIENDLY.get(ch, ch)
+
+        # Channel label
+        imgui.text(f"{ch} {friendly}")
+        imgui.next_column()
+
+        # Source dropdown
+        current_idx = 0
+        if route.source_axis in source_options:
+            current_idx = source_options.index(route.source_axis)
+        imgui.push_item_width(-1)
+        changed, new_idx = imgui.combo(f"##{device_id}_{ch}_src", current_idx, source_labels)
+        imgui.pop_item_width()
+        if changed:
+            route.source_axis = source_options[new_idx]
+            if route.source_axis == "(none)":
+                route.enabled = False
+            router.save_to_settings(self.app.app_settings)
+            if is_osr:
+                self._save_routes_to_osr_profile(device_id)
+        imgui.next_column()
+
+        # Min % slider (getattr for compat with device_control < 5.4)
+        min_val = getattr(route, 'min_value', 0.0)
+        imgui.push_item_width(-1)
+        changed, new_min = imgui.slider_float(f"##{device_id}_{ch}_min", min_val, 0.0, 50.0, "%.0f%%")
+        imgui.pop_item_width()
+        if changed and hasattr(route, 'min_value'):
+            route.min_value = new_min
+            router.save_to_settings(self.app.app_settings)
+            if is_osr:
+                self._save_routes_to_osr_profile(device_id)
+            self._preview_axis_position_pct(ch, new_min, f"Previewing {friendly} min")
+        imgui.next_column()
+
+        # Max % slider
+        max_val = getattr(route, 'max_value', 100.0)
+        imgui.push_item_width(-1)
+        changed, new_max = imgui.slider_float(f"##{device_id}_{ch}_max", max_val, 50.0, 100.0, "%.0f%%")
+        imgui.pop_item_width()
+        if changed and hasattr(route, 'max_value'):
+            route.max_value = new_max
+            router.save_to_settings(self.app.app_settings)
+            if is_osr:
+                self._save_routes_to_osr_profile(device_id)
+            self._preview_axis_position_pct(ch, new_max, f"Previewing {friendly} max")
+        imgui.next_column()
+
+        # Enable checkbox
+        changed, new_val = imgui.checkbox(f"##{device_id}_{ch}_en", route.enabled)
+        if changed:
+            route.enabled = new_val
+            router.save_to_settings(self.app.app_settings)
+            if is_osr:
+                self._save_routes_to_osr_profile(device_id)
+        imgui.next_column()
+
+        # Invert checkbox
+        changed, new_val = imgui.checkbox(f"##{device_id}_{ch}_inv", route.invert)
+        if changed:
+            route.invert = new_val
+            router.save_to_settings(self.app.app_settings)
+            if is_osr:
+                self._save_routes_to_osr_profile(device_id)
+        imgui.next_column()
+
+    def _render_axis_details(self, device_id, ch, route, router, is_osr, friendly):
+        """Render expandable detail section for one axis."""
+        imgui.indent(10)
+        settings_changed = False
+        _has_extended = hasattr(route, 'speed_multiplier')
+
+        # Speed multiplier
+        speed = getattr(route, 'speed_multiplier', 1.0)
+        changed, new_speed = imgui.slider_float(
+            f"Speed Multiplier##{device_id}_{ch}", speed, 0.1, 3.0, "%.2f"
+        )
+        if changed and _has_extended:
+            route.speed_multiplier = new_speed
+            settings_changed = True
+
+        # Smoothing
+        smooth = getattr(route, 'smoothing_factor', 0.3)
+        changed, new_smooth = imgui.slider_float(
+            f"Smoothing##{device_id}_{ch}", smooth, 0.0, 1.0, "%.2f"
+        )
+        if changed and _has_extended:
+            route.smoothing_factor = new_smooth
+            settings_changed = True
+
+        # Pattern / motion provider
+        pattern_types = ["disabled", "wave", "follow", "auto", "random_noise"]
+        pattern_labels = ["Disabled", "Wave (Smooth)", "Follow Primary", "Auto-Select", "Random Noise"]
+        cur_pat = getattr(route, 'motion_provider_pattern', "disabled")
+        cur_pat_idx = pattern_types.index(cur_pat) if cur_pat in pattern_types else 0
+        changed, new_pat_idx = imgui.combo(
+            f"Pattern##{device_id}_{ch}", cur_pat_idx, pattern_labels
+        )
+        if changed and 0 <= new_pat_idx < len(pattern_types) and _has_extended:
+            route.motion_provider_pattern = pattern_types[new_pat_idx]
+            settings_changed = True
+
+        if cur_pat != "disabled":
+            intensity = getattr(route, 'motion_provider_intensity', 1.0)
+            changed, new_int = imgui.slider_float(
+                f"Intensity##{device_id}_{ch}", intensity, 0.0, 2.0, "%.2f"
+            )
+            if changed and _has_extended:
+                route.motion_provider_intensity = new_int
+                settings_changed = True
+
+            freq = getattr(route, 'motion_provider_frequency', 1.0)
+            changed, new_freq = imgui.slider_float(
+                f"Frequency##{device_id}_{ch}", freq, 0.1, 5.0, "%.2f"
+            )
+            if changed and _has_extended:
+                route.motion_provider_frequency = new_freq
+                settings_changed = True
+
+            if cur_pat in ("follow", "auto"):
+                follow = getattr(route, 'motion_provider_follow_strength', 0.5)
+                changed, new_fs = imgui.slider_float(
+                    f"Follow Strength##{device_id}_{ch}", follow, 0.0, 1.0, "%.2f"
+                )
+                if changed and _has_extended:
+                    route.motion_provider_follow_strength = new_fs
+                    settings_changed = True
+                _tooltip_if_hovered("How closely this axis follows the primary axis movement")
+
+        # Test / demo buttons
+        imgui.spacing()
+        imgui.text("Test:")
+        imgui.same_line()
+        min_pct = getattr(route, 'min_value', 0.0)
+        max_pct = getattr(route, 'max_value', 100.0)
+        if imgui.small_button(f"Min##{device_id}_{ch}_tmin"):
+            self._preview_axis_position_pct(ch, min_pct, f"Testing {friendly} min")
+        imgui.same_line()
+        if imgui.small_button(f"Max##{device_id}_{ch}_tmax"):
+            self._preview_axis_position_pct(ch, max_pct, f"Testing {friendly} max")
+        imgui.same_line()
+        if imgui.small_button(f"Center##{device_id}_{ch}_tctr"):
+            self._preview_axis_position_pct(ch, (min_pct + max_pct) / 2.0, f"Centering {friendly}")
+
+        # Simulation patterns
+        imgui.same_line()
+        if imgui.small_button(f"Demo##{device_id}_{ch}"):
+            self._demo_axis_range_pct(ch, min_pct, max_pct, route.invert, friendly)
+        imgui.same_line()
+        if imgui.small_button(f"Sine##{device_id}_{ch}"):
+            self._simulate_axis_pattern_pct(ch, "sine_wave", min_pct, max_pct, route.invert, friendly)
+        imgui.same_line()
+        if imgui.small_button(f"Square##{device_id}_{ch}"):
+            self._simulate_axis_pattern_pct(ch, "square_wave", min_pct, max_pct, route.invert, friendly)
+        if imgui.small_button(f"Triangle##{device_id}_{ch}"):
+            self._simulate_axis_pattern_pct(ch, "triangle_wave", min_pct, max_pct, route.invert, friendly)
+        imgui.same_line()
+        if imgui.small_button(f"Random##{device_id}_{ch}"):
+            self._simulate_axis_pattern_pct(ch, "random", min_pct, max_pct, route.invert, friendly)
+        imgui.same_line()
+        if imgui.small_button(f"Pulse##{device_id}_{ch}"):
+            self._simulate_axis_pattern_pct(ch, "pulse", min_pct, max_pct, route.invert, friendly)
+
+        if settings_changed:
+            router.save_to_settings(self.app.app_settings)
+            if is_osr:
+                self._save_routes_to_osr_profile(device_id)
+
+        imgui.unindent(10)
+
+    def _load_osr_profile_to_routes(self, device_id, profile_name):
+        """Load OSR profile TCode values into AxisRoute 0-100% values."""
+        osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
+        profile_data = osr_profiles.get(profile_name, {})
+        if not profile_data:
+            return
+
+        router = self.device_manager.axis_router
+        config = router.get_config(device_id)
+        if not config:
+            return
+
+        # Map OSR profile axis keys → TCode channel
+        _PROFILE_KEY_TO_CH = {
+            'up_down': 'L0', 'left_right': 'L1', 'front_back': 'L2',
+            'twist': 'R0', 'roll': 'R1', 'pitch': 'R2',
+            'vibration': 'V0', 'aux_vibration': 'V1',
+        }
+
+        for axis_key, ch in _PROFILE_KEY_TO_CH.items():
+            axis_data = profile_data.get(axis_key)
+            route = config.routes.get(ch)
+            if not axis_data or not route:
+                continue
+            route.enabled = axis_data.get("enabled", False)
+            route.invert = axis_data.get("invert", False)
+            # Extended fields — safe setattr for compat with device_control < 5.4
+            _ext = {
+                'min_value': (axis_data.get("min_position", 0) / 9999.0) * 100.0,
+                'max_value': (axis_data.get("max_position", 9999) / 9999.0) * 100.0,
+                'speed_multiplier': axis_data.get("speed_multiplier", 1.0),
+                'smoothing_factor': axis_data.get("smoothing_factor", 0.3),
+                'motion_provider_pattern': axis_data.get("pattern_type", "disabled"),
+                'motion_provider_intensity': axis_data.get("pattern_intensity", 1.0),
+                'motion_provider_frequency': axis_data.get("pattern_frequency", 1.0),
+                'motion_provider_follow_strength': axis_data.get("follow_strength", 0.5),
+            }
+            for attr, val in _ext.items():
+                if hasattr(route, attr):
+                    setattr(route, attr, val)
+
+        # Also load profile to the device backend
+        self._load_osr_profile_to_device(profile_name, profile_data)
+
+    def _save_routes_to_osr_profile(self, device_id):
+        """Write AxisRoute values back to the active OSR profile."""
+        router = self.device_manager.axis_router
+        config = router.get_config(device_id)
+        if not config:
+            return
+
+        current_profile_name = self.app.app_settings.get("device_control_selected_profile", "Balanced")
+        osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
+        profile_data = osr_profiles.get(current_profile_name)
+        if not profile_data:
+            return
+
+        _CH_TO_PROFILE_KEY = {
+            'L0': 'up_down', 'L1': 'left_right', 'L2': 'front_back',
+            'R0': 'twist', 'R1': 'roll', 'R2': 'pitch',
+            'V0': 'vibration', 'V1': 'aux_vibration',
+        }
+
+        for ch, route in config.routes.items():
+            axis_key = _CH_TO_PROFILE_KEY.get(ch)
+            if not axis_key or axis_key not in profile_data:
+                continue
+            axis_data = profile_data[axis_key]
+            axis_data["enabled"] = route.enabled
+            axis_data["invert"] = route.invert
+            axis_data["min_position"] = int((getattr(route, 'min_value', 0.0) / 100.0) * 9999)
+            axis_data["max_position"] = int((getattr(route, 'max_value', 100.0) / 100.0) * 9999)
+            axis_data["speed_multiplier"] = getattr(route, 'speed_multiplier', 1.0)
+            axis_data["smoothing_factor"] = getattr(route, 'smoothing_factor', 0.3)
+            axis_data["pattern_type"] = getattr(route, 'motion_provider_pattern', "disabled")
+            axis_data["pattern_intensity"] = getattr(route, 'motion_provider_intensity', 1.0)
+            axis_data["pattern_frequency"] = getattr(route, 'motion_provider_frequency', 1.0)
+            axis_data["follow_strength"] = getattr(route, 'motion_provider_follow_strength', 0.5)
+
+        osr_profiles[current_profile_name] = profile_data
+        self.app.app_settings.set("device_control_osr_profiles", osr_profiles)
+        self.app.app_settings.save_settings()
+
+    # ── Device-agnostic preview/demo helpers (0-100% based) ──────────
+
+    def _preview_axis_position_pct(self, channel, position_pct, message):
+        """Preview a specific axis position using 0-100% (device-agnostic)."""
+        try:
+            if not self.device_manager.is_connected():
+                return
+
+            backend = self.device_manager.get_connected_backend()
+            if not backend or not backend.is_connected():
+                return
+
+            import threading
+            def run_preview():
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    success = loop.run_until_complete(backend.set_axis_position(channel, position_pct))
+                    if success:
+                        self.app.logger.debug(f"{message}: {channel} to {position_pct:.1f}%")
+                except Exception as e:
+                    self.app.logger.error(f"Failed to preview axis position: {e}")
+                finally:
+                    loop.close()
+
+            thread = threading.Thread(target=run_preview, daemon=True)
+            thread.start()
+        except Exception as e:
+            self.app.logger.error(f"Failed to preview axis position: {e}")
+
+    def _demo_axis_range_pct(self, channel, min_pct, max_pct, inverted, label):
+        """Demonstrate the full range of an axis using 0-100% values."""
+        try:
+            if not self.device_manager.is_connected():
+                return
+
+            import threading
+            def run_demo():
+                import asyncio
+                import time
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    backend = self.device_manager.get_connected_backend()
+                    if not backend:
+                        return
+
+                    center = (min_pct + max_pct) / 2.0
+                    if inverted:
+                        sequence = [(max_pct, "0% (inv)"), (min_pct, "100% (inv)"), (center, "center")]
+                    else:
+                        sequence = [(min_pct, "0%"), (max_pct, "100%"), (center, "center")]
+
+                    self.app.logger.info(f"Demonstrating {label} range...")
+                    for pos, desc in sequence:
+                        loop.run_until_complete(backend.set_axis_position(channel, pos))
+                        self.app.logger.info(f"{label} demo: {desc} -> {channel} at {pos:.1f}%")
+                        time.sleep(2.0)
+                    self.app.logger.info(f"{label} range demo complete")
+                except Exception as e:
+                    self.app.logger.error(f"Failed to demo axis range: {e}")
+                finally:
+                    loop.close()
+
+            thread = threading.Thread(target=run_demo, daemon=True)
+            thread.start()
+        except Exception as e:
+            self.app.logger.error(f"Failed to start axis demo: {e}")
+
+    def _simulate_axis_pattern_pct(self, channel, pattern_type, min_pct, max_pct, inverted, label):
+        """Simulate motion patterns using 0-100% values (device-agnostic)."""
+        try:
+            import threading
+            import math
+            import random
+
+            def run_pattern():
+                import asyncio
+                import time
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    backend = self.device_manager.get_connected_backend()
+                    if not backend:
+                        return
+
+                    center = (min_pct + max_pct) / 2.0
+                    amplitude = (max_pct - min_pct) / 2.0
+                    duration = 10.0
+                    steps = 50
+                    dt = duration / steps
+
+                    positions = []
+                    if pattern_type == "sine_wave":
+                        for i in range(steps):
+                            t = (i / steps) * 4 * math.pi
+                            pos = center + amplitude * math.sin(t)
+                            positions.append(pos)
+                    elif pattern_type == "square_wave":
+                        for i in range(steps):
+                            t = (i / steps) * 4
+                            pos = max_pct if (t % 2) < 1 else min_pct
+                            positions.append(pos)
+                    elif pattern_type == "triangle_wave":
+                        for i in range(steps):
+                            t = (i / steps) * 4
+                            cycle_pos = t % 2
+                            if cycle_pos < 1:
+                                pos = min_pct + (max_pct - min_pct) * cycle_pos
+                            else:
+                                pos = max_pct - (max_pct - min_pct) * (cycle_pos - 1)
+                            positions.append(pos)
+                    elif pattern_type == "random":
+                        for _ in range(20):
+                            positions.append(random.uniform(min_pct, max_pct))
+                        dt = duration / 20
+                    elif pattern_type == "pulse":
+                        for _ in range(10):
+                            positions.extend([max_pct, center])
+                        dt = duration / 20
+
+                    self.app.logger.info(f"Starting {pattern_type} for {label}...")
+                    for pos in positions:
+                        if inverted:
+                            pos = max_pct + min_pct - pos
+                        loop.run_until_complete(backend.set_axis_position(channel, pos))
+                        time.sleep(dt)
+
+                    # Return to center
+                    loop.run_until_complete(backend.set_axis_position(channel, center))
+                    self.app.logger.info(f"{label} {pattern_type} complete")
+                except Exception as e:
+                    self.app.logger.error(f"Error in {pattern_type} pattern: {e}")
+                finally:
+                    loop.close()
+
+            thread = threading.Thread(target=run_pattern, daemon=True)
+            thread.start()
+        except Exception as e:
+            self.app.logger.error(f"Failed to start {pattern_type} pattern: {e}")
 
     def _render_all_advanced_settings(self):
         """Render all advanced settings in one section."""
@@ -725,14 +1109,6 @@ class DeviceControlMixin:
         imgui.separator()
         imgui.spacing()
 
-        # Per-Axis Configuration (for OSR devices)
-        connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
-        if connected_device and "osr" in connected_device.device_id.lower():
-            if imgui.tree_node("Per-Axis Configuration##PerAxis"):
-                imgui.text_colored("Configure individual axes:", 0.7, 0.7, 0.7)
-                self._render_osr_axis_configuration()
-                imgui.tree_pop()
-
         imgui.unindent(10)
 
     def _render_connection_status_section(self):
@@ -800,9 +1176,6 @@ class DeviceControlMixin:
             # Advanced OSR Settings
             if imgui.collapsing_header("OSR Performance Settings##OSRPerformance")[0]:
                 self._render_osr_performance_settings()
-
-            if imgui.collapsing_header("OSR Axis Configuration##OSRAxis")[0]:
-                self._render_osr_axis_configuration()
 
             if imgui.collapsing_header("OSR Test Functions##OSRTest")[0]:
                 imgui.indent(10)
@@ -1586,240 +1959,6 @@ class DeviceControlMixin:
         except Exception as e:
             self.app.logger.error(f"Failed to start OSR test movement: {e}")
 
-    def _preview_axis_position(self, axis_key, tcode_position, message):
-        """Preview a specific axis position in real-time."""
-        try:
-            if not self.device_manager.is_connected():
-                self.app.logger.warning("No device connected for preview")
-                return
-
-            connected_device = self.device_manager.get_connected_device_info()
-            if not connected_device or "osr" not in connected_device.device_id.lower():
-                self.app.logger.warning("Preview only available for OSR devices")
-                return
-
-            # Get the OSR backend
-            backend = self.device_manager.get_connected_backend()
-            if not backend:
-                self.app.logger.warning("No connected backend available for preview")
-                return
-
-            # Check backend connection status
-            if not backend.is_connected():
-                self.app.logger.warning("Backend not connected for preview")
-                return
-
-            self.app.logger.debug(f"Using backend: {type(backend).__name__} for axis preview")
-
-            tcode_axis = _DEVICE_AXIS_TCODE.get(axis_key)
-            if not tcode_axis:
-                self.app.logger.warning(f"Unknown axis key: {axis_key}")
-                return
-
-            # Convert TCode position (0-9999) to percentage (0-100) for backend
-            position_percent = (tcode_position / 9999.0) * 100.0
-
-            # Send command through backend's standardized axis method
-            import threading
-            def run_preview():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # Log what we're about to send
-                    self.app.logger.debug(f"Sending command: {tcode_axis} to {position_percent:.1f}% via {type(backend).__name__}")
-
-                    # Check if backend is still connected before sending
-                    if not backend.is_connected():
-                        self.app.logger.error(f"Backend disconnected before sending {tcode_axis} command")
-                        return
-
-                    # Use backend's set_axis_position method instead of direct TCode
-                    success = loop.run_until_complete(backend.set_axis_position(tcode_axis, position_percent))
-
-                    if success:
-                        self.app.logger.info(f"{message}: {tcode_axis} axis to {position_percent:.1f}%")
-                    else:
-                        self.app.logger.error(f"Failed to set {tcode_axis} axis position - backend returned False")
-
-                except Exception as e:
-                    self.app.logger.error(f"Failed to preview axis position: {e}")
-                finally:
-                    loop.close()
-
-            thread = threading.Thread(target=run_preview, daemon=True)
-            thread.start()
-
-        except Exception as e:
-            self.app.logger.error(f"Failed to preview axis position: {e}")
-
-    def _demo_axis_range(self, axis_key, min_pos, max_pos, inverted, axis_label):
-        """Demonstrate the full range of an axis with current settings."""
-        try:
-            if not self.device_manager.is_connected():
-                self.app.logger.warning("No device connected for demo")
-                return
-
-            import threading
-            def run_demo():
-                import asyncio
-                import time
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # Get the OSR backend
-                    backend = self.device_manager.get_connected_backend()
-                    if not backend:
-                        return
-
-                    tcode_axis = _DEVICE_AXIS_TCODE.get(axis_key)
-                    if not tcode_axis:
-                        self.app.logger.warning(f"Unknown axis: {axis_key}")
-                        return
-
-                    self.app.logger.info(f"Demonstrating {axis_label} range...")
-
-                    # Demo sequence: min -> max -> center (respecting inversion)
-                    # Convert TCode positions (0-9999) to percentages (0-100) for backend
-                    if inverted:
-                        sequence = [
-                            ((max_pos / 9999.0) * 100.0, "0% (inverted)"),
-                            ((min_pos / 9999.0) * 100.0, "100% (inverted)"),
-                            (((min_pos + max_pos) / 2 / 9999.0) * 100.0, "50% (center)")
-                        ]
-                    else:
-                        sequence = [
-                            ((min_pos / 9999.0) * 100.0, "0% (normal)"),
-                            ((max_pos / 9999.0) * 100.0, "100% (normal)"),
-                            (((min_pos + max_pos) / 2 / 9999.0) * 100.0, "50% (center)")
-                        ]
-
-                    for position_percent, label in sequence:
-                        # Use backend's standardized axis method instead of direct TCode
-                        success = loop.run_until_complete(backend.set_axis_position(tcode_axis, position_percent))
-                        if success:
-                            self.app.logger.info(f"{axis_label} demo: {label} \u2192 {tcode_axis} axis to {position_percent:.1f}%")
-                        else:
-                            self.app.logger.error(f"Failed to set {tcode_axis} axis to {position_percent:.1f}%")
-                        time.sleep(2.0)  # Wait between movements
-
-                    self.app.logger.info(f"{axis_label} range demonstration complete")
-
-                except Exception as e:
-                    self.app.logger.error(f"Failed to demo axis range: {e}")
-                finally:
-                    loop.close()
-
-            thread = threading.Thread(target=run_demo, daemon=True)
-            thread.start()
-
-        except Exception as e:
-            self.app.logger.error(f"Failed to start axis demo: {e}")
-
-    def _simulate_axis_pattern(self, axis_key: str, pattern_type: str, min_pos: int, max_pos: int, inverted: bool, axis_label: str):
-        """Simulate various motion patterns for axis testing."""
-        try:
-            import threading
-            import math
-            import random
-
-            def run_pattern():
-                import asyncio
-                import time
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    backend = self.device_manager.get_connected_backend()
-                    if not backend:
-                        return
-
-                    tcode_axis = _DEVICE_AXIS_TCODE.get(axis_key)
-                    if not tcode_axis:
-                        self.app.logger.warning(f"Unknown axis: {axis_key}")
-                        return
-
-                    self.app.logger.info(f"Starting {pattern_type} pattern for {axis_label}...")
-
-                    # Generate pattern positions
-                    center_pos = (min_pos + max_pos) // 2
-                    amplitude = (max_pos - min_pos) // 2
-                    duration = 10.0  # 10 seconds
-                    steps = 50  # Number of steps
-                    dt = duration / steps
-
-                    positions = []
-
-                    if pattern_type == "sine_wave":
-                        for i in range(steps):
-                            t = (i / steps) * 4 * math.pi  # 2 full cycles
-                            offset = amplitude * math.sin(t)
-                            pos = center_pos + offset
-                            positions.append((int(pos), f"Sine {i}/{steps}"))
-
-                    elif pattern_type == "square_wave":
-                        for i in range(steps):
-                            t = (i / steps) * 4  # 2 full cycles
-                            pos = max_pos if (t % 2) < 1 else min_pos
-                            positions.append((int(pos), f"Square {i}/{steps}"))
-
-                    elif pattern_type == "triangle_wave":
-                        for i in range(steps):
-                            t = (i / steps) * 4  # 2 full cycles
-                            cycle_pos = t % 2
-                            if cycle_pos < 1:
-                                # Rising
-                                pos = min_pos + (max_pos - min_pos) * cycle_pos
-                            else:
-                                # Falling
-                                pos = max_pos - (max_pos - min_pos) * (cycle_pos - 1)
-                            positions.append((int(pos), f"Triangle {i}/{steps}"))
-
-                    elif pattern_type == "random":
-                        for i in range(20):  # Shorter for random
-                            pos = random.randint(min_pos, max_pos)
-                            positions.append((int(pos), f"Random {i}/20"))
-
-                    elif pattern_type == "pulse":
-                        for i in range(10):  # 10 pulses
-                            # Pulse out and back
-                            positions.append((max_pos, f"Pulse {i} - Out"))
-                            positions.append((center_pos, f"Pulse {i} - Back"))
-
-                    # Execute pattern
-                    for pos, label in positions:
-                        if inverted:
-                            # Invert the position mapping
-                            display_pos = max_pos + min_pos - pos
-                        else:
-                            display_pos = pos
-
-                        # Convert to percentage for backend
-                        position_percent = (display_pos / 9999.0) * 100.0
-
-                        success = loop.run_until_complete(backend.set_axis_position(tcode_axis, position_percent))
-                        if success:
-                            self.app.logger.info(f"{axis_label} {pattern_type}: {label} \u2192 {tcode_axis} at {position_percent:.1f}%")
-                        else:
-                            self.app.logger.error(f"Failed to set {tcode_axis} to {position_percent:.1f}%")
-
-                        time.sleep(dt)
-
-                    # Return to center
-                    center_percent = ((center_pos if not inverted else center_pos) / 9999.0) * 100.0
-                    loop.run_until_complete(backend.set_axis_position(tcode_axis, center_percent))
-                    self.app.logger.info(f"{axis_label} {pattern_type} pattern complete - returned to center")
-
-                except Exception as e:
-                    self.app.logger.error(f"Error in {pattern_type} pattern: {e}")
-                finally:
-                    loop.close()
-
-            thread = threading.Thread(target=run_pattern, daemon=True)
-            thread.start()
-
-        except Exception as e:
-            self.app.logger.error(f"Failed to start {pattern_type} pattern: {e}")
-
     def _update_live_tracking_control(self, enabled: bool):
         """Update live tracking control setting in tracker manager."""
         try:
@@ -1875,264 +2014,6 @@ class DeviceControlMixin:
             self.app.logger.error(f"Failed to initialize video playback bridge: {e}")
             self.video_playback_bridge = None
 
-
-    def _render_osr_axis_configuration(self):
-        """Render OSR axis configuration UI."""
-        try:
-            imgui.separator()
-            imgui.text("OSR Axis Configuration")
-
-            # Load current OSR settings
-            current_profile_name = self.app.app_settings.get("device_control_selected_profile", "Balanced")
-            osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
-
-            if current_profile_name not in osr_profiles:
-                imgui.text_colored("No OSR profile found in settings", 1.0, 0.5, 0.0)
-                return
-
-            profile_data = osr_profiles[current_profile_name]
-
-            # Profile selection
-            imgui.text("Profile:")
-            imgui.same_line()
-            profile_names = list(osr_profiles.keys())
-            current_index = profile_names.index(current_profile_name) if current_profile_name in profile_names else 0
-
-            changed, new_index = imgui.combo("##profile_selector", current_index, profile_names)
-            if changed and 0 <= new_index < len(profile_names):
-                new_profile_name = profile_names[new_index]
-                self.app.app_settings.set("device_control_selected_profile", new_profile_name)
-                profile_data = osr_profiles[new_profile_name]
-                self._load_osr_profile_to_device(new_profile_name, profile_data)
-
-            imgui.text(f"Description: {profile_data.get('description', 'No description')}")
-
-            # Axis configurations
-            imgui.separator()
-            imgui.text("Axis Settings:")
-
-            axes_to_show = [
-                # Linear axes
-                ("up_down", "Up/Down Stroke", "L0"),
-                ("left_right", "Left/Right", "L1"),
-                ("front_back", "Front/Back", "L2"),
-                # Rotation axes
-                ("twist", "Twist", "R0"),
-                ("roll", "Roll", "R1"),
-                ("pitch", "Pitch", "R2"),
-                # Vibration axes
-                ("vibration", "Vibration", "V0"),
-                ("aux_vibration", "Aux Vibration", "V1")
-            ]
-
-            settings_changed = False
-
-            for axis_key, axis_label, tcode in axes_to_show:
-                if axis_key not in profile_data:
-                    continue
-
-                axis_data = profile_data[axis_key]
-
-                # Axis header with enable checkbox
-                enabled = axis_data.get("enabled", False)
-                changed, new_enabled = imgui.checkbox(f"{axis_label} ({tcode})", enabled)
-                if changed:
-                    axis_data["enabled"] = new_enabled
-                    settings_changed = True
-
-                if enabled:
-                    imgui.indent(20)
-
-                    # Min/Max position sliders with real-time preview
-                    min_pos = axis_data.get("min_position", 0)
-                    max_pos = axis_data.get("max_position", 9999)
-
-                    imgui.text(f"{axis_label} Range:")
-                    imgui.text_colored("Drag sliders to feel the limits in real-time", 0.7, 0.7, 0.7)
-
-                    changed, new_min = imgui.slider_int(f"Min Position##{axis_key}", min_pos, 0, 9999, f"%d (0%% limit)")
-                    if changed:
-                        axis_data["min_position"] = new_min
-                        settings_changed = True
-                        # Real-time preview: move to min position
-                        self._preview_axis_position(axis_key, new_min, f"Previewing {axis_label} minimum")
-
-                    changed, new_max = imgui.slider_int(f"Max Position##{axis_key}", max_pos, 0, 9999, f"%d (100%% limit)")
-                    if changed:
-                        axis_data["max_position"] = new_max
-                        settings_changed = True
-                        # Real-time preview: move to max position
-                        self._preview_axis_position(axis_key, new_max, f"Previewing {axis_label} maximum")
-
-                    # Range validation
-                    if new_min >= new_max:
-                        imgui.text_colored("Warning: Min must be less than Max", 1.0, 0.5, 0.0)
-
-                    # Preview buttons for testing limits
-                    imgui.text("Test Range:")
-                    if imgui.button(f"Test Min##{axis_key}"):
-                        self._preview_axis_position(axis_key, new_min, f"Testing {axis_label} minimum (0%)")
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Move to minimum position (funscript 0%)")
-
-                    imgui.same_line()
-                    if imgui.button(f"Test Max##{axis_key}"):
-                        self._preview_axis_position(axis_key, new_max, f"Testing {axis_label} maximum (100%)")
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Move to maximum position (funscript 100%)")
-
-                    imgui.same_line()
-                    if imgui.button(f"Center##{axis_key}"):
-                        center_pos = (new_min + new_max) // 2
-                        self._preview_axis_position(axis_key, center_pos, f"Centering {axis_label} (50%)")
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Move to center position (funscript 50%)")
-
-                    # Speed multiplier
-                    speed_mult = axis_data.get("speed_multiplier", 1.0)
-                    changed, new_speed = imgui.slider_float(f"Speed Multiplier##{axis_key}", speed_mult, 0.1, 3.0, "%.2f")
-                    if changed:
-                        axis_data["speed_multiplier"] = new_speed
-                        settings_changed = True
-
-                    # Invert checkbox with preview
-                    invert = axis_data.get("invert", False)
-                    changed, new_invert = imgui.checkbox(f"Invert Direction##{axis_key}", invert)
-                    if changed:
-                        axis_data["invert"] = new_invert
-                        settings_changed = True
-                        # Preview inversion by showing the effect
-                        if new_invert:
-                            # Show inverted max (funscript 0% -> device max)
-                            self._preview_axis_position(axis_key, new_max, f"Previewing {axis_label} INVERTED: funscript 0% \u2192 device max")
-                        else:
-                            # Show normal min (funscript 0% -> device min)
-                            self._preview_axis_position(axis_key, new_min, f"Previewing {axis_label} NORMAL: funscript 0% \u2192 device min")
-
-                    # Pattern simulation buttons
-                    imgui.separator()
-                    imgui.text(f"{axis_label} Simulation Patterns:")
-
-                    # Row 1: Basic patterns
-                    if imgui.button(f"Demo Range##{axis_key}"):
-                        self._demo_axis_range(axis_key, new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Test min \u2192 max \u2192 center positions")
-
-                    imgui.same_line()
-                    if imgui.button(f"Sine Wave##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "sine_wave", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Smooth sine wave motion")
-
-                    imgui.same_line()
-                    if imgui.button(f"Square Wave##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "square_wave", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Sharp min/max transitions")
-
-                    # Row 2: Complex patterns
-                    if imgui.button(f"Triangle Wave##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "triangle_wave", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Linear ramp up/down motion")
-
-                    imgui.same_line()
-                    if imgui.button(f"Random Pattern##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "random", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Random positions for testing")
-
-                    imgui.same_line()
-                    if imgui.button(f"Pulse Pattern##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "pulse", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Quick pulses from center")
-
-                    # Smoothing
-                    smoothing = axis_data.get("smoothing_factor", 0.8)
-                    changed, new_smoothing = imgui.slider_float(f"Smoothing##{axis_key}", smoothing, 0.0, 1.0, "%.2f")
-                    if changed:
-                        axis_data["smoothing_factor"] = new_smoothing
-                        settings_changed = True
-
-                    # Pattern generation settings for this axis
-                    imgui.separator()
-                    imgui.text(f"{axis_label} Pattern Generation:")
-
-                    # Pattern type dropdown (generalized for all axes)
-                    pattern_types = ["disabled", "wave", "follow", "auto", "random_noise"]
-                    pattern_labels = ["Disabled", "Wave (Smooth)", "Follow Primary", "Auto-Select", "Random Noise"]
-                    current_pattern = axis_data.get("pattern_type", "disabled")
-                    current_pattern_index = pattern_types.index(current_pattern) if current_pattern in pattern_types else 0
-
-                    changed, new_pattern_index = imgui.combo(f"Pattern Type##{axis_key}", current_pattern_index, pattern_labels)
-                    if changed and 0 <= new_pattern_index < len(pattern_types):
-                        axis_data["pattern_type"] = pattern_types[new_pattern_index]
-                        settings_changed = True
-
-                    # Pattern intensity (only if not disabled)
-                    if axis_data.get("pattern_type", "disabled") != "disabled":
-                        intensity = axis_data.get("pattern_intensity", 1.0)
-                        changed, new_intensity = imgui.slider_float(f"Pattern Intensity##{axis_key}", intensity, 0.0, 2.0, "%.2f")
-                        if changed:
-                            axis_data["pattern_intensity"] = new_intensity
-                            settings_changed = True
-
-                        frequency = axis_data.get("pattern_frequency", 1.0)
-                        changed, new_frequency = imgui.slider_float(f"Pattern Frequency##{axis_key}", frequency, 0.1, 5.0, "%.2f")
-                        if changed:
-                            axis_data["pattern_frequency"] = new_frequency
-                            settings_changed = True
-
-                        # Follow strength (only for follow and auto modes)
-                        if axis_data.get("pattern_type") in ("follow", "auto"):
-                            follow_strength = axis_data.get("follow_strength", 0.5)
-                            changed, new_fs = imgui.slider_float(f"Follow Strength##{axis_key}", follow_strength, 0.0, 1.0, "%.2f")
-                            if changed:
-                                axis_data["follow_strength"] = new_fs
-                                settings_changed = True
-                            _tooltip_if_hovered("How closely this axis follows the primary axis movement")
-
-                    imgui.unindent(20)
-
-                imgui.separator()
-
-            # Global settings
-            imgui.text("Global Settings:")
-
-            # Update rate
-            update_rate = profile_data.get("update_rate_hz", 20.0)
-            changed, new_rate = imgui.slider_float("Update Rate (Hz)", update_rate, 5.0, 50.0, "%.1f")
-            if changed:
-                profile_data["update_rate_hz"] = new_rate
-                settings_changed = True
-
-            # Safety limits
-            safety_enabled = profile_data.get("safety_limits_enabled", True)
-            changed, new_safety = imgui.checkbox("Safety Limits Enabled", safety_enabled)
-            if changed:
-                profile_data["safety_limits_enabled"] = new_safety
-                settings_changed = True
-
-            # Apply button
-            imgui.separator()
-            if imgui.button("Apply Configuration"):
-                self._load_osr_profile_to_device(current_profile_name, profile_data)
-                settings_changed = True
-
-            imgui.same_line()
-            if imgui.button("Test Axis Movement"):
-                self._test_osr_axes()
-
-            # Save settings if changed
-            if settings_changed:
-                osr_profiles[current_profile_name] = profile_data
-                self.app.app_settings.set("device_control_osr_profiles", osr_profiles)
-                self.app.app_settings.save_settings()
-
-        except Exception as e:
-            imgui.text_colored(f"Error in OSR configuration: {e}", 1.0, 0.0, 0.0)
 
     def _load_osr_profile_to_device(self, profile_name: str, profile_data: dict):
         """Load OSR profile to the connected device."""

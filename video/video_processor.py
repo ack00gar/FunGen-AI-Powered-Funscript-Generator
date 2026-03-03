@@ -402,7 +402,8 @@ class VideoProcessor:
             capacity = self._frame_buffer.maxlen or 0
             start = self._frame_buffer[0][0] if self._frame_buffer else -1
             end = self._frame_buffer[-1][0] if self._frame_buffer else -1
-        return {'size': size, 'capacity': capacity, 'start': start, 'end': end}
+        return {'size': size, 'capacity': capacity, 'start': start, 'end': end,
+                'current': self.current_frame_index}
 
     def _clear_cache(self):
         with self.frame_cache_lock:
@@ -2299,7 +2300,7 @@ class VideoProcessor:
 
         2-tier lookup (no cv2 fallback):
         1. Buffer hit — O(1), instant
-        2. Buffer miss — clear buffer, restart pipe at target, read + append
+        2. Buffer miss — rebuild buffer centered on target (50% before, 50% after)
         """
         # 1. Buffer lookup (O(1))
         frame = self._buffer_lookup(target_frame)
@@ -2307,11 +2308,25 @@ class VideoProcessor:
             self.current_frame_index = target_frame
             return frame
 
-        # 2. Buffer miss: restart pipe at target_frame
+        # 2. Buffer miss: rebuild centered on target_frame
+        #    Start pipe at target - capacity/2 so cursor lands in the middle.
+        half_buf = (self._frame_buffer.maxlen or 300) // 2
+        pipe_start = max(0, target_frame - half_buf)
+        frames_to_skip = target_frame - pipe_start  # frames to read before target
+
         with self._frame_buffer_lock:
             self._frame_buffer.clear()
 
-        if self._start_unified_pipe(target_frame):
+        if self._start_unified_pipe(pipe_start):
+            # Pre-fill buffer with frames before target
+            for i in range(frames_to_skip):
+                pre_frame = self._pipe_read_one()
+                if pre_frame is not None:
+                    self._buffer_append(pipe_start + i, pre_frame)
+                else:
+                    break
+
+            # Read the target frame itself
             frame = self._pipe_read_one()
             if frame is not None:
                 self._buffer_append(target_frame, frame)

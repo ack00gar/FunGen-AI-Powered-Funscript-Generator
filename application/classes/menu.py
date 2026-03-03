@@ -660,6 +660,15 @@ class MainMenu:
                     imgui.menu_item("(no bookmarks)", enabled=False)
                 imgui.end_menu()
 
+            imgui.separator()
+            video_loaded = self.app.processor and self.app.processor.video_info
+            if imgui.menu_item("Go to Frame...", self._get_shortcut_display("go_to_frame"),
+                               selected=False, enabled=video_loaded)[0]:
+                if self.gui:
+                    self.gui._go_to_frame_open = True
+                    self.gui._go_to_frame_input = ""
+                    self.gui._go_to_frame_focus = True
+
             imgui.end_menu()
 
     def _render_per_timeline_undo_items(self, fs_proc, tl_num):
