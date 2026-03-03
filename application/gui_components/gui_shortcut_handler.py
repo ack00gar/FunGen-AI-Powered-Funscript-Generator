@@ -144,6 +144,16 @@ class ShortcutHandlerMixin:
         elif check_and_run_shortcut("reset_timeline_view", self._handle_reset_timeline_view_shortcut):
             pass
 
+        # Video Zoom Controls
+        elif check_and_run_shortcut("zoom_in_video", self._handle_zoom_in_video_shortcut):
+            pass
+        elif check_and_run_shortcut("zoom_out_video", self._handle_zoom_out_video_shortcut):
+            pass
+        elif check_and_run_shortcut("reset_video_view", self._handle_reset_video_view_shortcut):
+            pass
+        elif check_and_run_shortcut("toggle_fullscreen", self._handle_toggle_fullscreen_shortcut):
+            pass
+
         # Tracking Tools
         elif check_and_run_shortcut("set_oscillation_area", self._handle_toggle_oscillation_area_mode):
             pass
@@ -773,6 +783,24 @@ class ShortcutHandlerMixin:
             self.app.exit_set_user_roi_mode()
         else:
             self.app.enter_set_user_roi_mode()
+
+    def _handle_zoom_in_video_shortcut(self):
+        """Handle keyboard shortcut for zooming in video (Cmd+Shift+= / Ctrl+Shift+=)"""
+        self.app.app_state_ui.adjust_video_zoom(1.2)
+
+    def _handle_zoom_out_video_shortcut(self):
+        """Handle keyboard shortcut for zooming out video (Cmd+Shift+- / Ctrl+Shift+-)"""
+        self.app.app_state_ui.adjust_video_zoom(1.0 / 1.2)
+
+    def _handle_reset_video_view_shortcut(self):
+        """Handle keyboard shortcut for resetting video zoom/pan (Cmd+Shift+R / Ctrl+Shift+R)"""
+        self.app.app_state_ui.reset_video_zoom_pan()
+        self.app.logger.info("Video zoom/pan reset", extra={'status_message': True})
+
+    def _handle_toggle_fullscreen_shortcut(self):
+        """Handle keyboard shortcut for toggling fullscreen (F11)"""
+        if hasattr(self, 'fullscreen_manager') and self.fullscreen_manager:
+            self.fullscreen_manager.toggle()
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()

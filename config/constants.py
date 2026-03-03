@@ -214,6 +214,12 @@ DEFAULT_SHORTCUTS = {
     "set_chapter_end": "O",          # Out-point (end of chapter)
     "select_points_in_chapter": "E", # Select all points within chapter boundaries
 
+    # Video Zoom Controls
+    "zoom_in_video": f"{MOD_KEY}+SHIFT+EQUAL",
+    "zoom_out_video": f"{MOD_KEY}+SHIFT+MINUS",
+    "reset_video_view": f"{MOD_KEY}+SHIFT+R",
+    "toggle_fullscreen": "F11",
+
     # Tracking Tools
     "set_oscillation_area": "X",     # Toggle oscillation area drawing mode
     "set_user_roi": "U",             # Toggle User ROI drawing mode

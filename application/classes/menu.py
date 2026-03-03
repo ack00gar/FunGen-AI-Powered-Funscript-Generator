@@ -414,6 +414,7 @@ class MainMenu:
 
             self._render_file_menu(app_state, file_mgr)
             self._render_edit_menu(app_state)
+            self._render_markers_menu(app_state)
             self._render_view_menu(app_state, stage_proc)
             self._render_tools_menu(app_state, file_mgr)
             self._render_help_menu()
@@ -516,75 +517,6 @@ class MainMenu:
                     fm.export_heatmap_png(1)
                 imgui.end_menu()
 
-            # Chapters submenu
-            has_video = fm.video_path is not None
-            has_chapters = has_video and len(fs_proc.video_chapters) > 0
-            if imgui.begin_menu("Chapters..."):
-                # Save Chapters (default location next to video)
-                if _menu_item_simple("Save Chapters...", enabled=has_chapters):
-                    if self.app.gui_instance and self.app.gui_instance.file_dialog and has_chapters:
-                        chapter_mgr = self.app.chapter_manager
-                        default_path = chapter_mgr.get_default_chapter_filepath(fm.video_path)
-                        initial_dir = os.path.dirname(default_path)
-                        initial_filename = os.path.basename(default_path)
-
-                        self.app.gui_instance.file_dialog.show(
-                            is_save=True,
-                            title="Save Chapters",
-                            extension_filter="Chapter Files (*.json),*.json",
-                            callback=lambda filepath: self._save_chapters_callback(filepath),
-                            initial_path=initial_dir,
-                            initial_filename=initial_filename
-                        )
-
-                # Save Chapters As (custom location)
-                if _menu_item_simple("Save Chapters As...", enabled=has_chapters):
-                    if self.app.gui_instance and self.app.gui_instance.file_dialog and has_chapters:
-                        initial_dir = os.path.dirname(fm.video_path) if fm.video_path else os.getcwd()
-                        initial_filename = "chapters.json"
-
-                        self.app.gui_instance.file_dialog.show(
-                            is_save=True,
-                            title="Save Chapters As",
-                            extension_filter="Chapter Files (*.json),*.json",
-                            callback=lambda filepath: self._save_chapters_callback(filepath),
-                            initial_path=initial_dir,
-                            initial_filename=initial_filename
-                        )
-
-                # Load Chapters
-                if _menu_item_simple("Load Chapters...", enabled=has_video):
-                    if self.app.gui_instance and self.app.gui_instance.file_dialog and has_video:
-                        initial_dir = os.path.dirname(fm.video_path) if fm.video_path else os.getcwd()
-
-                        self.app.gui_instance.file_dialog.show(
-                            is_save=False,
-                            title="Load Chapters",
-                            extension_filter="Chapter Files (*.json),*.json",
-                            callback=lambda filepath: self._load_chapters_callback(filepath),
-                            initial_path=initial_dir
-                        )
-
-                imgui.separator()
-
-                # Backup Chapters Now
-                if _menu_item_simple("Backup Chapters Now", enabled=has_chapters):
-                    chapter_mgr = self.app.chapter_manager
-                    success = chapter_mgr.backup_chapters_manually(fs_proc.video_chapters, fm.video_path)
-                    if not success:
-                        self.app.logger.error("Failed to create chapter backup", extra={'status_message': True})
-
-                # Clear All Chapters
-                if _menu_item_simple("Clear All Chapters", enabled=has_chapters):
-                    # Confirm before clearing
-                    if hasattr(self.app, 'confirmation_needed'):
-                        self.app.confirmation_needed = ('clear_chapters', len(fs_proc.video_chapters))
-                    else:
-                        fs_proc.video_chapters.clear()
-                        self.app.logger.info("All chapters cleared", extra={'status_message': True})
-
-                imgui.end_menu()
-
             imgui.separator()
 
             if _menu_item_simple("Exit"):
@@ -635,31 +567,6 @@ class MainMenu:
                         self._render_per_timeline_undo_items(fs_proc, tl_num)
                 imgui.end_menu()
 
-            # --- Bookmarks ---
-            imgui.separator()
-            if imgui.menu_item("Add Bookmark", "B")[0]:
-                self._add_bookmark_at_playhead()
-
-            if not hasattr(app_state, 'show_bookmark_list_window'):
-                app_state.show_bookmark_list_window = False
-            clicked, val = imgui.menu_item(
-                "Bookmark List", selected=app_state.show_bookmark_list_window
-            )
-            if clicked:
-                app_state.show_bookmark_list_window = val
-
-            if imgui.begin_menu("Go to Bookmark"):
-                bm_mgr = self._get_active_bookmark_manager()
-                if bm_mgr and bm_mgr.bookmarks:
-                    for bm in bm_mgr.bookmarks:
-                        time_str = self._format_bookmark_time(bm.time_ms)
-                        label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}"
-                        if imgui.menu_item(label)[0]:
-                            self._seek_to_bookmark(bm.time_ms)
-                else:
-                    imgui.menu_item("(no bookmarks)", enabled=False)
-                imgui.end_menu()
-
             imgui.separator()
             video_loaded = self.app.processor and self.app.processor.video_info
             if imgui.menu_item("Go to Frame...", self._get_shortcut_display("go_to_frame"),
@@ -703,6 +610,15 @@ class MainMenu:
                 app_state.show_toolbar = val
                 self.app.project_manager.project_dirty = True
 
+            # Show Video Controls overlay
+            clicked, val = imgui.menu_item(
+                "Show Video Controls",
+                selected=app_state.show_video_controls_overlay
+            )
+            if clicked:
+                app_state.show_video_controls_overlay = val
+                self.app.project_manager.project_dirty = True
+
             imgui.separator()
 
             # Gauges submenu
@@ -713,11 +629,6 @@ class MainMenu:
 
             # Timelines submenu
             self._render_timelines_submenu(app_state)
-
-            imgui.separator()
-
-            # Chapters submenu
-            self._render_chapters_submenu(app_state)
 
             imgui.separator()
 
@@ -939,14 +850,43 @@ class MainMenu:
 
             imgui.end_menu()
 
-    def _render_chapters_submenu(self, app_state):
-        """Chapter-related windows and tools."""
-        pm = self.app.project_manager
-        if imgui.begin_menu("Chapters"):
-            # Chapter List window
+    def _render_markers_menu(self, app_state):
+        """Combined bookmarks + chapters menu."""
+        app = self.app
+        pm = app.project_manager
+        fm = app.file_manager
+        fs_proc = app.funscript_processor
+
+        if imgui.begin_menu("Markers", True):
+            # --- Bookmarks ---
+            if imgui.menu_item("Add Bookmark", "B")[0]:
+                self._add_bookmark_at_playhead()
+
+            if not hasattr(app_state, 'show_bookmark_list_window'):
+                app_state.show_bookmark_list_window = False
+            clicked, val = imgui.menu_item(
+                "Bookmark List", selected=app_state.show_bookmark_list_window
+            )
+            if clicked:
+                app_state.show_bookmark_list_window = val
+
+            if imgui.begin_menu("Go to Bookmark"):
+                bm_mgr = self._get_active_bookmark_manager()
+                if bm_mgr and bm_mgr.bookmarks:
+                    for bm in bm_mgr.bookmarks:
+                        time_str = self._format_bookmark_time(bm.time_ms)
+                        label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}"
+                        if imgui.menu_item(label)[0]:
+                            self._seek_to_bookmark(bm.time_ms)
+                else:
+                    imgui.menu_item("(no bookmarks)", enabled=False)
+                imgui.end_menu()
+
+            imgui.separator()
+
+            # --- Chapters Windows ---
             if not hasattr(app_state, "show_chapter_list_window"):
                 app_state.show_chapter_list_window = False
-
             clicked, val = imgui.menu_item(
                 "Chapter List", selected=app_state.show_chapter_list_window
             )
@@ -954,16 +894,74 @@ class MainMenu:
                 app_state.show_chapter_list_window = val
                 pm.project_dirty = True
 
-            # Chapter Type Manager window
             if not hasattr(app_state, "show_chapter_type_manager"):
                 app_state.show_chapter_type_manager = False
-
             clicked, val = imgui.menu_item(
                 "Chapter Type Manager", selected=app_state.show_chapter_type_manager
             )
             if clicked:
                 app_state.show_chapter_type_manager = val
                 pm.project_dirty = True
+
+            imgui.separator()
+
+            # --- Chapters I/O ---
+            has_video = fm.video_path is not None
+            has_chapters = has_video and len(fs_proc.video_chapters) > 0
+
+            if _menu_item_simple("Save Chapters...", enabled=has_chapters):
+                if self.app.gui_instance and self.app.gui_instance.file_dialog and has_chapters:
+                    chapter_mgr = self.app.chapter_manager
+                    default_path = chapter_mgr.get_default_chapter_filepath(fm.video_path)
+                    initial_dir = os.path.dirname(default_path)
+                    initial_filename = os.path.basename(default_path)
+                    self.app.gui_instance.file_dialog.show(
+                        is_save=True,
+                        title="Save Chapters",
+                        extension_filter="Chapter Files (*.json),*.json",
+                        callback=lambda filepath: self._save_chapters_callback(filepath),
+                        initial_path=initial_dir,
+                        initial_filename=initial_filename
+                    )
+
+            if _menu_item_simple("Save Chapters As...", enabled=has_chapters):
+                if self.app.gui_instance and self.app.gui_instance.file_dialog and has_chapters:
+                    initial_dir = os.path.dirname(fm.video_path) if fm.video_path else os.getcwd()
+                    initial_filename = "chapters.json"
+                    self.app.gui_instance.file_dialog.show(
+                        is_save=True,
+                        title="Save Chapters As",
+                        extension_filter="Chapter Files (*.json),*.json",
+                        callback=lambda filepath: self._save_chapters_callback(filepath),
+                        initial_path=initial_dir,
+                        initial_filename=initial_filename
+                    )
+
+            if _menu_item_simple("Load Chapters...", enabled=has_video):
+                if self.app.gui_instance and self.app.gui_instance.file_dialog and has_video:
+                    initial_dir = os.path.dirname(fm.video_path) if fm.video_path else os.getcwd()
+                    self.app.gui_instance.file_dialog.show(
+                        is_save=False,
+                        title="Load Chapters",
+                        extension_filter="Chapter Files (*.json),*.json",
+                        callback=lambda filepath: self._load_chapters_callback(filepath),
+                        initial_path=initial_dir
+                    )
+
+            imgui.separator()
+
+            if _menu_item_simple("Backup Chapters Now", enabled=has_chapters):
+                chapter_mgr = self.app.chapter_manager
+                success = chapter_mgr.backup_chapters_manually(fs_proc.video_chapters, fm.video_path)
+                if not success:
+                    self.app.logger.error("Failed to create chapter backup", extra={'status_message': True})
+
+            if _menu_item_simple("Clear All Chapters", enabled=has_chapters):
+                if hasattr(self.app, 'confirmation_needed'):
+                    self.app.confirmation_needed = ('clear_chapters', len(fs_proc.video_chapters))
+                else:
+                    fs_proc.video_chapters.clear()
+                    self.app.logger.info("All chapters cleared", extra={'status_message': True})
 
             imgui.end_menu()
 
