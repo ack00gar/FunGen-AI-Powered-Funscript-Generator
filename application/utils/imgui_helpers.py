@@ -3,6 +3,12 @@
 import imgui
 
 
+def tooltip_if_hovered(text):
+    """Show a tooltip when the last imgui item is hovered."""
+    if imgui.is_item_hovered():
+        imgui.set_tooltip(text)
+
+
 class DisabledScope:
     """Context manager to disable imgui widgets with reduced alpha."""
     __slots__ = ("active",)

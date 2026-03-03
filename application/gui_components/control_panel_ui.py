@@ -4,7 +4,7 @@ import config
 from config.constants_colors import CurrentTheme
 from application.utils import get_icon_texture_manager, primary_button_style, destructive_button_style
 from application.utils.feature_detection import is_feature_available as _is_feature_available
-from application.utils.imgui_helpers import DisabledScope as _DisabledScope
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
 from application.utils.section_card import section_card
 
 # Import dynamic tracker discovery
@@ -23,11 +23,8 @@ from .cp_execution_ui import ExecutionMixin
 from .cp_tracker_settings_ui import TrackerSettingsMixin
 from .cp_device_control_ui import DeviceControlMixin
 from .cp_streamer_ui import StreamerMixin
+from .cp_batch_ui import BatchMixin
 from .cp_metadata_ui import MetadataEditorMixin
-
-def _tooltip_if_hovered(text):
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(text)
 
 def _readonly_input(label_id, value, width=-1):
     if width is not None and width >= 0:
@@ -45,6 +42,7 @@ class ControlPanelUI(
     TrackerSettingsMixin,
     DeviceControlMixin,
     StreamerMixin,
+    BatchMixin,
     MetadataEditorMixin,
 ):
     def __init__(self, app):
@@ -92,6 +90,9 @@ class ControlPanelUI(
         self._discovered_ossm_devices = []
         self._ossm_scan_performed = False
 
+        # Unified axis configuration panel state
+        self._axis_details_expanded = {}  # keyed by "{device_id}_{channel}"
+
         # Streamer attributes (supporter feature)
         self._native_sync_manager = None
         self._prev_client_count = 0
@@ -127,6 +128,17 @@ class ControlPanelUI(
         self._tracker_filter_open = False
 
     # ------- Helpers -------
+
+    def _render_addon_version_label(self, module_name, display_name):
+        """Render a dim version label for an addon module."""
+        try:
+            mod = __import__(module_name)
+            version = getattr(mod, '__version__', 'unknown')
+            imgui.text_colored(f"{display_name} v{version}", 0.5, 0.5, 0.5, 1.0)
+            imgui.spacing()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Failed to read {module_name} version: {e}")
 
     def _try_reinitialize_tracker_ui(self):
         """Try to initialize or reinitialize the dynamic tracker UI."""
@@ -399,7 +411,20 @@ class ControlPanelUI(
             if available:
                 imgui.set_tooltip(tooltip)
             else:
-                imgui.set_tooltip(f"{tooltip}\n(Available for supporters)")
+                # Show FeatureInfo description alongside locked message
+                _SIDEBAR_FEATURE_MAP = {
+                    "device_control": "device_control",
+                    "native_sync": "streamer",
+                    "supporter_batch": "patreon_features",
+                }
+                feat_name = _SIDEBAR_FEATURE_MAP.get(key)
+                desc = ""
+                if feat_name:
+                    from application.utils.feature_detection import get_feature_detector
+                    info = get_feature_detector().get_feature_info(feat_name)
+                    if info:
+                        desc = f"\n{info.description}"
+                imgui.set_tooltip(f"{tooltip}{desc}\n(Available for supporters)")
             # Hover bg (drawn before text so text stays on top)
             hover_bg = imgui.get_color_u32_rgba(*SidebarColors.HOVER_BG)
             draw_list.add_rect_filled(
@@ -679,18 +704,12 @@ class ControlPanelUI(
             if self._feat_device:
                 self._render_device_control_tab()
             else:
-                self._render_locked_feature_placeholder(
-                    "Device Control",
-                    "Control hardware devices in real-time during playback. "
-                    "Supports OSR, Buttplug, and other haptic devices.")
+                self._render_device_control_preview()
         elif tab_selected == "native_sync":
             if self._feat_streamer:
                 self._render_native_sync_tab()
             else:
-                self._render_locked_feature_placeholder(
-                    "Streamer",
-                    "Stream video with synchronized funscript to browsers and VR headsets. "
-                    "Built-in web server with HereSphere integration.")
+                self._render_streamer_preview()
         elif tab_selected == "metadata":
             self._render_metadata_tab()
         elif tab_selected == "supporter_batch":
@@ -716,98 +735,164 @@ class ControlPanelUI(
             imgui.pop_style_color()
             imgui.spacing()
 
-    def _render_supporter_batch_tab(self):
-        """Render the Patreon Exclusive tab (supporter feature)."""
-        if not self._feat_supporter:
-            self._render_locked_feature_placeholder(
-                "Patreon Exclusive (monthly ko-fi supporter)",
-                "Process multiple videos in sequence with a batch queue. "
-                "Set up watched folders for automatic processing.")
-            return
-        # Version info (top of tab, consistent with other supporter modules)
-        try:
-            import patreon_features
-            version = getattr(patreon_features, '__version__', 'unknown')
-            imgui.text_colored(f"Patreon Exclusive v{version}", 0.5, 0.5, 0.5, 1.0)
-            imgui.spacing()
-        except Exception:
-            pass
-        try:
-            from patreon_features.batch.batch_ui import render_batch_panel
-            render_batch_panel(self.app)
-        except Exception as e:
-            imgui.text_colored("Patreon module error", 0.9, 0.3, 0.3, 1.0)
-            imgui.text_wrapped(str(e))
-
+    def _render_addon_promo_banner(self, feature_name, description):
+        """Gold 'Available for Supporters' banner with feature description."""
         imgui.spacing()
-        self._render_patreon_exclusive_extras()
+        # Gold accent bar
+        draw_list = imgui.get_window_draw_list()
+        cursor = imgui.get_cursor_screen_pos()
+        avail_w = imgui.get_content_region_available_width()
+        bar_color = imgui.get_color_u32_rgba(0.9, 0.75, 0.3, 0.8)
+        draw_list.add_rect_filled(cursor[0], cursor[1], cursor[0] + avail_w, cursor[1] + 3, bar_color, 1.0)
+        imgui.dummy(0, 6)
 
-    def _render_patreon_exclusive_extras(self):
-        """Render additional Patreon-exclusive feature sections."""
-        # --- Recording Mode ---
-        with section_card("Recording Mode##patreon_rec", open_by_default=False) as _open:
-            if _open:
-                imgui.text_wrapped(
-                    "Draw funscripts by moving your mouse while video plays. "
-                    "Points are auto-simplified with RDP."
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.3, 1.0)
+        imgui.text(f"{feature_name} — Available for Supporters")
+        imgui.pop_style_color()
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+        imgui.text_wrapped(description)
+        imgui.pop_style_color()
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+    def _render_device_control_preview(self):
+        """Render a grayed-out preview of the Device Control tab for non-supporters."""
+        self._render_addon_promo_banner(
+            "Device Control",
+            "Control hardware devices in real-time during playback. "
+            "Supports OSR2/OSR6, Buttplug.io, Handy, and OSSM devices."
+        )
+        with _DisabledScope(True):
+            imgui.text_colored("Device: Not Connected", 0.7, 0.3, 0.3, 1.0)
+            imgui.separator()
+            imgui.text("Connect a Device:")
+            imgui.spacing()
+
+            # OSR2/OSR6
+            if imgui.collapsing_header("OSR2/OSR6 (USB)##PreviewOSR", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                imgui.text("Serial Port:")
+                imgui.push_item_width(150)
+                imgui.combo("##PreviewOSRPort", 0, ["Select port..."])
+                imgui.pop_item_width()
+                imgui.same_line()
+                imgui.button("Scan Ports")
+
+            # Buttplug.io
+            if imgui.collapsing_header("Buttplug.io (Universal)##PreviewButtplug", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                imgui.text("Server Address:")
+                imgui.push_item_width(200)
+                imgui.input_text("##PreviewBPAddr", "ws://127.0.0.1:12345", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                imgui.pop_item_width()
+                imgui.button("Connect##PreviewBPConnect")
+
+            # Handy
+            if imgui.collapsing_header("Handy (Direct)##PreviewHandy", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                imgui.text("Connection Key:")
+                imgui.push_item_width(200)
+                imgui.input_text("##PreviewHandyKey", "", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                imgui.pop_item_width()
+                imgui.button("Connect##PreviewHandyConnect")
+
+            # OSSM
+            if imgui.collapsing_header("OSSM (Bluetooth)##PreviewOSSM", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                imgui.button("Scan for OSSM Devices")
+
+            imgui.separator()
+            # Axis Configuration
+            if imgui.collapsing_header("Axis Configuration##PreviewAxisConfig")[0]:
+                imgui.text_colored("Connect a device to configure axes", 0.5, 0.5, 0.5, 1.0)
+
+            # Live Control Integration
+            if imgui.collapsing_header("Live Control Integration##PreviewLiveControl")[0]:
+                imgui.text_colored("Enables real-time device control during video playback", 0.5, 0.5, 0.5, 1.0)
+
+            # Device Playback
+            if imgui.collapsing_header("Device Playback##PreviewPlayback")[0]:
+                imgui.text_colored("Play funscripts on connected devices", 0.5, 0.5, 0.5, 1.0)
+
+    def _render_streamer_preview(self):
+        """Render a grayed-out preview of the Streamer tab for non-supporters."""
+        self._render_addon_promo_banner(
+            "Video Streamer",
+            "Stream video to browsers and VR headsets with frame-perfect synchronization. "
+            "Built-in web server with HereSphere, XBVR, and Stash integration."
+        )
+        with _DisabledScope(True):
+            # Server Control
+            if imgui.collapsing_header("Server Control##PreviewSyncControl", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                imgui.text_colored(
+                    "Stream video to browsers/VR headsets with frame-perfect synchronization. "
+                    "Supports zoom/pan controls, speed modes, and interactive device control.",
+                    0.7, 0.7, 0.7
                 )
+                imgui.pop_text_wrap_pos()
                 imgui.spacing()
-                imgui.text_colored("Activate via timeline toolbar (REC mode)", 0.7, 0.7, 0.7, 1.0)
+                imgui.button("Start Streaming Server", width=-1)
 
-        # --- Dynamic Injection ---
-        with section_card("Dynamic Injection##patreon_inj", open_by_default=False) as _open:
-            if _open:
-                imgui.text_wrapped(
-                    "Add intermediate points to smooth out segments. "
-                    "Supports linear, cosine, and cubic interpolation."
+            # Display Options
+            if imgui.collapsing_header("Display Options##PreviewSyncDisplay")[0]:
+                imgui.checkbox("Auto-hide Video Feed while streaming##PreviewAutoHide", False)
+
+            # Rolling Autotune
+            if imgui.collapsing_header("Rolling Autotune (Live Tracking)##PreviewRollingAT")[0]:
+                imgui.checkbox("Enable Rolling Autotune##PreviewRAT", False)
+                imgui.text("Interval (seconds):")
+                imgui.push_item_width(100)
+                imgui.slider_float("##PreviewRATInterval", 10.0, 5.0, 60.0, "%.0f")
+                imgui.pop_item_width()
+
+            # XBVR Integration
+            if imgui.collapsing_header("XBVR Integration##PreviewXBVR", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                imgui.text_colored(
+                    "Browse your XBVR library in the VR viewer with scene thumbnails and funscript availability.",
+                    0.7, 0.7, 0.7
                 )
+                imgui.pop_text_wrap_pos()
                 imgui.spacing()
-                imgui.text_colored("Right-click a segment in Injection mode on the timeline", 0.7, 0.7, 0.7, 1.0)
+                imgui.text("XBVR Host/IP:")
+                imgui.push_item_width(200)
+                imgui.input_text("##PreviewXBVRHost", "localhost", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                imgui.pop_item_width()
+                imgui.text("XBVR Port:")
+                imgui.push_item_width(100)
+                imgui.input_text("##PreviewXBVRPort", "9999", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                imgui.pop_item_width()
 
-        # --- Pattern Library ---
-        with section_card("Pattern Library##patreon_pat", open_by_default=False) as _open:
-            if _open:
-                imgui.text_wrapped(
-                    "Save and reuse movement patterns (soft bounces, sine waves, custom motions). "
-                    "Apply with speed and amplitude scaling."
+            # Stash Integration
+            if imgui.collapsing_header("Stash Integration##PreviewStash", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                imgui.text_colored(
+                    "Browse and load videos from your Stash library directly in the VR viewer.",
+                    0.7, 0.7, 0.7
                 )
+                imgui.pop_text_wrap_pos()
                 imgui.spacing()
-                pattern_lib = getattr(self.app, 'pattern_library', None)
-                if pattern_lib:
-                    patterns = pattern_lib.list_patterns()
-                    if patterns:
-                        imgui.text(f"Saved patterns: {len(patterns)}")
-                        for p_name in patterns:
-                            imgui.bullet_text(p_name)
-                    else:
-                        imgui.text_colored("No patterns saved yet", 0.5, 0.5, 0.5, 1.0)
-                    imgui.spacing()
-                    imgui.text_colored("Select points on timeline > right-click > Save Selection as Pattern", 0.7, 0.7, 0.7, 1.0)
-                else:
-                    imgui.text_colored("Pattern library not loaded", 0.5, 0.5, 0.5, 1.0)
+                imgui.text("Stash Host/IP:")
+                imgui.push_item_width(200)
+                imgui.input_text("##PreviewStashHost", "localhost", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                imgui.pop_item_width()
+                imgui.text("Stash Port:")
+                imgui.push_item_width(100)
+                imgui.input_text("##PreviewStashPort", "9999", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                imgui.pop_item_width()
 
-        # --- Multi-Axis Generation ---
-        with section_card("Multi-Axis Generation##patreon_ma", open_by_default=False) as _open:
-            if _open:
-                imgui.text_wrapped(
-                    "Auto-generate Roll, Pitch, Twist, Sway, and Surge axes from your stroke axis. "
-                    "Heuristic mode derives motion from stroke data. Video-aware mode uses body pose keypoints."
-                )
-                imgui.spacing()
-                imgui.text_colored("Right-click timeline > Generate Axis > choose axis", 0.7, 0.7, 0.7, 1.0)
+            # Requirements
+            if imgui.collapsing_header("Requirements##PreviewSyncReqs", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                imgui.bullet_text("Ports 8080 (HTTP) and 8765 (WebSocket) available")
+                imgui.bullet_text("Browser with HTML5 video support")
+                imgui.bullet_text("Video can be loaded before or after starting the server")
 
-        # --- Live Device Preview ---
-        with section_card("Live Device Preview##patreon_ldp", open_by_default=False) as _open:
-            if _open:
-                imgui.text_wrapped(
-                    "Feel cursor position on your device while editing, without playing the video. "
-                    "Rate-limited to avoid flooding device commands."
-                )
-                imgui.spacing()
-                imgui.text_colored("Enable in Device Control tab > Live Control Integration", 0.7, 0.7, 0.7, 1.0)
-
-        # BPM/Tempo Overlay removed from patreon extras — now a core feature
-        # (controls in timeline toolbar)
+            # Features
+            if imgui.collapsing_header("Features##PreviewSyncFeatures")[0]:
+                imgui.bullet_text("Native hardware H.265/AV1 decode")
+                imgui.bullet_text("Zoom/Pan controls (+/- and WASD keys)")
+                imgui.bullet_text("Speed modes (Real Time / Slo Mo)")
+                imgui.bullet_text("Real-time FPS and resolution stats")
+                imgui.bullet_text("Interactive device control")
+                imgui.bullet_text("Funscript visualization graph")
 
     # ------- Tab orchestrators (call into mixins) -------
 

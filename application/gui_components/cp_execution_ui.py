@@ -3,12 +3,7 @@ import imgui
 import os
 from config.constants_colors import CurrentTheme
 from application.utils import primary_button_style, destructive_button_style
-from application.utils.imgui_helpers import DisabledScope as _DisabledScope
-
-
-def _tooltip_if_hovered(text):
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(text)
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
 
 
 class ExecutionMixin:

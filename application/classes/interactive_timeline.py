@@ -90,6 +90,7 @@ class InteractiveFunscriptTimeline:
         self.range_end_time: float = 0
 
         self.is_hovered: bool = False  # Set each frame; read by status strip hints
+        self._alt_arrow_panning: bool = False  # Track Alt+Arrow pan for seek-on-release
         self._hovered_point_idx: int = -1  # For hover tooltip stats
 
         self.context_menu_target_idx: int = -1
@@ -599,12 +600,30 @@ class InteractiveFunscriptTimeline:
                      mods["shift"] == io.key_shift)
             return held and match
 
-        # 1. Pan Left/Right (Arrow keys) - persistent while held
+        # 1. Pan Left/Right (Arrow keys) - persistent while held, seek on release
         pan_speed = self.app.app_settings.get("timeline_pan_speed_multiplier", 5) * app_state.timeline_zoom_factor_ms_per_px
+        panning_now = False
         if check_key_held("pan_timeline_left", "ALT+LEFT_ARROW"):
             app_state.timeline_pan_offset_ms -= pan_speed
+            panning_now = True
         if check_key_held("pan_timeline_right", "ALT+RIGHT_ARROW"):
             app_state.timeline_pan_offset_ms += pan_speed
+            panning_now = True
+
+        if panning_now:
+            self._alt_arrow_panning = True
+        elif self._alt_arrow_panning:
+            # Just released — seek to center of visible timeline
+            self._alt_arrow_panning = False
+            if self.app.processor and self.app.processor.fps > 0:
+                # Estimate visible width from window width (timeline spans most of it)
+                tl_width_px = max(200, app_state.window_width - 50)
+                visible_width_ms = tl_width_px * app_state.timeline_zoom_factor_ms_per_px
+                center_ms = app_state.timeline_pan_offset_ms + visible_width_ms / 2
+                target_frame = max(0, int(center_ms * self.app.processor.fps / 1000.0))
+                if self.app.processor.total_frames > 0:
+                    target_frame = min(target_frame, self.app.processor.total_frames - 1)
+                self.app.event_handlers.seek_video_with_sync(target_frame)
 
         # 2. Select All (Ctrl+A)
         if check_shortcut("select_all_points", "CTRL+A"):
@@ -1963,6 +1982,30 @@ class InteractiveFunscriptTimeline:
         imgui.text("|")
         imgui.same_line()
 
+        _MODE_DESCRIPTIONS = {
+            TimelineMode.SELECT: (
+                "Select Mode\n"
+                "Click to add points. Click+drag to move.\n"
+                "Alt+drag for range selection. Ctrl+click for multi-select."
+            ),
+            TimelineMode.ALTERNATING: (
+                "Alternating Mode\n"
+                "Click to place alternating high/low points.\n"
+                "Top/Bottom values adjustable via sliders.\n"
+                "Great for quickly creating rhythmic stroke patterns."
+            ),
+            TimelineMode.INJECTION: (
+                "Injection Mode (Supporter)\n"
+                "Right-click a segment to inject intermediate points.\n"
+                "Supports linear, cosine, and cubic interpolation."
+            ),
+            TimelineMode.RECORDING: (
+                "Recording Mode (Supporter)\n"
+                "Draw funscripts by moving your mouse while video plays.\n"
+                "Points auto-simplified with RDP. Press Record to start."
+            ),
+        }
+
         mode_labels = ["Select", "Alternating"]
         # Add patreon-exclusive modes
         _is_patreon = _is_feature_available("patreon_features")
@@ -1985,7 +2028,7 @@ class InteractiveFunscriptTimeline:
         if changed_mode:
             self._mode = mode_map[new_mode_idx]
         if imgui.is_item_hovered():
-            imgui.set_tooltip("Timeline editing mode")
+            imgui.set_tooltip(_MODE_DESCRIPTIONS.get(self._mode, "Timeline editing mode"))
 
         # Mode-specific toolbar additions
         if self._mode == TimelineMode.ALTERNATING:

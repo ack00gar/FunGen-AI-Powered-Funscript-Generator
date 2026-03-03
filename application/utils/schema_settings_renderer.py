@@ -16,11 +16,7 @@ On change the value is written to *app_settings* **and**
 """
 
 import imgui
-
-
-def _tooltip_if_hovered(text):
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(text)
+from application.utils.imgui_helpers import tooltip_if_hovered as _tooltip_if_hovered
 
 
 def render_schema_settings(schema, app_settings, tracker_instance) -> bool:
