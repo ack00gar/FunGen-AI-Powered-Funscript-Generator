@@ -1,6 +1,16 @@
 """Device Control tab UI mixin for ControlPanelUI."""
 import imgui
 from application.utils.imgui_helpers import tooltip_if_hovered as _tooltip_if_hovered
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope
+from application.utils.section_card import section_card as _section_card
+from application.utils import primary_button_style, destructive_button_style
+
+# Canonical TCode channel → friendly name mapping (used across axis config UI)
+_CHANNEL_FRIENDLY = {
+    "L0": "Stroke", "L1": "Sway", "L2": "Surge",
+    "R0": "Twist", "R1": "Roll", "R2": "Pitch",
+    "V0": "Vibration", "V1": "Pump",
+}
 
 
 class DeviceControlMixin:
@@ -29,14 +39,38 @@ class DeviceControlMixin:
                 self._render_device_control_content()
             else:
                 imgui.text("Device Control system failed to initialize.")
-                imgui.text_colored("Check logs for details.", 1.0, 0.5, 0.0)
+                err = getattr(self, '_device_control_init_error', None)
+                if err is not None:
+                    imgui.text_colored(f"Error: {err}", 1.0, 0.4, 0.4, 1.0)
+                    if isinstance(err, (AttributeError, TypeError)):
+                        imgui.spacing()
+                        imgui.text_colored("This looks like a version mismatch.", 1.0, 0.85, 0.2, 1.0)
+                        imgui.text_colored("Did you update to the latest Device Control version?", 1.0, 0.85, 0.2, 1.0)
+                        imgui.text_colored("Install the latest device_control zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+                    elif isinstance(err, (ImportError, ModuleNotFoundError)):
+                        imgui.spacing()
+                        imgui.text_colored("Device Control addon not found or incomplete.", 1.0, 0.85, 0.2, 1.0)
+                        imgui.text_colored("Install the latest device_control zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+                    else:
+                        imgui.text_colored("Check logs for details.", 1.0, 0.5, 0.0, 1.0)
+                else:
+                    imgui.text_colored("Check logs for details.", 1.0, 0.5, 0.0, 1.0)
+                imgui.spacing()
                 if imgui.button("Retry Initialization"):
-                    # Reset initialization flag to try again
                     self._device_control_initialized = False
+                    self._device_control_init_error = None
 
         except Exception as e:
-            imgui.text(f"Error in Device Control: {e}")
-            imgui.text_colored("See logs for full details.", 1.0, 0.0, 0.0)
+            imgui.text_colored(f"Error in Device Control: {e}", 1.0, 0.4, 0.4, 1.0)
+            if isinstance(e, (AttributeError, TypeError)):
+                imgui.spacing()
+                imgui.text_colored("This looks like a version mismatch.", 1.0, 0.85, 0.2, 1.0)
+                imgui.text_colored("Did you update to the latest Device Control version?", 1.0, 0.85, 0.2, 1.0)
+                imgui.text_colored("Install the latest device_control zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+            elif isinstance(e, (ImportError, ModuleNotFoundError)):
+                imgui.text_colored("Device Control addon not found or incomplete.", 1.0, 0.85, 0.2, 1.0)
+                imgui.text_colored("Install the latest device_control zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+            imgui.text_colored("See logs for full details.", 0.7, 0.7, 0.7, 1.0)
 
     def _initialize_device_control(self):
         """Initialize device control system for the control panel."""
@@ -135,6 +169,7 @@ class DeviceControlMixin:
             self.app.logger.error(f"Failed to initialize Device Control: {e}")
             import traceback
             self.app.logger.error(f"Full traceback: {traceback.format_exc()}")
+            self._device_control_init_error = e
             self._device_control_initialized = True  # Mark as attempted
 
     def _update_existing_tracker_managers(self):
@@ -196,53 +231,64 @@ class DeviceControlMixin:
             import traceback
             self.app.logger.error(f"Traceback: {traceback.format_exc()}")
 
+    def _get_connected_device_type(self):
+        """Return the device type string for the currently connected device, or ''."""
+        if not self.device_manager.is_connected():
+            return ""
+        for did in self.device_manager.connected_devices:
+            return self.device_manager.get_device_type_for_id(did)
+        return ""
+
     def _render_device_control_content(self):
         """Render the main device control interface with improved UX."""
         # Version info (top of tab, consistent with other supporter modules)
         self._render_addon_version_label("device_control", "Device Control")
 
-        # SIMPLIFIED: Compact connection status (always visible)
+        # Compact connection status (always visible, no card needed)
         self._render_compact_connection_status()
 
         imgui.separator()
 
-        # SIMPLIFIED: Quick controls when connected (always visible)
-        if self.device_manager.is_connected():
-            self._render_quick_controls()
-            imgui.separator()
+        _conn_type = self._get_connected_device_type()
 
-        # Device Types (collapsible)
-        if not self.device_manager.is_connected():
-            imgui.text("Connect a Device:")
-            imgui.spacing()
+        # Quick controls when connected
+        if _conn_type:
+            with _section_card("Quick Controls##QuickCtrl", tier="primary") as is_open:
+                if is_open:
+                    self._render_quick_controls()
 
-        # OSR2/OSR6 Devices
-        if imgui.collapsing_header("OSR2/OSR6 (USB)##OSRDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_osr_controls()
+        # Device type sections
+        _osr_open = _conn_type == "osr" or not _conn_type
+        with _section_card("OSR2/OSR6 (USB)##OSRDevices", tier="primary", open_by_default=_osr_open) as is_open:
+            if is_open:
+                self._render_osr_controls()
 
-        # Buttplug.io Universal Devices
-        if imgui.collapsing_header("Buttplug.io (Universal)##ButtplugDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_buttplug_controls()
+        _bp_open = _conn_type in ("buttplug_linear", "buttplug_vibrator")
+        with _section_card("Buttplug.io (Universal)##ButtplugDevices", tier="primary", open_by_default=_bp_open) as is_open:
+            if is_open:
+                self._render_buttplug_controls()
 
-        # Handy Direct Control
-        if imgui.collapsing_header("Handy (Direct)##HandyDirect", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_handy_controls()
+        _handy_open = _conn_type == "handy"
+        with _section_card("Handy : Direct / Streaming##HandyDirect", tier="primary", open_by_default=_handy_open) as is_open:
+            if is_open:
+                self._render_handy_controls()
 
-        # OSSM BLE Direct Control
-        if imgui.collapsing_header("OSSM (Bluetooth)##OSSMDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_ossm_controls()
+        _ossm_open = _conn_type == "ossm"
+        with _section_card("OSSM (Bluetooth)##OSSMDevices", tier="primary", open_by_default=_ossm_open) as is_open:
+            if is_open:
+                self._render_ossm_controls()
 
-        # Axis Configuration (shown when connected — unified panel)
-        if self.device_manager.is_connected():
-            imgui.separator()
-            if imgui.collapsing_header("Axis Configuration##AxisConfig", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                self._render_axis_configuration()
+        # Axis Configuration (shown when connected)
+        if _conn_type:
+            with _section_card("Axis Configuration##AxisConfig", tier="primary") as is_open:
+                if is_open:
+                    self._render_axis_configuration()
 
-        # SIMPLIFIED: All settings in one collapsible section
-        if self.device_manager.is_connected():
-            imgui.separator()
-            if imgui.collapsing_header("Advanced Settings##DeviceAdvancedAll")[0]:
-                self._render_all_advanced_settings()
+        # Advanced Settings
+        if _conn_type:
+            with _section_card("Advanced Settings##DeviceAdvancedAll", tier="secondary", open_by_default=False) as is_open:
+                if is_open:
+                    self._render_all_advanced_settings()
 
     def _render_compact_connection_status(self):
         """Render compact connection status (always visible)."""
@@ -325,11 +371,6 @@ class DeviceControlMixin:
 
         imgui.spacing()
 
-        # Movement recording
-        self._render_recording_controls()
-
-        imgui.spacing()
-
         # Bookmark navigation
         self._render_bookmark_nav()
 
@@ -343,62 +384,7 @@ class DeviceControlMixin:
             self.device_manager.update_position(new_pos, 50.0)
         _tooltip_if_hovered("Drag to test device movement")
 
-    def _render_recording_controls(self):
-        """Render movement recording controls in Quick Controls."""
-        try:
-            recorder = getattr(self.device_manager, 'recorder', None)
-            if not recorder:
-                return
 
-            if recorder.is_recording:
-                # Recording active — show red indicator + elapsed time + stop button
-                elapsed_s = recorder.duration_ms / 1000.0
-                imgui.text_colored("REC", 1.0, 0.2, 0.2)
-                imgui.same_line()
-                imgui.text(f"{elapsed_s:.1f}s ({recorder.action_count} pts)")
-                imgui.same_line()
-                if imgui.small_button("Stop Recording##RecStop"):
-                    recorder.stop()
-                    self._export_recording()
-            else:
-                if imgui.small_button("Record Movement##RecStart"):
-                    proc = self.app.processor
-                    video_time_ms = 0
-                    if proc and proc.is_video_open():
-                        fps = proc.fps or 30.0
-                        video_time_ms = int((proc.current_frame_index / fps) * 1000)
-                    recorder.start(video_time_ms)
-                _tooltip_if_hovered("Record device positions during playback and export as .funscript")
-        except Exception:
-            pass
-
-    def _export_recording(self):
-        """Export recorded movement as funscript file."""
-        try:
-            recorder = self.device_manager.recorder
-            if recorder.action_count == 0:
-                self.app.logger.warning("No actions recorded — nothing to export")
-                return
-
-            # Build default filename from video name
-            import os
-            proc = self.app.processor
-            base_name = "recorded"
-            if proc and proc.is_video_open() and hasattr(proc, 'video_path'):
-                base_name = os.path.splitext(os.path.basename(proc.video_path))[0]
-
-            default_path = os.path.join(
-                os.path.dirname(getattr(proc, 'video_path', '.') or '.'),
-                f"{base_name}_recorded.funscript"
-            )
-
-            recorder.save_funscript(default_path)
-            self.app.logger.info(
-                f"Recording exported: {default_path} ({recorder.action_count} actions)",
-                extra={'status_message': True, 'duration': 5.0}
-            )
-        except Exception as e:
-            self.app.logger.error(f"Failed to export recording: {e}")
 
     def _render_bookmark_nav(self):
         """Render prev/next bookmark navigation buttons."""
@@ -453,13 +439,7 @@ class DeviceControlMixin:
         try:
             from device_control.axis_routing import CHANNEL_FRIENDLY_NAMES
         except ImportError:
-            CHANNEL_FRIENDLY_NAMES = {
-                "L0": "Stroke", "L1": "Sway", "L2": "Surge",
-                "R0": "Twist", "R1": "Roll", "R2": "Pitch",
-                "V0": "Vibration", "V1": "Pump",
-            }
-
-        imgui.indent(10)
+            CHANNEL_FRIENDLY_NAMES = _CHANNEL_FRIENDLY
 
         # Get current timeline axis assignments
         axis_assignments = {}
@@ -486,6 +466,7 @@ class DeviceControlMixin:
 
             channels = DEVICE_CHANNELS.get(device_type, ["L0"])
             is_osr = device_type == "osr"
+            is_multi_axis = is_osr  # OSR has multiple TCode channels
 
             # Device header
             device_name = self.device_manager.get_connected_device_name()
@@ -520,7 +501,6 @@ class DeviceControlMixin:
                 current_profile_name = self.app.app_settings.get("device_control_selected_profile", "Balanced")
                 osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
                 if current_profile_name in osr_profiles:
-                    # Check if routes are at defaults (0/100)
                     all_default = all(
                         getattr(r, 'min_value', 0.0) == 0.0 and getattr(r, 'max_value', 100.0) == 100.0
                         for r in config.routes.values()
@@ -530,46 +510,47 @@ class DeviceControlMixin:
 
             imgui.spacing()
 
-            # Column headers
-            imgui.columns(6, f"axis_config_table_{device_id}", True)
-            imgui.set_column_width(0, 80)   # Channel
-            imgui.set_column_width(1, 160)  # Source
-            imgui.set_column_width(2, 80)   # Min
-            imgui.set_column_width(3, 80)   # Max
-            imgui.set_column_width(4, 30)   # En
-            imgui.set_column_width(5, 30)   # Inv
-
-            imgui.text("Channel")
-            imgui.next_column()
-            imgui.text("Source")
-            imgui.next_column()
-            imgui.text("Min %")
-            imgui.next_column()
-            imgui.text("Max %")
-            imgui.next_column()
-            imgui.text("En")
-            imgui.next_column()
-            imgui.text("Inv")
-            imgui.next_column()
-            imgui.separator()
-
+            # Ensure all channels have routes
             for ch in channels:
-                route = config.routes.get(ch)
-                if not route:
-                    route = AxisRoute(device_channel=ch, source_axis="none", enabled=False)
-                    config.routes[ch] = route
-                self._render_axis_row(device_id, ch, route, source_options, source_labels, router, is_osr)
+                if ch not in config.routes:
+                    config.routes[ch] = AxisRoute(device_channel=ch, source_axis="none", enabled=False)
 
-            imgui.columns(1)
+            if is_multi_axis:
+                # Multi-axis table: 4 columns (Channel, Source, Range, En)
+                imgui.columns(4, f"axis_config_table_{device_id}", True)
+                imgui.set_column_width(0, 80)   # Channel
+                imgui.set_column_width(1, 140)  # Source
+                imgui.set_column_width(2, 150)  # Range (dual slider)
+                imgui.set_column_width(3, 30)   # En
 
-            # Expandable details per axis
+                imgui.text("Channel")
+                imgui.next_column()
+                imgui.text("Source")
+                imgui.next_column()
+                imgui.text("Range")
+                imgui.next_column()
+                imgui.text("En")
+                imgui.next_column()
+                imgui.separator()
+
+                for ch in channels:
+                    route = config.routes[ch]
+                    self._render_axis_row_multi(device_id, ch, route, source_options, source_labels, router, is_osr)
+
+                imgui.columns(1)
+            else:
+                # Single-axis: compact inline layout (no table)
+                ch = channels[0]
+                route = config.routes[ch]
+                self._render_axis_row_single(device_id, ch, route, source_options, source_labels, router)
+
+            # Expandable details per axis (includes Invert checkbox)
             for ch in channels:
                 route = config.routes.get(ch)
                 if not route:
                     continue
                 friendly = CHANNEL_FRIENDLY_NAMES.get(ch, ch)
                 detail_key = f"{device_id}_{ch}"
-                expanded = self._axis_details_expanded.get(detail_key, False)
                 if imgui.tree_node(f"{ch} {friendly} Details##{detail_key}"):
                     self._axis_details_expanded[detail_key] = True
                     self._render_axis_details(device_id, ch, route, router, is_osr, friendly)
@@ -577,16 +558,55 @@ class DeviceControlMixin:
                 else:
                     self._axis_details_expanded[detail_key] = False
 
-        imgui.unindent(10)
+    def _render_axis_row_single(self, device_id, ch, route, source_options, source_labels, router):
+        """Render compact single-axis configuration (Handy, Buttplug, OSSM)."""
+        friendly = _CHANNEL_FRIENDLY.get(ch, ch)
 
-    def _render_axis_row(self, device_id, ch, route, source_options, source_labels, router, is_osr):
-        """Render a single axis row in the configuration table."""
-        _FRIENDLY = {
-            "L0": "Stroke", "L1": "Sway", "L2": "Surge",
-            "R0": "Twist", "R1": "Roll", "R2": "Pitch",
-            "V0": "Vibration", "V1": "Pump",
-        }
-        friendly = _FRIENDLY.get(ch, ch)
+        # Source dropdown
+        imgui.text("Source:")
+        imgui.same_line()
+        current_idx = 0
+        if route.source_axis in source_options:
+            current_idx = source_options.index(route.source_axis)
+        imgui.push_item_width(-1)
+        changed, new_idx = imgui.combo(f"##{device_id}_{ch}_src", current_idx, source_labels)
+        imgui.pop_item_width()
+        if changed:
+            route.source_axis = source_options[new_idx]
+            if route.source_axis == "(none)":
+                route.enabled = False
+            router.save_to_settings(self.app.app_settings)
+
+        # Range: dual-handle slider (full width)
+        imgui.text("Range:")
+        imgui.same_line()
+        min_val = getattr(route, 'min_value', 0.0)
+        max_val = getattr(route, 'max_value', 100.0)
+        imgui.push_item_width(-1)
+        changed, new_min, new_max = imgui.drag_float_range2(
+            f"##{device_id}_{ch}_range", min_val, max_val,
+            0.5, 0.0, 100.0, "Min %.0f%%", "Max %.0f%%"
+        )
+        imgui.pop_item_width()
+        if changed and hasattr(route, 'min_value'):
+            route.min_value = new_min
+            route.max_value = new_max
+            router.save_to_settings(self.app.app_settings)
+
+        # Enabled + Inverted on same line
+        changed_en, new_en = imgui.checkbox(f"Enabled##{device_id}_{ch}_en", route.enabled)
+        if changed_en:
+            route.enabled = new_en
+            router.save_to_settings(self.app.app_settings)
+        imgui.same_line()
+        changed_inv, new_inv = imgui.checkbox(f"Inverted##{device_id}_{ch}_inv", route.invert)
+        if changed_inv:
+            route.invert = new_inv
+            router.save_to_settings(self.app.app_settings)
+
+    def _render_axis_row_multi(self, device_id, ch, route, source_options, source_labels, router, is_osr):
+        """Render a single axis row in the multi-axis configuration table (OSR)."""
+        friendly = _CHANNEL_FRIENDLY.get(ch, ch)
 
         # Channel label
         imgui.text(f"{ch} {friendly}")
@@ -608,30 +628,21 @@ class DeviceControlMixin:
                 self._save_routes_to_osr_profile(device_id)
         imgui.next_column()
 
-        # Min % slider (getattr for compat with device_control < 5.4)
+        # Range: dual-handle slider
         min_val = getattr(route, 'min_value', 0.0)
+        max_val = getattr(route, 'max_value', 100.0)
         imgui.push_item_width(-1)
-        changed, new_min = imgui.slider_float(f"##{device_id}_{ch}_min", min_val, 0.0, 50.0, "%.0f%%")
+        changed, new_min, new_max = imgui.drag_float_range2(
+            f"##{device_id}_{ch}_range", min_val, max_val,
+            0.5, 0.0, 100.0, "%.0f%%", "%.0f%%"
+        )
         imgui.pop_item_width()
         if changed and hasattr(route, 'min_value'):
             route.min_value = new_min
-            router.save_to_settings(self.app.app_settings)
-            if is_osr:
-                self._save_routes_to_osr_profile(device_id)
-            self._preview_axis_position_pct(ch, new_min, f"Previewing {friendly} min")
-        imgui.next_column()
-
-        # Max % slider
-        max_val = getattr(route, 'max_value', 100.0)
-        imgui.push_item_width(-1)
-        changed, new_max = imgui.slider_float(f"##{device_id}_{ch}_max", max_val, 50.0, 100.0, "%.0f%%")
-        imgui.pop_item_width()
-        if changed and hasattr(route, 'max_value'):
             route.max_value = new_max
             router.save_to_settings(self.app.app_settings)
             if is_osr:
                 self._save_routes_to_osr_profile(device_id)
-            self._preview_axis_position_pct(ch, new_max, f"Previewing {friendly} max")
         imgui.next_column()
 
         # Enable checkbox
@@ -643,20 +654,17 @@ class DeviceControlMixin:
                 self._save_routes_to_osr_profile(device_id)
         imgui.next_column()
 
-        # Invert checkbox
-        changed, new_val = imgui.checkbox(f"##{device_id}_{ch}_inv", route.invert)
-        if changed:
-            route.invert = new_val
-            router.save_to_settings(self.app.app_settings)
-            if is_osr:
-                self._save_routes_to_osr_profile(device_id)
-        imgui.next_column()
-
     def _render_axis_details(self, device_id, ch, route, router, is_osr, friendly):
         """Render expandable detail section for one axis."""
         imgui.indent(10)
         settings_changed = False
         _has_extended = hasattr(route, 'speed_multiplier')
+
+        # Invert checkbox (moved here from table to save column space)
+        changed_inv, new_inv = imgui.checkbox(f"Invert##{device_id}_{ch}_inv", route.invert)
+        if changed_inv:
+            route.invert = new_inv
+            settings_changed = True
 
         # Speed multiplier
         speed = getattr(route, 'speed_multiplier', 1.0)
@@ -983,8 +991,6 @@ class DeviceControlMixin:
 
     def _render_all_advanced_settings(self):
         """Render all advanced settings in one section."""
-        imgui.indent(10)
-
         # Performance Settings
         imgui.text_colored("Performance:", 0.8, 0.8, 0.2)
         config = self.device_manager.config
@@ -1105,84 +1111,34 @@ class DeviceControlMixin:
                 self.device_manager._auto_home_duration_s = new_duration
             _tooltip_if_hovered("How long the homing transition takes (ease-in curve)")
 
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        imgui.unindent(10)
-
-    def _render_connection_status_section(self):
-        """Render connection status section with consistent UX."""
-        imgui.indent(15)
-
-        if self.device_manager.is_connected():
-            device_name = self.device_manager.get_connected_device_name()
-            self._status_indicator(f"Connected to {device_name}", "ready", "Device is connected and ready")
-
-            # Connection info
-            device_info = self.device_manager.get_connected_device_info()
-            if device_info:
-                imgui.text(f"Device ID: {device_info.device_id}")
-                imgui.text(f"Type: {device_info.device_type.value.title()}")
-
-                # Quick position test
-                imgui.separator()
-                imgui.text("Quick Test:")
-                current_pos = self.device_manager.current_position
-                changed, new_pos = imgui.slider_float("Position##QuickTest", current_pos, 0.0, 100.0, "%.1f")
-                if changed:
-                    self.device_manager.update_position(new_pos, 50.0)
-
-                _tooltip_if_hovered("Drag to test device movement")
-
+        # OSR-specific performance settings (only when OSR connected)
+        if self._get_connected_device_type() == "osr":
+            imgui.spacing()
             imgui.separator()
-            if imgui.button("Disconnect Device"):
-                self._disconnect_current_device()
-        else:
-            self._status_indicator("No device connected", "warning", "Connect a device below")
-            imgui.text("Select and connect a device from the types below.")
+            imgui.spacing()
+            self._render_osr_performance_settings()
 
-        imgui.unindent(15)
-
-    def _render_device_types_section(self):
-        """Render device types section with consistent UX."""
-        imgui.indent(15)
-
-        # OSR2/OSR6 Devices
-        if imgui.collapsing_header("OSR2/OSR6 Devices (USB/Serial)##OSRDevices")[0]:
-            self._render_osr_controls()
-
-        # Buttplug.io Universal Devices
-        if imgui.collapsing_header("Buttplug.io Devices (Universal)##ButtplugDevices")[0]:
-            self._render_buttplug_controls()
-
-        # Handy Direct Control
-        if imgui.collapsing_header("Handy (Direct API)##HandyDirect")[0]:
-            self._render_handy_controls()
-
-        imgui.unindent(15)
+        imgui.spacing()
 
     def _render_osr_controls(self):
         """Render OSR device controls."""
-        imgui.indent(10)
-
         # Check OSR connection status
         connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
-        is_osr_connected = connected_device and "osr" in connected_device.device_id.lower()
+        is_osr_connected = self._get_connected_device_type() == "osr"
 
         if is_osr_connected:
             self._status_indicator(f"Connected to {connected_device.device_id}", "ready", "OSR device connected and ready")
 
-            # Advanced OSR Settings
-            if imgui.collapsing_header("OSR Performance Settings##OSRPerformance")[0]:
-                self._render_osr_performance_settings()
-
-            if imgui.collapsing_header("OSR Test Functions##OSRTest")[0]:
-                imgui.indent(10)
-                if imgui.button("Run Movement Test##OSR"):
-                    self._test_osr_movement()
-                _tooltip_if_hovered("Test OSR device with predefined movement sequence")
-                imgui.unindent(10)
+            # Uniform action row
+            imgui.spacing()
+            if imgui.button("Test Movement##OSR"):
+                self._test_osr_movement()
+            _tooltip_if_hovered("Test OSR device with predefined movement sequence")
+            imgui.same_line()
+            with destructive_button_style():
+                if imgui.button("Disconnect##OSRDisconnect"):
+                    self._disconnect_current_device()
+            _tooltip_if_hovered("Disconnect OSR device")
 
         else:
             imgui.text("Connect your OSR2/OSR6 device via USB cable.")
@@ -1200,8 +1156,9 @@ class DeviceControlMixin:
                     port_name = port_info.get('device', 'Unknown')
                     description = port_info.get('description', 'No description')
 
-                    if imgui.button(f"Connect##OSR_{port_name}"):
-                        self._connect_osr_device(port_name)
+                    with primary_button_style():
+                        if imgui.button(f"Connect##OSR_{port_name}"):
+                            self._connect_osr_device(port_name)
                     imgui.same_line()
                     imgui.text(f"{port_name} ({description})")
 
@@ -1213,15 +1170,12 @@ class DeviceControlMixin:
                 imgui.bullet_text("Check device is powered on")
                 imgui.bullet_text("Try different USB cable or port")
 
-        imgui.unindent(10)
-
     def _render_handy_controls(self):
         """Render Handy direct API controls."""
-        imgui.indent(10)
 
         # Check Handy connection status
         connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
-        is_handy_connected = connected_device and "handy" in connected_device.device_id.lower()
+        is_handy_connected = self._get_connected_device_type() == "handy"
 
         if is_handy_connected:
             # Connected state + measured RTD
@@ -1230,8 +1184,8 @@ class DeviceControlMixin:
             self._status_indicator(f"Connected to {connected_device.name}{rtd_label}", "ready", "Handy connected and ready")
 
             # Mode selector (HDSP vs HSSP)
-            handy_mode = self.app.app_settings.get("device_control_handy_mode", "HDSP (Direct)")
-            mode_options = ["HDSP (Direct)", "HSSP (Script Sync)"]
+            handy_mode = self.app.app_settings.get("device_control_handy_mode", "HSSP (Script Sync)")
+            mode_options = ["HSSP (Script Sync)", "HDSP (Experimental)"]
             mode_idx = mode_options.index(handy_mode) if handy_mode in mode_options else 0
             imgui.text("Mode:")
             imgui.same_line()
@@ -1245,7 +1199,7 @@ class DeviceControlMixin:
                 # Reset preparation state so the new mode starts fresh
                 if hasattr(self, 'device_video_integration') and self.device_video_integration:
                     self.device_video_integration.reset_handy_preparation()
-            _tooltip_if_hovered("HDSP: sends positions in real-time (recommended)\nHSSP: uploads script to device (use if HDSP has issues)")
+            _tooltip_if_hovered("HSSP: uploads script to device (recommended)\nHDSP: sends positions in real-time (experimental)")
 
             is_hdsp_mode = mode_options[new_mode_idx if changed_mode else mode_idx].startswith("HDSP")
 
@@ -1338,8 +1292,9 @@ class DeviceControlMixin:
             imgui.spacing()
 
             # Disconnect button
-            if imgui.button("Disconnect Handy##HandyDisconnect"):
-                self._disconnect_handy()
+            with destructive_button_style():
+                if imgui.button("Disconnect##HandyDisconnect"):
+                    self._disconnect_handy()
             _tooltip_if_hovered("Disconnect from Handy device")
 
             imgui.spacing()
@@ -1348,87 +1303,22 @@ class DeviceControlMixin:
 
             # Sync settings (HSSP only — not applicable to HDSP mode)
             if not is_hdsp_mode:
-                imgui.text("Sync Settings:")
-                imgui.indent(10)
-
+                imgui.text("Sync Offset:")
+                imgui.same_line()
                 current_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
-
-                # Row 1: -50 / -10 / -1 buttons, then slider, then +1 / +10 / +50 buttons
-                # Fine adjustment buttons (left side - decrease compensation)
-                if imgui.button("-50##SyncMinus50"):
-                    new_offset = max(0, current_offset - 50)
-                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                    self._apply_handy_hstp_offset(new_offset)
-                _tooltip_if_hovered("-50ms")
-                imgui.same_line()
-
-                if imgui.button("-10##SyncMinus10"):
-                    new_offset = max(0, current_offset - 10)
-                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                    self._apply_handy_hstp_offset(new_offset)
-                _tooltip_if_hovered("-10ms")
-                imgui.same_line()
-
-                if imgui.button("-1##SyncMinus1"):
-                    new_offset = max(0, current_offset - 1)
-                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                    self._apply_handy_hstp_offset(new_offset)
-                _tooltip_if_hovered("-1ms")
-                imgui.same_line()
-
-                # Sync offset slider
-                imgui.push_item_width(100)
-                changed, value = imgui.slider_int(
-                    "##HandySyncOffset",
-                    current_offset,
-                    0, 2500
+                imgui.push_item_width(-1)
+                changed, new_offset = imgui.drag_int(
+                    "##HandySyncOffset", current_offset, 1.0, 0, 2500, "%d ms"
                 )
                 imgui.pop_item_width()
                 if changed:
-                    self.app.app_settings.set("device_control_handy_sync_offset_ms", value)
-                    self._apply_handy_hstp_offset(value)
-                _tooltip_if_hovered("Fine-tune sync feel (ms): higher = device moves earlier\nNetwork latency is auto-compensated; adjust if movement feels late")
-                imgui.same_line()
-
-                # Fine adjustment buttons (right side - increase compensation)
-                if imgui.button("+1##SyncPlus1"):
-                    new_offset = min(2500, current_offset + 1)
                     self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
                     self._apply_handy_hstp_offset(new_offset)
-                _tooltip_if_hovered("+1ms")
-                imgui.same_line()
-
-                if imgui.button("+10##SyncPlus10"):
-                    new_offset = min(2500, current_offset + 10)
-                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                    self._apply_handy_hstp_offset(new_offset)
-                _tooltip_if_hovered("+10ms")
-                imgui.same_line()
-
-                if imgui.button("+50##SyncPlus50"):
-                    new_offset = min(2500, current_offset + 50)
-                    self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                    self._apply_handy_hstp_offset(new_offset)
-                _tooltip_if_hovered("+50ms")
-
-                # Row 2: Direct numeric input + current value display
-                imgui.push_item_width(80)
-                changed, input_value = imgui.input_int("##SyncOffsetInput", current_offset, 0, 0)
-                imgui.pop_item_width()
-                if changed:
-                    clamped_value = max(0, min(2500, input_value))
-                    self.app.app_settings.set("device_control_handy_sync_offset_ms", clamped_value)
-                    self._apply_handy_hstp_offset(clamped_value)
-                _tooltip_if_hovered("Enter lag compensation directly (ms)\n0 to 2500")
-                imgui.same_line()
-                imgui.text("ms")
-                imgui.same_line()
-                if current_offset > 0:
-                    imgui.text_colored(f"(compensating {current_offset}ms lag)", 0.5, 0.8, 0.5, 1.0)
-                else:
-                    imgui.text_colored("(no compensation)", 0.6, 0.6, 0.6, 1.0)
-
-                imgui.unindent(10)
+                _tooltip_if_hovered(
+                    "Drag to adjust, Ctrl+Click for direct input.\n"
+                    "Higher = device moves earlier to compensate lag.\n"
+                    "Network latency is auto-compensated; adjust if movement feels late."
+                )
 
         else:
             # Disconnected state - show connection controls
@@ -1449,7 +1339,6 @@ class DeviceControlMixin:
 
             # Connect button (PRIMARY - positive action)
             if connection_key and len(connection_key) > 0:
-                from application.utils import primary_button_style
                 with primary_button_style():
                     if imgui.button("Connect to Handy##HandyConnect"):
                         self._connect_handy(connection_key)
@@ -1487,22 +1376,19 @@ class DeviceControlMixin:
 
                 imgui.unindent(10)
 
-        imgui.unindent(10)
-
     def _render_buttplug_controls(self):
         """Render Buttplug.io device controls."""
-        imgui.indent(10)
 
         # Check Buttplug connection status
         connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
-        is_buttplug_connected = connected_device and "buttplug" in connected_device.device_id.lower()
+        is_buttplug_connected = self._get_connected_device_type() in ("buttplug_linear", "buttplug_vibrator")
 
         if is_buttplug_connected:
             self._status_indicator(f"Connected to {connected_device.name}", "ready", "Buttplug device connected and ready")
 
             # Device capabilities
-            if hasattr(connected_device, 'capabilities') and connected_device.capabilities:
-                caps = connected_device.capabilities
+            caps = getattr(connected_device, 'capabilities', None)
+            if caps:
                 imgui.text("Device capabilities:")
                 imgui.indent(10)
                 if caps.supports_linear:
@@ -1514,13 +1400,35 @@ class DeviceControlMixin:
                 imgui.bullet_text(f"Update rate: {caps.max_position_rate_hz} Hz")
                 imgui.unindent(10)
 
-            # Advanced Buttplug Settings
-            if imgui.collapsing_header("Buttplug Test Functions##ButtplugTest")[0]:
-                imgui.indent(10)
-                if imgui.button("Run Movement Test##Buttplug"):
-                    self._test_buttplug_movement()
-                _tooltip_if_hovered("Test device with predefined movement sequence")
-                imgui.unindent(10)
+            # BLE Latency Compensation
+            if caps and caps.supports_linear:
+                imgui.spacing()
+                imgui.separator()
+                imgui.text("BLE Latency Compensation")
+                _tooltip_if_hovered(
+                    "Compensates for Bluetooth transport delay.\n"
+                    "Higher values make the device move earlier/faster to stay in sync.\n"
+                    "Start at 100ms and adjust based on your setup."
+                )
+                current_ble_comp = self.app.app_settings.get("ble_latency_compensation_ms", 100)
+                changed, new_ble_comp = imgui.slider_int(
+                    "##BLELatencyComp", current_ble_comp, 0, 300, f"{current_ble_comp} ms"
+                )
+                if changed:
+                    self.app.app_settings.set("ble_latency_compensation_ms", new_ble_comp)
+                    if hasattr(self.device_manager, 'update_ble_latency_compensation'):
+                        self.device_manager.update_ble_latency_compensation(new_ble_comp)
+
+            # Uniform action row
+            imgui.spacing()
+            if imgui.button("Test Movement##Buttplug"):
+                self._test_buttplug_movement()
+            _tooltip_if_hovered("Test device with predefined movement sequence")
+            imgui.same_line()
+            with destructive_button_style():
+                if imgui.button("Disconnect##ButtplugDisconnect"):
+                    self._disconnect_current_device()
+            _tooltip_if_hovered("Disconnect Buttplug device")
 
         else:
             imgui.text("Connect devices via Intiface Central")
@@ -1547,8 +1455,9 @@ class DeviceControlMixin:
                 imgui.unindent(10)
 
             imgui.separator()
-            if imgui.button("Discover Devices##ButtplugDiscover"):
-                self._discover_buttplug_devices()
+            with primary_button_style():
+                if imgui.button("Discover Devices##ButtplugDiscover"):
+                    self._discover_buttplug_devices()
             _tooltip_if_hovered("Search for devices through Intiface Central")
 
             imgui.same_line()
@@ -1562,8 +1471,9 @@ class DeviceControlMixin:
                 imgui.text(f"Found {len(self._discovered_buttplug_devices)} device(s):")
 
                 for i, device_info in enumerate(self._discovered_buttplug_devices):
-                    if imgui.button(f"Connect##buttplug_{i}"):
-                        self._connect_specific_buttplug_device(device_info.device_id)
+                    with primary_button_style():
+                        if imgui.button(f"Connect##buttplug_{i}"):
+                            self._connect_specific_buttplug_device(device_info.device_id)
                     imgui.same_line()
                     imgui.text(f"{device_info.name} ({device_info.device_type.name})")
 
@@ -1574,145 +1484,6 @@ class DeviceControlMixin:
                 imgui.bullet_text("Start Intiface Central application")
                 imgui.bullet_text("Enable Server Mode in Intiface")
                 imgui.bullet_text("Connect and pair your devices")
-
-
-        imgui.unindent(10)
-
-    def _render_device_settings_section(self):
-        """Render device settings section with consistent UX."""
-        imgui.indent(15)
-
-        # Performance Settings
-        if imgui.collapsing_header("Device Performance##DevicePerformance")[0]:
-            imgui.indent(10)
-            config = self.device_manager.config
-
-            # Update rate
-            changed, new_rate = imgui.slider_float("Update Rate##DeviceRate", config.max_position_rate_hz, 1.0, 120.0, "%.1f Hz")
-            if changed:
-                config.max_position_rate_hz = new_rate
-            _tooltip_if_hovered("How often device position is updated per second (T-Code devices can handle 60-120Hz)")
-
-            # Position smoothing
-            changed, new_smoothing = imgui.slider_float("Position Smoothing##DeviceSmooth", config.position_smoothing, 0.0, 1.0, "%.2f")
-            if changed:
-                config.position_smoothing = new_smoothing
-            _tooltip_if_hovered("Smooths position changes to reduce jerkiness (0=no smoothing, 1=maximum smoothing)")
-
-            # Latency compensation
-            changed, new_latency = imgui.slider_int("Latency Compensation##DeviceLatency", config.latency_compensation_ms, 0, 200)
-            if changed:
-                config.latency_compensation_ms = new_latency
-            _tooltip_if_hovered("Compensates for device response delay in milliseconds")
-
-            imgui.unindent(10)
-
-
-        # Live Control Integration
-        if imgui.collapsing_header("Live Control Integration##DeviceLiveControl")[0]:
-            imgui.indent(10)
-
-            # Live tracking device control
-            live_tracking_enabled = self.app.app_settings.get("device_control_live_tracking", False)
-            changed, new_live_tracking = imgui.checkbox("Live Tracking Control##DeviceLiveTracking", live_tracking_enabled)
-            if changed:
-                self.app.app_settings.set("device_control_live_tracking", new_live_tracking)
-                self.app.app_settings.save_settings()
-                self._update_live_tracking_control(new_live_tracking)
-            _tooltip_if_hovered("Stream live tracker data directly to device in real-time")
-
-            # Video playback device control
-            video_playback_enabled = self.app.app_settings.get("device_control_video_playback", False)
-            changed, new_video_playback = imgui.checkbox("Video Playback Control##DeviceVideoPlayback", video_playback_enabled)
-            if changed:
-                self.app.app_settings.set("device_control_video_playback", new_video_playback)
-                self.app.app_settings.save_settings()
-                self._update_video_playback_control(new_video_playback)
-            _tooltip_if_hovered("Sync device with video timeline and funscript playback")
-
-            # Live Preview (editing-time haptic feedback)
-            live_preview_bridge = getattr(self, 'live_preview_bridge', None)
-            if live_preview_bridge:
-                preview_enabled = live_preview_bridge.config.enabled
-                changed, new_preview = imgui.checkbox("Live Preview##DeviceLivePreview", preview_enabled)
-                if changed:
-                    live_preview_bridge.config.enabled = new_preview
-                    if new_preview:
-                        live_preview_bridge.start()
-                    else:
-                        live_preview_bridge.stop()
-                _tooltip_if_hovered("Send device position as you scrub through the timeline (even when video is paused)")
-
-            imgui.unindent(10)
-
-
-        # Advanced Settings (only show if live control enabled)
-        live_tracking_enabled = self.app.app_settings.get("device_control_live_tracking", False)
-        video_playback_enabled = self.app.app_settings.get("device_control_video_playback", False)
-
-        if live_tracking_enabled or video_playback_enabled:
-            if imgui.collapsing_header("Advanced Control Settings##DeviceAdvanced")[0]:
-                imgui.indent(10)
-
-                # Control intensity
-                live_intensity = self.app.app_settings.get("device_control_live_intensity", 1.0)
-                changed, new_intensity = imgui.slider_float("Control Intensity##DeviceIntensity", live_intensity, 0.1, 2.0, "%.2fx")
-                if changed:
-                    self.app.app_settings.set("device_control_live_intensity", new_intensity)
-                    self.app.app_settings.save_settings()
-                _tooltip_if_hovered("Multiplier for device movement intensity")
-
-                # Rolling Autotune (for live tracking → device)
-                if live_tracking_enabled:
-                    imgui.spacing()
-                    imgui.separator()
-                    imgui.spacing()
-                    imgui.text("Rolling Autotune:")
-
-                    settings = self.app.app_settings
-                    tr = getattr(self.app, 'tracker', None)
-
-                    if not tr:
-                        imgui.text_colored("Tracker not initialized", 1.0, 0.5, 0.0, 1.0)
-                    else:
-                        cur_enabled = settings.get("live_tracker_rolling_autotune_enabled", False)
-                        ch, new_enabled = imgui.checkbox("Enable##RollingAutotuneDevice", cur_enabled)
-                        if imgui.is_item_hovered():
-                            imgui.set_tooltip(
-                                "Apply Ultimate Autotune to the last N seconds of live tracking data\n"
-                                "before sending to the device. Cleans up noise for smoother motion.")
-                        if ch:
-                            settings.set("live_tracker_rolling_autotune_enabled", new_enabled)
-                            tr.rolling_autotune_enabled = new_enabled
-
-                        if cur_enabled:
-                            cur_interval = settings.get("live_tracker_rolling_autotune_interval_ms", 5000)
-                            imgui.push_item_width(120)
-                            ch, new_interval = imgui.input_int("Interval (ms)##RAIntervalDev", cur_interval, 1000)
-                            imgui.pop_item_width()
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip("How often to apply autotune (default: 5000ms)")
-                            if ch:
-                                v = max(1000, min(30000, new_interval))
-                                if v != cur_interval:
-                                    settings.set("live_tracker_rolling_autotune_interval_ms", v)
-                                    tr.rolling_autotune_interval_ms = v
-
-                            cur_window = settings.get("live_tracker_rolling_autotune_window_ms", 5000)
-                            imgui.push_item_width(120)
-                            ch, new_window = imgui.input_int("Window (ms)##RAWindowDev", cur_window, 1000)
-                            imgui.pop_item_width()
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip("Size of data window to process (default: 5000ms)")
-                            if ch:
-                                v = max(1000, min(30000, new_window))
-                                if v != cur_window:
-                                    settings.set("live_tracker_rolling_autotune_window_ms", v)
-                                    tr.rolling_autotune_window_ms = v
-
-                imgui.unindent(10)
-
-        imgui.unindent(15)
 
     def _disconnect_current_device(self):
         """Disconnect the currently connected device."""
@@ -2001,20 +1772,6 @@ class DeviceControlMixin:
         except Exception as e:
             self.app.logger.error(f"Failed to update video playback control: {e}")
 
-    def _initialize_video_playback_bridge(self):
-        """Initialize video playback bridge."""
-        try:
-            if self.device_manager:
-                from device_control.bridges.video_playback_bridge import create_video_playback_bridge
-                self.video_playback_bridge = create_video_playback_bridge(self.device_manager)
-                self.app.logger.info("Video playback bridge initialized")
-            else:
-                self.app.logger.warning("Device manager not available for video playback bridge")
-        except Exception as e:
-            self.app.logger.error(f"Failed to initialize video playback bridge: {e}")
-            self.video_playback_bridge = None
-
-
     def _load_osr_profile_to_device(self, profile_name: str, profile_data: dict):
         """Load OSR profile to the connected device."""
         try:
@@ -2035,43 +1792,6 @@ class DeviceControlMixin:
 
         except Exception as e:
             self.app.logger.error(f"Error loading OSR profile to device: {e}")
-
-    def _test_osr_axes(self):
-        """Test OSR axes with a simple movement pattern."""
-        try:
-            import threading
-            def run_test():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(self._test_osr_movement_async())
-                finally:
-                    loop.close()
-
-            thread = threading.Thread(target=run_test, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.app.logger.error(f"Failed to start OSR test: {e}")
-
-    async def _test_osr_movement_async(self):
-        """Test OSR movement pattern."""
-        try:
-            backend = self.device_manager.get_connected_backend()
-            if backend and hasattr(backend, 'set_position_with_profile'):
-                # Test pattern: 0 -> 50 -> 100 -> 50 -> 0
-                test_positions = [0.0, 50.0, 100.0, 50.0, 0.0]
-
-                import asyncio
-                for pos in test_positions:
-                    await backend.set_position_with_profile(pos)
-                    await asyncio.sleep(1.0)  # Hold position for 1 second
-
-                self.app.logger.info("OSR axis test completed")
-
-        except Exception as e:
-            self.app.logger.error(f"OSR test movement failed: {e}")
-
 
     def _open_intiface_download(self):
         """Open Intiface Central download page."""
@@ -2365,78 +2085,6 @@ class DeviceControlMixin:
         sync_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
         self._apply_handy_hstp_offset(sync_offset)
 
-    def _test_handy_movement(self):
-        """Test Handy device movement."""
-        try:
-            import threading
-            def test_handy_async():
-                import asyncio
-
-                async def run_test():
-                    try:
-                        self.app.logger.info(f"Device manager has _handy_backend: {hasattr(self.device_manager, '_handy_backend')}")
-                        if hasattr(self.device_manager, '_handy_backend'):
-                            self.app.logger.info(f"_handy_backend value: {self.device_manager._handy_backend}")
-
-                        if not hasattr(self.device_manager, '_handy_backend') or not self.device_manager._handy_backend:
-                            self.app.logger.error("No Handy connected")
-                            return
-
-                        backend = self.device_manager._handy_backend
-                        self.app.logger.info(f"Backend type: {type(backend)}")
-                        self.app.logger.info(f"Backend connected: {backend.is_connected()}")
-                        self.app.logger.info("Testing Handy movement...")
-
-                        # Test sequence: position, duration_ms (short durations for immediate testing)
-                        positions = [(20, 50), (80, 50), (50, 50), (30, 50), (70, 50), (50, 50)]
-
-                        for i, (pos, duration) in enumerate(positions):
-                            try:
-                                self.app.logger.info(f"   Calling set_position_enhanced({pos}, duration_ms={duration})")
-                                success = await backend.set_position_enhanced(
-                                    primary=pos,
-                                    duration_ms=duration,
-                                    movement_type="test"
-                                )
-                                self.app.logger.info(f"   set_position_enhanced returned: {success}")
-
-                                if success:
-                                    self.app.logger.info(f"   Step {i+1}/{len(positions)}: Position {pos}% in {duration}ms")
-                                else:
-                                    self.app.logger.error(f"   Step {i+1} failed")
-
-                                # Wait for movement to complete
-                                await asyncio.sleep(duration / 1000.0 + 0.2)
-
-                            except Exception as e:
-                                self.app.logger.error(f"   Step {i+1} error: {e}")
-                                import traceback
-                                self.app.logger.error(f"   Traceback: {traceback.format_exc()}")
-
-                        # Return to center
-                        try:
-                            await backend.stop()
-                            self.app.logger.info("Handy movement test complete")
-                        except Exception as e:
-                            self.app.logger.error(f"Failed to stop Handy: {e}")
-
-                    except Exception as e:
-                        self.app.logger.error(f"Handy test failed: {e}")
-
-                # Create new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(run_test())
-                finally:
-                    loop.close()
-
-            thread = threading.Thread(target=test_handy_async, daemon=True)
-            thread.start()
-
-        except Exception as e:
-            self.app.logger.error(f"Failed to start Handy test: {e}")
-
     def _upload_funscript_to_handy(self, timeline_num: int = 1):
         """Upload funscript from specified timeline to Handy for HSSP streaming."""
         import threading
@@ -2504,8 +2152,6 @@ class DeviceControlMixin:
 
     def _render_ossm_controls(self):
         """Render OSSM BLE device controls."""
-        imgui.indent(10)
-
         try:
             # Check if bleak is available
             ossm_available = 'ossm' in (self.device_manager.available_backends if self.device_manager else {})
@@ -2513,7 +2159,6 @@ class DeviceControlMixin:
             if not ossm_available:
                 imgui.text_colored("OSSM backend unavailable", 0.7, 0.5, 0.0)
                 imgui.text("Install bleak: pip install bleak>=0.21.0")
-                imgui.unindent(10)
                 return
 
             # Check connection status
@@ -2527,8 +2172,6 @@ class DeviceControlMixin:
 
         except Exception as e:
             imgui.text_colored(f"OSSM error: {e}", 1.0, 0.3, 0.3)
-
-        imgui.unindent(10)
 
     def _render_ossm_connected(self, device_info):
         """Render OSSM controls when connected."""
@@ -2597,8 +2240,9 @@ class DeviceControlMixin:
         imgui.same_line()
 
         # Disconnect button
-        if imgui.button("Disconnect##OSSMDisconnect"):
-            self._disconnect_ossm()
+        with destructive_button_style():
+            if imgui.button("Disconnect##OSSMDisconnect"):
+                self._disconnect_ossm()
         _tooltip_if_hovered("Disconnect from OSSM device")
 
     def _render_ossm_disconnected(self):

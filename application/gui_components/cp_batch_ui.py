@@ -11,8 +11,10 @@ import logging
 import threading
 from typing import Optional, List
 
-from application.utils.imgui_helpers import DisabledScope as _DisabledScope
-from application.utils.section_card import section_card
+from application.utils import primary_button_style, destructive_button_style
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
+from application.utils.section_card import section_card as _section_card
+from config.element_group_colors import ControlPanelColors as _CPColors
 
 logger = logging.getLogger(__name__)
 
@@ -185,8 +187,8 @@ class BatchMixin:
     def _render_supporter_batch_tab(self):
         """Render the Patreon Exclusive tab (supporter feature).
 
-        When addon is available → full interactive UI.
-        When addon is missing → grayed-out preview with promo banner.
+        When addon is available -> full interactive UI.
+        When addon is missing -> grayed-out preview with promo banner.
         """
         if not self._feat_supporter:
             self._render_batch_preview()
@@ -197,27 +199,23 @@ class BatchMixin:
 
         watcher, queue, worker = _get_batch_components(self.app)
         if watcher is None:
-            # Addon installed but batch components failed to load
-            imgui.text_colored("Batch module could not be loaded", 0.9, 0.3, 0.3, 1.0)
+            imgui.text_colored("Batch module could not be loaded", *_CPColors.ERROR_TEXT)
             return
 
         # --- Watched Folder Section ---
-        open_, _ = imgui.collapsing_header(
-            "Watched Folder##BatchWatchedFolder", flags=0)
-        if open_:
-            self._render_watched_folder_section(watcher, worker)
+        with _section_card("Watched Folder##BatchWatchedFolder", tier="primary") as is_open:
+            if is_open:
+                self._render_watched_folder_section(watcher, worker)
 
         # --- Queue Section ---
-        open_, _ = imgui.collapsing_header(
-            "Batch Queue##BatchQueue", flags=0)
-        if open_:
-            self._render_queue_section(queue, worker)
+        with _section_card("Batch Queue##BatchQueue", tier="primary") as is_open:
+            if is_open:
+                self._render_queue_section(queue, worker)
 
         # --- Live Capture Section ---
-        open_, _ = imgui.collapsing_header(
-            "Live Capture##LiveCapture", flags=0)
-        if open_:
-            self._render_capture_panel()
+        with _section_card("Live Capture##LiveCapture", tier="primary") as is_open:
+            if is_open:
+                self._render_capture_panel()
 
         imgui.spacing()
         self._render_patreon_exclusive_extras()
@@ -228,21 +226,18 @@ class BatchMixin:
         """Render watched folder controls."""
         app = self.app
         if watcher.is_watching:
-            imgui.text_colored("Watching:", 0.2, 0.8, 0.2, 1.0)
+            imgui.text_colored("Watching:", *_CPColors.SUCCESS_TEXT)
             imgui.same_line()
             watch_display = watcher.watch_path or ""
             imgui.text(watch_display)
             if imgui.is_item_hovered() and watcher.watch_path:
                 imgui.set_tooltip(watcher.watch_path)
 
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.3, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.8, 0.4, 0.4, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.2, 0.2, 1.0)
-            if imgui.button("Stop Watching", width=-1):
-                watcher.stop_watching()
-                if worker.is_running:
-                    worker.stop()
-            imgui.pop_style_color(3)
+            with destructive_button_style():
+                if imgui.button("Stop Watching", width=-1):
+                    watcher.stop_watching()
+                    if worker.is_running:
+                        worker.stop()
         else:
             if not hasattr(app_state := app.app_state_ui, '_batch_watch_path'):
                 app_state._batch_watch_path = app.app_settings.get("batch_watch_path", "")
@@ -261,30 +256,22 @@ class BatchMixin:
                 "Include subfolders", app_state._batch_watch_recursive)
 
             can_start = bool(app_state._batch_watch_path) and os.path.isdir(app_state._batch_watch_path)
-            if not can_start:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.7, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.5, 0.15, 1.0)
-            if imgui.button("Start Watching", width=-1):
-                app.app_settings.set("batch_watch_path", app_state._batch_watch_path)
-                app.app_settings.set("batch_watch_recursive", app_state._batch_watch_recursive)
-                watcher.start_watching(app_state._batch_watch_path, app_state._batch_watch_recursive)
-                if not worker.is_running:
-                    worker.start()
-            imgui.pop_style_color(3)
-
-            if not can_start:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
+            with _DisabledScope(not can_start):
+                with primary_button_style():
+                    if imgui.button("Start Watching", width=-1):
+                        app.app_settings.set("batch_watch_path", app_state._batch_watch_path)
+                        app.app_settings.set("batch_watch_recursive", app_state._batch_watch_recursive)
+                        watcher.start_watching(app_state._batch_watch_path, app_state._batch_watch_recursive)
+                        if not worker.is_running:
+                            worker.start()
 
             imgui.text_wrapped("Watches while the app is running. For headless mode use: --watch FOLDER")
 
         imgui.spacing()
         tracker_name = getattr(app.app_state_ui, 'selected_tracker_name', '(none)')
-        imgui.text_colored(f"Tracker: {tracker_name}", 0.6, 0.6, 0.6, 1.0)
+        imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+        imgui.text(f"Tracker: {tracker_name}")
+        imgui.pop_style_color()
         imgui.text_wrapped("Uses the same tracker and settings as the Run tab.")
         imgui.spacing()
 
@@ -296,9 +283,11 @@ class BatchMixin:
 
         # Worker status
         if worker.is_running:
-            imgui.text_colored("Worker: Running", 0.2, 0.8, 0.2, 1.0)
+            imgui.text_colored("Worker: Running", *_CPColors.SUCCESS_TEXT)
         else:
-            imgui.text_colored("Worker: Stopped", 0.5, 0.5, 0.5, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+            imgui.text("Worker: Stopped")
+            imgui.pop_style_color()
         imgui.same_line()
 
         if worker.is_running:
@@ -312,10 +301,10 @@ class BatchMixin:
 
         imgui.text(f"Total: {status['total']}  ")
         imgui.same_line()
-        imgui.text_colored(f"Done: {status['completed']}", 0.2, 0.8, 0.2, 1.0)
+        imgui.text_colored(f"Done: {status['completed']}", *_CPColors.SUCCESS_TEXT)
         imgui.same_line()
         if status['failed'] > 0:
-            imgui.text_colored(f"Failed: {status['failed']}", 0.9, 0.3, 0.3, 1.0)
+            imgui.text_colored(f"Failed: {status['failed']}", *_CPColors.ERROR_TEXT)
             imgui.same_line()
         imgui.text(f"Queued: {status['queued']}")
 
@@ -323,27 +312,23 @@ class BatchMixin:
         if est > 0:
             minutes = int(est // 60)
             seconds = int(est % 60)
-            imgui.text_colored(f"Estimated remaining: {minutes}m {seconds}s", 0.6, 0.6, 0.6, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+            imgui.text(f"Estimated remaining: {minutes}m {seconds}s")
+            imgui.pop_style_color()
 
         # Pause/Resume
         if queue.is_paused:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.7, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.5, 0.15, 1.0)
-            if imgui.button("Resume", width=100):
-                queue.resume()
-            imgui.pop_style_color(3)
+            with primary_button_style():
+                if imgui.button("Resume", width=100):
+                    queue.resume()
         else:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.6, 0.1, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.8, 0.7, 0.2, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.5, 0.05, 1.0)
             if imgui.button("Pause", width=100):
                 queue.pause()
-            imgui.pop_style_color(3)
 
         imgui.same_line()
-        if imgui.button("Clear Queue", width=100):
-            queue.clear()
+        with destructive_button_style():
+            if imgui.button("Clear Queue", width=100):
+                queue.clear()
 
         # Item list
         items = queue.items
@@ -359,12 +344,12 @@ class BatchMixin:
                 }.get(item.status.name, "[?]")
 
                 color = {
-                    "QUEUED": (0.6, 0.6, 0.6, 1.0),
-                    "PROCESSING": (0.2, 0.7, 0.9, 1.0),
-                    "COMPLETED": (0.2, 0.8, 0.2, 1.0),
-                    "FAILED": (0.9, 0.3, 0.3, 1.0),
-                    "SKIPPED": (0.5, 0.5, 0.5, 1.0),
-                }.get(item.status.name, (0.6, 0.6, 0.6, 1.0))
+                    "QUEUED": _CPColors.LABEL_TEXT,
+                    "PROCESSING": _CPColors.STATUS_INFO,
+                    "COMPLETED": _CPColors.SUCCESS_TEXT,
+                    "FAILED": _CPColors.ERROR_TEXT,
+                    "SKIPPED": _CPColors.LABEL_TEXT,
+                }.get(item.status.name, _CPColors.LABEL_TEXT)
 
                 imgui.text_colored(status_icon, *color)
                 imgui.same_line()
@@ -386,7 +371,7 @@ class BatchMixin:
 
         manager = _get_capture_manager()
         if manager is None:
-            imgui.text_colored("Live capture module not available", 0.9, 0.3, 0.3, 1.0)
+            imgui.text_colored("Live capture module not available", *_CPColors.ERROR_TEXT)
             return
 
         if not _trackers_loaded:
@@ -427,37 +412,35 @@ class BatchMixin:
 
         # Start/Stop
         if is_capturing:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.2, 0.2, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.8, 0.3, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.15, 0.15, 1.0)
-            if imgui.button("Stop Capture", width=-1):
-                manager.stop()
-            imgui.pop_style_color(3)
+            with destructive_button_style():
+                if imgui.button("Stop Capture", width=-1):
+                    manager.stop()
         else:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.65, 0.2, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.75, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.55, 0.15, 1.0)
-            if imgui.button("Start Capture", width=-1):
-                self._start_capture(manager)
-            imgui.pop_style_color(3)
+            with primary_button_style():
+                if imgui.button("Start Capture", width=-1):
+                    self._start_capture(manager)
 
         # Status
         imgui.spacing()
         if status["state"] == "CAPTURING":
-            imgui.text_colored(f"Capturing at {status['fps']:.1f} FPS", 0.2, 0.8, 0.2, 1.0)
+            imgui.text_colored(f"Capturing at {status['fps']:.1f} FPS", *_CPColors.SUCCESS_TEXT)
             imgui.text(f"Frames: {status['frames_captured']}")
             if status.get("tracker_active"):
                 imgui.same_line()
-                imgui.text_colored("  Tracking", 0.2, 0.7, 0.9, 1.0)
+                imgui.text_colored("  Tracking", *_CPColors.STATUS_INFO)
         elif status["state"] == "ERROR":
-            imgui.text_colored("Error", 0.9, 0.3, 0.3, 1.0)
+            imgui.text_colored("Error", *_CPColors.ERROR_TEXT)
             imgui.text_wrapped(status["error"])
         else:
-            imgui.text_colored("Idle", 0.5, 0.5, 0.5, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+            imgui.text("Idle")
+            imgui.pop_style_color()
 
         last_save = status.get("last_save_path", "")
         if last_save:
-            imgui.text_colored("Saved:", 0.6, 0.6, 0.6, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+            imgui.text("Saved:")
+            imgui.pop_style_color()
             imgui.same_line()
             imgui.text(last_save)
             if imgui.is_item_hovered():
@@ -469,9 +452,11 @@ class BatchMixin:
     def _render_capture_window_controls(self):
         global _selected_window, _window_filter
 
-        imgui.text_colored(
+        imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.WARNING_TEXT)
+        imgui.text_wrapped(
             "Note: GPU-accelerated apps (Chrome, Firefox) may show a black/white screen. "
-            "Use Screen capture instead.", 0.7, 0.7, 0.4, 1.0)
+            "Use Screen capture instead.")
+        imgui.pop_style_color()
         imgui.spacing()
 
         if not _windows_loaded and not _windows_loading:
@@ -486,7 +471,9 @@ class BatchMixin:
             return
 
         if not _cached_windows:
-            imgui.text_colored("No windows found.", 0.5, 0.5, 0.5, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+            imgui.text("No windows found.")
+            imgui.pop_style_color()
             return
 
         changed, _window_filter = imgui.input_text("Filter##WindowFilter", _window_filter, 256)
@@ -500,7 +487,9 @@ class BatchMixin:
 
         window_labels = [w.display_label for _, w in filtered]
         if not window_labels:
-            imgui.text_colored("No matching windows", 0.5, 0.5, 0.5, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+            imgui.text("No matching windows")
+            imgui.pop_style_color()
             return
 
         display_idx = 0
@@ -528,9 +517,9 @@ class BatchMixin:
 
         if _url_validation_result:
             if _url_validation_result == "Valid":
-                imgui.text_colored("URL is valid", 0.2, 0.8, 0.2, 1.0)
+                imgui.text_colored("URL is valid", *_CPColors.SUCCESS_TEXT)
             else:
-                imgui.text_colored(_url_validation_result, 0.9, 0.3, 0.3, 1.0)
+                imgui.text_colored(_url_validation_result, *_CPColors.ERROR_TEXT)
 
     def _render_capture_tracker_options(self):
         global _selected_tracker_idx, _connect_device, _save_funscript
@@ -544,13 +533,14 @@ class BatchMixin:
                 "##CaptureTracker", _selected_tracker_idx, _tracker_display_names)
             imgui.pop_item_width()
         else:
-            imgui.text_colored("No trackers available", 0.5, 0.5, 0.5, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+            imgui.text("No trackers available")
+            imgui.pop_style_color()
 
         from application.utils.feature_detection import is_feature_available
         if is_feature_available("device_control"):
             _, _connect_device = imgui.checkbox("Connect Device##CaptureDevice", _connect_device)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Send tracker output to connected device in real-time")
+            _tooltip_if_hovered("Send tracker output to connected device in real-time")
 
         _, _save_funscript = imgui.checkbox("Save funscript on stop##CaptureSave", _save_funscript)
 
@@ -611,55 +601,64 @@ class BatchMixin:
         )
         with _DisabledScope(True):
             # Watched Folder preview
-            if imgui.collapsing_header("Watched Folder##PreviewWatchedFolder", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.button("Browse...##PreviewWatchBrowse")
-                imgui.same_line()
-                imgui.text("(no folder selected)")
-                imgui.checkbox("Include subfolders##PreviewRecursive", False)
-                imgui.button("Start Watching##PreviewStartWatch", width=-1)
-                imgui.spacing()
-                imgui.text_colored("Tracker: (select in Run tab)", 0.6, 0.6, 0.6, 1.0)
-                imgui.text_wrapped("Watches while the app is running. For headless mode use: --watch FOLDER")
+            with _section_card("Watched Folder##PreviewWatchedFolder", tier="primary") as is_open:
+                if is_open:
+                    imgui.button("Browse...##PreviewWatchBrowse")
+                    imgui.same_line()
+                    imgui.text("(no folder selected)")
+                    imgui.checkbox("Include subfolders##PreviewRecursive", False)
+                    imgui.button("Start Watching##PreviewStartWatch", width=-1)
+                    imgui.spacing()
+                    imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+                    imgui.text("Tracker: (select in Run tab)")
+                    imgui.pop_style_color()
+                    imgui.text_wrapped("Watches while the app is running. For headless mode use: --watch FOLDER")
 
             # Batch Queue preview
-            if imgui.collapsing_header("Batch Queue##PreviewBatchQueue", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.text_colored("Worker: Stopped", 0.5, 0.5, 0.5, 1.0)
-                imgui.same_line()
-                imgui.small_button("Start Worker##PreviewWorkerStart")
-                imgui.spacing()
-                imgui.text("Total: 0  ")
-                imgui.same_line()
-                imgui.text_colored("Done: 0", 0.2, 0.8, 0.2, 1.0)
-                imgui.same_line()
-                imgui.text("Queued: 0")
-                imgui.button("Pause##PreviewPause", width=100)
-                imgui.same_line()
-                imgui.button("Clear Queue##PreviewClear", width=100)
+            with _section_card("Batch Queue##PreviewBatchQueue", tier="primary") as is_open:
+                if is_open:
+                    imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+                    imgui.text("Worker: Stopped")
+                    imgui.pop_style_color()
+                    imgui.same_line()
+                    imgui.small_button("Start Worker##PreviewWorkerStart")
+                    imgui.spacing()
+                    imgui.text("Total: 0  ")
+                    imgui.same_line()
+                    imgui.text_colored("Done: 0", *_CPColors.SUCCESS_TEXT)
+                    imgui.same_line()
+                    imgui.text("Queued: 0")
+                    imgui.button("Pause##PreviewPause", width=100)
+                    imgui.same_line()
+                    imgui.button("Clear Queue##PreviewClear", width=100)
 
             # Live Capture preview
-            if imgui.collapsing_header("Live Capture##PreviewLiveCapture", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.text("Source:")
-                imgui.same_line()
-                imgui.radio_button("Screen##PreviewScreen", True)
-                imgui.same_line()
-                imgui.radio_button("Window##PreviewWindow", False)
-                imgui.same_line()
-                imgui.radio_button("Stream URL##PreviewStream", False)
-                imgui.spacing()
-                imgui.text("Captures your primary screen.")
-                imgui.spacing()
-                imgui.separator()
-                imgui.spacing()
-                imgui.text("Tracker:")
-                imgui.same_line()
-                imgui.push_item_width(imgui.get_content_region_available()[0])
-                imgui.combo("##PreviewCaptureTracker", 0, ["(select tracker)"])
-                imgui.pop_item_width()
-                imgui.checkbox("Save funscript on stop##PreviewCaptureSave", True)
-                imgui.spacing()
-                imgui.button("Start Capture##PreviewStartCapture", width=-1)
-                imgui.spacing()
-                imgui.text_colored("Idle", 0.5, 0.5, 0.5, 1.0)
+            with _section_card("Live Capture##PreviewLiveCapture", tier="primary") as is_open:
+                if is_open:
+                    imgui.text("Source:")
+                    imgui.same_line()
+                    imgui.radio_button("Screen##PreviewScreen", True)
+                    imgui.same_line()
+                    imgui.radio_button("Window##PreviewWindow", False)
+                    imgui.same_line()
+                    imgui.radio_button("Stream URL##PreviewStream", False)
+                    imgui.spacing()
+                    imgui.text("Captures your primary screen.")
+                    imgui.spacing()
+                    imgui.separator()
+                    imgui.spacing()
+                    imgui.text("Tracker:")
+                    imgui.same_line()
+                    imgui.push_item_width(imgui.get_content_region_available()[0])
+                    imgui.combo("##PreviewCaptureTracker", 0, ["(select tracker)"])
+                    imgui.pop_item_width()
+                    imgui.checkbox("Save funscript on stop##PreviewCaptureSave", True)
+                    imgui.spacing()
+                    imgui.button("Start Capture##PreviewStartCapture", width=-1)
+                    imgui.spacing()
+                    imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+                    imgui.text("Idle")
+                    imgui.pop_style_color()
 
         # Show extras section even in preview
         self._render_patreon_exclusive_extras()
@@ -669,27 +668,31 @@ class BatchMixin:
     def _render_patreon_exclusive_extras(self):
         """Render additional Patreon-exclusive feature sections."""
         # --- Recording Mode ---
-        with section_card("Recording Mode##patreon_rec", open_by_default=False) as _open:
+        with _section_card("Recording Mode##patreon_rec", open_by_default=False) as _open:
             if _open:
                 imgui.text_wrapped(
                     "Draw funscripts by moving your mouse while video plays. "
                     "Points are auto-simplified with RDP."
                 )
                 imgui.spacing()
-                imgui.text_colored("Activate via timeline toolbar (REC mode)", 0.7, 0.7, 0.7, 1.0)
+                imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.HINT_TEXT)
+                imgui.text("Activate via timeline toolbar (REC mode)")
+                imgui.pop_style_color()
 
         # --- Dynamic Injection ---
-        with section_card("Dynamic Injection##patreon_inj", open_by_default=False) as _open:
+        with _section_card("Dynamic Injection##patreon_inj", open_by_default=False) as _open:
             if _open:
                 imgui.text_wrapped(
                     "Add intermediate points to smooth out segments. "
                     "Supports linear, cosine, and cubic interpolation."
                 )
                 imgui.spacing()
-                imgui.text_colored("Right-click a segment in Injection mode on the timeline", 0.7, 0.7, 0.7, 1.0)
+                imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.HINT_TEXT)
+                imgui.text("Right-click a segment in Injection mode on the timeline")
+                imgui.pop_style_color()
 
         # --- Pattern Library ---
-        with section_card("Pattern Library##patreon_pat", open_by_default=False) as _open:
+        with _section_card("Pattern Library##patreon_pat", open_by_default=False) as _open:
             if _open:
                 imgui.text_wrapped(
                     "Save and reuse movement patterns (soft bounces, sine waves, custom motions). "
@@ -704,28 +707,38 @@ class BatchMixin:
                         for p_name in patterns:
                             imgui.bullet_text(p_name)
                     else:
-                        imgui.text_colored("No patterns saved yet", 0.5, 0.5, 0.5, 1.0)
+                        imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+                        imgui.text("No patterns saved yet")
+                        imgui.pop_style_color()
                     imgui.spacing()
-                    imgui.text_colored("Select points on timeline > right-click > Save Selection as Pattern", 0.7, 0.7, 0.7, 1.0)
+                    imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.HINT_TEXT)
+                    imgui.text("Select points on timeline > right-click > Save Selection as Pattern")
+                    imgui.pop_style_color()
                 else:
-                    imgui.text_colored("Pattern library not loaded", 0.5, 0.5, 0.5, 1.0)
+                    imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+                    imgui.text("Pattern library not loaded")
+                    imgui.pop_style_color()
 
         # --- Multi-Axis Generation ---
-        with section_card("Multi-Axis Generation##patreon_ma", open_by_default=False) as _open:
+        with _section_card("Multi-Axis Generation##patreon_ma", open_by_default=False) as _open:
             if _open:
                 imgui.text_wrapped(
                     "Auto-generate Roll, Pitch, Twist, Sway, and Surge axes from your stroke axis. "
                     "Heuristic mode derives motion from stroke data. Video-aware mode uses body pose keypoints."
                 )
                 imgui.spacing()
-                imgui.text_colored("Right-click timeline > Generate Axis > choose axis", 0.7, 0.7, 0.7, 1.0)
+                imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.HINT_TEXT)
+                imgui.text("Right-click timeline > Generate Axis > choose axis")
+                imgui.pop_style_color()
 
         # --- Live Device Preview ---
-        with section_card("Live Device Preview##patreon_ldp", open_by_default=False) as _open:
+        with _section_card("Live Device Preview##patreon_ldp", open_by_default=False) as _open:
             if _open:
                 imgui.text_wrapped(
                     "Feel cursor position on your device while editing, without playing the video. "
                     "Rate-limited to avoid flooding device commands."
                 )
                 imgui.spacing()
-                imgui.text_colored("Enable in Device Control tab > Live Control Integration", 0.7, 0.7, 0.7, 1.0)
+                imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.HINT_TEXT)
+                imgui.text("Enable in Device Control tab > Live Control Integration")
+                imgui.pop_style_color()

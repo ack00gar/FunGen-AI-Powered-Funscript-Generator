@@ -2,6 +2,7 @@
 import imgui
 import os
 from config.constants_colors import CurrentTheme
+from config.element_group_colors import ControlPanelColors as _CPColors
 from application.utils import primary_button_style, destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
 
@@ -88,11 +89,11 @@ class ExecutionMixin:
             if adaptive_state is not None:
                 imgui.spacing()
                 if adaptive_state.is_converged:
-                    imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.9, 0.3, 1.0)  # green
+                    imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.SUCCESS_TEXT)
                     imgui.text(f"Tuning converged: P={adaptive_state.best_producers}/C={adaptive_state.best_consumers} ({adaptive_state.best_fps:.0f} FPS)")
                     imgui.pop_style_color()
                 else:
-                    imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.8, 0.3, 1.0)  # green
+                    imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.SUCCESS_TEXT)
                     imgui.text(f"Tuning: P={adaptive_state.current_producers}/C={adaptive_state.current_consumers}")
                     imgui.pop_style_color()
                 if imgui.is_item_hovered():
@@ -373,19 +374,14 @@ class ExecutionMixin:
 
         with _DisabledScope(disabled):
             if is_enabled:
-                g = self.GeneralColors
-                imgui.push_style_color(imgui.COLOR_BUTTON, *g.RED_DARK)
-                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *g.RED_LIGHT)
-                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *g.RED)
                 btn_text = "Disable Refinement Mode"
+                with destructive_button_style():
+                    if imgui.button("%s##ToggleInteractiveRefinement" % btn_text, width=-1):
+                        app.app_state_ui.interactive_refinement_mode_enabled = not is_enabled
             else:
                 btn_text = "Enable Refinement Mode"
-
-            if imgui.button("%s##ToggleInteractiveRefinement" % btn_text, width=-1):
-                app.app_state_ui.interactive_refinement_mode_enabled = not is_enabled
-
-            if is_enabled:
-                imgui.pop_style_color(3)
+                if imgui.button("%s##ToggleInteractiveRefinement" % btn_text, width=-1):
+                    app.app_state_ui.interactive_refinement_mode_enabled = not is_enabled
 
             _tooltip_if_hovered("Enables clicking on object boxes in the video to refine the script for that chapter.")
 

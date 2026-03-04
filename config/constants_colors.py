@@ -36,6 +36,8 @@ class DarkTheme:
     GRAY_LIGHT = (0.8, 0.8, 0.8, 1.0)
     GRAY_DARK = (0.3, 0.3, 0.3, 1.0)
     GRAY_MEDIUM = (0.5, 0.5, 0.5, 1.0)
+    GRAY_SUBDUED = (0.6, 0.6, 0.6, 1.0)
+    HINT_TEXT = (0.7, 0.7, 0.7, 1.0)
 
     ORANGE = (1.0, 0.6, 0.0, 1.0)
     ORANGE_LIGHT = (1.0, 0.8, 0.4, 0.8)

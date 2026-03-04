@@ -108,6 +108,13 @@ class ControlPanelColors:
     # Section header colors
     SECTION_HEADER = CurrentTheme.CONTROL_PANEL_SECTION_HEADER
 
+    # Text colors for control panel content
+    HINT_TEXT = CurrentTheme.HINT_TEXT
+    LABEL_TEXT = CurrentTheme.GRAY_SUBDUED
+    SUCCESS_TEXT = CurrentTheme.GREEN
+    ERROR_TEXT = CurrentTheme.RED
+    WARNING_TEXT = CurrentTheme.ORANGE
+
 
 class VideoNavigationColors:
     """Color constants for video navigation components."""
@@ -276,6 +283,16 @@ class StatusStripColors:
     ACCENT = CurrentTheme.STATUS_STRIP_ACCENT
     ENERGY_SAVER = CurrentTheme.ENERGY_SAVER_INDICATOR
     WARNING = CurrentTheme.STATUS_STRIP_WARNING
+
+
+class ToolbarColors:
+    """Color constants for toolbar components."""
+    BG_TOP = (0.18, 0.18, 0.20, 0.98)
+    BG_BOTTOM = (0.13, 0.13, 0.14, 0.98)
+    LABEL_TEXT = (0.45, 0.45, 0.50, 0.7)
+    SEPARATOR = (0.35, 0.35, 0.40, 0.3)
+    SHADOW_1 = (0.0, 0.0, 0.0, 0.25)
+    SHADOW_2 = (0.0, 0.0, 0.0, 0.10)
 
 
 class ButtonColors:

@@ -8,6 +8,8 @@ from collections import deque
 from application.utils import _format_time
 from application.utils.system_monitor import SystemMonitor
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
+from application.utils.section_card import section_card as _section_card
+from config.element_group_colors import ControlPanelColors as _CPColors
 from funscript.quality_validator import FunscriptQualityValidator, IssueSeverity
 
 
@@ -263,74 +265,77 @@ class InfoGraphsUI:
             imgui.spacing()
 
             # Video (collapsed by default)
-            if imgui.collapsing_header("Video##VideoParentSection")[0]:
-                if imgui.tree_node("Video Information##VideoInfoNode"):
-                    self._render_content_video_info()
-                    imgui.tree_pop()
-                if imgui.tree_node("Video Settings##VideoSettingsNode"):
-                    self._render_content_video_settings()
-                    imgui.tree_pop()
-
-            imgui.separator()
+            with _section_card("Video##VideoParentSection", tier="primary",
+                               open_by_default=False) as vid_open:
+                if vid_open:
+                    if imgui.tree_node("Video Information##VideoInfoNode"):
+                        self._render_content_video_info()
+                        imgui.tree_pop()
+                    if imgui.tree_node("Video Settings##VideoSettingsNode"):
+                        self._render_content_video_settings()
+                        imgui.tree_pop()
 
             # Funscript (expanded by default)
-            if imgui.collapsing_header("Funscript##FunscriptParentSection",
-                                       flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                # T1 always
-                self._render_funscript_info_section(1)
+            with _section_card("Funscript##FunscriptParentSection", tier="primary") as fs_open:
+                if fs_open:
+                    # T1 always
+                    self._render_funscript_info_section(1)
 
-                # T2 if visible
-                if self.app.app_state_ui.show_funscript_interactive_timeline2:
-                    self._render_funscript_info_section(2)
+                    # T2 if visible
+                    if self.app.app_state_ui.show_funscript_interactive_timeline2:
+                        self._render_funscript_info_section(2)
 
-                # T3+ if visible
-                for tl_num in EXTRA_TIMELINE_RANGE:
-                    vis_attr = f"show_funscript_interactive_timeline{tl_num}"
-                    if getattr(self.app.app_state_ui, vis_attr, False):
-                        self._render_funscript_info_section(tl_num)
-
-            imgui.separator()
+                    # T3+ if visible
+                    for tl_num in EXTRA_TIMELINE_RANGE:
+                        vis_attr = f"show_funscript_interactive_timeline{tl_num}"
+                        if getattr(self.app.app_state_ui, vis_attr, False):
+                            self._render_funscript_info_section(tl_num)
 
             # Segment Statistics (expanded by default)
-            if imgui.collapsing_header("Segment Statistics##SegStatSection",
-                                       flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                self._render_segment_statistics()
+            with _section_card("Segment Statistics##SegStatSection", tier="primary") as seg_open:
+                if seg_open:
+                    self._render_segment_statistics()
 
         elif tab_selected == "advanced":
             imgui.spacing()
             # Undo-Redo History section (collapsed by default)
-            if imgui.collapsing_header("Undo-Redo History##UndoRedoSection")[0]:
-                self._render_content_undo_redo_history()
-            imgui.separator()
+            with _section_card("Undo-Redo History##UndoRedoSection", tier="primary",
+                               open_by_default=False) as undo_open:
+                if undo_open:
+                    self._render_content_undo_redo_history()
 
             # Performance Monitoring section (collapsed by default)
-            if imgui.collapsing_header("Performance Monitoring##PerformanceSection")[0]:
-                # OPTIMIZATION: Only render performance data if section is expanded
-                if performance_tab_now_active:
-                    self.perf_monitor.render_info(show_detailed=True)
-                imgui.separator()
+            with _section_card("Performance Monitoring##PerformanceSection", tier="primary",
+                               open_by_default=False) as perf_open:
+                if perf_open:
+                    # OPTIMIZATION: Only render performance data if section is expanded
+                    if performance_tab_now_active:
+                        self.perf_monitor.render_info(show_detailed=True)
+                    imgui.separator()
 
-                # Video Pipeline Performance subsection
-                if imgui.collapsing_header(
-                    "Video Pipeline Performance##PipelineTimingSection",
-                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
-                )[0]:
-                    self._render_content_pipeline_timing()
+                    # Video Pipeline Performance subsection
+                    with _section_card("Video Pipeline Performance##PipelineTimingSection",
+                                       tier="secondary") as pipe_open:
+                        if pipe_open:
+                            self._render_content_pipeline_timing()
 
-                # System Monitor subsection
-                if imgui.collapsing_header(
-                    "System Monitor##SystemMonitorSection",
-                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
-                )[0]:
-                    self._render_content_performance()
+                    # System Monitor subsection
+                    with _section_card("System Monitor##SystemMonitorSection",
+                                       tier="secondary") as sys_open:
+                        if sys_open:
+                            self._render_content_performance()
 
-                # Disk I/O subsection
-                if imgui.collapsing_header("Disk I/O##DiskIOSection")[0]:
-                    self._render_disk_io_section()
+                    # Disk I/O subsection
+                    with _section_card("Disk I/O##DiskIOSection", tier="secondary",
+                                       open_by_default=False) as disk_open:
+                        if disk_open:
+                            self._render_disk_io_section()
 
-                # UI Performance subsection
-                if imgui.collapsing_header("UI Performance##UIPerformanceSection")[0]:
-                    self._render_content_ui_performance()
+                    # UI Performance subsection
+                    with _section_card("UI Performance##UIPerformanceSection", tier="secondary",
+                                       open_by_default=False) as ui_open:
+                        if ui_open:
+                            self._render_content_ui_performance()
 
         # Always check memory alerts
         if hasattr(self, "system_monitor"):

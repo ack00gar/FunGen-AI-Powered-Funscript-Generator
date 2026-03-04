@@ -1701,7 +1701,8 @@ class InteractiveFunscriptTimeline:
         if not actions or len(actions) < 2:
             return
 
-        click_time = tf.x_to_time(mouse_pos[0])
+        center_x = tf.x_offset + (tf.width / 2)
+        click_time = tf.x_to_time(center_x)
 
         # Highlight segment under cursor (visual feedback)
         timestamps = [a['at'] for a in actions]
@@ -2724,7 +2725,11 @@ class InteractiveFunscriptTimeline:
 
         # Check if video is playing - use is_playing attribute if available
         is_playing = False
-        if getattr(processor, 'live_capture_active', False):
+        mpv = getattr(self.app, '_mpv_controller', None)
+        if mpv and mpv.is_active:
+            # mpv review mode — processor is stopped but mpv drives current_frame_index
+            is_playing = mpv.is_playing
+        elif getattr(processor, 'live_capture_active', False):
             # Live capture pauses the processor but still updates current_frame_index
             is_playing = True
         elif hasattr(processor, 'is_playing'):
