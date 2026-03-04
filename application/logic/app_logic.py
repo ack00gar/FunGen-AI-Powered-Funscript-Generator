@@ -256,6 +256,28 @@ class ApplicationLogic:
                 self._audio_player = None
                 self._audio_sync = None
 
+        # --- mpv Playback Controller (fullscreen — Patreon supporter feature) ---
+        self._mpv_controller = None
+        self._mpv_binary_missing = False   # True = patreon folder present but mpv not installed
+        if not self.is_cli_mode:
+            try:
+                import shutil
+                from video.mpv_ipc_bridge import _find_mpv_binary
+                mpv_bin = _find_mpv_binary()
+                # Verify the binary actually exists (not the "mpv" fallback string)
+                if shutil.which(mpv_bin) is None and not __import__('os').path.isfile(mpv_bin):
+                    self._mpv_binary_missing = True
+                    self.logger.warning(
+                        "mpv binary not found — fullscreen mode unavailable. "
+                        "Install mpv (macOS: brew install mpv)"
+                    )
+                else:
+                    from video.mpv_playback_controller import MpvPlaybackController
+                    self._mpv_controller = MpvPlaybackController(self)
+                    self.logger.info(f"MpvPlaybackController initialized (binary: {mpv_bin})")
+            except Exception as e:
+                self.logger.warning(f"MpvPlaybackController unavailable: {e}")
+
         # --- System Scaling Detection ---
         if not self.is_cli_mode:
             try:
@@ -1264,6 +1286,10 @@ class ApplicationLogic:
                 self.project_manager.project_dirty:
             self.logger.info("Performing final autosave on exit...")
             self.project_manager.perform_autosave()
+
+        # Stop mpv review mode if active
+        if self._mpv_controller and self._mpv_controller.is_active:
+            self._mpv_controller.stop()
 
         # Stop audio playback and persist volume to settings
         if hasattr(self, '_audio_volume_live'):

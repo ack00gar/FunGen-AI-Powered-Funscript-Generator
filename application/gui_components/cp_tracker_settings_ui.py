@@ -2,6 +2,8 @@
 import imgui
 from application.utils import primary_button_style, destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
+from application.utils.section_card import section_card as _section_card
+from config.element_group_colors import ControlPanelColors as _CPColors
 
 
 class TrackerSettingsMixin:
@@ -66,99 +68,111 @@ class TrackerSettingsMixin:
 
         settings = app.app_settings
 
-        imgui.indent()
-        if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu")[0]:
-            cur_conf = settings.get("live_tracker_confidence_threshold")
-            ch, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", cur_conf, 0.1, 0.95, "%.2f")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Minimum confidence for object detection (higher = fewer false positives, lower = more detections)")
-            if ch and new_conf != cur_conf:
-                settings.set("live_tracker_confidence_threshold", new_conf)
-                tr.confidence_threshold = new_conf
+        with _section_card("Detection & ROI Definition##ROIDetectionTrackerMenu", tier="primary") as is_open:
+            if is_open:
+                cur_conf = settings.get("live_tracker_confidence_threshold")
+                ch, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", cur_conf, 0.1, 0.95, "%.2f")
+                _tooltip_if_hovered("Minimum confidence for object detection (higher = fewer false positives, lower = more detections)")
+                if ch and new_conf != cur_conf:
+                    settings.set("live_tracker_confidence_threshold", new_conf)
+                    tr.confidence_threshold = new_conf
 
-            cur_pad = settings.get("live_tracker_roi_padding")
-            ch, new_pad = imgui.input_int("ROI Padding##ROIPadTrackerMenu", cur_pad)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Pixels to expand the region of interest beyond detected object (larger = more context)")
-            if ch:
-                v = max(0, new_pad)
-                if v != cur_pad:
-                    settings.set("live_tracker_roi_padding", v)
-                    tr.roi_padding = v
-
-            cur_int = settings.get("live_tracker_roi_update_interval")
-            ch, new_int = imgui.input_int("ROI Update Interval (frames)##ROIIntervalTrackerMenu", cur_int)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("How often to run object detection (higher = better performance, lower = more responsive tracking)")
-            if ch:
-                v = max(1, new_int)
-                if v != cur_int:
-                    settings.set("live_tracker_roi_update_interval", v)
-                    tr.roi_update_interval = v
-
-            cur_sm = settings.get("live_tracker_roi_smoothing_factor")
-            ch, new_sm = imgui.slider_float("ROI Smoothing Factor##ROISmoothTrackerMenu", cur_sm, 0.0, 1.0, "%.2f")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Smooths ROI position changes between frames (0=instant changes, 1=maximum smoothing)")
-            if ch and new_sm != cur_sm:
-                settings.set("live_tracker_roi_smoothing_factor", new_sm)
-                tr.roi_smoothing_factor = new_sm
-
-            cur_persist = settings.get("live_tracker_roi_persistence_frames")
-            ch, new_pf = imgui.input_int("ROI Persistence (frames)##ROIPersistTrackerMenu", cur_persist)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("How many frames to keep tracking after losing detection (0=stop immediately, higher=keep tracking longer)")
-            if ch:
-                v = max(0, new_pf)
-                if v != cur_persist:
-                    settings.set("live_tracker_roi_persistence_frames", v)
-                    tr.max_frames_for_roi_persistence = v
-
-        if imgui.collapsing_header("Optical Flow##ROIFlowTrackerMenu")[0]:
-            cur_sparse = settings.get("live_tracker_use_sparse_flow")
-            ch, new_sparse = imgui.checkbox("Use Sparse Optical Flow##ROISparseFlowTrackerMenu", cur_sparse)
-            if ch:
-                settings.set("live_tracker_use_sparse_flow", new_sparse)
-                tr.use_sparse_flow = new_sparse
-
-            imgui.text("DIS Dense Flow Settings:")
-            with _DisabledScope(cur_sparse):
-                presets = ["ULTRAFAST", "FAST", "MEDIUM"]
-                cur_p = settings.get("live_tracker_dis_flow_preset").upper()
-                try:
-                    p_idx = presets.index(cur_p)
-                except ValueError:
-                    p_idx = 0
-                ch, nidx = imgui.combo("DIS Preset##ROIDISPresetTrackerMenu", p_idx, presets)
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Optical flow quality preset (ULTRAFAST=best performance, MEDIUM=best quality)")
+                cur_pad = settings.get("live_tracker_roi_padding")
+                ch, new_pad = imgui.input_int("ROI Padding##ROIPadTrackerMenu", cur_pad)
+                _tooltip_if_hovered("Pixels to expand the region of interest beyond detected object (larger = more context)")
                 if ch:
-                    nv = presets[nidx]
-                    if nv != cur_p:
-                        settings.set("live_tracker_dis_flow_preset", nv)
-                        tr.update_dis_flow_config(preset=nv)
+                    v = max(0, new_pad)
+                    if v != cur_pad:
+                        settings.set("live_tracker_roi_padding", v)
+                        tr.roi_padding = v
 
-                cur_scale = settings.get("live_tracker_dis_finest_scale")
-                ch, new_scale = imgui.input_int("DIS Finest Scale (0-10, 0=auto)##ROIDISFineScaleTrackerMenu", cur_scale)
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Optical flow scale detail level (0=auto, lower=more detail but slower)")
-                if ch and new_scale != cur_scale:
-                    settings.set("live_tracker_dis_finest_scale", new_scale)
-                    tr.update_dis_flow_config(finest_scale=new_scale)
+                cur_int = settings.get("live_tracker_roi_update_interval")
+                ch, new_int = imgui.input_int("ROI Update Interval (frames)##ROIIntervalTrackerMenu", cur_int)
+                _tooltip_if_hovered("How often to run object detection (higher = better performance, lower = more responsive tracking)")
+                if ch:
+                    v = max(1, new_int)
+                    if v != cur_int:
+                        settings.set("live_tracker_roi_update_interval", v)
+                        tr.roi_update_interval = v
 
-            if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu")[0]:
+                cur_sm = settings.get("live_tracker_roi_smoothing_factor")
+                ch, new_sm = imgui.slider_float("ROI Smoothing Factor##ROISmoothTrackerMenu", cur_sm, 0.0, 1.0, "%.2f")
+                _tooltip_if_hovered("Smooths ROI position changes between frames (0=instant changes, 1=maximum smoothing)")
+                if ch and new_sm != cur_sm:
+                    settings.set("live_tracker_roi_smoothing_factor", new_sm)
+                    tr.roi_smoothing_factor = new_sm
+
+                cur_persist = settings.get("live_tracker_roi_persistence_frames")
+                ch, new_pf = imgui.input_int("ROI Persistence (frames)##ROIPersistTrackerMenu", cur_persist)
+                _tooltip_if_hovered("How many frames to keep tracking after losing detection (0=stop immediately, higher=keep tracking longer)")
+                if ch:
+                    v = max(0, new_pf)
+                    if v != cur_persist:
+                        settings.set("live_tracker_roi_persistence_frames", v)
+                        tr.max_frames_for_roi_persistence = v
+
+        with _section_card("Optical Flow##ROIFlowTrackerMenu", tier="primary") as is_open:
+            if is_open:
+                cur_sparse = settings.get("live_tracker_use_sparse_flow")
+                ch, new_sparse = imgui.checkbox("Use Sparse Optical Flow##ROISparseFlowTrackerMenu", cur_sparse)
+                if ch:
+                    settings.set("live_tracker_use_sparse_flow", new_sparse)
+                    tr.use_sparse_flow = new_sparse
+
+                imgui.text("DIS Dense Flow Settings:")
+                with _DisabledScope(cur_sparse):
+                    presets = ["ULTRAFAST", "FAST", "MEDIUM"]
+                    cur_p = settings.get("live_tracker_dis_flow_preset").upper()
+                    try:
+                        p_idx = presets.index(cur_p)
+                    except ValueError:
+                        p_idx = 0
+                    ch, nidx = imgui.combo("DIS Preset##ROIDISPresetTrackerMenu", p_idx, presets)
+                    _tooltip_if_hovered("Optical flow quality preset (ULTRAFAST=best performance, MEDIUM=best quality)")
+                    if ch:
+                        nv = presets[nidx]
+                        if nv != cur_p:
+                            settings.set("live_tracker_dis_flow_preset", nv)
+                            tr.update_dis_flow_config(preset=nv)
+
+                    cur_scale = settings.get("live_tracker_dis_finest_scale")
+                    ch, new_scale = imgui.input_int("DIS Finest Scale (0-10, 0=auto)##ROIDISFineScaleTrackerMenu", cur_scale)
+                    _tooltip_if_hovered("Optical flow scale detail level (0=auto, lower=more detail but slower)")
+                    if ch and new_scale != cur_scale:
+                        settings.set("live_tracker_dis_finest_scale", new_scale)
+                        tr.update_dis_flow_config(finest_scale=new_scale)
+
+                imgui.spacing()
+
+                # Flow smoothing (was orphaned — now inside Optical Flow where it belongs)
+                cur_smooth = settings.get("live_tracker_flow_smoothing_window")
+                ch, nv = imgui.input_int("Flow Smoothing Window##ROIFlowSmoothWinTrackerMenu", cur_smooth)
+                if ch:
+                    v = max(1, nv)
+                    if v != cur_smooth:
+                        settings.set("live_tracker_flow_smoothing_window", v)
+                        tr.flow_history_window_smooth = v
+
+                imgui.text("Output Delay (frames):")
+                cur_delay = settings.get("funscript_output_delay_frames")
+                ch, nd = imgui.slider_int("##OutputDelayFrames", cur_delay, 0, 20)
+                if ch and nd != cur_delay:
+                    settings.set("funscript_output_delay_frames", nd)
+                    app.calibration.funscript_output_delay_frames = nd
+                    app.calibration.update_tracker_delay_params()
+
+        with _section_card("Output Signal Generation##ROISignalTrackerMenu", tier="primary") as is_open:
+            if is_open:
                 cur_sens = settings.get("live_tracker_sensitivity")
                 ch, ns = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu", cur_sens, 0.0, 100.0, "%.1f")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("How responsive the output is to motion changes (higher = more sensitive to small movements)")
+                _tooltip_if_hovered("How responsive the output is to motion changes (higher = more sensitive to small movements)")
                 if ch and ns != cur_sens:
                     settings.set("live_tracker_sensitivity", ns)
                     tr.sensitivity = ns
 
                 cur_amp = settings.get("live_tracker_base_amplification")
                 ch, na = imgui.slider_float("Base Amplification##ROIBaseAmpTrackerMenu", cur_amp, 0.1, 5.0, "%.2f")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Multiplier for output range (higher = more movement, lower = gentler motion)")
+                _tooltip_if_hovered("Multiplier for output range (higher = more movement, lower = gentler motion)")
                 if ch:
                     v = max(0.1, na)
                     if v != cur_amp:
@@ -184,24 +198,6 @@ class TrackerSettingsMixin:
                 if changed:
                     settings.set("live_tracker_class_amp_multipliers", cur)
                     tr.class_specific_amplification_multipliers = cur
-
-            cur_smooth = settings.get("live_tracker_flow_smoothing_window")
-            ch, nv = imgui.input_int("Flow Smoothing Window##ROIFlowSmoothWinTrackerMenu", cur_smooth)
-            if ch:
-                v = max(1, nv)
-                if v != cur_smooth:
-                    settings.set("live_tracker_flow_smoothing_window", v)
-                    tr.flow_history_window_smooth = v
-
-            imgui.text("Output Delay (frames):")
-            cur_delay = settings.get("funscript_output_delay_frames")
-            ch, nd = imgui.slider_int("##OutputDelayFrames", cur_delay, 0, 20)
-            if ch and nd != cur_delay:
-                settings.set("funscript_output_delay_frames", nd)
-                app.calibration.funscript_output_delay_frames = nd
-                app.calibration.update_tracker_delay_params()
-
-        imgui.unindent()
 
     def _render_tracking_axes_mode(self, stage_proc):
         """Renders UI elements for tracking axis mode."""

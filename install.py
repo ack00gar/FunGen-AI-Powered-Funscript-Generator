@@ -1193,46 +1193,54 @@ class FunGenUniversalInstaller:
                         print(f"    torch-tensorrt and tensorrt for {cuda_version} installed successfully")
                         print(f"    PyTorch stack constrained to {torch_version}+{cuda_version}")
             
-            # Install device_control requirements if available (supporter feature)
-            device_control_req_path = self.project_path / "device_control" / "requirements.txt"
-            if device_control_req_path.exists():
-                print("  Installing device control requirements (supporter feature)...")
+            # Install addon requirements for any addon folder that ships a requirements.txt.
+            # device_control gets a compilation-fallback retry (native extensions on Windows).
+            # All other addons (streamer, patreon_features, …) get a plain pip install.
+            _COMPILATION_ERRORS = [
+                "Microsoft Visual C++", "failed-wheel-build",
+                "error: Microsoft Visual C++", "Building wheel",
+                "Failed building wheel", "build dependencies",
+                "error: subprocess-exited-with-error",
+            ]
+            _ADDONS = [
+                ("device_control",   "Device Control",    True),   # (folder, label, try_binary_fallback)
+                ("streamer",         "Streamer",          False),
+                ("patreon_features", "Patreon Features",  False),
+            ]
+            any_addon_found = False
+            for folder, label, try_binary_fallback in _ADDONS:
+                req_path = self.project_path / folder / "requirements.txt"
+                if not req_path.exists():
+                    continue
+                any_addon_found = True
+                print(f"  Installing {label} requirements...")
                 ret, stdout, stderr = self.run_command([
-                    str(python_exe), "-m", "pip", "install", "-r", str(device_control_req_path)
+                    str(python_exe), "-m", "pip", "install", "-r", str(req_path)
                 ], check=False)
-                
-                if ret != 0:
-                    # Try with precompiled wheels for device control too
-                    error_text = stderr + stdout
-                    compilation_errors = [
-                        "Microsoft Visual C++",
-                        "failed-wheel-build", 
-                        "error: Microsoft Visual C++",
-                        "Building wheel",
-                        "Failed building wheel",
-                        "build dependencies",
-                        "error: subprocess-exited-with-error"
-                    ]
-                    
-                    if any(error in error_text for error in compilation_errors):
-                        self.print_warning("Compilation error in device control requirements. Trying precompiled wheels...")
-                        ret2, stdout2, stderr2 = self.run_command([
-                            str(python_exe), "-m", "pip", "install", "-r", str(device_control_req_path),
-                            "--only-binary=all", "--prefer-binary"
-                        ], check=False)
-                        
-                        if ret2 != 0:
-                            self.print_warning("Failed to install device control requirements even with precompiled wheels")
-                            self.print_warning("Device control features may not work properly.")
-                        else:
-                            print("    Device control requirements installed successfully (precompiled)")
+                if ret != 0 and try_binary_fallback and any(e in stderr + stdout for e in _COMPILATION_ERRORS):
+                    self.print_warning(f"Compilation error in {label} requirements. Trying precompiled wheels...")
+                    ret, stdout, stderr = self.run_command([
+                        str(python_exe), "-m", "pip", "install", "-r", str(req_path),
+                        "--only-binary=all", "--prefer-binary"
+                    ], check=False)
+                    if ret != 0:
+                        self.print_warning(f"Failed to install {label} requirements even with precompiled wheels.")
+                        self.print_warning(f"{label} features may not work properly.")
                     else:
-                        self.print_warning(f"Failed to install device control requirements: {stderr}")
-                        self.print_warning("Device control features may not work properly.")
+                        print(f"    {label} requirements installed successfully (precompiled)")
+                elif ret != 0:
+                    self.print_warning(f"Failed to install {label} requirements: {stderr}")
+                    self.print_warning(f"{label} features may not work properly.")
                 else:
-                    print("    Device control requirements installed successfully")
-            else:
-                print("  Device control not found - core features only")
+                    print(f"    {label} requirements installed successfully")
+
+            if not any_addon_found:
+                print("  No addons found — core features only")
+
+            # Check / install mpv system binary (required for Patreon fullscreen feature).
+            patreon_folder = self.project_path / "patreon_features"
+            if patreon_folder.exists():
+                self._ensure_mpv_installed()
             
             self.print_success("Python dependencies installed")
             return True
@@ -1295,6 +1303,65 @@ class FunGenUniversalInstaller:
         self.print_success("Using CPU configuration")
         return "cpu"
     
+    def _ensure_mpv_installed(self):
+        """Check for the mpv binary and attempt to install it if missing (non-fatal)."""
+        # Quick check: already on PATH or at the Homebrew location
+        homebrew_mpv = "/opt/homebrew/bin/mpv"
+        if shutil.which("mpv") or (self.platform == "Darwin" and os.path.isfile(homebrew_mpv)):
+            self.print_success("mpv is already installed")
+            return
+
+        print("  mpv not found — required for Patreon fullscreen feature")
+
+        if self.platform == "Darwin":
+            # Try Homebrew
+            if shutil.which("brew"):
+                print("  Installing mpv via Homebrew...")
+                ret, _, stderr = self.run_command(["brew", "install", "mpv"], check=False)
+                if ret == 0:
+                    self.print_success("mpv installed via Homebrew")
+                else:
+                    self.print_warning(f"Homebrew install failed: {stderr.strip()}")
+                    self.print_warning("Install mpv manually:  brew install mpv")
+            else:
+                self.print_warning("Homebrew not found — install mpv manually:")
+                self.print_warning("  brew install mpv   (after installing Homebrew from https://brew.sh)")
+
+        elif self.platform == "Linux":
+            # Try apt-get (Debian/Ubuntu); fall through to a generic hint otherwise.
+            if shutil.which("apt-get"):
+                print("  Installing mpv via apt-get (may require sudo)...")
+                ret, _, stderr = self.run_command(
+                    ["sudo", "apt-get", "install", "-y", "mpv"], check=False
+                )
+                if ret == 0:
+                    self.print_success("mpv installed via apt-get")
+                else:
+                    self.print_warning(f"apt-get install failed: {stderr.strip()}")
+                    self.print_warning("Install mpv manually:  sudo apt install mpv")
+            elif shutil.which("dnf"):
+                print("  Installing mpv via dnf (may require sudo)...")
+                ret, _, stderr = self.run_command(
+                    ["sudo", "dnf", "install", "-y", "mpv"], check=False
+                )
+                if ret == 0:
+                    self.print_success("mpv installed via dnf")
+                else:
+                    self.print_warning(f"dnf install failed: {stderr.strip()}")
+                    self.print_warning("Install mpv manually:  sudo dnf install mpv")
+            else:
+                self.print_warning("Could not detect package manager — install mpv manually:")
+                self.print_warning("  https://mpv.io/installation/")
+
+        elif self.platform == "Windows":
+            # winget can install mpv; we don't try silently on Windows to avoid UAC issues.
+            self.print_warning("mpv is not installed.  Install it with:")
+            self.print_warning("  winget install mpv")
+            self.print_warning("Then re-run this installer (or just launch FunGen — fullscreen will work once mpv is on PATH).")
+
+        else:
+            self.print_warning("Unknown platform — install mpv manually from https://mpv.io/installation/")
+
     def _handle_rocm_fallback(self, python_exe: Path, error_msg: str) -> bool:
         """Handle ROCm installation failure with user acknowledgement"""
         print()

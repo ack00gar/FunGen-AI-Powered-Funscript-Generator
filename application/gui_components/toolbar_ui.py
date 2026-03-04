@@ -26,6 +26,7 @@ import imgui
 from application.utils import get_icon_texture_manager
 from application.utils.button_styles import primary_button_style, destructive_button_style
 from application.utils.feature_detection import is_feature_available as _is_feature_available
+from config.element_group_colors import ToolbarColors
 
 try:
     from video.audio_player import SOUNDDEVICE_AVAILABLE
@@ -114,6 +115,7 @@ class ToolbarUI:
         # Cache feature detection flags for this frame
         self._feat_streamer = _is_feature_available("streamer")
         self._feat_device = _is_feature_available("device_control")
+        self._feat_supporter = _is_feature_available("patreon_features")
 
         # Check if toolbar should be shown
         if not hasattr(app_state, 'show_toolbar'):
@@ -142,23 +144,23 @@ class ToolbarUI:
 
         imgui.begin("##MainToolbar", flags=flags)
 
-        # Draw background manually
+        # Draw gradient background
         draw_list = imgui.get_window_draw_list()
         win_pos = imgui.get_window_position()
         win_size = imgui.get_window_size()
-        bg_color = imgui.get_color_u32_rgba(0.15, 0.15, 0.15, 0.95)
-        draw_list.add_rect_filled(
-            win_pos[0], win_pos[1],
-            win_pos[0] + win_size[0], win_pos[1] + win_size[1],
-            bg_color
-        )
+        x0, y0 = win_pos[0], win_pos[1]
+        x1, y1 = x0 + win_size[0], y0 + win_size[1]
+        top_color = imgui.get_color_u32_rgba(*ToolbarColors.BG_TOP)
+        bot_color = imgui.get_color_u32_rgba(*ToolbarColors.BG_BOTTOM)
+        draw_list.add_rect_filled_multicolor(x0, y0, x1, y1, top_color, top_color, bot_color, bot_color)
 
-        # Style for toolbar buttons
+        # Style for toolbar buttons — transparent floating style
         imgui.push_style_var(imgui.STYLE_FRAME_PADDING, (self._button_padding, self._button_padding))
         imgui.push_style_var(imgui.STYLE_ITEM_SPACING, (8, 4))
-        imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.2, 0.2, 0.5)
-        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.3, 0.3, 0.7)
-        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.15, 0.15, 0.9)
+        imgui.push_style_var(imgui.STYLE_FRAME_ROUNDING, 6.0)
+        imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.5, 0.5, 0.55, 0.2)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.4, 0.4, 0.45, 0.35)
 
         # Add small padding at start
         imgui.dummy(8, 0)
@@ -226,24 +228,24 @@ class ToolbarUI:
         self._render_view_section(icon_mgr, btn_size)
         self._end_toolbar_section()
 
-        # --- OPTIONAL TOOLS SECTION (Buyer features - conditional) ---
-        # Check if any optional features exist by calling _check_features_available()
-        # This method is defined in _render_features_section and checks dynamically
-        # The actual rendering happens inside _render_features_section
-        # Quick check for any known optional features
-        has_any_optional_features = (self._feat_streamer or self._feat_device)
+        # --- TOOLS SECTION (always visible — grayed out if locked) ---
+        imgui.same_line(spacing=12)
+        self._render_separator()
+        imgui.same_line(spacing=12)
 
-        if has_any_optional_features:
-            imgui.same_line(spacing=12)
-            self._render_separator()
-            imgui.same_line(spacing=12)
-
-            self._begin_toolbar_section("Tools")
-            self._render_features_section(icon_mgr, btn_size)
-            self._end_toolbar_section()
+        self._begin_toolbar_section("Tools")
+        self._render_features_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
 
         imgui.pop_style_color(3)
-        imgui.pop_style_var(2)
+        imgui.pop_style_var(3)
+
+        # Bottom shadow (2-line soft shadow instead of hard border)
+        bottom_y = y0 + win_size[1] - 1
+        shadow1_color = imgui.get_color_u32_rgba(*ToolbarColors.SHADOW_1)
+        shadow2_color = imgui.get_color_u32_rgba(*ToolbarColors.SHADOW_2)
+        draw_list.add_line(x0, bottom_y, x1, bottom_y, shadow1_color, 1.0)
+        draw_list.add_line(x0, bottom_y + 1, x1, bottom_y + 1, shadow2_color, 1.0)
 
         imgui.end()
 
@@ -255,7 +257,7 @@ class ToolbarUI:
         height = self._label_height + self._label_spacing + self._icon_size + (self._button_padding * 2)
 
         # Draw vertical line
-        color = imgui.get_color_u32_rgba(0.5, 0.5, 0.5, 0.5)
+        color = imgui.get_color_u32_rgba(*ToolbarColors.SEPARATOR)
         draw_list.add_line(
             cursor_pos[0], cursor_pos[1],
             cursor_pos[0], cursor_pos[1] + height,
@@ -297,7 +299,7 @@ class ToolbarUI:
 
         # Now render the label centered above the section
         if hasattr(self, '_pending_section_label') and self._pending_section_label:
-            label_text = self._pending_section_label
+            label_text = self._pending_section_label.upper()
             text_size = imgui.calc_text_size(label_text)
 
             # Calculate centered position
@@ -313,9 +315,9 @@ class ToolbarUI:
             label_y = window_pos[1] + 4  # Small top padding
 
             # Render centered label text
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.55, 0.55, 0.55, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *ToolbarColors.LABEL_TEXT)
             draw_list.add_text(window_pos[0] + label_x, label_y,
-                             imgui.get_color_u32_rgba(0.55, 0.55, 0.55, 1.0),
+                             imgui.get_color_u32_rgba(*ToolbarColors.LABEL_TEXT),
                              label_text)
             imgui.pop_style_color()
 
@@ -376,10 +378,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'save.png', btn_size, "Save Project"):
                 pm.save_project_dialog()
         else:
-            # Disabled state
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'save.png', btn_size, "Save Project (No project loaded)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'save.png', btn_size, "Save Project (No project loaded)")
 
         imgui.same_line()
 
@@ -448,9 +447,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'undo.png', btn_size, f"Undo (T{selected_tl})"):
                 fs_proc.perform_undo_redo(selected_tl, "undo")
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo (Nothing to undo)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'undo.png', btn_size, "Undo (Nothing to undo)")
 
         imgui.same_line()
 
@@ -458,9 +455,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'redo.png', btn_size, f"Redo (T{selected_tl})"):
                 fs_proc.perform_undo_redo(selected_tl, "redo")
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo (Nothing to redo)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'redo.png', btn_size, "Redo (Nothing to redo)")
 
         imgui.same_line(spacing=8)
 
@@ -469,9 +464,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, f"Ultimate Autotune (T{selected_tl})"):
                 app.trigger_ultimate_autotune_with_defaults(timeline_num=selected_tl)
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (No video)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (No video)")
 
     def _render_playback_section(self, icon_mgr, btn_size):
         """Render playback control buttons."""
@@ -486,9 +479,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'jump-start.png', btn_size, "Jump to Start (HOME)"):
                 app.event_handlers.handle_playback_control("jump_start")
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'jump-start.png', btn_size, "Jump to Start (No video)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'jump-start.png', btn_size, "Jump to Start (No video)")
 
         imgui.same_line()
 
@@ -497,9 +488,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'prev-frame.png', btn_size, "Previous Frame (LEFT)"):
                 app.event_handlers.handle_playback_control("prev_frame")
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'prev-frame.png', btn_size, "Previous Frame (No video)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'prev-frame.png', btn_size, "Previous Frame (No video)")
 
         imgui.same_line()
 
@@ -516,9 +505,7 @@ class ToolbarUI:
             if is_playing:
                 self._apply_button_color_default()
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'play.png', btn_size, "Play (No video loaded)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'play.png', btn_size, "Play (No video loaded)")
 
         imgui.same_line()
 
@@ -527,9 +514,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'stop.png', btn_size, "Stop"):
                 app.event_handlers.handle_playback_control("stop")
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'stop.png', btn_size, "Stop (No video)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'stop.png', btn_size, "Stop (No video)")
 
         imgui.same_line()
 
@@ -538,9 +523,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'next-frame.png', btn_size, "Next Frame (RIGHT)"):
                 app.event_handlers.handle_playback_control("next_frame")
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'next-frame.png', btn_size, "Next Frame (No video)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'next-frame.png', btn_size, "Next Frame (No video)")
 
         imgui.same_line()
 
@@ -549,9 +532,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'jump-end.png', btn_size, "Jump to End (END)"):
                 app.event_handlers.handle_playback_control("jump_end")
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'jump-end.png', btn_size, "Jump to End (No video)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'jump-end.png', btn_size, "Jump to End (No video)")
 
         # Separator before video/speed controls (same style as between Timeline 1 and 2)
         imgui.same_line(spacing=12)
@@ -688,9 +669,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'jump-start.png', btn_size, "Previous Point (Down)"):
                 app.event_handlers.handle_jump_to_point("prev")
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'jump-start.png', btn_size, "Previous Point (No video)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'jump-start.png', btn_size, "Previous Point (No video)")
 
         imgui.same_line()
 
@@ -699,9 +678,7 @@ class ToolbarUI:
             if self._toolbar_button(icon_mgr, 'jump-end.png', btn_size, "Next Point (Up)"):
                 app.event_handlers.handle_jump_to_point("next")
         else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'jump-end.png', btn_size, "Next Point (No video)")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'jump-end.png', btn_size, "Next Point (No video)")
 
     def _render_tracking_section(self, icon_mgr, btn_size):
         """Render tracking controls (start/stop + auto-simplify + auto-post-processing)."""
@@ -710,10 +687,7 @@ class ToolbarUI:
         settings = app.app_settings
 
         if not processor:
-            # No processor - show disabled
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'robot.png', btn_size, "Processor not initialized")
-            imgui.pop_style_var()
+            self._toolbar_button_disabled(icon_mgr, 'robot.png', btn_size, "Processor not initialized")
             return
 
         # Check if live tracking is running (same logic as control_panel_ui.py)
@@ -773,241 +747,240 @@ class ToolbarUI:
             app.logger.info(f"Automatic post-processing {'enabled' if new_value else 'disabled'}", extra={"status_message": True})
 
     def _render_features_section(self, icon_mgr, btn_size):
-        """Render supporter feature toggles (streamer, device control).
+        """Render supporter feature toggles (streamer, device control, patreon).
 
-        Returns:
-            bool: True if any features were rendered, False otherwise.
+        Always renders all 3 tool buttons. Unavailable features show as grayed-out
+        with support tooltips for feature discovery.
         """
-        app = self.app
-        rendered_any = False
-
-        # Check for optional feature modules (supporter features)
         has_streamer = self._feat_streamer
         has_device_control = self._feat_device
+        has_supporter = self._feat_supporter
+        rendered_any = False
 
+        # --- Streamer button ---
         if has_streamer:
-            control_panel = self.app.gui_instance.control_panel_ui if hasattr(self.app, 'gui_instance') else None
+            self._render_streamer_button_active(icon_mgr, btn_size, is_first=True)
+            rendered_any = True
+        else:
+            self._toolbar_button_disabled(
+                icon_mgr, 'satellite.png', btn_size,
+                "Streamer \u2014 Stream from XBVR & Stash.\nSupport on Ko-fi to unlock."
+            )
+            rendered_any = True
 
-            # Initialize sync manager if not already done
-            if control_panel and not hasattr(control_panel, '_native_sync_manager'):
-                control_panel._native_sync_manager = None
+        # --- Device Control button ---
+        imgui.same_line()
+        if has_device_control:
+            self._render_device_button_active(icon_mgr, btn_size)
+        else:
+            self._toolbar_button_disabled(
+                icon_mgr, 'flashlight.png', btn_size,
+                "Device Control \u2014 Control OSR2, Handy & more.\nSupport on Ko-fi to unlock."
+            )
 
-            sync_mgr = getattr(control_panel, '_native_sync_manager', None) if control_panel else None
+        # --- Patreon Exclusive button ---
+        imgui.same_line()
+        if has_supporter:
+            # Patreon features available — show as active (blue tint)
+            self._apply_button_color_blue()
+            self._toolbar_button(icon_mgr, 'sidebar-batch.png', btn_size,
+                                 "Patreon Exclusive \u2014 Early access trackers, batch processing.")
+            self._apply_button_color_default()
+        else:
+            self._toolbar_button_disabled(
+                icon_mgr, 'sidebar-batch.png', btn_size,
+                "Patreon Exclusive \u2014 Early access trackers, batch processing.\nMonthly Ko-fi subscription."
+            )
 
-            # Initialize sync manager on first access if needed
-            if control_panel and sync_mgr is None:
+    def _render_streamer_button_active(self, icon_mgr, btn_size, is_first=False):
+        """Render the active (available) streamer button with full toggle logic."""
+        control_panel = self.app.gui_instance.control_panel_ui if hasattr(self.app, 'gui_instance') else None
+
+        # Initialize sync manager if not already done
+        if control_panel and not hasattr(control_panel, '_native_sync_manager'):
+            control_panel._native_sync_manager = None
+
+        sync_mgr = getattr(control_panel, '_native_sync_manager', None) if control_panel else None
+
+        # Initialize sync manager on first access if needed
+        if control_panel and sync_mgr is None:
+            try:
+                from streamer.integration_manager import NativeSyncManager
                 try:
-                    from streamer.integration_manager import NativeSyncManager
-                    try:
-                        # Try with app_logic parameter (newer streamer versions)
-                        sync_mgr = NativeSyncManager(
-                            self.app.processor,
-                            logger=self.app.logger,
-                            app_logic=self.app
-                        )
-                    except TypeError:
-                        # Fall back to old signature (older streamer versions)
-                        sync_mgr = NativeSyncManager(
-                            self.app.processor,
-                            logger=self.app.logger
-                        )
-                    control_panel._native_sync_manager = sync_mgr
-                    self.app.logger.debug("Toolbar: Initialized NativeSyncManager")
-                except Exception as e:
-                    self.app.logger.debug(f"Toolbar: Could not initialize NativeSyncManager: {e}")
+                    sync_mgr = NativeSyncManager(
+                        self.app.processor,
+                        logger=self.app.logger,
+                        app_logic=self.app
+                    )
+                except TypeError:
+                    sync_mgr = NativeSyncManager(
+                        self.app.processor,
+                        logger=self.app.logger
+                    )
+                control_panel._native_sync_manager = sync_mgr
+                self.app.logger.debug("Toolbar: Initialized NativeSyncManager")
+            except Exception as e:
+                self.app.logger.debug(f"Toolbar: Could not initialize NativeSyncManager: {e}")
 
-            # Show the button if we have the module (even if sync manager failed to init)
-            is_running = False
+        is_running = False
+        if sync_mgr:
+            try:
+                status = sync_mgr.get_status()
+                is_running = status.get('is_running', False)
+            except Exception as e:
+                self.app.logger.debug(f"Error getting streamer status: {e}")
+
+        # Satellite emoji — colored button
+        imgui.pop_style_color(3)
+        if is_running:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
+        else:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.0, 0.0, 0.7)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.0, 0.0, 0.85)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.0, 0.0, 0.9)
+
+        tooltip = "Stop Streaming Server" if is_running else "Start Streaming Server"
+        if self._toolbar_button(icon_mgr, 'satellite.png', btn_size, tooltip):
             if sync_mgr:
                 try:
-                    status = sync_mgr.get_status()
-                    is_running = status.get('is_running', False)
+                    if is_running:
+                        self.app.logger.info("Toolbar: Stopping streaming server...")
+                        sync_mgr.stop()
+                    else:
+                        self.app.logger.info("Toolbar: Starting streaming server...")
+                        sync_mgr.enable_heresphere = True
+                        sync_mgr.enable_xbvr_browser = True
+                        sync_mgr.start()
                 except Exception as e:
-                    self.app.logger.debug(f"Error getting streamer status: {e}")
-
-            # Satellite emoji - clickable to start/stop streaming
-            # Red when inactive, green when active
-            imgui.pop_style_color(3)  # Pop default colors
-            if is_running:
-                # Green when active
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
-                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
-                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
-            else:
-                # Red when inactive
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.0, 0.0, 0.7)
-                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.0, 0.0, 0.85)
-                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.0, 0.0, 0.9)
-
-            tooltip = "Stop Streaming Server" if is_running else "Start Streaming Server"
-            if self._toolbar_button(icon_mgr, 'satellite.png', btn_size, tooltip):
-                # Toggle streaming server
-                if sync_mgr:
-                    try:
-                        if is_running:
-                            self.app.logger.info("Toolbar: Stopping streaming server...")
-                            sync_mgr.stop()
-                        else:
-                            self.app.logger.info("Toolbar: Starting streaming server...")
-                            # Enable default settings
-                            sync_mgr.enable_heresphere = True
-                            sync_mgr.enable_xbvr_browser = True
-                            sync_mgr.start()
-                    except Exception as e:
-                        self.app.logger.error(f"Toolbar: Failed to toggle streaming: {e}")
-                        import traceback
-                        self.app.logger.error(traceback.format_exc())
-                else:
-                    self.app.logger.warning("Toolbar: Streamer module available but NativeSyncManager failed to initialize")
-
-            imgui.pop_style_color(3)
-
-            rendered_any = True
-
-        # Device Control button
-        if has_device_control:
-            # Get device manager from control_panel_ui (where it's actually stored)
-            control_panel_ui = getattr(self.app.gui_instance, 'control_panel_ui', None) if hasattr(self.app, 'gui_instance') else None
-            device_manager = getattr(control_panel_ui, 'device_manager', None) if control_panel_ui else None
-
-            is_connected = False
-            if device_manager:
-                try:
-                    is_connected = bool(device_manager.is_connected())
-                except Exception as e:
-                    self.app.logger.error(f"Toolbar: Error checking device connection status: {e}")
+                    self.app.logger.error(f"Toolbar: Failed to toggle streaming: {e}")
                     import traceback
                     self.app.logger.error(traceback.format_exc())
-
-            if rendered_any:
-                imgui.same_line()
             else:
-                # First button in features section - pop default colors
-                imgui.pop_style_color(3)
+                self.app.logger.warning("Toolbar: Streamer module available but NativeSyncManager failed to initialize")
 
-            # Flashlight emoji - red when inactive, green when active
-            if is_connected:
-                # Green when connected
+        imgui.pop_style_color(3)
+        # Restore transparent defaults
+        imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.5, 0.5, 0.55, 0.2)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.4, 0.4, 0.45, 0.35)
+
+    def _render_device_button_active(self, icon_mgr, btn_size):
+        """Render the active (available) device control button with full toggle logic."""
+        control_panel_ui = getattr(self.app.gui_instance, 'control_panel_ui', None) if hasattr(self.app, 'gui_instance') else None
+        device_manager = getattr(control_panel_ui, 'device_manager', None) if control_panel_ui else None
+
+        is_connected = False
+        if device_manager:
+            try:
+                is_connected = bool(device_manager.is_connected())
+            except Exception as e:
+                self.app.logger.error(f"Toolbar: Error checking device connection status: {e}")
+                import traceback
+                self.app.logger.error(traceback.format_exc())
+
+        # Flashlight emoji — colored button
+        imgui.pop_style_color(3)
+        if is_connected:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
+        else:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.0, 0.0, 0.7)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.0, 0.0, 0.85)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.0, 0.0, 0.9)
+
+        tooltip = "Disconnect Device" if is_connected else "Connect Device"
+        if self._toolbar_button(icon_mgr, 'flashlight.png', btn_size, tooltip):
+            if device_manager:
+                try:
+                    if is_connected:
+                        self.app.logger.info("Toolbar: Disconnecting device...")
+                        import asyncio
+                        import threading
+
+                        def run_disconnect():
+                            try:
+                                loop = asyncio.get_event_loop()
+                                if loop.is_running():
+                                    future = asyncio.run_coroutine_threadsafe(device_manager.stop(), loop)
+                                    future.result(timeout=10)
+                                else:
+                                    loop.run_until_complete(device_manager.stop())
+                            except RuntimeError:
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                try:
+                                    loop.run_until_complete(device_manager.stop())
+                                finally:
+                                    loop.close()
+
+                            self.app.logger.info("Toolbar: Device disconnected successfully")
+
+                        thread = threading.Thread(target=run_disconnect, daemon=True)
+                        thread.start()
+                    else:
+                        self.app.logger.info("Toolbar: Auto-connecting to Handy device...")
+                        self._auto_connect_handy()
+                except Exception as e:
+                    self.app.logger.error(f"Toolbar: Failed to toggle device connection: {e}")
+                    import traceback
+                    self.app.logger.error(traceback.format_exc())
+            else:
+                self.app.logger.info("Toolbar: DeviceManager not initialized, auto-connecting Handy...")
+                self._auto_connect_handy()
+
+        imgui.pop_style_color(3)
+
+        # Restore transparent defaults
+        imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.5, 0.5, 0.55, 0.2)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.4, 0.4, 0.45, 0.35)
+
+        # Script Loaded indicator — only show when device is connected
+        if is_connected and device_manager:
+            imgui.same_line()
+
+            script_loaded = device_manager.has_prepared_handy_devices() if hasattr(device_manager, 'has_prepared_handy_devices') else False
+
+            if script_loaded:
                 imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
                 imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
                 imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
+                tooltip = "Script Loaded - Click to reload"
             else:
-                # Red when disconnected
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.0, 0.0, 0.7)
-                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.0, 0.0, 0.85)
-                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.0, 0.0, 0.9)
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.4, 0.4, 0.4, 0.7)
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.5, 0.5, 0.5, 0.85)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.3, 0.3, 0.3, 0.9)
+                tooltip = "No Script Loaded - Click to upload"
 
-            tooltip = "Disconnect Device" if is_connected else "Connect Device"
-            if self._toolbar_button(icon_mgr, 'flashlight.png', btn_size, tooltip):
-                # Toggle device connection
-                if device_manager:
-                    try:
-                        if is_connected:
-                            # Disconnect the device using the existing event loop
-                            self.app.logger.info("Toolbar: Disconnecting device...")
-                            import asyncio
-                            import threading
-
-                            def run_disconnect():
-                                try:
-                                    loop = asyncio.get_event_loop()
-                                    if loop.is_running():
-                                        # Schedule disconnect in the existing loop
-                                        future = asyncio.run_coroutine_threadsafe(device_manager.stop(), loop)
-                                        future.result(timeout=10)  # Wait up to 10 seconds
-                                    else:
-                                        # Use the existing loop if not running
-                                        loop.run_until_complete(device_manager.stop())
-                                except RuntimeError:
-                                    # No event loop exists, create a new one
-                                    loop = asyncio.new_event_loop()
-                                    asyncio.set_event_loop(loop)
-                                    try:
-                                        loop.run_until_complete(device_manager.stop())
-                                    finally:
-                                        loop.close()
-
-                                self.app.logger.info("Toolbar: Device disconnected successfully")
-
-                            # Run disconnect in a separate thread to avoid blocking
-                            thread = threading.Thread(target=run_disconnect, daemon=True)
-                            thread.start()
-                        else:
-                            # Auto-connect to Handy device
-                            self.app.logger.info("Toolbar: Auto-connecting to Handy device...")
-                            self._auto_connect_handy()
-                    except Exception as e:
-                        self.app.logger.error(f"Toolbar: Failed to toggle device connection: {e}")
-                        import traceback
-                        self.app.logger.error(traceback.format_exc())
-                else:
-                    # DeviceManager not initialized - try to auto-connect Handy
-                    self.app.logger.info("Toolbar: DeviceManager not initialized, auto-connecting Handy...")
-                    self._auto_connect_handy()
+            if self._toolbar_button(icon_mgr, 'page-facing-up.png', btn_size, tooltip):
+                self._upload_script_to_device(device_manager)
 
             imgui.pop_style_color(3)
 
-            rendered_any = True
-
-            # Script Loaded indicator - only show when device is connected
-            if is_connected and device_manager:
+            # Sync toggle button for Handy
+            if script_loaded:
                 imgui.same_line()
 
-                # Check if script is loaded on device
-                script_loaded = device_manager.has_prepared_handy_devices() if hasattr(device_manager, 'has_prepared_handy_devices') else False
+                is_handy_playing = device_manager.is_handy_playing() if hasattr(device_manager, 'is_handy_playing') else False
 
-                # Document emoji - gray when no script, green when loaded
-                if script_loaded:
+                if is_handy_playing:
                     imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
                     imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
                     imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
-                    tooltip = "Script Loaded - Click to reload"
+                    tooltip = "Handy Synced - Click to Pause"
                 else:
-                    imgui.push_style_color(imgui.COLOR_BUTTON, 0.4, 0.4, 0.4, 0.7)
-                    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.5, 0.5, 0.5, 0.85)
-                    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.3, 0.3, 0.3, 0.9)
-                    tooltip = "No Script Loaded - Click to upload"
+                    imgui.push_style_color(imgui.COLOR_BUTTON, 0.9, 0.5, 0.0, 0.7)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 1.0, 0.6, 0.0, 0.85)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.8, 0.4, 0.0, 0.9)
+                    tooltip = "Handy Paused - Click to Resume"
 
-                if self._toolbar_button(icon_mgr, 'page-facing-up.png', btn_size, tooltip):
-                    # Trigger script upload via control panel
-                    self._upload_script_to_device(device_manager)
+                if self._toolbar_button(icon_mgr, 'counterclockwise-arrows.png', btn_size, tooltip):
+                    self._toggle_handy_playback(device_manager)
 
                 imgui.pop_style_color(3)
-
-                # Sync toggle button for Handy - single icon, color indicates state
-                # Only show when script is loaded
-                if script_loaded:
-                    imgui.same_line()
-
-                    # Check if Handy is currently playing/synced
-                    is_handy_playing = device_manager.is_handy_playing() if hasattr(device_manager, 'is_handy_playing') else False
-
-                    if is_handy_playing:
-                        # Green when synced/playing - click to pause
-                        imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
-                        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
-                        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
-                        tooltip = "Handy Synced - Click to Pause"
-                    else:
-                        # Orange when paused - click to resume
-                        imgui.push_style_color(imgui.COLOR_BUTTON, 0.9, 0.5, 0.0, 0.7)
-                        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 1.0, 0.6, 0.0, 0.85)
-                        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.8, 0.4, 0.0, 0.9)
-                        tooltip = "Handy Paused - Click to Resume"
-
-                    # Use sync icon (counterclockwise arrows) for both states
-                    if self._toolbar_button(icon_mgr, 'counterclockwise-arrows.png', btn_size, tooltip):
-                        self._toggle_handy_playback(device_manager)
-
-                    imgui.pop_style_color(3)
-
-        # Restore default button colors if any features were rendered
-        if rendered_any:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.2, 0.2, 0.5)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.3, 0.3, 0.7)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.15, 0.15, 0.9)
-
-        return rendered_any
 
     def _render_view_section(self, icon_mgr, btn_size):
         """Render view toggle buttons (chapter list, simulator)."""
@@ -1050,6 +1023,12 @@ class ToolbarUI:
             imgui.set_tooltip(tooltip)
 
         return clicked
+
+    def _toolbar_button_disabled(self, icon_mgr, icon, btn_size, tooltip):
+        """Render a disabled (grayed-out) toolbar button."""
+        imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+        self._toolbar_button(icon_mgr, icon, btn_size, tooltip)
+        imgui.pop_style_var()
 
     def _toolbar_toggle_button(self, icon_mgr, icon_name, size, tooltip, is_active):
         """

@@ -798,9 +798,23 @@ class ShortcutHandlerMixin:
         self.app.logger.info("Video zoom/pan reset", extra={'status_message': True})
 
     def _handle_toggle_fullscreen_shortcut(self):
-        """Handle keyboard shortcut for toggling fullscreen (F11)"""
-        if hasattr(self, 'fullscreen_manager') and self.fullscreen_manager:
-            self.fullscreen_manager.toggle()
+        """Handle keyboard shortcut for toggling fullscreen (F11) — mpv supporter feature."""
+        from application.utils.feature_detection import is_feature_available as _is_feature_available
+        if not _is_feature_available("patreon_features"):
+            return
+        mpv = getattr(self.app, '_mpv_controller', None)
+        if mpv is None:
+            return
+        if mpv.is_active:
+            mpv.stop()
+        else:
+            file_manager = getattr(self.app, 'file_manager', None)
+            video_path = file_manager.video_path if file_manager else None
+            if not video_path:
+                return
+            processor = self.app.processor
+            start_frame = processor.current_frame_index if processor else 0
+            mpv.start(video_path, start_frame=start_frame, fullscreen=True)
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()

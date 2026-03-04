@@ -17,6 +17,13 @@ class AppEventHandlers:
             self.logger.info("No video loaded for playback control.", extra={'status_message': True})
             return
 
+        # mpv review mode intercept — when active, route all actions through it
+        mpv = getattr(self.app, '_mpv_controller', None)
+        if mpv and mpv.is_active:
+            mpv.handle_action(action_name)
+            self.app.energy_saver.reset_activity_timer()
+            return
+
         total_frames = processor.video_info.get('total_frames', 0)
         current_frame = processor.current_frame_index
         fs_proc = self.app.funscript_processor
@@ -375,6 +382,15 @@ class AppEventHandlers:
         ALWAYS use this method instead of calling processor.seek_video() directly
         to ensure all UI elements stay synchronized.
         """
+        # mpv review mode intercept — seek via IPC instead of FFmpeg
+        mpv = getattr(self.app, '_mpv_controller', None)
+        if mpv and mpv.is_active:
+            mpv.seek(frame_index)
+            # Pan timeline to the new position even when paused
+            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+            self.app.app_state_ui.timeline_interaction_active = False
+            return
+
         if self.app.processor:
             self.app.processor.seek_video(frame_index)
             # ALWAYS force timeline synchronization after seeking to ensure all timelines stay in sync

@@ -1105,7 +1105,7 @@ class AppFunscriptProcessor:
             'clear': lambda: target_fs_obj.clear_points(axis, s_time, e_time, sel_idx),
             'amplify': lambda: target_fs_obj.apply_plugin('Amplify', axis=axis, scale_factor=self.amplify_factor_input,
                                                          center_value=self.amplify_center_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
-            'apply_sg': lambda: target_fs_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=self.sg_window_length_input,
+            'apply_sg': lambda: target_fs_obj.apply_plugin('Smooth (SG)', axis=axis, window_length=self.sg_window_length_input,
                                                            polyorder=self.sg_polyorder_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
             'apply_rdp': lambda: target_fs_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=self.rdp_epsilon_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
             'apply_dynamic_amp': lambda: target_fs_obj.apply_plugin('Dynamic Amplify', axis=axis, window_ms=self.dynamic_amp_window_ms_input,
@@ -1672,7 +1672,7 @@ class AppFunscriptProcessor:
                     self.logger.debug(
                         f"Processing {axis} in '{chapter.position_long_name}' ({effective_start_ms}-{effective_end_ms}ms) with params: {params}")
 
-                    funscript_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=sg_win, polyorder=sg_poly, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
+                    funscript_obj.apply_plugin('Smooth (SG)', axis=axis, window_length=sg_win, polyorder=sg_poly, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
                     funscript_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=rdp_eps, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
                     if axis == 'primary':
                         funscript_obj.apply_plugin('Threshold Clamp', axis=axis, lower_threshold=clamp_low, upper_threshold=clamp_high, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
@@ -1681,7 +1681,7 @@ class AppFunscriptProcessor:
             else:
                 self.logger.info(f"No chapters found. Applying default settings to {axis} axis for the full range.")
                 params = default_params
-                funscript_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=params["sg_window"], polyorder=params["sg_polyorder"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
+                funscript_obj.apply_plugin('Smooth (SG)', axis=axis, window_length=params["sg_window"], polyorder=params["sg_polyorder"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
                 funscript_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=params["rdp_epsilon"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
                 if axis == 'primary':
                     funscript_obj.apply_plugin('Threshold Clamp', axis=axis, lower_threshold=params["clamp_lower"], upper_threshold=params["clamp_upper"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)

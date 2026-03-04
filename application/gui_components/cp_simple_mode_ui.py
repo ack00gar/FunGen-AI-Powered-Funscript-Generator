@@ -3,7 +3,10 @@ import imgui
 import os
 import config
 from application.utils import primary_button_style, destructive_button_style
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
+from application.utils.section_card import section_card as _section_card
 from config.tracker_discovery import TrackerCategory
+from config.element_group_colors import ControlPanelColors as _CPColors
 
 
 class SimpleModeMixin:
@@ -21,113 +24,100 @@ class SimpleModeMixin:
         imgui.begin("FunGen Simple##SimpleControlPanel", flags=flags)
 
         # Title
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
+        imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.STATUS_INFO)
         imgui.text("Simple Mode")
         imgui.pop_style_color()
         imgui.text_wrapped("Easy 3-step workflow for beginners")
         imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
 
         # STEP 1: Load Video
-        self._section_header("Step 1: Load Video", "Open a video file to analyze")
-
-        if processor and processor.video_info:
-            self._status_indicator("Video loaded", "ready", "Video is ready for analysis")
-            imgui.text_wrapped("File: %s" % os.path.basename(processor.video_path or "Unknown"))
-            video_info = processor.video_info
-            if video_info:
-                duration_str = "%.0f:%02.0f" % divmod(video_info.get('duration', 0), 60)
-                imgui.text_wrapped("Duration: %s | %dx%d | %.0f fps" % (
-                    duration_str,
-                    video_info.get('width', 0),
-                    video_info.get('height', 0),
-                    video_info.get('fps', 0)
-                ))
-        else:
-            self._status_indicator("No video loaded", "info", "Drag and drop a video file onto the window")
-            imgui.text_wrapped("Supported formats: MP4, AVI, MOV, MKV")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
+        with _section_card("Step 1: Load Video##SimpleStep1", tier="primary") as is_open:
+            if is_open:
+                if processor and processor.video_info:
+                    self._status_indicator("Video loaded", "ready", "Video is ready for analysis")
+                    imgui.text_wrapped("File: %s" % os.path.basename(processor.video_path or "Unknown"))
+                    video_info = processor.video_info
+                    if video_info:
+                        duration_str = "%.0f:%02.0f" % divmod(video_info.get('duration', 0), 60)
+                        imgui.text_wrapped("Duration: %s | %dx%d | %.0f fps" % (
+                            duration_str,
+                            video_info.get('width', 0),
+                            video_info.get('height', 0),
+                            video_info.get('fps', 0)
+                        ))
+                else:
+                    self._status_indicator("No video loaded", "info", "Drag and drop a video file onto the window")
+                    imgui.text_wrapped("Supported formats: MP4, AVI, MOV, MKV")
 
         # STEP 2: Choose Analysis Method
-        self._section_header("Step 2: Choose What to Track", "Select analysis method for your video")
+        with _section_card("Step 2: Choose What to Track##SimpleStep2", tier="primary") as is_open:
+            if is_open:
+                # Auto-recommend tracker based on video properties
+                if processor and processor.video_info and self.tracker_ui:
+                    rec_name, rec_reason = self.tracker_ui.recommend_tracker(processor.video_info)
+                    self._auto_recommended_tracker = rec_name
+                    self._auto_recommendation_reason = rec_reason
+                    # Auto-select on first video load if user hasn't manually picked
+                    if not self._user_manually_picked_tracker:
+                        if app_state.selected_tracker_name != rec_name:
+                            app_state.selected_tracker_name = rec_name
+                            if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
+                                app.app_settings.set("selected_tracker_name", rec_name)
 
-        # Auto-recommend tracker based on video properties
-        if processor and processor.video_info and self.tracker_ui:
-            rec_name, rec_reason = self.tracker_ui.recommend_tracker(processor.video_info)
-            self._auto_recommended_tracker = rec_name
-            self._auto_recommendation_reason = rec_reason
-            # Auto-select on first video load if user hasn't manually picked
-            if not self._user_manually_picked_tracker:
-                if app_state.selected_tracker_name != rec_name:
-                    app_state.selected_tracker_name = rec_name
-                    if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                        app.app_settings.set("selected_tracker_name", rec_name)
-
-        # Render card-based tracker selection
-        self._render_simple_mode_tracker_selection()
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
+                # Render card-based tracker selection
+                self._render_simple_mode_tracker_selection()
 
         # STEP 3: Generate Funscript
-        self._section_header("Step 3: Generate Funscript", "Start the analysis process")
+        with _section_card("Step 3: Generate Funscript##SimpleStep3", tier="primary") as is_open:
+            if is_open:
+                # Show progress or start button
+                if stage_proc.full_analysis_active:
+                    self._simple_mode_post_processing_applied = False  # Reset for new analysis
+                    self._render_simple_progress_display()
 
-        # Show progress or start button
-        if stage_proc.full_analysis_active:
-            self._simple_mode_post_processing_applied = False  # Reset for new analysis
-            self._render_simple_progress_display()
+                    # Stop button
+                    imgui.spacing()
+                    with destructive_button_style():
+                        if imgui.button("Stop Analysis", width=-1):
+                            app.event_handlers.handle_abort_process_click()
+                else:
+                    acts = fs_proc.get_actions("primary")
+                    if acts:
+                        # Analysis complete - show completion state
+                        self._status_indicator(
+                            "Analysis Complete",
+                            "ready",
+                            "Generated %d motion points" % len(acts)
+                        )
+                        imgui.spacing()
 
-            # Stop button
-            imgui.spacing()
-            with destructive_button_style():
-                if imgui.button("Stop Analysis", width=-1):
-                    app.event_handlers.handle_abort_process_click()
-        else:
-            acts = fs_proc.get_actions("primary")
-            if acts:
-                # Analysis complete - show completion state
-                self._status_indicator(
-                    "Analysis Complete",
-                    "ready",
-                    "Generated %d motion points" % len(acts)
-                )
-                imgui.spacing()
+                        # Post-processing prompt
+                        self._render_simple_mode_post_processing_prompt()
 
-                # Post-processing prompt
-                self._render_simple_mode_post_processing_prompt()
+                        imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.HINT_TEXT)
+                        imgui.text_wrapped("What's next?")
+                        imgui.pop_style_color()
+                        imgui.spacing()
 
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
-                imgui.text_wrapped("What's next?")
-                imgui.pop_style_color()
-                imgui.spacing()
+                        # Export button (primary action)
+                        with primary_button_style():
+                            if imgui.button("Export Funscript", width=-1):
+                                # Trigger export for Timeline 1
+                                self._export_funscript_timeline(app, 1)
 
-                # Export button (primary action)
-                from application.utils import primary_button_style
-                with primary_button_style():
-                    if imgui.button("Export Funscript", width=-1):
-                        # Trigger export for Timeline 1
-                        self._export_funscript_timeline(app, 1)
+                        # Fine-tune button (secondary action)
+                        imgui.spacing()
+                        if imgui.button("Fine-Tune Results (Switch to Expert Mode)", width=-1):
+                            app_state.ui_view_mode = "expert"
+                            app.logger.info("Switched to Expert Mode", extra={"status_message": True})
+                    else:
+                        # Ready to start
+                        self._render_start_stop_buttons(stage_proc, fs_proc, app.event_handlers)
 
-                # Fine-tune button (secondary action)
-                imgui.spacing()
-                if imgui.button("Fine-Tune Results (Switch to Expert Mode)", width=-1):
-                    app_state.ui_view_mode = "expert"
-                    app.logger.info("Switched to Expert Mode", extra={"status_message": True})
-            else:
-                # Ready to start
-                self._render_start_stop_buttons(stage_proc, fs_proc, app.event_handlers)
-
-        imgui.spacing()
-        imgui.separator()
         imgui.spacing()
 
         # Switch to Expert Mode link
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
+        imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
         imgui.text_wrapped("Need more control?")
         imgui.pop_style_color()
         if imgui.button("Switch to Expert Mode", width=-1):
@@ -152,6 +142,20 @@ class SimpleModeMixin:
         elif category == TrackerCategory.LIVE_INTERVENTION:
             return (0.9, 0.6, 0.2, 1.0)   # Orange
         return (0.5, 0.5, 0.5, 1.0)       # Gray fallback
+
+    def _handle_tracker_card_click(self, info):
+        """Handle tracker card click — update selection and persist setting."""
+        app = self.app
+        app_state = app.app_state_ui
+        self._user_manually_picked_tracker = True
+        if app_state.selected_tracker_name != info.internal_name:
+            if hasattr(app, 'logger') and app.logger:
+                app.logger.info(f"UI(Simple): Tracker changed to {info.internal_name}")
+            if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
+                app.clear_all_overlays_and_ui_drawings()
+        app_state.selected_tracker_name = info.internal_name
+        if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
+            app.app_settings.set("selected_tracker_name", info.internal_name)
 
     def _render_simple_mode_tracker_selection(self):
         """Render card-based tracker selection for Simple Mode."""
@@ -214,15 +218,7 @@ class SimpleModeMixin:
                 is_selected = (app_state.selected_tracker_name == info.internal_name)
                 is_rec = (self._auto_recommended_tracker == info.internal_name)
                 if self._render_tracker_card(info, is_selected, is_rec):
-                    self._user_manually_picked_tracker = True
-                    if app_state.selected_tracker_name != info.internal_name:
-                        if hasattr(app, 'logger') and app.logger:
-                            app.logger.info(f"UI(Simple): Tracker changed to {info.internal_name}")
-                        if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
-                            app.clear_all_overlays_and_ui_drawings()
-                    app_state.selected_tracker_name = info.internal_name
-                    if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                        app.app_settings.set("selected_tracker_name", info.internal_name)
+                    self._handle_tracker_card_click(info)
 
         if live_trackers:
             imgui.spacing()
@@ -234,15 +230,7 @@ class SimpleModeMixin:
                 is_selected = (app_state.selected_tracker_name == info.internal_name)
                 is_rec = (self._auto_recommended_tracker == info.internal_name)
                 if self._render_tracker_card(info, is_selected, is_rec):
-                    self._user_manually_picked_tracker = True
-                    if app_state.selected_tracker_name != info.internal_name:
-                        if hasattr(app, 'logger') and app.logger:
-                            app.logger.info(f"UI(Simple): Tracker changed to {info.internal_name}")
-                        if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
-                            app.clear_all_overlays_and_ui_drawings()
-                    app_state.selected_tracker_name = info.internal_name
-                    if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                        app.app_settings.set("selected_tracker_name", info.internal_name)
+                    self._handle_tracker_card_click(info)
 
         imgui.end_child()
 
@@ -295,12 +283,12 @@ class SimpleModeMixin:
         # Recommended badge
         if is_recommended:
             imgui.same_line()
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.9, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.SUCCESS_TEXT)
             imgui.text("[Recommended]")
             imgui.pop_style_color()
 
         # Description (gray, second line)
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
+        imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
         imgui.text_wrapped(info.description if info.description else "")
         imgui.pop_style_color()
 
@@ -326,11 +314,11 @@ class SimpleModeMixin:
         imgui.spacing()
         if self._simple_mode_post_processing_applied:
             # Already applied - show status
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.9, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.SUCCESS_TEXT)
             imgui.text("Results polished")
             imgui.pop_style_color()
         else:
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.HINT_TEXT)
             imgui.text_wrapped("Optional: Improve results with automatic smoothing and optimization")
             imgui.pop_style_color()
             imgui.spacing()
@@ -347,11 +335,10 @@ class SimpleModeMixin:
                         app.logger.error("Post-processing failed: %s" % e, extra={"status_message": True})
                     finally:
                         app.app_settings.data["enable_auto_post_processing"] = original_setting
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Applies smoothing, simplification, clamping, and amplitude\n"
-                    "optimization to improve the generated funscript quality."
-                )
+            _tooltip_if_hovered(
+                "Applies smoothing, simplification, clamping, and amplitude\n"
+                "optimization to improve the generated funscript quality."
+            )
         imgui.spacing()
 
     def _get_tracker_num_stages(self, tracker_name):
@@ -395,7 +382,7 @@ class SimpleModeMixin:
         current_stage = stage_proc.current_analysis_stage
 
         # Header
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
+        imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.STATUS_INFO)
         imgui.text("Analyzing...")
         imgui.pop_style_color()
 
@@ -444,7 +431,7 @@ class SimpleModeMixin:
         if overall > 0.01 and eta_str and eta_str != "N/A":
             status_parts.append("ETA: %s" % eta_str)
         if status_parts:
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
             imgui.text(" | ".join(status_parts))
             imgui.pop_style_color()
 
