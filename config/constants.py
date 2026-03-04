@@ -14,7 +14,7 @@ except ImportError:
 # META & VERSIONING
 ####################################################################################################
 APP_NAME = "FunGen"
-APP_VERSION = "0.6.1"
+APP_VERSION = "0.6.2"
 APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION} - AI Computer Vision"
 FUNSCRIPT_AUTHOR = "FunGen"
 
@@ -108,9 +108,9 @@ TOOLBAR_BUTTON_RED_HOVERED = (0.85, 0.0, 0.0, 0.85)
 TOOLBAR_BUTTON_RED_PRESSED = (0.6, 0.0, 0.0, 0.9)
 
 # Default: Normal button state (inactive)
-TOOLBAR_BUTTON_DEFAULT = (0.2, 0.2, 0.2, 0.5)
-TOOLBAR_BUTTON_DEFAULT_HOVERED = (0.3, 0.3, 0.3, 0.7)
-TOOLBAR_BUTTON_DEFAULT_PRESSED = (0.15, 0.15, 0.15, 0.9)
+TOOLBAR_BUTTON_DEFAULT = (0.0, 0.0, 0.0, 0.0)
+TOOLBAR_BUTTON_DEFAULT_HOVERED = (0.5, 0.5, 0.55, 0.2)
+TOOLBAR_BUTTON_DEFAULT_PRESSED = (0.4, 0.4, 0.45, 0.35)
 
 
 # TrackerMode enum removed - now using dynamic tracker discovery system

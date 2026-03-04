@@ -8,6 +8,7 @@ import config.constants as constants
 from config.element_group_colors import VideoDisplayColors
 from application.utils import get_logo_texture_manager, get_icon_texture_manager
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
+from application.utils.feature_detection import is_feature_available as _is_feature_available
 
 # Module-level logger for Handy debug output (disabled by default)
 _handy_debug_logger = logging.getLogger(__name__ + '.handy')
@@ -277,7 +278,11 @@ class VideoDisplayUI:
             imgui.same_line(spacing=pb_btn_spacing)
 
             # Play/Pause button (dynamic based on state)
-            is_playing = self.app.processor and self.app.processor.is_processing and not self.app.processor.pause_event.is_set()
+            _mpv = getattr(self.app, '_mpv_controller', None)
+            if _mpv and _mpv.is_active:
+                is_playing = _mpv.is_playing
+            else:
+                is_playing = self.app.processor and self.app.processor.is_processing and not self.app.processor.pause_event.is_set()
             play_pause_icon_name = 'pause.png' if is_playing else 'play.png'
             play_pause_fallback = "||" if is_playing else ">"
 
@@ -1434,22 +1439,26 @@ class VideoDisplayUI:
             imgui.end_tooltip()
     
     def _render_fullscreen_button_inline(self, spacing: float, button_height: float, controls_disabled: bool):
-        """Render fullscreen button inline with playback controls."""
-        button_width = button_height
+        """
+        Render the fullscreen button inline with playback controls.
 
+        Fullscreen is a Patreon supporter feature: launches mpv in fullscreen
+        with hardware decode (VideoToolbox), native audio, and timeline sync.
+        Disabled for non-supporters with an explanatory tooltip.
+        """
+        button_width = button_height
         imgui.same_line(spacing=spacing)
 
-        video_loaded = (self.app.processor and
-                       hasattr(self.app.processor, 'video_path') and
-                       self.app.processor.video_path)
+        mpv = getattr(self.app, '_mpv_controller', None)
+        mpv_missing = getattr(self.app, '_mpv_binary_missing', False)
+        video_path = self.app.file_manager.video_path if self.app.file_manager else None
+        video_loaded = bool(video_path)
+        is_fs_active = mpv is not None and mpv.is_active
+        is_supporter = _is_feature_available("patreon_features")
 
-        fs_mgr = getattr(self.gui_instance, 'fullscreen_manager', None)
-        is_fs_active = fs_mgr and fs_mgr.is_active
-
-        fullscreen_button_disabled = not video_loaded
+        button_disabled = not video_loaded or not is_supporter or (is_supporter and mpv is None)
 
         icon_mgr = get_icon_texture_manager()
-
         if is_fs_active:
             imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)
             button_icon_name = 'fullscreen-exit.png'
@@ -1459,32 +1468,57 @@ class VideoDisplayUI:
             button_icon_name = 'fullscreen.png'
             button_text_fallback = "FS"
 
-        with _DisabledScope(fullscreen_button_disabled):
+        button_clicked = False
+        with _DisabledScope(button_disabled):
             fs_tex, _, _ = icon_mgr.get_icon_texture(button_icon_name)
             if fs_tex:
                 button_clicked = imgui.image_button(fs_tex, button_width, button_width)
             else:
                 button_clicked = imgui.button(f"{button_text_fallback}##FullscreenControl", width=button_width)
 
-        if button_clicked and not fullscreen_button_disabled:
-            if fs_mgr:
-                fs_mgr.toggle()
+        # Capture item rect BEFORE pop_style_color so the last item is still the button
+        item_min = imgui.get_item_rect_min()
+        item_max = imgui.get_item_rect_max()
 
         imgui.pop_style_color()
 
-        if imgui.is_item_hovered():
+        if button_clicked and not button_disabled:
+            if is_fs_active:
+                mpv.stop()
+            elif mpv is not None:
+                processor = self.app.processor
+                start_frame = processor.current_frame_index if processor else 0
+                mpv.start(video_path, start_frame=start_frame, fullscreen=True)
+
+        # Use is_mouse_hovering_rect instead of is_item_hovered so the tooltip
+        # fires even when the button is disabled (ITEM_DISABLED suppresses hover).
+        if imgui.is_mouse_hovering_rect(item_min[0], item_min[1], item_max[0], item_max[1]):
             imgui.begin_tooltip()
-            if not video_loaded:
+            if not is_supporter:
+                imgui.text("Fullscreen playback (mpv)")
+                imgui.text_disabled("Patreon exclusive — ko-fi monthly supporters")
+            elif mpv is None and mpv_missing:
+                imgui.text("mpv not installed")
+                imgui.text_disabled("Install mpv to enable fullscreen mode")
+                if self.app.platform == "Darwin" or __import__('sys').platform == "darwin":
+                    imgui.text_disabled("  brew install mpv")
+                elif __import__('sys').platform.startswith("linux"):
+                    imgui.text_disabled("  sudo apt install mpv")
+                else:
+                    imgui.text_disabled("  winget install mpv")
+            elif mpv is None:
+                imgui.text("Fullscreen unavailable")
+                imgui.text_disabled("mpv could not be initialised — check logs")
+            elif not video_loaded:
                 imgui.text("No video loaded")
             elif is_fs_active:
-                imgui.text("Exit fullscreen (ESC / F11)")
+                imgui.text("Exit fullscreen (F11)")
+                imgui.text_disabled("mpv — hardware decode + native audio")
             else:
                 imgui.text("Enter fullscreen (F11)")
+                imgui.text_disabled("mpv — hardware decode + native audio")
             imgui.end_tooltip()
-    
-    # Dead ffplay fullscreen code removed — native fullscreen now handled by
-    # NativeFullscreenManager in fullscreen_display.py
-    
+
     def _is_handy_available(self):
         """Check if Handy devices are connected and device control is enabled."""
         try:

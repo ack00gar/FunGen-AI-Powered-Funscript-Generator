@@ -68,81 +68,83 @@ class AdvancedSettingsMixin:
         app = self.app
         settings = app.app_settings
 
-        if imgui.collapsing_header("Settings Profiles##AdvancedProfiles", flags=0)[0]:
-            # Cache profile list (refresh every 2 seconds)
-            now = time.time()
-            if self._profile_list_cache is None or (now - self._profile_list_cache_time) > 2.0:
-                self._profile_list_cache = settings.list_profiles()
-                self._profile_list_cache_time = now
+        with section_card("Settings Profiles##AdvancedProfiles", tier="primary",
+                          open_by_default=False) as _profiles_open:
+            if _profiles_open:
+                # Cache profile list (refresh every 2 seconds)
+                now = time.time()
+                if self._profile_list_cache is None or (now - self._profile_list_cache_time) > 2.0:
+                    self._profile_list_cache = settings.list_profiles()
+                    self._profile_list_cache_time = now
 
-            profiles = self._profile_list_cache
-            profile_names = [p["name"] for p in profiles] if profiles else []
+                profiles = self._profile_list_cache
+                profile_names = [p["name"] for p in profiles] if profiles else []
 
-            # Load / Delete existing profile
-            if profile_names:
-                imgui.text("Load Profile:")
-                imgui.push_item_width(imgui.get_content_region_available_width() - 140)
-                # Use a simple combo for profile selection
-                clicked, idx = imgui.combo("##ProfileCombo", self._selected_profile_idx, profile_names)
-                if clicked:
-                    self._selected_profile_idx = idx
-                imgui.pop_item_width()
+                # Load / Delete existing profile
+                if profile_names:
+                    imgui.text("Load Profile:")
+                    imgui.push_item_width(imgui.get_content_region_available_width() - 140)
+                    # Use a simple combo for profile selection
+                    clicked, idx = imgui.combo("##ProfileCombo", self._selected_profile_idx, profile_names)
+                    if clicked:
+                        self._selected_profile_idx = idx
+                    imgui.pop_item_width()
 
-                imgui.same_line()
-                sel_idx = min(self._selected_profile_idx, len(profile_names) - 1) if profile_names else 0
-                sel_name = profile_names[sel_idx] if profile_names else ""
-                if imgui.button("Load##LoadProfile"):
-                    if sel_name and settings.load_profile(sel_name):
-                        app.logger.info("Profile loaded: %s" % sel_name, extra={"status_message": True})
-                        self._profile_list_cache = None  # Refresh cache
-                imgui.same_line()
-                with destructive_button_style():
-                    if imgui.button("Delete##DeleteProfile"):
-                        if sel_name:
-                            imgui.open_popup("Confirm Delete Profile##DeleteProfilePopup")
-
-                # Confirm delete popup
-                if imgui.begin_popup_modal("Confirm Delete Profile##DeleteProfilePopup", True, imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
-                    imgui.text("Delete profile '%s'?" % sel_name)
-                    avail_w = imgui.get_content_region_available_width()
-                    pw = (avail_w - imgui.get_style().item_spacing[0]) / 2.0
-                    with destructive_button_style():
-                        if imgui.button("Delete##ConfirmDeleteProfile", width=pw):
-                            if settings.delete_profile(sel_name):
-                                app.logger.info("Profile deleted: %s" % sel_name, extra={"status_message": True})
-                                self._profile_list_cache = None
-                                self._selected_profile_idx = 0
-                            imgui.close_current_popup()
                     imgui.same_line()
-                    if imgui.button("Cancel##CancelDeleteProfile", width=pw):
-                        imgui.close_current_popup()
-                    imgui.end_popup()
-            else:
-                imgui.text_disabled("No saved profiles")
+                    sel_idx = min(self._selected_profile_idx, len(profile_names) - 1) if profile_names else 0
+                    sel_name = profile_names[sel_idx] if profile_names else ""
+                    if imgui.button("Load##LoadProfile"):
+                        if sel_name and settings.load_profile(sel_name):
+                            app.logger.info("Profile loaded: %s" % sel_name, extra={"status_message": True})
+                            self._profile_list_cache = None  # Refresh cache
+                    imgui.same_line()
+                    with destructive_button_style():
+                        if imgui.button("Delete##DeleteProfile"):
+                            if sel_name:
+                                imgui.open_popup("Confirm Delete Profile##DeleteProfilePopup")
 
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
+                    # Confirm delete popup
+                    if imgui.begin_popup_modal("Confirm Delete Profile##DeleteProfilePopup", True, imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+                        imgui.text("Delete profile '%s'?" % sel_name)
+                        avail_w = imgui.get_content_region_available_width()
+                        pw = (avail_w - imgui.get_style().item_spacing[0]) / 2.0
+                        with destructive_button_style():
+                            if imgui.button("Delete##ConfirmDeleteProfile", width=pw):
+                                if settings.delete_profile(sel_name):
+                                    app.logger.info("Profile deleted: %s" % sel_name, extra={"status_message": True})
+                                    self._profile_list_cache = None
+                                    self._selected_profile_idx = 0
+                                imgui.close_current_popup()
+                        imgui.same_line()
+                        if imgui.button("Cancel##CancelDeleteProfile", width=pw):
+                            imgui.close_current_popup()
+                        imgui.end_popup()
+                else:
+                    imgui.text_disabled("No saved profiles")
 
-            # Save new profile
-            imgui.text("Save Current Settings as Profile:")
-            imgui.push_item_width(imgui.get_content_region_available_width() - 70)
-            _, self._profile_name_input = imgui.input_text_with_hint(
-                "##ProfileNameInput",
-                "Profile name...",
-                self._profile_name_input,
-                128,
-            )
-            imgui.pop_item_width()
-            imgui.same_line()
-            if imgui.button("Save##SaveProfile"):
-                if self._profile_name_input.strip():
-                    if settings.save_profile(self._profile_name_input):
-                        app.logger.info("Profile saved: %s" % self._profile_name_input.strip(), extra={"status_message": True})
-                        self._profile_name_input = ""
-                        self._profile_list_cache = None  # Refresh cache
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Saves current processing settings as a reusable preset\n(tracking, post-processing, performance - not UI layout)")
+                imgui.spacing()
+                imgui.separator()
+                imgui.spacing()
+
+                # Save new profile
+                imgui.text("Save Current Settings as Profile:")
+                imgui.push_item_width(imgui.get_content_region_available_width() - 70)
+                _, self._profile_name_input = imgui.input_text_with_hint(
+                    "##ProfileNameInput",
+                    "Profile name...",
+                    self._profile_name_input,
+                    128,
+                )
+                imgui.pop_item_width()
+                imgui.same_line()
+                if imgui.button("Save##SaveProfile"):
+                    if self._profile_name_input.strip():
+                        if settings.save_profile(self._profile_name_input):
+                            app.logger.info("Profile saved: %s" % self._profile_name_input.strip(), extra={"status_message": True})
+                            self._profile_name_input = ""
+                            self._profile_list_cache = None  # Refresh cache
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Saves current processing settings as a reusable preset\n(tracking, post-processing, performance - not UI layout)")
 
     # ------- Advanced tab -------
 

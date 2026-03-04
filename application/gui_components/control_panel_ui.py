@@ -70,6 +70,8 @@ class ControlPanelUI(
         self.device_manager = None
         self.param_manager = None
         self._device_control_initialized = False
+        self._device_control_init_error = None   # stores last init exception for UI display
+        self._streamer_init_error = None          # stores last streamer init exception for UI display
         self._first_frame_rendered = False
         self.video_playback_bridge = None  # Video playback bridge for live control
         self.live_tracker_bridge = None    # Live tracker bridge for real-time control
@@ -333,6 +335,10 @@ class ControlPanelUI(
         draw_list = imgui.get_window_draw_list()
 
         imgui.begin_child("##Sidebar", width=sidebar_w, height=total_h, border=False)
+
+        # Top padding to align first sidebar icon with toolbar icons
+        _SIDEBAR_TOP_PAD = 6
+        imgui.dummy(0, _SIDEBAR_TOP_PAD)
 
         # Draw sidebar background
         pos = imgui.get_window_position()
@@ -770,46 +776,56 @@ class ControlPanelUI(
             imgui.spacing()
 
             # OSR2/OSR6
-            if imgui.collapsing_header("OSR2/OSR6 (USB)##PreviewOSR", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.text("Serial Port:")
-                imgui.push_item_width(150)
-                imgui.combo("##PreviewOSRPort", 0, ["Select port..."])
-                imgui.pop_item_width()
-                imgui.same_line()
-                imgui.button("Scan Ports")
+            with section_card("OSR2/OSR6 (USB)##PreviewOSR", tier="primary") as is_open:
+                if is_open:
+                    imgui.text("Serial Port:")
+                    imgui.push_item_width(150)
+                    imgui.combo("##PreviewOSRPort", 0, ["Select port..."])
+                    imgui.pop_item_width()
+                    imgui.same_line()
+                    imgui.button("Scan Ports")
 
             # Buttplug.io
-            if imgui.collapsing_header("Buttplug.io (Universal)##PreviewButtplug", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.text("Server Address:")
-                imgui.push_item_width(200)
-                imgui.input_text("##PreviewBPAddr", "ws://127.0.0.1:12345", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
-                imgui.pop_item_width()
-                imgui.button("Connect##PreviewBPConnect")
+            with section_card("Buttplug.io (Universal)##PreviewButtplug", tier="primary") as is_open:
+                if is_open:
+                    imgui.text("Server Address:")
+                    imgui.push_item_width(200)
+                    imgui.input_text("##PreviewBPAddr", "ws://127.0.0.1:12345", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                    imgui.pop_item_width()
+                    imgui.button("Connect##PreviewBPConnect")
 
             # Handy
-            if imgui.collapsing_header("Handy (Direct)##PreviewHandy", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.text("Connection Key:")
-                imgui.push_item_width(200)
-                imgui.input_text("##PreviewHandyKey", "", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
-                imgui.pop_item_width()
-                imgui.button("Connect##PreviewHandyConnect")
+            with section_card("Handy (Direct)##PreviewHandy", tier="primary") as is_open:
+                if is_open:
+                    imgui.text("Connection Key:")
+                    imgui.push_item_width(200)
+                    imgui.input_text("##PreviewHandyKey", "", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                    imgui.pop_item_width()
+                    imgui.button("Connect##PreviewHandyConnect")
 
             # OSSM
-            if imgui.collapsing_header("OSSM (Bluetooth)##PreviewOSSM", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.button("Scan for OSSM Devices")
+            with section_card("OSSM (Bluetooth)##PreviewOSSM", tier="primary") as is_open:
+                if is_open:
+                    imgui.button("Scan for OSSM Devices")
 
             imgui.separator()
             # Axis Configuration
-            if imgui.collapsing_header("Axis Configuration##PreviewAxisConfig")[0]:
-                imgui.text_colored("Connect a device to configure axes", 0.5, 0.5, 0.5, 1.0)
+            with section_card("Axis Configuration##PreviewAxisConfig", tier="secondary",
+                              open_by_default=False) as is_open:
+                if is_open:
+                    imgui.text_colored("Connect a device to configure axes", 0.5, 0.5, 0.5, 1.0)
 
             # Live Control Integration
-            if imgui.collapsing_header("Live Control Integration##PreviewLiveControl")[0]:
-                imgui.text_colored("Enables real-time device control during video playback", 0.5, 0.5, 0.5, 1.0)
+            with section_card("Live Control Integration##PreviewLiveControl", tier="secondary",
+                              open_by_default=False) as is_open:
+                if is_open:
+                    imgui.text_colored("Enables real-time device control during video playback", 0.5, 0.5, 0.5, 1.0)
 
             # Device Playback
-            if imgui.collapsing_header("Device Playback##PreviewPlayback")[0]:
-                imgui.text_colored("Play funscripts on connected devices", 0.5, 0.5, 0.5, 1.0)
+            with section_card("Device Playback##PreviewPlayback", tier="secondary",
+                              open_by_default=False) as is_open:
+                if is_open:
+                    imgui.text_colored("Play funscripts on connected devices", 0.5, 0.5, 0.5, 1.0)
 
     def _render_streamer_preview(self):
         """Render a grayed-out preview of the Streamer tab for non-supporters."""
@@ -820,79 +836,89 @@ class ControlPanelUI(
         )
         with _DisabledScope(True):
             # Server Control
-            if imgui.collapsing_header("Server Control##PreviewSyncControl", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                imgui.text_colored(
-                    "Stream video to browsers/VR headsets with frame-perfect synchronization. "
-                    "Supports zoom/pan controls, speed modes, and interactive device control.",
-                    0.7, 0.7, 0.7
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.spacing()
-                imgui.button("Start Streaming Server", width=-1)
+            with section_card("Server Control##PreviewSyncControl", tier="primary") as is_open:
+                if is_open:
+                    imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                    imgui.text_colored(
+                        "Stream video to browsers/VR headsets with frame-perfect synchronization. "
+                        "Supports zoom/pan controls, speed modes, and interactive device control.",
+                        0.7, 0.7, 0.7
+                    )
+                    imgui.pop_text_wrap_pos()
+                    imgui.spacing()
+                    imgui.button("Start Streaming Server", width=-1)
 
             # Display Options
-            if imgui.collapsing_header("Display Options##PreviewSyncDisplay")[0]:
-                imgui.checkbox("Auto-hide Video Feed while streaming##PreviewAutoHide", False)
+            with section_card("Display Options##PreviewSyncDisplay", tier="secondary",
+                              open_by_default=False) as is_open:
+                if is_open:
+                    imgui.checkbox("Auto-hide Video Feed while streaming##PreviewAutoHide", False)
 
             # Rolling Autotune
-            if imgui.collapsing_header("Rolling Autotune (Live Tracking)##PreviewRollingAT")[0]:
-                imgui.checkbox("Enable Rolling Autotune##PreviewRAT", False)
-                imgui.text("Interval (seconds):")
-                imgui.push_item_width(100)
-                imgui.slider_float("##PreviewRATInterval", 10.0, 5.0, 60.0, "%.0f")
-                imgui.pop_item_width()
+            with section_card("Rolling Autotune (Live Tracking)##PreviewRollingAT", tier="secondary",
+                              open_by_default=False) as is_open:
+                if is_open:
+                    imgui.checkbox("Enable Rolling Autotune##PreviewRAT", False)
+                    imgui.text("Interval (seconds):")
+                    imgui.push_item_width(100)
+                    imgui.slider_float("##PreviewRATInterval", 10.0, 5.0, 60.0, "%.0f")
+                    imgui.pop_item_width()
 
             # XBVR Integration
-            if imgui.collapsing_header("XBVR Integration##PreviewXBVR", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                imgui.text_colored(
-                    "Browse your XBVR library in the VR viewer with scene thumbnails and funscript availability.",
-                    0.7, 0.7, 0.7
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.spacing()
-                imgui.text("XBVR Host/IP:")
-                imgui.push_item_width(200)
-                imgui.input_text("##PreviewXBVRHost", "localhost", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
-                imgui.pop_item_width()
-                imgui.text("XBVR Port:")
-                imgui.push_item_width(100)
-                imgui.input_text("##PreviewXBVRPort", "9999", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
-                imgui.pop_item_width()
+            with section_card("XBVR Integration##PreviewXBVR", tier="primary") as is_open:
+                if is_open:
+                    imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                    imgui.text_colored(
+                        "Browse your XBVR library in the VR viewer with scene thumbnails and funscript availability.",
+                        0.7, 0.7, 0.7
+                    )
+                    imgui.pop_text_wrap_pos()
+                    imgui.spacing()
+                    imgui.text("XBVR Host/IP:")
+                    imgui.push_item_width(200)
+                    imgui.input_text("##PreviewXBVRHost", "localhost", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                    imgui.pop_item_width()
+                    imgui.text("XBVR Port:")
+                    imgui.push_item_width(100)
+                    imgui.input_text("##PreviewXBVRPort", "9999", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                    imgui.pop_item_width()
 
             # Stash Integration
-            if imgui.collapsing_header("Stash Integration##PreviewStash", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                imgui.text_colored(
-                    "Browse and load videos from your Stash library directly in the VR viewer.",
-                    0.7, 0.7, 0.7
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.spacing()
-                imgui.text("Stash Host/IP:")
-                imgui.push_item_width(200)
-                imgui.input_text("##PreviewStashHost", "localhost", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
-                imgui.pop_item_width()
-                imgui.text("Stash Port:")
-                imgui.push_item_width(100)
-                imgui.input_text("##PreviewStashPort", "9999", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
-                imgui.pop_item_width()
+            with section_card("Stash Integration##PreviewStash", tier="primary") as is_open:
+                if is_open:
+                    imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                    imgui.text_colored(
+                        "Browse and load videos from your Stash library directly in the VR viewer.",
+                        0.7, 0.7, 0.7
+                    )
+                    imgui.pop_text_wrap_pos()
+                    imgui.spacing()
+                    imgui.text("Stash Host/IP:")
+                    imgui.push_item_width(200)
+                    imgui.input_text("##PreviewStashHost", "localhost", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                    imgui.pop_item_width()
+                    imgui.text("Stash Port:")
+                    imgui.push_item_width(100)
+                    imgui.input_text("##PreviewStashPort", "9999", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+                    imgui.pop_item_width()
 
             # Requirements
-            if imgui.collapsing_header("Requirements##PreviewSyncReqs", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.bullet_text("Ports 8080 (HTTP) and 8765 (WebSocket) available")
-                imgui.bullet_text("Browser with HTML5 video support")
-                imgui.bullet_text("Video can be loaded before or after starting the server")
+            with section_card("Requirements##PreviewSyncReqs", tier="secondary") as is_open:
+                if is_open:
+                    imgui.bullet_text("Ports 8080 (HTTP) and 8765 (WebSocket) available")
+                    imgui.bullet_text("Browser with HTML5 video support")
+                    imgui.bullet_text("Video can be loaded before or after starting the server")
 
             # Features
-            if imgui.collapsing_header("Features##PreviewSyncFeatures")[0]:
-                imgui.bullet_text("Native hardware H.265/AV1 decode")
-                imgui.bullet_text("Zoom/Pan controls (+/- and WASD keys)")
-                imgui.bullet_text("Speed modes (Real Time / Slo Mo)")
-                imgui.bullet_text("Real-time FPS and resolution stats")
-                imgui.bullet_text("Interactive device control")
-                imgui.bullet_text("Funscript visualization graph")
+            with section_card("Features##PreviewSyncFeatures", tier="secondary",
+                              open_by_default=False) as is_open:
+                if is_open:
+                    imgui.bullet_text("Native hardware H.265/AV1 decode")
+                    imgui.bullet_text("Zoom/Pan controls (+/- and WASD keys)")
+                    imgui.bullet_text("Speed modes (Real Time / Slo Mo)")
+                    imgui.bullet_text("Real-time FPS and resolution stats")
+                    imgui.bullet_text("Interactive device control")
+                    imgui.bullet_text("Funscript visualization graph")
 
     # ------- Tab orchestrators (call into mixins) -------
 
@@ -1091,35 +1117,42 @@ class ControlPanelUI(
 
         self._render_start_stop_buttons(stage_proc, fs_proc, events)
 
-        self._render_interactive_refinement_controls()
+        if stage_proc.stage2_overlay_data_map:
+            with section_card("Interactive Refinement##RunRefine", tier="secondary") as is_open:
+                if is_open:
+                    self._render_interactive_refinement_controls()
+        else:
+            self._render_interactive_refinement_controls()
 
         chapters = getattr(app.funscript_processor, "video_chapters", [])
         if chapters:
-            # Clear All Chapters button (DESTRUCTIVE - deletes all chapters)
-            with destructive_button_style():
-                if imgui.button("Clear All Chapters", width=-1):
-                    imgui.open_popup("ConfirmClearChapters")
-            opened, _ = imgui.begin_popup_modal("ConfirmClearChapters")
-            if opened:
-                w = imgui.get_window_width()
-                text = "Are you sure you want to clear all chapters? This cannot be undone."
-                tw = imgui.calc_text_size(text)[0]
-                imgui.set_cursor_pos_x((w - tw) * 0.5)
-                imgui.text(text)
-                imgui.spacing()
-                bw, cw = 150, 100
-                total = bw + cw + imgui.get_style().item_spacing[0]
-                imgui.set_cursor_pos_x((w - total) * 0.5)
-                # Confirm button (DESTRUCTIVE - irreversible action)
-                with destructive_button_style():
-                    if imgui.button("Yes, clear all", width=bw):
-                        app.funscript_processor.video_chapters.clear()
-                        app.project_manager.project_dirty = True
-                        imgui.close_current_popup()
-                imgui.same_line()
-                if imgui.button("Cancel", width=cw):
-                    imgui.close_current_popup()
-                imgui.end_popup()
+            with section_card("Chapters##RunChapters", tier="secondary") as is_open:
+                if is_open:
+                    # Clear All Chapters button (DESTRUCTIVE - deletes all chapters)
+                    with destructive_button_style():
+                        if imgui.button("Clear All Chapters", width=-1):
+                            imgui.open_popup("ConfirmClearChapters")
+                    opened, _ = imgui.begin_popup_modal("ConfirmClearChapters")
+                    if opened:
+                        w = imgui.get_window_width()
+                        text = "Are you sure you want to clear all chapters? This cannot be undone."
+                        tw = imgui.calc_text_size(text)[0]
+                        imgui.set_cursor_pos_x((w - tw) * 0.5)
+                        imgui.text(text)
+                        imgui.spacing()
+                        bw, cw = 150, 100
+                        total = bw + cw + imgui.get_style().item_spacing[0]
+                        imgui.set_cursor_pos_x((w - total) * 0.5)
+                        # Confirm button (DESTRUCTIVE - irreversible action)
+                        with destructive_button_style():
+                            if imgui.button("Yes, clear all", width=bw):
+                                app.funscript_processor.video_chapters.clear()
+                                app.project_manager.project_dirty = True
+                                imgui.close_current_popup()
+                        imgui.same_line()
+                        if imgui.button("Cancel", width=cw):
+                            imgui.close_current_popup()
+                        imgui.end_popup()
 
         if disable_after and imgui.is_item_hovered():
             imgui.set_tooltip("Requires a video to be loaded and no other process to be active.")
@@ -1136,15 +1169,17 @@ class ControlPanelUI(
 
         # Dynamic tracker settings (replaces hardcoded per-tracker dispatch)
         if self._is_live_tracker(tmode):
-            if imgui.collapsing_header("Live Tracker Settings##ConfigLiveTracker",
-                                       flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                self._render_tracker_dynamic_settings()
+            with section_card("Live Tracker Settings##ConfigLiveTracker", tier="primary") as is_open:
+                if is_open:
+                    self._render_tracker_dynamic_settings()
 
         # Class filtering — only for trackers that use YOLO class detection
         tracker_inst = self._get_current_tracker_instance()
         if adv and tracker_inst and getattr(tracker_inst, 'uses_class_detection', False):
-            if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader")[0]:
-                self._render_class_filtering_content()
+            with section_card("Class Filtering##ConfigClassFilterHeader", tier="primary",
+                              open_by_default=False) as is_open:
+                if is_open:
+                    self._render_class_filtering_content()
 
         # Debug panel (only if tracker actually renders content)
         self._render_tracker_debug_panel()
@@ -1161,20 +1196,21 @@ class ControlPanelUI(
         imgui.text("Global application settings. Saved in settings.json.")
         imgui.spacing()
 
-        if imgui.collapsing_header(
-            "Interface & Performance##SettingsMenuPerfInterface",
-            flags=0,
-        )[0]:
-            self._render_settings_interface_perf()
+        with section_card("Interface & Performance##SettingsMenuPerfInterface", tier="primary",
+                          open_by_default=False) as is_open:
+            if is_open:
+                self._render_settings_interface_perf()
 
-        if imgui.collapsing_header(
-            "File & Output##SettingsMenuOutput", flags=0
-        )[0]:
-            self._render_settings_file_output()
+        with section_card("File & Output##SettingsMenuOutput", tier="primary",
+                          open_by_default=False) as is_open:
+            if is_open:
+                self._render_settings_file_output()
 
         if app_state.show_advanced_options:
-            if imgui.collapsing_header("Logging & Autosave##SettingsMenuLogging")[0]:
-                self._render_settings_logging_autosave()
+            with section_card("Logging & Autosave##SettingsMenuLogging", tier="primary",
+                              open_by_default=False) as is_open:
+                if is_open:
+                    self._render_settings_logging_autosave()
         imgui.spacing()
 
         # Reset All Settings button (DESTRUCTIVE - resets all settings)
