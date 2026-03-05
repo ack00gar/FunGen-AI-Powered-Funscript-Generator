@@ -59,7 +59,7 @@ class MpvPlaybackController:
         if self._bridge is not None:
             self.stop()
 
-        processor = self._app.processor
+        processor = getattr(self._app, 'processor', None)
         fps = processor.fps if processor and processor.fps > 0 else 30.0
         start_ms = (start_frame / fps) * 1000.0
 
@@ -79,8 +79,9 @@ class MpvPlaybackController:
             return False
 
         # Disable FFmpeg audio sync — mpv handles audio natively
-        if self._app._audio_sync:
-            self._app._audio_sync.stop()
+        audio_sync = getattr(self._app, '_audio_sync', None)
+        if audio_sync:
+            audio_sync.stop()
 
         self._bridge.add_position_callback(self._on_position)
         self._bridge.play()
@@ -93,9 +94,10 @@ class MpvPlaybackController:
             self._bridge.stop()
             self._bridge = None
 
-        if self._app._audio_sync:
+        audio_sync = getattr(self._app, '_audio_sync', None)
+        if audio_sync:
             try:
-                self._app._audio_sync.start()
+                audio_sync.start()
             except Exception:
                 pass  # already running is fine
 
@@ -122,7 +124,7 @@ class MpvPlaybackController:
         """
         if not self._bridge:
             return
-        processor = self._app.processor
+        processor = getattr(self._app, 'processor', None)
         fps = processor.fps if processor and processor.fps > 0 else 30.0
         # Update frame index immediately for responsive UI
         if processor:
@@ -141,11 +143,11 @@ class MpvPlaybackController:
         elif action_name == "jump_start":
             self.seek(0)
         elif action_name == "jump_end":
-            processor = self._app.processor
+            processor = getattr(self._app, 'processor', None)
             if processor:
                 self.seek(max(0, processor.total_frames - 1))
         elif action_name in ("prev_frame", "next_frame"):
-            processor = self._app.processor
+            processor = getattr(self._app, 'processor', None)
             if processor:
                 delta = -1 if action_name == "prev_frame" else 1
                 self.seek(max(0, processor.current_frame_index + delta))
@@ -196,7 +198,7 @@ class MpvPlaybackController:
         and device-sync code all read the correct position.
         Uses round() so pausing snaps to the nearest frame boundary.
         """
-        processor = self._app.processor
+        processor = getattr(self._app, 'processor', None)
         if not processor or processor.fps <= 0:
             return
 

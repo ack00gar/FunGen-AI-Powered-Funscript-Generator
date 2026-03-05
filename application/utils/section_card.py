@@ -32,8 +32,9 @@ _TIER_PRESETS = {
 def section_card(label, tier="primary", accent_color=None, open_by_default=True):
     """Context manager that wraps content in a visually distinct card container.
 
-    Uses draw_list channel splitting to draw a background rect behind content.
-    Channel 0 = background (drawn first), Channel 1 = content (drawn on top).
+    Primary tier uses draw_list channel splitting to draw background behind content
+    (needed for accent bar). Secondary/inline tiers draw background after content
+    to avoid nested channel split assertions.
 
     Args:
         label: Display text for the card header. Also used as imgui ID.
@@ -50,6 +51,10 @@ def section_card(label, tier="primary", accent_color=None, open_by_default=True)
     accent_width = preset["accent_width"]
     padding = preset["padding"]
 
+    # Only use channel splitting for primary tier (has accent bar).
+    # Secondary/inline skip channels to avoid nested split assertions.
+    use_channels = accent_width > 0
+
     imgui.spacing()
 
     # Record start position for background drawing
@@ -57,10 +62,11 @@ def section_card(label, tier="primary", accent_color=None, open_by_default=True)
     region_start = imgui.get_cursor_screen_pos()
     content_width = imgui.get_content_region_available_width()
 
-    # Split channels BEFORE rendering content so background ends up behind it.
-    # Channel 0 = background (rendered first), Channel 1 = content (rendered on top).
-    draw_list.channels_split(2)
-    draw_list.channels_set_current(1)  # All content goes to foreground channel
+    if use_channels:
+        # Split channels BEFORE rendering content so background ends up behind it.
+        # Channel 0 = background (rendered first), Channel 1 = content (rendered on top).
+        draw_list.channels_split(2)
+        draw_list.channels_set_current(1)  # All content goes to foreground channel
 
     # Indent content for padding + accent bar
     total_left_pad = padding + accent_width
@@ -88,25 +94,30 @@ def section_card(label, tier="primary", accent_color=None, open_by_default=True)
     # Unindent
     imgui.unindent(total_left_pad)
 
-    # Draw card background on channel 0 (behind content on channel 1)
     bg_color = imgui.get_color_u32_rgba(*bg)
     x1, y1 = region_start[0], region_start[1]
     x2 = x1 + content_width
     y2 = region_end_y
 
-    draw_list.channels_set_current(0)  # Background channel
-    draw_list.add_rect_filled(x1, y1, x2, y2, bg_color, rounding)
+    if use_channels:
+        # Draw card background on channel 0 (behind content on channel 1)
+        draw_list.channels_set_current(0)  # Background channel
+        draw_list.add_rect_filled(x1, y1, x2, y2, bg_color, rounding)
 
-    # Draw accent bar if primary tier with accent color
-    if accent_width > 0 and accent_color:
-        accent_u32 = imgui.get_color_u32_rgba(*accent_color)
-        draw_list.add_rect_filled(
-            x1, y1,
-            x1 + accent_width, y2,
-            accent_u32, rounding
-        )
+        # Draw accent bar if primary tier with accent color
+        if accent_color:
+            accent_u32 = imgui.get_color_u32_rgba(*accent_color)
+            draw_list.add_rect_filled(
+                x1, y1,
+                x1 + accent_width, y2,
+                accent_u32, rounding
+            )
 
-    # Merge: channel 0 (bg) rendered first, then channel 1 (content) on top
-    draw_list.channels_merge()
+        # Merge: channel 0 (bg) rendered first, then channel 1 (content) on top
+        draw_list.channels_merge()
+    else:
+        # No channel splitting — draw background directly (renders on top but
+        # secondary/inline use semi-transparent alpha so content shows through)
+        draw_list.add_rect_filled(x1, y1, x2, y2, bg_color, rounding)
 
     imgui.spacing()
