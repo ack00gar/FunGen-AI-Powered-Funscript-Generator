@@ -15,6 +15,7 @@ from tracker.tracker_manager import create_tracker_manager
 
 from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
 from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
+from application.utils.addon_update_checker import AddonUpdateChecker
 from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION, PROJECT_FILE_EXTENSION, MODEL_DOWNLOAD_URLS
 from config.tracker_discovery import get_tracker_discovery
 from pathlib import Path
@@ -130,6 +131,7 @@ class ApplicationLogic:
 
         # --- Initialize Auto-Updater ---
         self.updater = AutoUpdater(self)
+        self.addon_checker = AddonUpdateChecker(self)
 
         # REFACTORED Defensive programming. Always make sure the type is a list of strings.
         discarded_tracking_classes = self.app_settings.get("discarded_tracking_classes", [])
@@ -379,6 +381,7 @@ class ApplicationLogic:
         # Check for updates on startup only if enabled
         if self.app_settings.get("updater_check_on_startup", True):
             self.updater.check_for_updates_async()
+            self.addon_checker.check_for_updates_async()
 
         # First-run model download is now handled by the FirstRunWizard (step 5).
         # The wizard calls trigger_first_run_setup() when the user reaches that step.
