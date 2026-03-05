@@ -1,0 +1,19 @@
+{
+  "addons": {
+    "device_control": {
+      "version": "5.5.5",
+      "display_name": "Device Control",
+      "changelog": "Revision-based change detection, toolbar upload hash sync, HSSP sync fix"
+    },
+    "streamer": {
+      "version": "3.5.1",
+      "display_name": "Video Streamer",
+      "changelog": "UI form factor unification"
+    },
+    "patreon_features": {
+      "version": "1.1.4",
+      "display_name": "Patreon Features",
+      "changelog": "UI form factor unification"
+    }
+  }
+}

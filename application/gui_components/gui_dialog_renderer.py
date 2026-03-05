@@ -290,6 +290,9 @@ class DialogRendererMixin:
         self.app.updater.render_migration_warning_dialog()
         self.app.updater.render_update_settings_dialog()
 
+        # Addon update checker dialog
+        self.app.addon_checker.render_update_dialog()
+
         # Keyboard Shortcuts Dialog (accessible via F1 or Help menu)
         self.keyboard_shortcuts_dialog.render()
 
