@@ -1612,6 +1612,9 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Go to Frame popup (Ctrl+G)
         self._render_go_to_frame_popup()
 
+        # Tick addon status-strip ads (non-intrusive, once per frame)
+        self.app.addon_checker.tick_status_ads()
+
         # Render status strip at bottom of window
         self._render_status_strip(status_strip_h)
 
