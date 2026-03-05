@@ -187,7 +187,7 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
             # Vectorized perpendicular distance calculation
             intermediate_points = segment_points[1:-1]
             point_vecs = intermediate_points - segment_points[0]
-            cross_products = np.cross(line_vec, point_vecs)
+            cross_products = line_vec[0] * point_vecs[:, 1] - line_vec[1] * point_vecs[:, 0]
             distances = np.abs(cross_products) / line_length
             
             if len(distances) == 0:

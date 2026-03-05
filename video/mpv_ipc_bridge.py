@@ -1,7 +1,7 @@
 """
-MpvIPCBridge — controls mpv via unix socket IPC.
+MpvIPCBridge — controls mpv via IPC (Unix socket or Windows named pipe).
 
-Launches mpv with --input-ipc-server, then communicates over the socket
+Launches mpv with --input-ipc-server, then communicates over the socket/pipe
 to drive playback and poll position for FunGen timeline sync.
 
 Protocol: newline-delimited JSON (MPV IPC v2 / JSON-IPC).
@@ -9,6 +9,7 @@ Protocol: newline-delimited JSON (MPV IPC v2 / JSON-IPC).
 
 import json
 import os
+import sys
 import shutil
 import socket
 import subprocess
@@ -19,7 +20,8 @@ from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SOCK = "/tmp/fungen_mpv.sock"
+_IS_WINDOWS = sys.platform == "win32"
+_DEFAULT_SOCK = r"\\.\pipe\fungen_mpv" if _IS_WINDOWS else "/tmp/fungen_mpv.sock"
 
 
 def _find_mpv_binary() -> str:
@@ -71,6 +73,7 @@ class MpvIPCBridge:
 
         self._proc: Optional[subprocess.Popen] = None
         self._sock: Optional[socket.socket] = None
+        self._pipe = None  # Windows named pipe file handle
         self._sock_lock = threading.Lock()
         self._req_id = 0
 
@@ -92,8 +95,9 @@ class MpvIPCBridge:
     # ------------------------------------------------------------------
 
     def start(self) -> bool:
-        """Launch mpv and connect to IPC socket. Returns True on success."""
-        if os.path.exists(self.sock_path):
+        """Launch mpv and connect to IPC socket/pipe. Returns True on success."""
+        # Clean up stale socket (Unix only)
+        if not _IS_WINDOWS and os.path.exists(self.sock_path):
             os.unlink(self.sock_path)
 
         cmd = [
@@ -121,24 +125,21 @@ class MpvIPCBridge:
             stderr=subprocess.DEVNULL,
         )
 
-        # Wait for socket to appear (up to 5s)
+        # Wait for IPC endpoint to appear (up to 5s)
         deadline = time.monotonic() + 5.0
-        while not os.path.exists(self.sock_path):
+        while True:
             if time.monotonic() > deadline:
-                logger.error("mpv IPC socket did not appear within 5s")
+                logger.error("mpv IPC endpoint did not appear within 5s")
                 return False
             if self._proc.poll() is not None:
                 logger.error(f"mpv exited early (code {self._proc.returncode})")
                 return False
+            if self._ipc_endpoint_ready():
+                break
             time.sleep(0.05)
 
         # Connect
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            self._sock.connect(self.sock_path)
-            self._sock.settimeout(0.5)
-        except OSError as e:
-            logger.error(f"Failed to connect to mpv socket: {e}")
+        if not self._connect():
             return False
 
         # Observe time-pos and pause state via push events
@@ -162,8 +163,41 @@ class MpvIPCBridge:
         logger.info(f"MpvIPCBridge connected (duration {self._duration_ms:.0f}ms)")
         return True
 
+    def _ipc_endpoint_ready(self) -> bool:
+        """Check if the IPC endpoint (socket or named pipe) is available."""
+        if _IS_WINDOWS:
+            # On Windows, try to open the named pipe briefly
+            try:
+                h = open(self.sock_path, "r+b", buffering=0)
+                h.close()
+                return True
+            except OSError:
+                return False
+        else:
+            return os.path.exists(self.sock_path)
+
+    def _connect(self) -> bool:
+        """Establish IPC connection (socket on Unix, named pipe on Windows)."""
+        if _IS_WINDOWS:
+            try:
+                self._pipe = open(self.sock_path, "r+b", buffering=0)
+                logger.info(f"Connected to mpv named pipe: {self.sock_path}")
+                return True
+            except OSError as e:
+                logger.error(f"Failed to connect to mpv named pipe: {e}")
+                return False
+        else:
+            self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                self._sock.connect(self.sock_path)
+                self._sock.settimeout(0.5)
+                return True
+            except OSError as e:
+                logger.error(f"Failed to connect to mpv socket: {e}")
+                return False
+
     def stop(self):
-        """Stop mpv and close socket."""
+        """Stop mpv and close socket/pipe."""
         self._stop_event.set()
         if self._poller_thread and self._poller_thread.is_alive():
             self._poller_thread.join(timeout=2.0)
@@ -180,6 +214,13 @@ class MpvIPCBridge:
                 pass
             self._sock = None
 
+        if self._pipe:
+            try:
+                self._pipe.close()
+            except Exception:
+                pass
+            self._pipe = None
+
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
             try:
@@ -188,7 +229,8 @@ class MpvIPCBridge:
                 self._proc.kill()
         self._proc = None
 
-        if os.path.exists(self.sock_path):
+        # Clean up Unix socket file (no-op on Windows)
+        if not _IS_WINDOWS and os.path.exists(self.sock_path):
             os.unlink(self.sock_path)
 
         logger.info("MpvIPCBridge stopped")
@@ -258,23 +300,44 @@ class MpvIPCBridge:
             pass
 
     # ------------------------------------------------------------------
-    # Internal
+    # Internal — transport abstraction
     # ------------------------------------------------------------------
 
     def _next_req_id(self) -> int:
         self._req_id += 1
         return self._req_id
 
+    def _send_raw(self, data: bytes):
+        """Send raw bytes over the IPC transport."""
+        if _IS_WINDOWS:
+            if self._pipe is None:
+                return
+            self._pipe.write(data)
+            self._pipe.flush()
+        else:
+            if self._sock is None:
+                return
+            self._sock.sendall(data)
+
+    def _recv_raw(self, bufsize: int = 4096) -> bytes:
+        """Receive raw bytes from the IPC transport. May raise OSError/timeout."""
+        if _IS_WINDOWS:
+            if self._pipe is None:
+                return b""
+            return self._pipe.read(bufsize) or b""
+        else:
+            if self._sock is None:
+                return b""
+            return self._sock.recv(bufsize)
+
     def _send_cmd(self, cmd: list) -> dict:
         req = {"command": cmd, "request_id": self._next_req_id()}
         payload = json.dumps(req) + "\n"
         with self._sock_lock:
-            if self._sock is None:
-                return {}
             try:
-                self._sock.sendall(payload.encode())
+                self._send_raw(payload.encode())
             except OSError:
-                return {}
+                pass
         return {}
 
     def _get_property(self, name: str):
@@ -283,15 +346,13 @@ class MpvIPCBridge:
         req = {"command": ["get_property", name], "request_id": req_id}
         payload = json.dumps(req) + "\n"
         with self._sock_lock:
-            if self._sock is None:
-                return None
             try:
-                self._sock.sendall(payload.encode())
+                self._send_raw(payload.encode())
                 buf = b""
                 deadline = time.monotonic() + 1.0
                 while time.monotonic() < deadline:
                     try:
-                        chunk = self._sock.recv(4096)
+                        chunk = self._recv_raw(4096)
                         if not chunk:
                             break
                         buf += chunk
@@ -306,7 +367,7 @@ class MpvIPCBridge:
                                 pass
                         if b"\n" in buf:
                             buf = buf.split(b"\n")[-1]
-                    except socket.timeout:
+                    except (socket.timeout, OSError):
                         break
             except OSError:
                 pass
@@ -316,11 +377,13 @@ class MpvIPCBridge:
         """Background thread: reads push events from mpv and updates state."""
         buf = b""
         while not self._stop_event.is_set():
-            if self._sock is None:
-                break
             try:
-                chunk = self._sock.recv(4096)
+                chunk = self._recv_raw(4096)
                 if not chunk:
+                    if _IS_WINDOWS:
+                        # On Windows, pipe read returns empty on EOF
+                        time.sleep(0.01)
+                        continue
                     break
                 buf += chunk
             except socket.timeout:
