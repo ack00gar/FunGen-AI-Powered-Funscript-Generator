@@ -114,11 +114,19 @@ class MpvPlaybackController:
             self._bridge.pause()
 
     def seek(self, frame_index: int):
-        """Seek to a frame index (converts to ms for mpv)."""
+        """Seek to a frame index (converts to ms for mpv).
+
+        Also updates processor.current_frame_index immediately so the
+        timeline and UI reflect the new position without waiting for the
+        IPC position callback (which may be delayed when paused).
+        """
         if not self._bridge:
             return
         processor = self._app.processor
         fps = processor.fps if processor and processor.fps > 0 else 30.0
+        # Update frame index immediately for responsive UI
+        if processor:
+            processor.current_frame_index = max(0, frame_index)
         self._bridge.seek((frame_index / fps) * 1000.0)
 
     def handle_action(self, action_name: str):
