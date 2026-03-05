@@ -26,6 +26,10 @@ class AppFunscriptProcessor:
         self.scripting_start_frame: int = 0
         self.scripting_end_frame: int = 0
 
+        # Monotonic revision counter — bumped on every funscript mutation.
+        # Used by device control to detect changes (replaces brittle len()/id() checks).
+        self._revision: int = 0
+
         # Funscript Attributes (stats are per timeline)
         self.funscript_stats_t1: Dict = self._get_default_funscript_stats()
         self.funscript_stats_t2: Dict = self._get_default_funscript_stats()
@@ -715,6 +719,7 @@ class AppFunscriptProcessor:
                 extra={'status_message': False})
 
     def _finalize_action_and_update_ui(self, timeline_num: int, change_description: str):
+        self._revision += 1
         self.update_funscript_stats_for_timeline(timeline_num, change_description)
         self.app.project_manager.project_dirty = True
 

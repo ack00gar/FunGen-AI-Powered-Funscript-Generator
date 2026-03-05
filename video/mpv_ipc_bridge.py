@@ -1,55 +1,45 @@
 """
-MpvIPCBridge — controls mpv via IPC (Unix socket or Windows named pipe).
+MpvIPCBridge — FunGen-ready cross-platform IPC control for mpv.
 
-Launches mpv with --input-ipc-server, then communicates over the socket/pipe
-to drive playback and poll position for FunGen timeline sync.
+Supports:
+- Windows Named Pipe
+- Unix domain socket
 
-Protocol: newline-delimited JSON (MPV IPC v2 / JSON-IPC).
+Keeps full functionality:
+- play/pause/seek
+- position callbacks
+- synchronous get_property
+- latency tracking
+- fullscreen, no_video, start_ms, extra_args
 """
 
 import json
 import os
-import sys
 import shutil
 import socket
 import subprocess
 import threading
 import time
 import logging
+import sys
 from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
 
-_IS_WINDOWS = sys.platform == "win32"
-_DEFAULT_SOCK = r"\\.\pipe\fungen_mpv" if _IS_WINDOWS else "/tmp/fungen_mpv.sock"
-
+_DEFAULT_SOCK = r"\\.\pipe\fungen_mpv" if sys.platform == "win32" else "/tmp/fungen_mpv.sock"
 
 def _find_mpv_binary() -> str:
-    """Locate the mpv binary: PATH first, then known Homebrew location."""
     found = shutil.which("mpv")
     if found:
         return found
+    # Example for macOS Homebrew, fallback
     homebrew_path = "/opt/homebrew/bin/mpv"
     if os.path.isfile(homebrew_path):
         return homebrew_path
-    return "mpv"  # last-resort: let subprocess raise a clear error
-
+    return "mpv"
 
 class MpvIPCBridge:
-    """
-    Thin wrapper around mpv's JSON IPC socket.
-
-    Usage:
-        bridge = MpvIPCBridge(video_path)
-        bridge.start()
-        pos = bridge.get_position_ms()
-        bridge.seek(5000)
-        bridge.stop()
-
-    Position callbacks are fired from a background event thread whenever
-    mpv pushes a time-pos property-change event.
-    Callback signature: callback(position_ms: float, duration_ms: float)
-    """
+    """FunGen-ready cross-platform mpv IPC bridge."""
 
     def __init__(
         self,
@@ -57,10 +47,10 @@ class MpvIPCBridge:
         mpv_binary: Optional[str] = None,
         sock_path: str = _DEFAULT_SOCK,
         fullscreen: bool = False,
-        no_video: bool = False,          # headless: audio + IPC only
+        no_video: bool = False,
         start_ms: float = 0.0,
         poll_hz: int = 30,
-        extra_args: Optional[list] = None,  # extra mpv CLI args appended to command
+        extra_args: Optional[list] = None,
     ):
         self.video_path = video_path
         self.mpv_binary = mpv_binary or _find_mpv_binary()
@@ -72,8 +62,7 @@ class MpvIPCBridge:
         self.extra_args = extra_args or []
 
         self._proc: Optional[subprocess.Popen] = None
-        self._sock: Optional[socket.socket] = None
-        self._pipe = None  # Windows named pipe file handle
+        self._sock = None  # socket (Unix) or file object (Windows pipe)
         self._sock_lock = threading.Lock()
         self._req_id = 0
 
@@ -86,75 +75,91 @@ class MpvIPCBridge:
         self._stop_event = threading.Event()
         self._position_callbacks: list[Callable] = []
 
-        # Latency tracking
         self.last_poll_latency_ms: float = 0.0
         self.last_seek_latency_ms: float = 0.0
 
-    # ------------------------------------------------------------------
+    # -------------------------------
     # Lifecycle
-    # ------------------------------------------------------------------
+    # -------------------------------
 
     def start(self) -> bool:
-        """Launch mpv and connect to IPC socket/pipe. Returns True on success."""
-        # Clean up stale socket (Unix only)
-        if not _IS_WINDOWS and os.path.exists(self.sock_path):
+        """Launch mpv and connect to IPC."""
+        if sys.platform != "win32" and os.path.exists(self.sock_path):
             os.unlink(self.sock_path)
 
         cmd = [
             self.mpv_binary,
             self.video_path,
             f"--input-ipc-server={self.sock_path}",
-            "--really-quiet",           # minimal terminal output
-            "--keep-open=yes",          # don't close on EOF
-            "--pause=yes",              # start paused so we control timing
+            "--really-quiet",
+            "--keep-open=yes",
+            "--pause=yes",
         ]
         if self.fullscreen:
             cmd.append("--fullscreen")
         if self.no_video:
-            # --vo=null: decode video without opening a display window.
-            # Do NOT use --vid=no (leaves nothing to play if no audio track).
             cmd.append("--vo=null")
         if self.start_ms > 0:
             cmd.append(f"--start={self.start_ms / 1000.0:.3f}")
         cmd.extend(self.extra_args)
 
         logger.info(f"Launching mpv: {' '.join(cmd)}")
-        self._proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        self._proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Wait for IPC endpoint to appear (up to 5s)
+        # Wait for IPC availability and connect (unified retry loop)
         deadline = time.monotonic() + 5.0
-        while True:
-            if time.monotonic() > deadline:
-                logger.error("mpv IPC endpoint did not appear within 5s")
-                return False
+        connected = False
+        while time.monotonic() < deadline:
             if self._proc.poll() is not None:
                 logger.error(f"mpv exited early (code {self._proc.returncode})")
                 return False
-            if self._ipc_endpoint_ready():
-                break
-            time.sleep(0.05)
+            if sys.platform == "win32":
+                try:
+                    import win32file
+                    import msvcrt
+                    handle = win32file.CreateFile(
+                        self.sock_path,
+                        win32file.GENERIC_READ | win32file.GENERIC_WRITE,
+                        0, None,
+                        win32file.OPEN_EXISTING,
+                        0, None
+                    )
+                    self._sock = os.fdopen(
+                        msvcrt.open_osfhandle(handle.Detach(), os.O_RDWR | os.O_BINARY),
+                        'r+b', buffering=0
+                    )
+                    connected = True
+                    break
+                except Exception:
+                    time.sleep(0.05)
+            else:
+                if not os.path.exists(self.sock_path):
+                    time.sleep(0.05)
+                    continue
+                try:
+                    self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    self._sock.connect(self.sock_path)
+                    self._sock.settimeout(0.5)
+                    connected = True
+                    break
+                except Exception:
+                    time.sleep(0.05)
 
-        # Connect
-        if not self._connect():
+        if not connected:
+            logger.error("mpv IPC socket/pipe did not appear within 5s")
             return False
 
-        # Observe time-pos and pause state via push events
+        # Observe required properties
         self._send_cmd(["observe_property", 1, "time-pos"])
         self._send_cmd(["observe_property", 2, "pause"])
         self._send_cmd(["observe_property", 3, "duration"])
 
-        # Start event loop thread (reads events pushed by mpv)
+        # Start event loop
         self._stop_event.clear()
-        self._poller_thread = threading.Thread(
-            target=self._event_loop, name="mpv-ipc-poller", daemon=True
-        )
+        self._poller_thread = threading.Thread(target=self._event_loop, name="mpv-ipc-poller", daemon=True)
         self._poller_thread.start()
 
-        # Get duration
+        # Get duration synchronously
         dur = self._get_property("duration")
         if dur is not None:
             with self._state_lock:
@@ -163,41 +168,8 @@ class MpvIPCBridge:
         logger.info(f"MpvIPCBridge connected (duration {self._duration_ms:.0f}ms)")
         return True
 
-    def _ipc_endpoint_ready(self) -> bool:
-        """Check if the IPC endpoint (socket or named pipe) is available."""
-        if _IS_WINDOWS:
-            # On Windows, try to open the named pipe briefly
-            try:
-                h = open(self.sock_path, "r+b", buffering=0)
-                h.close()
-                return True
-            except OSError:
-                return False
-        else:
-            return os.path.exists(self.sock_path)
-
-    def _connect(self) -> bool:
-        """Establish IPC connection (socket on Unix, named pipe on Windows)."""
-        if _IS_WINDOWS:
-            try:
-                self._pipe = open(self.sock_path, "r+b", buffering=0)
-                logger.info(f"Connected to mpv named pipe: {self.sock_path}")
-                return True
-            except OSError as e:
-                logger.error(f"Failed to connect to mpv named pipe: {e}")
-                return False
-        else:
-            self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            try:
-                self._sock.connect(self.sock_path)
-                self._sock.settimeout(0.5)
-                return True
-            except OSError as e:
-                logger.error(f"Failed to connect to mpv socket: {e}")
-                return False
-
     def stop(self):
-        """Stop mpv and close socket/pipe."""
+        """Stop mpv and close IPC."""
         self._stop_event.set()
         if self._poller_thread and self._poller_thread.is_alive():
             self._poller_thread.join(timeout=2.0)
@@ -214,13 +186,6 @@ class MpvIPCBridge:
                 pass
             self._sock = None
 
-        if self._pipe:
-            try:
-                self._pipe.close()
-            except Exception:
-                pass
-            self._pipe = None
-
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
             try:
@@ -229,15 +194,14 @@ class MpvIPCBridge:
                 self._proc.kill()
         self._proc = None
 
-        # Clean up Unix socket file (no-op on Windows)
-        if not _IS_WINDOWS and os.path.exists(self.sock_path):
+        if sys.platform != "win32" and os.path.exists(self.sock_path):
             os.unlink(self.sock_path)
 
         logger.info("MpvIPCBridge stopped")
 
-    # ------------------------------------------------------------------
-    # Playback control
-    # ------------------------------------------------------------------
+    # -------------------------------
+    # Playback
+    # -------------------------------
 
     def play(self):
         self._send_cmd(["set_property", "pause", False])
@@ -250,23 +214,21 @@ class MpvIPCBridge:
             self._is_playing = False
 
     def seek(self, position_ms: float):
-        """Seek to absolute position (milliseconds). Measures response latency."""
         t0 = time.monotonic()
         self._send_cmd(["seek", position_ms / 1000.0, "absolute"])
-        # Latency = time until time-pos update is received (event loop)
         target = position_ms
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:
             with self._state_lock:
-                if abs(self._position_ms - target) < 200:  # within 200ms
+                if abs(self._position_ms - target) < 200:
                     self.last_seek_latency_ms = (time.monotonic() - t0) * 1000.0
                     return
             time.sleep(0.005)
         self.last_seek_latency_ms = (time.monotonic() - t0) * 1000.0
 
-    # ------------------------------------------------------------------
-    # State queries
-    # ------------------------------------------------------------------
+    # -------------------------------
+    # State
+    # -------------------------------
 
     def get_position_ms(self) -> float:
         with self._state_lock:
@@ -284,75 +246,58 @@ class MpvIPCBridge:
     def is_alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
-    # ------------------------------------------------------------------
+    # -------------------------------
     # Callbacks
-    # ------------------------------------------------------------------
+    # -------------------------------
 
     def add_position_callback(self, cb: Callable):
-        """Register callback(position_ms, duration_ms) called on every position update."""
         self._position_callbacks.append(cb)
 
     def remove_position_callback(self, cb: Callable):
-        """Remove a previously registered callback."""
         try:
             self._position_callbacks.remove(cb)
         except ValueError:
             pass
 
-    # ------------------------------------------------------------------
-    # Internal — transport abstraction
-    # ------------------------------------------------------------------
+    # -------------------------------
+    # Internal
+    # -------------------------------
 
     def _next_req_id(self) -> int:
         self._req_id += 1
         return self._req_id
 
-    def _send_raw(self, data: bytes):
-        """Send raw bytes over the IPC transport."""
-        if _IS_WINDOWS:
-            if self._pipe is None:
-                return
-            self._pipe.write(data)
-            self._pipe.flush()
-        else:
-            if self._sock is None:
-                return
-            self._sock.sendall(data)
-
-    def _recv_raw(self, bufsize: int = 4096) -> bytes:
-        """Receive raw bytes from the IPC transport. May raise OSError/timeout."""
-        if _IS_WINDOWS:
-            if self._pipe is None:
-                return b""
-            return self._pipe.read(bufsize) or b""
-        else:
-            if self._sock is None:
-                return b""
-            return self._sock.recv(bufsize)
-
     def _send_cmd(self, cmd: list) -> dict:
         req = {"command": cmd, "request_id": self._next_req_id()}
-        payload = json.dumps(req) + "\n"
+        payload = (json.dumps(req) + "\n").encode()
         with self._sock_lock:
+            if self._sock is None:
+                return {}
             try:
-                self._send_raw(payload.encode())
-            except OSError:
-                pass
+                if sys.platform == "win32":
+                    self._sock.write(payload)
+                    self._sock.flush()
+                else:
+                    self._sock.sendall(payload)
+            except Exception:
+                return {}
         return {}
 
     def _get_property(self, name: str):
-        """Synchronous property get (used at startup before event loop)."""
         req_id = self._next_req_id()
         req = {"command": ["get_property", name], "request_id": req_id}
-        payload = json.dumps(req) + "\n"
+        payload = (json.dumps(req) + "\n").encode()
         with self._sock_lock:
+            if self._sock is None:
+                return None
             try:
-                self._send_raw(payload.encode())
                 buf = b""
                 deadline = time.monotonic() + 1.0
-                while time.monotonic() < deadline:
-                    try:
-                        chunk = self._recv_raw(4096)
+                if sys.platform == "win32":
+                    self._sock.write(payload)
+                    self._sock.flush()
+                    while time.monotonic() < deadline:
+                        chunk = self._sock.read(4096)
                         if not chunk:
                             break
                         buf += chunk
@@ -367,29 +312,46 @@ class MpvIPCBridge:
                                 pass
                         if b"\n" in buf:
                             buf = buf.split(b"\n")[-1]
-                    except (socket.timeout, OSError):
-                        break
-            except OSError:
-                pass
+                else:
+                    self._sock.sendall(payload)
+                    while time.monotonic() < deadline:
+                        try:
+                            chunk = self._sock.recv(4096)
+                            if not chunk:
+                                break
+                            buf += chunk
+                            for line in buf.split(b"\n"):
+                                if not line.strip():
+                                    continue
+                                try:
+                                    obj = json.loads(line)
+                                    if obj.get("request_id") == req_id:
+                                        return obj.get("data")
+                                except json.JSONDecodeError:
+                                    pass
+                            if b"\n" in buf:
+                                buf = buf.split(b"\n")[-1]
+                        except socket.timeout:
+                            break
+            except Exception:
+                return None
         return None
 
     def _event_loop(self):
-        """Background thread: reads push events from mpv and updates state."""
         buf = b""
         while not self._stop_event.is_set():
+            if self._sock is None:
+                break
             try:
-                chunk = self._recv_raw(4096)
+                if sys.platform == "win32":
+                    chunk = self._sock.read(4096)
+                else:
+                    chunk = self._sock.recv(4096)
                 if not chunk:
-                    if _IS_WINDOWS:
-                        # On Windows, pipe read returns empty on EOF
-                        time.sleep(0.01)
-                        continue
                     break
                 buf += chunk
-            except socket.timeout:
+            except (OSError, socket.timeout):
                 continue
-            except OSError:
-                break
 
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)

@@ -1233,9 +1233,9 @@ class DeviceControlMixin:
                             'primary' if tl_num == 1 else ('secondary' if tl_num == 2 else axis_name))
                         if actions:
                             label = f"Timeline {tl_num} ({axis_name})"
-                            # Show upload indicator
+                            # Show upload indicator (uses revision counter for reliable change detection)
                             uploaded_tls = getattr(self, '_handy_uploaded_timelines', {})
-                            current_hash = len(actions)
+                            current_hash = getattr(self.app.funscript_processor, '_revision', 0)
                             if tl_num in uploaded_tls and uploaded_tls[tl_num] == current_hash:
                                 label += " [uploaded]"
                             upload_timelines.append(tl_num)
@@ -1263,7 +1263,7 @@ class DeviceControlMixin:
                     current_actions = self.app.funscript_processor.get_actions(
                         'primary' if selected_tl_num == 1 else ('secondary' if selected_tl_num == 2
                         else axis_assignments.get(selected_tl_num, 'primary')))
-                    current_hash = len(current_actions) if current_actions else 0
+                    current_hash = getattr(self.app.funscript_processor, '_revision', 0)
 
                     # Stale-script detection
                     uploaded_tls = getattr(self, '_handy_uploaded_timelines', {})
@@ -2126,12 +2126,12 @@ class DeviceControlMixin:
                 extra={'status_message': True})
             return
 
-        # Track upload hash per timeline for stale-script detection
+        # Track upload revision per timeline for stale-script detection
         if not hasattr(self, '_handy_uploaded_timelines'):
             self._handy_uploaded_timelines = {}
-        self._handy_uploaded_timelines[timeline_num] = len(actions)
-        # Legacy compat
-        self._handy_last_upload_hash = len(actions)
+        upload_rev = getattr(self.app.funscript_processor, '_revision', 0)
+        self._handy_uploaded_timelines[timeline_num] = upload_rev
+        self._handy_last_upload_hash = upload_rev
 
         axis_name = axis_assignments.get(timeline_num, 'stroke')
         self.app.logger.info(

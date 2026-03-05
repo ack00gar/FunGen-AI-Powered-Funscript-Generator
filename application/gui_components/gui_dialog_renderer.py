@@ -293,12 +293,15 @@ class DialogRendererMixin:
         # Keyboard Shortcuts Dialog (accessible via F1 or Help menu)
         self.keyboard_shortcuts_dialog.render()
 
-        # First-run setup wizard
+        # Legacy first-run popup (only shown if wizard was skipped, e.g. manual re-trigger from menu)
         self._render_first_run_setup_popup()
 
     def _render_first_run_setup_popup(self):
         app = self.app
         if not app.show_first_run_setup_popup:
+            return
+        # Skip if the new wizard is active — it handles model download itself
+        if hasattr(self, '_first_run_wizard') and self._first_run_wizard is not None:
             return
 
         imgui.open_popup("First-Time Setup")

@@ -1131,6 +1131,17 @@ class MainMenu:
             if clicked:
                 app.toggle_file_manager_window()
 
+            imgui.separator()
+
+            # Setup Wizard
+            if _menu_item_simple("Setup Wizard..."):
+                gui = getattr(app, "gui_instance", None)
+                if gui is not None:
+                    gui._show_setup_wizard = True
+                    app.logger.info("Setup Wizard triggered from menu")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Re-run the first-time setup wizard (display scale, mode, models)")
+
             imgui.end_menu()
 
     def _render_help_menu(self):
