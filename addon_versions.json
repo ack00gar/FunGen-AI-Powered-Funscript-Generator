@@ -1,9 +1,9 @@
 {
   "addons": {
     "device_control": {
-      "version": "5.5.5",
+      "version": "5.5.6",
       "display_name": "Device Control",
-      "changelog": "Revision-based change detection, toolbar upload hash sync, HSSP sync fix"
+      "changelog": "Fix HDSP speed clamping init, HDSP tooltip clarification"
     },
     "streamer": {
       "version": "3.5.1",

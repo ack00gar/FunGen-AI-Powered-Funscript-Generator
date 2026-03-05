@@ -75,14 +75,12 @@ def section_card(label, tier="primary", accent_color=None, open_by_default=True)
     # Add top padding via dummy
     imgui.dummy(0, padding * 0.5)
 
-    imgui.begin_group()
-
     # Render collapsible header within the card
     flags = imgui.TREE_NODE_DEFAULT_OPEN if open_by_default else 0
     is_open, _ = imgui.collapsing_header(label, flags=flags)
 
+    imgui.begin_group()
     yield is_open
-
     imgui.end_group()
 
     # Add bottom padding

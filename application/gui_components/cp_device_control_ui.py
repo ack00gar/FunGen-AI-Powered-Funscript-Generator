@@ -1203,7 +1203,7 @@ class DeviceControlMixin:
                 # Reset preparation state so the new mode starts fresh
                 if hasattr(self, 'device_video_integration') and self.device_video_integration:
                     self.device_video_integration.reset_handy_preparation()
-            _tooltip_if_hovered("HSSP: uploads script to device (recommended)\nHDSP: sends positions in real-time (experimental)")
+            _tooltip_if_hovered("HSSP: uploads script to device (recommended)\nHDSP: sends positions in real-time (experimental)\n\nNote: HDSP plays existing funscripts only.\nLive tracking is not supported in HDSP mode.")
 
             is_hdsp_mode = mode_options[new_mode_idx if changed_mode else mode_idx].startswith("HDSP")
 

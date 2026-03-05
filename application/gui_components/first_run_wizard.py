@@ -435,9 +435,9 @@ class FirstRunWizard:
         try:
             fd = self.app.gui.file_dialog if hasattr(self.app, "gui") else None
             if fd is not None:
-                fd.open(
+                fd.show(
                     title="Select Output Folder",
-                    default_path=self._output_folder,
+                    initial_path=self._output_folder,
                     is_folder_dialog=True,
                     callback=self._on_folder_selected,
                 )
