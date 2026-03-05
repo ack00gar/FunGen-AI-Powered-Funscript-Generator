@@ -241,6 +241,10 @@ class DeviceControlMixin:
 
     def _render_device_control_content(self):
         """Render the main device control interface with improved UX."""
+        # Guard: skip rendering while background disconnect thread is tearing down state
+        if getattr(self, '_device_disconnecting', False):
+            imgui.text("Disconnecting device...")
+            return
         # Version info (top of tab, consistent with other supporter modules)
         self._render_addon_version_label("device_control", "Device Control")
 
@@ -1491,6 +1495,8 @@ class DeviceControlMixin:
             import threading
             import asyncio
 
+            self._device_disconnecting = True
+
             def run_disconnect():
                 try:
                     # Try to use existing event loop first
@@ -1515,10 +1521,13 @@ class DeviceControlMixin:
                     self.app.logger.info("Device disconnected successfully")
                 except Exception as e:
                     self.app.logger.error(f"Error during disconnect: {e}")
+                finally:
+                    self._device_disconnecting = False
 
             thread = threading.Thread(target=run_disconnect, daemon=True)
             thread.start()
         except Exception as e:
+            self._device_disconnecting = False
             self.app.logger.error(f"Failed to disconnect device: {e}")
 
     def _scan_osr_devices(self):

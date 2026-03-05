@@ -965,8 +965,18 @@ class StandaloneSplashWindow:
                 ver_col = imgui.get_color_u32_rgba(0.7, 0.85, 1.0, 0.85 * fade_alpha)
                 draw_list_text.add_text(ver_x, ver_y, ver_col, version_text)
 
+                # Ko-fi support text (below version)
+                support_text = "Support the project and unlock features at ko-fi.com/k00gar"
+                sup_size = imgui.calc_text_size(support_text)
+                sup_x = (window_width - sup_size[0]) / 2
+                sup_y = ver_y + ver_size[1] + 10
+                # Fade in slightly later (after 0.8s)
+                sup_alpha = min(1.0, max(0.0, (current_time - 0.8) / 0.4)) * fade_alpha * 0.7
+                sup_col = imgui.get_color_u32_rgba(0.9, 0.75, 0.4, sup_alpha)
+                draw_list_text.add_text(sup_x, sup_y, sup_col, support_text)
+
                 # Add FunScript timeline visualization below the loading text
-                timeline_y = text_y + 55  # Position below the version text
+                timeline_y = text_y + 75  # Position below the support text
                 self._render_funscript_timeline(draw_list_text, window_width, timeline_y, current_time, fade_alpha)
 
         imgui.end()

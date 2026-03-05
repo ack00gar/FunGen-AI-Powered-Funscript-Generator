@@ -1,3 +1,4 @@
+import sys
 import time
 
 import imgui
@@ -335,7 +336,118 @@ class VideoDisplayUI:
         imgui.end()
         imgui.pop_style_var()  # STYLE_WINDOW_PADDING
 
-    
+    def _render_handy_sync_overlay(self):
+        """Render a small floating pill showing Handy sync state (top-right of video)."""
+        # Check if Handy is connected
+        if not hasattr(self.app, 'device_manager') or not self.app.device_manager:
+            return
+        dm = self.app.device_manager
+        if not dm.is_connected():
+            return
+
+        # Find a connected Handy backend
+        handy_backend = None
+        try:
+            from device_control.backends.handy_backend import HandyBackend
+            for backend in dm.connected_devices.values():
+                if isinstance(backend, HandyBackend):
+                    handy_backend = backend
+                    break
+        except (ImportError, AttributeError):
+            return
+        if handy_backend is None:
+            return
+
+        # Auto-fade with same timer as playback controls
+        now = time.monotonic()
+        elapsed = now - self._controls_last_activity_time
+        if elapsed > self._CONTROLS_HIDE_TIMEOUT:
+            return
+        fade_start = self._CONTROLS_HIDE_TIMEOUT - 1.0
+        alpha = 1.0 - (elapsed - fade_start) / 1.0 if elapsed > fade_start else 1.0
+
+        img_rect = self._actual_video_image_rect_on_screen
+        if img_rect['w'] <= 0 or img_rect['h'] <= 0:
+            return
+
+        # Build status text
+        streaming_state = dm._handy_streaming_state
+        point_count = 0
+        is_uploading = False
+        is_streaming = False
+        for state in streaming_state.values():
+            is_streaming = state.get('streaming_active', False)
+            is_uploading = state.get('prepared', False) is False and not state.get('setup_complete', False)
+
+        # Get point count from the funscript data if available
+        try:
+            cp = self.gui_instance
+            if hasattr(cp, 'device_video_integration') and cp.device_video_integration:
+                actions, _ = cp.device_video_integration.get_funscript_data()
+                if actions:
+                    point_count = len(actions)
+        except Exception:
+            pass
+
+        # Get last sync age
+        sync_age_str = ""
+        if handy_backend._last_sync_time > 0:
+            age_s = int(now - handy_backend._last_sync_time)
+            if age_s < 60:
+                sync_age_str = f"Synced {age_s}s ago"
+            else:
+                sync_age_str = f"Synced {age_s // 60}m ago"
+
+        # Determine status line
+        processor = self.app.processor
+        is_playing = processor and processor.is_processing and not getattr(processor, 'is_paused', True)
+
+        if is_uploading:
+            status = f"Handy | Uploading..."
+        elif not point_count:
+            status = f"Handy | No script"
+        elif not is_playing:
+            status = f"Handy | {point_count} pts | Paused"
+        elif sync_age_str:
+            status = f"Handy | {point_count} pts | {sync_age_str}"
+        else:
+            status = f"Handy | {point_count} pts | Ready"
+
+        # Position: top-right of video area
+        padding = 6.0
+        text_size = imgui.calc_text_size(status)
+        pill_w = text_size[0] + padding * 4
+        pill_h = text_size[1] + padding * 2
+        overlay_x = img_rect['max_x'] - pill_w - padding
+        overlay_y = img_rect['min_y'] + padding
+
+        flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE |
+                 imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SAVED_SETTINGS |
+                 imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_NO_FOCUS_ON_APPEARING |
+                 imgui.WINDOW_NO_NAV | imgui.WINDOW_NO_BACKGROUND | imgui.WINDOW_NO_INPUTS)
+
+        imgui.set_next_window_position(overlay_x, overlay_y)
+        imgui.set_next_window_size(pill_w, pill_h)
+        imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (padding * 2, padding))
+
+        imgui.begin("##HandySyncOverlay", flags=flags)
+
+        draw_list = imgui.get_window_draw_list()
+        win_pos = imgui.get_window_position()
+        win_size = imgui.get_window_size()
+        draw_list.add_rect_filled(
+            win_pos[0], win_pos[1],
+            win_pos[0] + win_size[0], win_pos[1] + win_size[1],
+            imgui.get_color_u32_rgba(0.1, 0.1, 0.1, 0.65 * alpha),
+            rounding=pill_h / 2
+        )
+
+        imgui.push_style_var(imgui.STYLE_ALPHA, alpha)
+        imgui.text_colored(status, 0.5, 0.9, 0.5, alpha)
+        imgui.pop_style_var()  # STYLE_ALPHA
+
+        imgui.end()
+        imgui.pop_style_var()  # STYLE_WINDOW_PADDING
 
     def _render_pose_skeleton(self, draw_list, pose_data: dict, is_dominant: bool):
         """Draws the skeleton, highlighting the dominant pose."""
@@ -816,6 +928,9 @@ class VideoDisplayUI:
                             # Video control overlays (zoom/pan buttons + playback controls)
                             if app_state.show_video_controls_overlay:
                                 self._render_video_controls_with_autohide(app_state)
+
+                            # Handy sync overlay (top-right pill when connected)
+                            self._render_handy_sync_overlay()
 
                 # --- Interactive Refinement Overlay and Click Handling ---
                 if self.app.app_state_ui.interactive_refinement_mode_enabled:
@@ -1500,9 +1615,9 @@ class VideoDisplayUI:
             elif mpv is None and mpv_missing:
                 imgui.text("mpv not installed")
                 imgui.text_disabled("Install mpv to enable fullscreen mode")
-                if self.app.platform == "Darwin" or __import__('sys').platform == "darwin":
+                if sys.platform == "darwin":
                     imgui.text_disabled("  brew install mpv")
-                elif __import__('sys').platform.startswith("linux"):
+                elif sys.platform.startswith("linux"):
                     imgui.text_disabled("  sudo apt install mpv")
                 else:
                     imgui.text_disabled("  winget install mpv")
