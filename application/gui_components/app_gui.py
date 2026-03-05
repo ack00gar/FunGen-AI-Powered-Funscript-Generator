@@ -24,6 +24,7 @@ from application.utils.timeline_modes import TimelineMode
 from application.gui_components.gui_preview_manager import PreviewManagerMixin
 from application.gui_components.gui_shortcut_handler import ShortcutHandlerMixin
 from application.gui_components.gui_dialog_renderer import DialogRendererMixin
+from application.gui_components.first_run_wizard import FirstRunWizard
 
 _STATUS_STRIP_HEIGHT = 22
 _HINT_ROTATION_INTERVAL_S = 10.0
@@ -122,6 +123,15 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.autotuner_window_ui = AutotunerWindow(app)
         self.keyboard_shortcuts_dialog = KeyboardShortcutsDialog(app)
         self.fullscreen_manager = NativeFullscreenManager(app, self)
+
+        # First-run wizard (full-window overlay, replaces old popup)
+        self._first_run_wizard = (
+            FirstRunWizard(app)
+            if app.app_settings.is_first_run and not app.is_cli_mode
+            else None
+        )
+        # Flag for menu-triggered wizard re-launch
+        self._show_setup_wizard = False
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
@@ -1324,6 +1334,25 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self._process_preview_results()
 
         imgui.new_frame()
+
+        # Launch wizard on demand (menu trigger)
+        if self._show_setup_wizard and self._first_run_wizard is None:
+            self._first_run_wizard = FirstRunWizard(self.app)
+            self._show_setup_wizard = False
+
+        # First-run wizard — full-window overlay, skips all other UI
+        if self._first_run_wizard is not None:
+            font_scale = self.app.app_settings.get("global_font_scale", 1.0)
+            imgui.get_io().font_global_scale = font_scale
+            wizard_done = self._first_run_wizard.render()
+            if wizard_done:
+                self._first_run_wizard = None
+            self.perf_frame_count += 1
+            self._time_render("ImGuiRender", imgui.render)
+            if self.impl:
+                draw_data = imgui.get_draw_data()
+                self.impl.render(draw_data)
+            return
 
         # IMPORTANT: Global shortcuts must be called AFTER new_frame() because
         # imgui.is_key_pressed() relies on KeysDownDuration which is updated by new_frame().

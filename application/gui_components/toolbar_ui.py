@@ -1205,6 +1205,14 @@ class ToolbarUI:
 
             if success:
                 self.app.logger.info("Toolbar: Script uploaded successfully!", extra={"status_message": True})
+                # Sync upload revision with device control UI so stale-script detection stays consistent
+                cp_ui = getattr(self.app.gui_instance, 'control_panel_ui', None) if hasattr(self.app, 'gui_instance') else None
+                if cp_ui is not None:
+                    if not hasattr(cp_ui, '_handy_uploaded_timelines'):
+                        cp_ui._handy_uploaded_timelines = {}
+                    upload_rev = getattr(self.app.funscript_processor, '_revision', 0)
+                    cp_ui._handy_uploaded_timelines[1] = upload_rev
+                    cp_ui._handy_last_upload_hash = upload_rev
             else:
                 self.app.logger.error("Toolbar: Failed to upload script", extra={"status_message": True})
 
