@@ -773,6 +773,7 @@ class AppFunscriptProcessor:
         live_actions_list.extend([a.copy() for a in new_actions])
 
         self._update_last_timestamp(target_funscript, axis_name, live_actions_list)
+        target_funscript._invalidate_cache(axis_name)
 
         # Undo manager's redo stack is auto-cleared by record_state_before_action.
         # For major events, explicitly clear full history.
@@ -967,6 +968,7 @@ class AppFunscriptProcessor:
         live_actions_list_ref.extend(unique_final_actions)
 
         self._update_last_timestamp(target_funscript, axis_name, unique_final_actions)
+        target_funscript._invalidate_cache(axis_name)
 
         self._finalize_action_and_update_ui(timeline_num, operation_description)
         self.logger.info(

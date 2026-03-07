@@ -341,6 +341,9 @@ class MultiAxisFunscript:
         action_timestamps = self._get_timestamps_for_axis(axis_name)
         idx = bisect.bisect_left(action_timestamps, timestamp_ms)
 
+        # Guard: clamp idx to actions list bounds (cache may be stale)
+        idx = min(idx, len(actions_target_list))
+
         action_inserted_or_updated = False
         if idx < len(actions_target_list) and actions_target_list[idx]["at"] == timestamp_ms:
             if actions_target_list[idx]["pos"] != clamped_pos:
@@ -349,7 +352,7 @@ class MultiAxisFunscript:
         else:
             can_insert = True
             if idx > 0 and len(actions_target_list) > 0:
-                prev_action = actions_target_list[idx - 1]
+                prev_action = actions_target_list[min(idx - 1, len(actions_target_list) - 1)]
                 if timestamp_ms - prev_action["at"] < min_interval_ms:
                     can_insert = False
 
