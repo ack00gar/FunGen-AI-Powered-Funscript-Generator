@@ -177,6 +177,9 @@ class VideoDisplayCoreMixin:
                     self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame_for_texture)
                     self._last_uploaded_frame_index = current_frame_index
                     self._texture_update_count += 1
+        else:
+            # No frame available — invalidate so next video's frame 0 uploads fresh
+            self._last_uploaded_frame_index = None
 
 
     def render(self):
@@ -235,6 +238,10 @@ class VideoDisplayCoreMixin:
                                     # Frame hasn't changed - skip expensive copy
                                     self._texture_skip_count += 1
                             # else: current_frame is just an int (frame number), no image to display
+                else:
+                    # No frame available (video closed/switching) — invalidate texture cache
+                    # so the next video's frame 0 is always uploaded fresh
+                    self._last_uploaded_frame_index = None
 
                 video_frame_available = current_frame_for_texture is not None or (not frame_changed and self._last_uploaded_frame_index is not None)
 

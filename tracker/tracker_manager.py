@@ -1001,6 +1001,14 @@ class TrackerManager:
         if hasattr(self._current_tracker, 'current_fps'):
             self.current_fps = getattr(self._current_tracker, 'current_fps', 0.0)
         
+        # Update show_roi toggle and tracked point from current tracker
+        if hasattr(self._current_tracker, 'show_roi'):
+            self.show_roi = getattr(self._current_tracker, 'show_roi', True)
+        if hasattr(self._current_tracker, 'user_roi_tracked_point_relative'):
+            self.user_roi_tracked_point_relative = getattr(self._current_tracker, 'user_roi_tracked_point_relative', None)
+        if hasattr(self._current_tracker, 'user_roi_fixed'):
+            self.user_roi_fixed = getattr(self._current_tracker, 'user_roi_fixed', None)
+
         # Update live tracker GUI attributes for motion mode overlay
         if hasattr(self._current_tracker, 'enable_inversion_detection'):
             self.enable_inversion_detection = getattr(self._current_tracker, 'enable_inversion_detection', False)
