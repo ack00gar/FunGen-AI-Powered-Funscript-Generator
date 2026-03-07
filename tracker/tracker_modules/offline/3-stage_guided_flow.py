@@ -79,6 +79,9 @@ OCCLUSION_FLOW_DAMPING = 0.85
 MALE_THRUST_RATIO = 1.5
 # Grinding detection: minimum dx/dy ratio
 GRIND_DX_DY_RATIO = 1.3
+# High-pass cutoff for drift removal (Hz). Strokes above this pass through.
+# 0.25 Hz preserves even very slow strokes while removing camera/ROI drift.
+HIGHPASS_CUTOFF_HZ = 0.25
 
 
 # ---------------------------------------------------------------------------
@@ -176,9 +179,11 @@ class ChapterProcessor:
         self.positions = []              # (frame_id, raw_position_0_100)
         self.secondary_positions = []    # (frame_id, secondary_0_100) for roll/grinding
 
-        # Flow accumulation for drift-corrected tracking
-        self.flow_history_dy = deque(maxlen=5)  # Short median window
+        # Flow integration — drift removed offline in get_actions()
+        self.flow_history_dy = deque(maxlen=5)  # Short median window for noise rejection
         self.flow_history_dx = deque(maxlen=5)
+        self.integrated_dy = 0.0         # Raw cumulative vertical displacement
+        self.integrated_dx = 0.0         # Raw cumulative horizontal displacement
 
     # ------------------------------------------------------------------
     # ROI extraction per strategy
@@ -308,6 +313,12 @@ class ChapterProcessor:
     # Signal extraction from optical flow
     # ------------------------------------------------------------------
 
+    def _integrate_flow(self, smooth_dy, smooth_dx=0.0):
+        """Accumulate flow displacement. Drift is removed later in get_actions()."""
+        self.integrated_dy += smooth_dy
+        self.integrated_dx += smooth_dx
+        return self.integrated_dy, self.integrated_dx
+
     def _compute_flow_in_roi(self, gray_frame, roi, img_h, img_w):
         """Compute DIS flow in the given ROI. Returns (median_dy, median_dx, magnitude)."""
         roi = _clamp_roi(roi, img_h, img_w)
@@ -346,87 +357,86 @@ class ChapterProcessor:
         - 0% visible = fully inserted = position 0
 
         Flow is used to:
-        1. Validate the direction of the geometric signal
-        2. Fill in during occlusions
-        3. Detect male thrusting (VR POV)
+        1. Fill in during occlusions (integrated displacement)
+        2. Detect male thrusting (VR POV)
+        3. Detect grinding (horizontal dominance)
         """
         lp = frame_obj.locked_penis_state
 
-        # Geometric signal from Stage 2 (already computed)
-        geo_pos = lp.visible_part if lp.active else 50.0
-        geo_pos = max(0.0, min(100.0, geo_pos))
+        # Geometric signal from Stage 2 (already computed, position-based)
+        geo_pos = lp.visible_part if lp.active else None
+        if geo_pos is not None:
+            geo_pos = max(0.0, min(100.0, geo_pos))
 
         # Flow in the contact zone
         dy, dx, mag = self._compute_flow_in_roi(gray, roi, img_h, img_w)
         self.flow_history_dy.append(dy)
         self.flow_history_dx.append(dx)
 
+        smooth_dy = float(np.median(self.flow_history_dy)) if self.flow_history_dy else 0.0
+        smooth_dx = float(np.median(self.flow_history_dx)) if self.flow_history_dx else 0.0
+        pos_dy, pos_dx = self._integrate_flow(smooth_dy, smooth_dx)
+
         # Male thrust detection (VR POV): check belly region
         if self.is_vr and self.belly_roi:
             belly_dy, _, belly_mag = self._compute_flow_in_roi(gray, self.belly_roi, img_h, img_w)
             if belly_mag > 0.5 and mag < 0.3:
                 # Body is moving but contact zone is still → male thrusting
-                # Use belly flow as the signal (inverted: belly moving down = thrusting in)
-                return max(0.0, min(100.0, 50.0 - belly_dy * 15.0)), dx
+                pos_dy, _ = self._integrate_flow(belly_dy)
+                return 50.0 - pos_dy, dx
 
         # Grinding detection
-        smooth_dy = float(np.median(self.flow_history_dy)) if self.flow_history_dy else 0.0
-        smooth_dx = float(np.median(self.flow_history_dx)) if self.flow_history_dx else 0.0
         abs_dy = abs(smooth_dy)
         abs_dx = abs(smooth_dx)
 
         if abs_dx > 0.5 and abs_dy > 0.01 and abs_dx / max(abs_dy, 0.01) > GRIND_DX_DY_RATIO:
-            # Grinding: horizontal motion dominates — use magnitude-based signal
-            # Smaller amplitude, faster oscillation
-            grind_signal = 50.0 + smooth_dx * 8.0
-            return max(0.0, min(100.0, grind_signal)), dx
+            return 50.0 - pos_dx, dx
 
-        return geo_pos, dx
+        # Use geometric position if available, else drift-corrected flow
+        if geo_pos is not None:
+            return geo_pos, dx
+        else:
+            return 50.0 - pos_dy, dx
 
     def _extract_signal_oral(self, frame_obj, gray, roi, penis_roi, img_h, img_w):
         """
         Oral signal: face/head vertical movement relative to penis.
 
-        The head bobs up and down. Flow captures this directly.
-        Also detect hand stroking (hand moving vertically near penis).
+        Integrates flow with high-pass drift removal so the signal tracks
+        HEAD POSITION oscillation. Downward head displacement = deeper = lower value.
         """
         dy, dx, mag = self._compute_flow_in_roi(gray, roi, img_h, img_w)
         self.flow_history_dy.append(dy)
         self.flow_history_dx.append(dx)
 
         smooth_dy = float(np.median(self.flow_history_dy)) if self.flow_history_dy else 0.0
+        pos_dy, _ = self._integrate_flow(smooth_dy)
 
-        # For BJ: downward motion of head (positive dy) = more insertion = lower position
-        # Scale: typical head bob is 1-4 pixels/frame at 640px
-        pos = 50.0 - smooth_dy * 12.0
-        return max(0.0, min(100.0, pos)), dx
+        return 50.0 - pos_dy, dx
 
     def _extract_signal_manual(self, frame_obj, gray, roi, penis_roi, img_h, img_w):
         """
-        Manual (HJ) signal: hand vertical movement.
+        Manual (HJ) signal: hand vertical movement with drift removal.
         """
         dy, dx, mag = self._compute_flow_in_roi(gray, roi, img_h, img_w)
         self.flow_history_dy.append(dy)
         self.flow_history_dx.append(dx)
 
         smooth_dy = float(np.median(self.flow_history_dy)) if self.flow_history_dy else 0.0
+        pos_dy, _ = self._integrate_flow(smooth_dy)
 
-        # Hand moving down = more insertion = lower position
-        pos = 50.0 - smooth_dy * 12.0
-        return max(0.0, min(100.0, pos)), dx
+        return 50.0 - pos_dy, dx
 
     def _extract_signal_fallback(self, frame_obj, gray, roi, penis_roi, img_h, img_w):
         """Fallback: use Stage 2 geometric signal if available, else flow."""
-        # Try Stage 2 funscript_distance
         if hasattr(frame_obj, 'funscript_distance') and frame_obj.funscript_distance is not None:
-            geo_pos = frame_obj.funscript_distance
-            return float(geo_pos), 0.0
+            return float(frame_obj.funscript_distance), 0.0
 
-        # Pure flow fallback
         dy, dx, mag = self._compute_flow_in_roi(gray, roi, img_h, img_w)
         self.flow_history_dy.append(dy)
-        pos = 50.0 - float(np.median(self.flow_history_dy)) * 10.0 if self.flow_history_dy else 50.0
-        return max(0.0, min(100.0, pos)), dx
+        smooth_dy = float(np.median(self.flow_history_dy)) if self.flow_history_dy else 0.0
+        pos_dy, _ = self._integrate_flow(smooth_dy)
+        return 50.0 - pos_dy, dx
 
     def extract_signal(self, frame_obj, gray, roi, penis_roi, img_h, img_w):
         """Extract primary and secondary signals based on strategy."""
@@ -546,29 +556,54 @@ class ChapterProcessor:
         frame_ids = np.array([p[0] for p in self.positions])
         raw_positions = np.array([p[1] for p in self.positions])
 
-        # Light SG smoothing to remove single-frame noise (preserves peaks)
+        # --- Step 1: Remove drift with zero-phase high-pass filter ---
+        # This is the key advantage of offline processing: we can look at
+        # the entire signal and cleanly separate oscillation from drift.
+        if len(raw_positions) >= 30:
+            try:
+                from scipy.signal import butter, sosfiltfilt
+                nyq = self.fps / 2.0
+                cutoff = min(HIGHPASS_CUTOFF_HZ, nyq * 0.8)  # safety margin
+                sos = butter(2, cutoff / nyq, btype='high', output='sos')
+                detrended = sosfiltfilt(sos, raw_positions)
+                # Re-center around 50
+                raw_positions = detrended + 50.0
+            except Exception:
+                # Fallback: simple detrend (subtract linear fit)
+                raw_positions = raw_positions - np.linspace(
+                    raw_positions[0], raw_positions[-1], len(raw_positions)
+                ) + 50.0
+
+        # --- Step 2: Light SG smoothing to remove single-frame noise ---
         if len(raw_positions) >= 7:
-            # Window must be odd and <= data length
             win = min(7, len(raw_positions))
             if win % 2 == 0:
                 win -= 1
             if win >= 5:
                 smoothed = savgol_filter(raw_positions, win, 2)
-                smoothed = np.clip(smoothed, 0, 100)
             else:
-                smoothed = raw_positions
+                smoothed = raw_positions.copy()
         else:
-            smoothed = raw_positions
+            smoothed = raw_positions.copy()
 
+        # --- Step 3: Sliding-window amplitude normalization ---
+        # Global normalization makes loud sections dominate and quiet ones
+        # shallow. Instead, normalize locally so each ~3s window fills the range.
         if normalize and len(smoothed) > 10:
-            # Per-chapter normalization using 5th/95th percentiles
-            p5 = np.percentile(smoothed, 5)
-            p95 = np.percentile(smoothed, 95)
-            data_range = p95 - p5
-            if data_range > 5:  # Only normalize if there's meaningful range
-                # Map [p5, p95] → [5, 95] to preserve some headroom
-                normalized = (smoothed - p5) / data_range * 90.0 + 5.0
-                smoothed = np.clip(normalized, 0, 100)
+            from scipy.ndimage import maximum_filter1d, minimum_filter1d
+            win_frames = max(15, int(self.fps * 3))  # 3-second window
+            local_max = maximum_filter1d(smoothed, win_frames, mode='nearest')
+            local_min = minimum_filter1d(smoothed, win_frames, mode='nearest')
+            local_range = local_max - local_min
+
+            # Normalize each sample by its local range
+            valid = local_range > 0.3
+            result = np.full_like(smoothed, 50.0)
+            result[valid] = (smoothed[valid] - local_min[valid]) / local_range[valid] * 90.0 + 5.0
+            smoothed = result
+
+        # Final clamp to valid funscript range
+        smoothed = np.clip(smoothed, 0, 100)
 
         # Convert to funscript actions
         primary_actions = []
@@ -862,11 +897,18 @@ class GuidedFlowTracker(BaseOfflineTracker):
                     segments.append(sd)
 
             # Reconstruct FrameObject map
-            raw_frames = data.get('frame_objects', {})
+            # Overlay msgpack uses 'frames' key; legacy/direct uses 'frame_objects'
+            raw_frames = data.get('frame_objects') or data.get('frames', {})
             frame_objects_map = {}
             yolo_input_size = data.get('yolo_input_size', 640)
+            # Detect overlay format: list with 'yolo_boxes' key instead of 'detections'
+            is_overlay_format = (isinstance(raw_frames, list) and raw_frames
+                                 and isinstance(raw_frames[0], dict)
+                                 and 'yolo_boxes' in raw_frames[0])
 
-            if isinstance(raw_frames, dict):
+            if is_overlay_format:
+                frame_objects_map = self._reconstruct_from_overlay(raw_frames, yolo_input_size)
+            elif isinstance(raw_frames, dict):
                 for fid_str, fo_data in raw_frames.items():
                     fid = int(fid_str) if isinstance(fid_str, str) else fid_str
                     if isinstance(fo_data, FrameObject):
@@ -889,6 +931,55 @@ class GuidedFlowTracker(BaseOfflineTracker):
         except Exception as e:
             self.logger.error(f"Failed to load Stage 2 data: {e}", exc_info=True)
             return None
+
+    @staticmethod
+    def _reconstruct_from_overlay(frames_list, yolo_input_size):
+        """Reconstruct FrameObjects from overlay msgpack format.
+
+        The overlay format stores boxes under 'yolo_boxes' (BoxRecord.to_dict())
+        and locked_penis data as a separate dict, while FrameObject's
+        parse_raw_frame_data expects 'detections' with 'class' key.
+        """
+        from detection.cd.data_structures.box_records import BoxRecord, PoseRecord
+        result = {}
+        for fd in frames_list:
+            fid = fd.get('frame_id', fd.get('frame_pos', 0))
+            # Create FrameObject without raw data — we'll populate manually
+            fo = FrameObject(fid, yolo_input_size, None)
+            fo.assigned_position = fd.get('assigned_position', 'Not Relevant')
+            fo.funscript_distance = fd.get('funscript_distance', 50)
+            fo.is_occluded = fd.get('is_occluded', False)
+            fo.motion_mode = fd.get('motion_mode', None)
+            fo.dominant_pose_id = fd.get('dominant_pose_id', None)
+
+            # Reconstruct boxes from overlay yolo_boxes dicts
+            for bd in fd.get('yolo_boxes', []):
+                box = BoxRecord(
+                    fid,
+                    bd.get('bbox'),
+                    bd.get('confidence', 0.0),
+                    bd.get('class_id', -1),
+                    bd.get('class_name', ''),
+                    yolo_input_size=yolo_input_size
+                )
+                box.is_excluded = bd.get('is_excluded', False)
+                if bd.get('track_id') is not None:
+                    box.track_id = bd['track_id']
+                fo.boxes.append(box)
+
+            # Reconstruct poses
+            for pd in fd.get('poses', []):
+                pr = PoseRecord(fid, pd.get('bbox'), pd.get('keypoints'))
+                fo.poses.append(pr)
+
+            # Reconstruct locked_penis_state from overlay dict
+            lp_data = fd.get('locked_penis')
+            if lp_data and isinstance(lp_data, dict):
+                fo.locked_penis_state.active = True
+                fo.locked_penis_state.box = tuple(lp_data['bbox']) if 'bbox' in lp_data else None
+
+            result[fid] = fo
+        return result
 
     def _detect_vr(self, cap):
         """Simple VR detection from aspect ratio."""
