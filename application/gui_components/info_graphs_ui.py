@@ -157,6 +157,23 @@ class InfoGraphsUI:
         self._quality_last_funscript_id = None  # detect funscript object swap
         self._quality_last_compute_time = {}   # {timeline_num: float} monotonic time
 
+        # Cached action statistics (avoid O(N) recomputation every frame)
+        self._stats_cache = {}               # {timeline_num: stats dict}
+        self._stats_last_action_counts = {}  # {timeline_num: int} for change detection
+        self._stats_last_funscript_id = None # detect funscript object swap
+
+        # Per-frame cache for system_monitor.get_stats() (avoid multiple calls per frame)
+        self._cached_system_stats = None
+        self._cached_system_stats_frame = -1
+        self._render_frame_counter = 0
+
+    def _get_system_stats(self):
+        """Get system monitor stats, cached per frame to avoid redundant calls."""
+        if self._cached_system_stats is None or self._cached_system_stats_frame != self._render_frame_counter:
+            self._cached_system_stats = self.system_monitor.get_stats()
+            self._cached_system_stats_frame = self._render_frame_counter
+        return self._cached_system_stats
+
     def _apply_video_render(self, new_pitch):
         """Execute video rendering with the new pitch value after delay"""
         processor = self.app.processor
@@ -201,6 +218,7 @@ class InfoGraphsUI:
         self.system_monitor.stop()
 
     def render(self):
+        self._render_frame_counter += 1
         app_state = self.app.app_state_ui
         window_title = "Info & Graphs##InfoGraphsFloating"
 
@@ -337,10 +355,15 @@ class InfoGraphsUI:
                         if ui_open:
                             self._render_content_ui_performance()
 
+            # System Report section (collapsed by default)
+            with _section_card("System Report##SystemReportSection", tier="primary",
+                               open_by_default=False) as report_open:
+                if report_open:
+                    self._render_system_report_section()
+
         # Always check memory alerts
         if hasattr(self, "system_monitor"):
-            stats = self.system_monitor.get_stats()
-            self._check_memory_alerts(stats)
+            self._check_memory_alerts(self._get_system_stats())
 
         imgui.end_child()
 
@@ -652,8 +675,8 @@ class InfoGraphsUI:
 
             # VR Unwarp Method dropdown
             imgui.spacing()
-            unwarp_method_disp = ["Auto (Metal/OpenGL)", "GPU Metal", "GPU OpenGL", "CPU (v360)"]
-            unwarp_method_val = ["auto", "metal", "opengl", "v360"]
+            unwarp_method_disp = ["Auto (Metal/OpenGL)", "GPU Metal", "GPU OpenGL", "CPU (v360)", "None (Crop Only)"]
+            unwarp_method_val = ["auto", "metal", "opengl", "v360", "none"]
 
             # Get current unwarp method
             current_unwarp_method = getattr(processor, 'vr_unwarp_method_override', 'auto')
@@ -682,30 +705,66 @@ class InfoGraphsUI:
                     "Auto: Automatically choose Metal or OpenGL\n"
                     "GPU Metal: Use Metal shader (macOS)\n"
                     "GPU OpenGL: Use OpenGL shader (cross-platform)\n"
-                    "CPU (v360): Use FFmpeg v360 filter (slower)"
+                    "CPU (v360): Use FFmpeg v360 filter (slower)\n"
+                    "None (Crop Only): Skip unwarping, just crop one panel.\n"
+                    "  Best performance for User ROI / OF-only trackers.\n"
+                    "  YOLO detection may not work on warped image."
                 )
 
-            # Track slider dragging state
-            is_slider_hovered = imgui.is_item_hovered()
-            is_mouse_down = imgui.is_mouse_down(0)  # Left mouse button
-            is_mouse_released = imgui.is_mouse_released(0)  # Left mouse button released
+            # Panel selector — shown when unwarp is "None (Crop Only)" and format is stereo
+            vr_fmt = getattr(processor, 'vr_input_format', '')
+            is_sbs = '_sbs' in vr_fmt or '_lr' in vr_fmt or '_rl' in vr_fmt
+            is_tb = '_tb' in vr_fmt
+            if current_unwarp_method == 'none' and (is_sbs or is_tb):
+                if is_sbs:
+                    panel_disp = ["Left", "Right"]
+                else:
+                    panel_disp = ["Top", "Bottom"]
+                panel_val = ["first", "second"]
+                current_panel = self.app.app_settings.get("vr_crop_panel", "first")
+                try:
+                    current_panel_idx = panel_val.index(current_panel)
+                except ValueError:
+                    current_panel_idx = 0
 
-            if is_slider_hovered and is_mouse_down:
-                self.pitch_slider_is_dragging = True
-                self.pitch_slider_was_dragging = True
-            elif (is_mouse_released or not is_mouse_down) and self.pitch_slider_was_dragging:
-                self._handle_mouse_release()
+                changed_panel, new_panel_idx = imgui.combo(
+                    "Crop Panel##vrCropPanel", current_panel_idx, panel_disp
+                )
+                if changed_panel:
+                    self.app.app_settings.set("vr_crop_panel", panel_val[new_panel_idx])
+                    processor.vr_crop_panel = panel_val[new_panel_idx]
+                    threading.Thread(
+                        target=processor.reapply_video_settings,
+                        daemon=True,
+                        name='CropPanelReapply'
+                    ).start()
+                if imgui.is_item_hovered():
+                    label = "left/right" if is_sbs else "top/bottom"
+                    imgui.set_tooltip(f"Select which {label} panel to crop from the stereo VR frame.")
 
-            changed_pitch, new_pitch = imgui.slider_int(
-                "View Pitch##vrPitch",
-                processor.vr_pitch,
-                self.PITCH_SLIDER_MIN,
-                self.PITCH_SLIDER_MAX,
-            )
-            if changed_pitch:
-                processor.vr_pitch = new_pitch
-                self.last_pitch_value = new_pitch
-                self._schedule_video_render(new_pitch)
+            # View Pitch slider — hidden when unwarp is "None (Crop Only)" since pitch has no effect
+            if current_unwarp_method != 'none':
+                # Track slider dragging state
+                is_slider_hovered = imgui.is_item_hovered()
+                is_mouse_down = imgui.is_mouse_down(0)  # Left mouse button
+                is_mouse_released = imgui.is_mouse_released(0)  # Left mouse button released
+
+                if is_slider_hovered and is_mouse_down:
+                    self.pitch_slider_is_dragging = True
+                    self.pitch_slider_was_dragging = True
+                elif (is_mouse_released or not is_mouse_down) and self.pitch_slider_was_dragging:
+                    self._handle_mouse_release()
+
+                changed_pitch, new_pitch = imgui.slider_int(
+                    "View Pitch##vrPitch",
+                    processor.vr_pitch,
+                    self.PITCH_SLIDER_MIN,
+                    self.PITCH_SLIDER_MAX,
+                )
+                if changed_pitch:
+                    processor.vr_pitch = new_pitch
+                    self.last_pitch_value = new_pitch
+                    self._schedule_video_render(new_pitch)
 
         # Navigation Buffer Settings (collapsed by default)
         imgui.separator()
@@ -969,7 +1028,7 @@ class InfoGraphsUI:
             imgui.tree_pop()
 
     def _render_segment_statistics(self):
-        """Render OFS-style segment statistics for the current playhead position."""
+        """Render segment statistics for the current playhead position."""
         processor = self.app.processor
         fs_proc = self.app.funscript_processor
         if not processor or not fs_proc or not processor.video_info:
@@ -994,8 +1053,8 @@ class InfoGraphsUI:
             imgui.text_colored("Not enough actions", 0.5, 0.5, 0.5, 1.0)
             return
 
-        # Find bounding actions using bisect
-        timestamps = [a['at'] for a in actions]
+        # Find bounding actions using bisect on cached timestamps
+        timestamps = fs_obj._get_timestamps_for_axis(axis_name)
         idx = bisect_left(timestamps, current_time_ms)
 
         # Clamp to valid segment range
@@ -1008,7 +1067,7 @@ class InfoGraphsUI:
         front = actions[idx]
 
         seg_duration_ms = front['at'] - behind['at']
-        interval_ms = current_time_ms - behind['at']
+        interval_ms = max(0, current_time_ms - behind['at'])
         pos_delta = front['pos'] - behind['pos']
         abs_delta = abs(pos_delta)
 
@@ -1030,11 +1089,28 @@ class InfoGraphsUI:
         self.funscript_info_perf.start_timing()
         fs_proc = self.app.funscript_processor
 
-        # Get stats directly from the funscript object (always current)
+        # Get stats with caching — avoid O(N) recomputation every frame
         target_funscript, axis_name = fs_proc._get_target_funscript_object_and_axis(timeline_num)
         if target_funscript and axis_name:
-            # Get live stats directly from the funscript object
-            stats = target_funscript.get_actions_statistics(axis=axis_name)
+            # Detect funscript object swap — clear all caches
+            obj_id = id(target_funscript)
+            if obj_id != self._stats_last_funscript_id:
+                self._stats_last_funscript_id = obj_id
+                self._stats_cache.clear()
+                self._stats_last_action_counts.clear()
+
+            actions = target_funscript.get_axis_actions(axis_name)
+            count = len(actions) if actions else 0
+            last_count = self._stats_last_action_counts.get(timeline_num, -1)
+
+            if count != last_count or timeline_num not in self._stats_cache:
+                # Recompute — action count changed
+                stats = target_funscript.get_actions_statistics(axis=axis_name)
+                self._stats_cache[timeline_num] = stats
+                self._stats_last_action_counts[timeline_num] = count
+            else:
+                stats = self._stats_cache[timeline_num]
+
             # Get source info from cached stats (for display purposes only)
             stats_attr = f'funscript_stats_t{timeline_num}'
             cached_stats = getattr(fs_proc, stats_attr, {})
@@ -1345,9 +1421,7 @@ class InfoGraphsUI:
     def _render_content_performance(self):
         self.perf_monitor.start_timing()
 
-        stats = self.system_monitor.get_stats()
-
-        self._check_memory_alerts(stats)
+        stats = self._get_system_stats()
 
         available_width = imgui.get_content_region_available_width()
 
@@ -1392,24 +1466,26 @@ class InfoGraphsUI:
             total_width = (bar_width + spacing) * len(per_core_usage) - spacing
             start_x = imgui.get_cursor_screen_pos()[0]
 
+            # Pre-compute outside loop
+            dl = imgui.get_window_draw_list()
+            bg_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.8)
+            text_color = imgui.get_color_u32_rgba(0.8, 0.8, 0.8, 1.0)
+            color_green = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 1.0)
+            color_yellow = imgui.get_color_u32_rgba(1.0, 0.8, 0.2, 1.0)
+            color_red = imgui.get_color_u32_rgba(1.0, 0.2, 0.2, 1.0)
+
             for i, core_load in enumerate(per_core_usage):
                 bar_x = start_x + i * (bar_width + spacing)
                 bar_y = imgui.get_cursor_screen_pos()[1]
 
-                if core_load < 50:
-                    color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 1.0)
-                elif core_load < 80:
-                    color = imgui.get_color_u32_rgba(1.0, 0.8, 0.2, 1.0)
-                else:
-                    color = imgui.get_color_u32_rgba(1.0, 0.2, 0.2, 1.0)
+                color = color_green if core_load < 50 else (color_yellow if core_load < 80 else color_red)
 
-                bg_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.8)
-                imgui.get_window_draw_list().add_rect_filled(
+                dl.add_rect_filled(
                     bar_x, bar_y, bar_x + bar_width, bar_y + bar_height, bg_color
                 )
 
                 usage_height = (core_load / 100.0) * bar_height
-                imgui.get_window_draw_list().add_rect_filled(
+                dl.add_rect_filled(
                     bar_x,
                     bar_y + bar_height - usage_height,
                     bar_x + bar_width,
@@ -1421,12 +1497,7 @@ class InfoGraphsUI:
                 text_size = imgui.calc_text_size(text)
                 text_x = bar_x + (bar_width - text_size[0]) / 2
                 text_y = bar_y + bar_height + 2
-                imgui.get_window_draw_list().add_text(
-                    text_x,
-                    text_y,
-                    imgui.get_color_u32_rgba(0.8, 0.8, 0.8, 1.0),
-                    text,
-                )
+                dl.add_text(text_x, text_y, text_color, text)
 
             imgui.dummy(total_width, bar_height + 20)
 
@@ -1620,7 +1691,7 @@ class InfoGraphsUI:
 
     def _render_disk_io_section(self):
         """Render the independent Disk I/O section."""
-        stats = self.system_monitor.get_stats()
+        stats = self._get_system_stats()
         
         available_width = imgui.get_content_region_available_width()
 
@@ -1730,6 +1801,49 @@ class InfoGraphsUI:
         )
 
         imgui.spacing()
+
+    def _render_system_report_section(self):
+        """Render system report with copy-to-clipboard button."""
+        # Lazy-generate report (cached until manually refreshed)
+        if not hasattr(self, '_system_report_text'):
+            self._system_report_text = None
+
+        if imgui.button("Generate Report##sysReport"):
+            from application.utils.system_report import generate_report
+            self._system_report_text = generate_report()
+
+        if self._system_report_text:
+            imgui.same_line()
+            if imgui.button("Copy to Clipboard##sysReportCopy"):
+                try:
+                    import pyperclip
+                    pyperclip.copy(self._system_report_text)
+                    self.app.logger.info("System report copied to clipboard.",
+                                         extra={'status_message': True, 'duration': 3.0})
+                except ImportError:
+                    # Fallback for macOS
+                    try:
+                        process = __import__('subprocess').Popen(
+                            ['pbcopy'], stdin=__import__('subprocess').PIPE, text=True)
+                        process.communicate(self._system_report_text)
+                        self.app.logger.info("System report copied to clipboard.",
+                                             extra={'status_message': True, 'duration': 3.0})
+                    except Exception as e:
+                        self.app.logger.warning(f"Could not copy to clipboard: {e}",
+                                                extra={'status_message': True})
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            # Scrollable text region
+            avail_h = max(200, imgui.get_content_region_available()[1] - 10)
+            imgui.begin_child("##sysReportScroll", width=-1, height=avail_h, border=True)
+            imgui.text_unformatted(self._system_report_text)
+            imgui.end_child()
+        else:
+            imgui.spacing()
+            imgui.text_disabled("Click 'Generate Report' to collect system information.")
 
     def _check_memory_alerts(self, stats):
         """Check memory usage and trigger alerts if thresholds are exceeded."""
@@ -2066,14 +2180,10 @@ class InfoGraphsUI:
             for component, _ in current_stats:
                 all_component_names.add(component)
 
-            if current_frame_count > 0:
-                for component, total_time in current_accumulated_times.items():
-                    all_component_names.add(component)
-                    avg_dict[component] = total_time / current_frame_count
-            else:
-                for component in current_accumulated_times.keys():
-                    all_component_names.add(component)
-                    avg_dict[component] = 0.0
+            inv_frame_count = 1.0 / current_frame_count if current_frame_count > 0 else 0.0
+            for component, total_time in current_accumulated_times.items():
+                all_component_names.add(component)
+                avg_dict[component] = total_time * inv_frame_count
 
             complete_stats = []
             for component in all_component_names:

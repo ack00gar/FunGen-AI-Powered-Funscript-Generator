@@ -5,8 +5,6 @@ This module provides functionality to automatically discover and load
 funscript transformation plugins, both built-in and user-defined.
 """
 
-import os
-import sys
 import importlib
 import importlib.util
 import inspect
@@ -72,7 +70,7 @@ class PluginLoader:
         
         # Log summary of what we're loading
         if plugin_files:
-            self.logger.info(f"Loading {len(plugin_files)} plugins from: {directory}")
+            self.logger.debug(f"Loading {len(plugin_files)} plugins from: {directory}")
         
         # Load each plugin
         for plugin_file in plugin_files:

@@ -13,6 +13,8 @@ import time
 import math
 import threading
 import multiprocessing
+import logging
+import warnings
 import gc
 import queue
 
@@ -204,76 +206,37 @@ class SplashScreen:
         # Spacing
         imgui.dummy(1, 30)
 
-        # Title: "FUNGEN" with gradient-like effect (cyan to purple)
+        # Title: "FUNGEN" with glow effect
         title_text = "FUNGEN"
-        title_font_size = imgui.get_font_size() * 3.0
+        title_scale = 3.0
 
-        # Calculate text width for centering
-        # Approximate width (ImGui doesn't support exact multi-colored text width calc easily)
-        char_width = title_font_size * 0.6  # Approximate
-        title_width = len(title_text) * char_width
+        imgui.set_window_font_scale(title_scale)
+        title_width = imgui.calc_text_size(title_text)[0]
         title_x = (window_width - title_width) / 2
 
         imgui.set_cursor_pos_x(title_x)
 
-        # Draw enhanced title with dramatic glow effect (multiple passes)
+        # Glow layers behind the title
         draw_list = imgui.get_window_draw_list()
         cursor_pos = imgui.get_cursor_screen_pos()
 
-        # Enhanced glow layers with more depth and color variation
-        for i in range(5, 0, -1):  # More glow layers
-            glow_offset = i * 3  # Larger offset for more dramatic effect
-            # Create dynamic glow color that cycles through laser colors
-            hue_shift = (current_time * 0.3) % 1.0  # Cycle every ~3.3 seconds
-            if hue_shift < 0.33:
-                r, g, b = 0.0, 0.83, 1.0  # Cyan (blue side)
-            elif hue_shift < 0.66:
-                r, g, b = 0.5, 0.0, 1.0   # Purple
-            else:
-                r, g, b = 1.0, 0.0, 0.5   # Magenta
-            glow_alpha = (0.4 * title_glow * alpha) / (i * 1.0)  # Brighter glow
-            glow_color = imgui.get_color_u32_rgba(r * 0.7, g * 0.7, b * 0.7, glow_alpha)
-            draw_list.add_text(
-                cursor_pos[0] - glow_offset, cursor_pos[1],
-                glow_color, title_text
-            )
-            draw_list.add_text(
-                cursor_pos[0] + glow_offset, cursor_pos[1],
-                glow_color, title_text
-            )
-            draw_list.add_text(
-                cursor_pos[0], cursor_pos[1] - glow_offset,
-                glow_color, title_text
-            )
-            draw_list.add_text(
-                cursor_pos[0], cursor_pos[1] + glow_offset,
-                glow_color, title_text
-            )
+        for i in range(3, 0, -1):
+            glow_offset = i * 2
+            glow_alpha = (0.3 * title_glow * alpha) / i
+            glow_color = imgui.get_color_u32_rgba(0.0, 0.6, 0.8, glow_alpha)
+            for dx, dy in [(-glow_offset, 0), (glow_offset, 0), (0, -glow_offset), (0, glow_offset)]:
+                draw_list.add_text(imgui.get_font(), imgui.get_font_size(),
+                                   cursor_pos[0] + dx, cursor_pos[1] + dy,
+                                   glow_color, title_text)
 
-        # Holographic scanline effect across the title
-        if int(current_time * 8) % 4 == 0:  # Every 4th frame
-            scanline_alpha = 0.2 * title_glow * alpha
-            scanline_color = imgui.get_color_u32_rgba(0.0, 0.9, 1.0, scanline_alpha)
-            title_width = imgui.calc_text_size(title_text)[0]
-            draw_list.add_line(cursor_pos[0], cursor_pos[1] + 12, cursor_pos[0] + title_width, cursor_pos[1] + 12, scanline_color, 1.0)
-
-        # Main title text with enhanced cyan color
-        enhanced_title_glow = 0.8 + 0.2 * math.sin(current_time * 4.0)  # Pulsing effect
-        title_color = imgui.get_color_u32_rgba(0.0, 0.95, 1.0, enhanced_title_glow * alpha)
-
-        # Scale up font for title (use text with custom size)
+        # Main title text
+        enhanced_title_glow = 0.8 + 0.2 * math.sin(current_time * 4.0)
         imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 0.95, 1.0, enhanced_title_glow * alpha)
-
         imgui.set_cursor_pos_x(title_x)
+        imgui.text(title_text)
+        imgui.pop_style_color()
 
-        # Draw large title text
-        for char in title_text:
-            imgui.text(char)
-            imgui.same_line()
-
-        imgui.pop_style_color(1)
-
-        imgui.new_line()
+        imgui.set_window_font_scale(1.0)
 
         # Spacing
         imgui.dummy(1, 20)
@@ -365,15 +328,14 @@ class SplashScreen:
 
         # Status message
         status_text = self.status_messages[self.current_status_index]
+
+        imgui.set_window_font_scale(1.3)
         status_width = imgui.calc_text_size(status_text)[0]
         status_x = (window_width - status_width) / 2
 
         imgui.set_cursor_pos_x(status_x)
 
-        # Enhanced pulsing status text with dynamic color and glow
-        status_alpha = 0.7 + 0.3 * math.sin(current_time * 3.5)  # Faster pulse
-        
-        # Dynamic color based on current status
+        # Status text color
         status_colors = [
             (0.7, 0.8, 0.9),    # Initializing
             (0.6, 0.9, 0.7),    # Loading AI models
@@ -382,37 +344,12 @@ class SplashScreen:
         ]
         color_idx = min(self.current_status_index, len(status_colors) - 1)
         color_r, color_g, color_b = status_colors[color_idx]
-        
-        # Draw glow effect for status text
-        status_cursor_pos = imgui.get_cursor_screen_pos()
-        draw_list = imgui.get_window_draw_list()
-        
-        # Glow layers
-        for i in range(3, 0, -1):
-            glow_offset = i * 2
-            glow_alpha = (0.2 * status_alpha * alpha) / i
-            glow_color = imgui.get_color_u32_rgba(color_r * 0.5, color_g * 0.5, color_b * 0.5, glow_alpha)
-            draw_list.add_text(
-                status_cursor_pos[0] - glow_offset, status_cursor_pos[1],
-                glow_color, status_text
-            )
-            draw_list.add_text(
-                status_cursor_pos[0] + glow_offset, status_cursor_pos[1],
-                glow_color, status_text
-            )
-            draw_list.add_text(
-                status_cursor_pos[0], status_cursor_pos[1] - glow_offset,
-                glow_color, status_text
-            )
-            draw_list.add_text(
-                status_cursor_pos[0], status_cursor_pos[1] + glow_offset,
-                glow_color, status_text
-            )
-        
-        # Main text
-        imgui.push_style_color(imgui.COLOR_TEXT, color_r, color_g, color_b, status_alpha * alpha)
+
+        imgui.push_style_color(imgui.COLOR_TEXT, color_r, color_g, color_b, alpha)
         imgui.text(status_text)
         imgui.pop_style_color()
+
+        imgui.set_window_font_scale(1.0)
 
         # Spacing
         imgui.dummy(1, 30)
@@ -431,8 +368,8 @@ class SplashScreen:
 
             imgui.set_cursor_pos_x(hint_x)
 
-            hint_alpha = 0.4 + 0.2 * math.sin(current_time * 3.0)
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.6, hint_alpha * alpha)
+            hint_alpha = 0.6 + 0.2 * math.sin(current_time * 3.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.7, hint_alpha * alpha)
             imgui.text(hint_text)
             imgui.pop_style_color()
 
@@ -483,6 +420,8 @@ class StandaloneSplashWindow:
 
     def _init_window(self):
         """Initialize a minimal GLFW window for the splash screen."""
+        # Suppress harmless GLFW scancode warnings (macOS non-US keyboards)
+        warnings.filterwarnings("ignore", message=".*Invalid scancode.*", category=glfw.GLFWError)
         if not glfw.init():
             return False
 
@@ -672,7 +611,7 @@ class StandaloneSplashWindow:
                 if i % 30 == 0:
                     print(f"Loaded {i}/{len(self.prerendered_frame_paths)} frame textures...")
 
-            print(f"✅ Loaded all {len(self.prerendered_textures)} pre-rendered frame textures")
+            print(f"Loaded all {len(self.prerendered_textures)} pre-rendered frame textures")
 
         except Exception as e:
             print(f"Failed to load pre-rendered textures: {e}")
@@ -730,7 +669,7 @@ class StandaloneSplashWindow:
                     # Brief yield before rendering to allow init thread to run
                     time.sleep(0.0001)
 
-                    gl.glClearColor(0.0, 0.0, 0.0, 0.0)
+                    gl.glClearColor(0.0, 0.0, 0.0, 1.0)
                     gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 
                     imgui.new_frame()
@@ -796,7 +735,7 @@ class StandaloneSplashWindow:
             if frame_count > 0:
                 avg_frame_time = total_frame_time / frame_count
                 if max_frame_time > target_frame_time * 2:
-                    print(f"Splash render stats: Avg frame time: {avg_frame_time*1000:.2f}ms, Max: {max_frame_time*1000:.2f}ms, FPS: {1.0/avg_frame_time:.1f}")
+                    logging.getLogger(__name__).debug(f"Splash render stats: Avg frame time: {avg_frame_time*1000:.2f}ms, Max: {max_frame_time*1000:.2f}ms, FPS: {1.0/avg_frame_time:.1f}")
             self._cleanup()
 
     def _render_prerendered_frame(self, frame_count):
@@ -909,74 +848,78 @@ class StandaloneSplashWindow:
             if current_time > 0.3 and self.quality_level > 0.3:  # Start lasers after fade-in
                 self._render_enhanced_laser_eyes(logo_x, logo_y + float_offset, logo_size, current_time - 0.3)
 
-            # "Loading FunGen..." text and version below the logo
+            # Loading quip and version below the logo
             if current_time > 0.3:  # Show after fade-in
                 from config.constants import APP_VERSION
-                loading_text = "Loading FunGen..."
 
-                # Use draw list for manual positioning
+                # Pick a random loading quip (stable per session)
+                if not hasattr(self, '_loading_quip'):
+                    import random
+                    _LOADING_QUIPS = [
+                        "Oops, forgot my pants...",
+                        "Warming up the engines...",
+                        "Calibrating the fun meter...",
+                        "Polishing the algorithms...",
+                        "Stretching before the workout...",
+                        "Finding the right angle...",
+                        "Hold on, almost ready...",
+                        "Did you see my... nevermind.",
+                        "Adjusting for maximum performance...",
+                        "Preparing the magic...",
+                        "Getting into position...",
+                        "Generating excitement...",
+                        "Tuning the sensitivity...",
+                        "Syncing the motions...",
+                        "Lubing up the pipeline...",
+                        "Initiating deep analysis...",
+                        "Almost there, don't stop now...",
+                        "Detecting points of interest...",
+                        "Tracking the action...",
+                        "Calculating optimal stroke...",
+                    ]
+                    self._loading_quip = random.choice(_LOADING_QUIPS)
+                loading_text = self._loading_quip
+
+                # Gentle pulse (stays readable — high baseline)
+                text_pulse = 0.85 + 0.15 * math.sin((current_time - 0.3) * 3.0)
+
+                # --- Loading quip at 1.8x ---
+                imgui.set_window_font_scale(1.8)
                 text_size = imgui.calc_text_size(loading_text)
                 text_x = (window_width - text_size[0]) / 2
-                text_y = logo_y + logo_size + float_offset + 30  # Below logo with spacing
+                text_y = logo_y + logo_size + float_offset + 25
+                imgui.set_cursor_pos((text_x, text_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 0.95, 1.0, fade_alpha * text_pulse)
+                imgui.text(loading_text)
+                imgui.pop_style_color()
 
-                # Enhanced pulsing animation with multiple components
-                text_pulse = 0.7 + 0.3 * math.sin((current_time - 0.3) * 3.0) + 0.1 * math.sin((current_time - 0.3) * 15.0)
-
-                # Get draw list for manual text rendering
-                draw_list_text = imgui.get_window_draw_list()
-
-                # Enhanced glow effect (multiple layers with more depth, quality-adaptive)
-                max_text_glow = max(2, int(5 * self.quality_level))
-                for i in range(max_text_glow, 0, -1):
-                    glow_offset = i * 3  # Larger offset
-                    glow_alpha = (0.4 * fade_alpha * text_pulse) / (i * 1.0)  # Brighter glow
-                    # Match the glow color to the laser colors for consistency
-                    laser_r = 0.0
-                    laser_g = 0.83
-                    laser_b = 1.0
-                    glow_color = imgui.get_color_u32_rgba(laser_r * 0.8, laser_g * 0.8, laser_b * 0.8, glow_alpha)
-                    draw_list_text.add_text(text_x - glow_offset, text_y, glow_color, loading_text)
-                    draw_list_text.add_text(text_x + glow_offset, text_y, glow_color, loading_text)
-                    draw_list_text.add_text(text_x, text_y - glow_offset, glow_color, loading_text)
-                    draw_list_text.add_text(text_x, text_y + glow_offset, glow_color, loading_text)
-
-                # Holographic scanline effect across the text
-                if int((current_time - 0.3) * 10) % 3 == 0:  # Every 3rd frame
-                    scanline_alpha = 0.2 * fade_alpha * text_pulse
-                    scanline_color = imgui.get_color_u32_rgba(0.0, 0.83, 1.0, scanline_alpha)
-                    draw_list_text.add_line(text_x, text_y + 8, text_x + text_size[0], text_y + 8, scanline_color, 1.0)
-
-                # Main text (bright cyan/blue)
-                text_color = imgui.get_color_u32_rgba(0.0, 0.95, 1.0, 0.95 * fade_alpha * text_pulse)
-                draw_list_text.add_text(text_x, text_y, text_color, loading_text)
-
-                # Version string (big, centered, below loading text)
-                version_text = f"v{APP_VERSION}"
+                # --- Version at 1.4x ---
+                version_text = f"FunGen v{APP_VERSION}"
+                imgui.set_window_font_scale(1.4)
                 ver_size = imgui.calc_text_size(version_text)
                 ver_x = (window_width - ver_size[0]) / 2
                 ver_y = text_y + text_size[1] + 8
-                # Subtle glow behind version
-                for i in range(3, 0, -1):
-                    g_off = i * 2
-                    g_alpha = (0.25 * fade_alpha) / i
-                    g_col = imgui.get_color_u32_rgba(0.0, 0.83, 1.0, g_alpha)
-                    draw_list_text.add_text(ver_x - g_off, ver_y, g_col, version_text)
-                    draw_list_text.add_text(ver_x + g_off, ver_y, g_col, version_text)
-                ver_col = imgui.get_color_u32_rgba(0.7, 0.85, 1.0, 0.85 * fade_alpha)
-                draw_list_text.add_text(ver_x, ver_y, ver_col, version_text)
+                imgui.set_cursor_pos((ver_x, ver_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.75, 0.88, 1.0, 0.95 * fade_alpha)
+                imgui.text(version_text)
+                imgui.pop_style_color()
 
-                # Ko-fi support text (below version)
+                # --- Ko-fi support text at 1.2x ---
                 support_text = "Support the project and unlock features at ko-fi.com/k00gar"
+                imgui.set_window_font_scale(1.2)
                 sup_size = imgui.calc_text_size(support_text)
                 sup_x = (window_width - sup_size[0]) / 2
                 sup_y = ver_y + ver_size[1] + 10
-                # Fade in slightly later (after 0.8s)
-                sup_alpha = min(1.0, max(0.0, (current_time - 0.8) / 0.4)) * fade_alpha * 0.7
-                sup_col = imgui.get_color_u32_rgba(0.9, 0.75, 0.4, sup_alpha)
-                draw_list_text.add_text(sup_x, sup_y, sup_col, support_text)
+                sup_alpha = min(1.0, max(0.0, (current_time - 0.8) / 0.4)) * fade_alpha * 0.9
+                imgui.set_cursor_pos((sup_x, sup_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.4, sup_alpha)
+                imgui.text(support_text)
+                imgui.pop_style_color()
+                imgui.set_window_font_scale(1.0)
 
                 # Add FunScript timeline visualization below the loading text
-                timeline_y = text_y + 75  # Position below the support text
+                draw_list_text = imgui.get_window_draw_list()
+                timeline_y = sup_y + sup_size[1] + 15  # Position below the support text
                 self._render_funscript_timeline(draw_list_text, window_width, timeline_y, current_time, fade_alpha)
 
         imgui.end()
@@ -1882,7 +1825,7 @@ def _show_splash_threading(init_function, *args, **kwargs):
     splash.start()
 
     # Wait for initialization to complete
-    init_thread.join()
+    init_thread.join(timeout=30.0)
 
     # Check for exceptions
     if result_container["exception"]:

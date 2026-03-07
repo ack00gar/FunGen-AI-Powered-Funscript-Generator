@@ -5,7 +5,6 @@ import json
 import shlex
 import numpy as np
 import cv2
-import platform
 import sys
 from typing import Optional, Iterator, Tuple, List, Dict, Any
 import logging
@@ -20,13 +19,27 @@ from video.vr_format_detector_ml_real import RealMLVRFormatDetector
 # Thumbnail extractor for fast random frame access
 from video.thumbnail_extractor import ThumbnailExtractor
 
+# Decomposed mixin modules
+from video._vp_nav_buffer import NavBufferMixin
+from video._vp_format_detection import FormatDetectionMixin
+from video._vp_ffmpeg_builders import FFmpegBuildersMixin
+from video._vp_dual_output import DualOutputMixin
+from video._vp_segment_streaming import SegmentStreamingMixin
+
 try:
-    from scipy.io import wavfile
+    import scipy  # noqa: F401 — presence check only (audio waveform generation)
     SCIPY_AVAILABLE_FOR_AUDIO = True
 except ImportError:
     SCIPY_AVAILABLE_FOR_AUDIO = False
 
-class VideoProcessor:
+
+class VideoProcessor(
+    NavBufferMixin,
+    FormatDetectionMixin,
+    FFmpegBuildersMixin,
+    DualOutputMixin,
+    SegmentStreamingMixin,
+):
     def __init__(self, app_instance, tracker: Optional[type] = None, yolo_input_size=640,
                  video_type='auto', vr_input_format='he_sbs',  # Default VR to SBS Equirectangular
                  vr_fov=190, vr_pitch=-21,
@@ -63,7 +76,7 @@ class VideoProcessor:
                 handler_to_add.setFormatter(formatter)
                 self.logger.addHandler(handler_to_add)
 
-        self.logger.info(f"VideoProcessor logger '{self.logger.name}' initialized.")
+        self.logger.debug(f"VideoProcessor logger '{self.logger.name}' initialized.")
 
         self.video_path = ""
         self._active_video_source_path: str = ""
@@ -112,10 +125,13 @@ class VideoProcessor:
         self.gpu_unwarp_enabled = False
 
         # VR Unwarp method override (from UI dropdown)
-        # Options: 'auto', 'metal', 'opengl', 'v360'
+        # Options: 'auto', 'metal', 'opengl', 'v360', 'none'
         self.vr_unwarp_method_override = 'auto'
+        # VR crop panel selection for "none" (crop only) mode: 'first' or 'second'
+        self.vr_crop_panel = 'first'
         if self.app and hasattr(self.app, 'app_settings'):
             self.vr_unwarp_method_override = self.app.app_settings.get('vr_unwarp_method', 'auto')
+            self.vr_crop_panel = self.app.app_settings.get('vr_crop_panel', 'first')
 
         # Thumbnail Extractor for fast random frame access (OpenCV-based)
         self.thumbnail_extractor = None
@@ -186,7 +202,7 @@ class VideoProcessor:
         """
         if callback not in self._seek_callbacks:
             self._seek_callbacks.append(callback)
-            self.logger.info(f"✅ Registered seek callback: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'} (total callbacks: {len(self._seek_callbacks)})")
+            self.logger.debug(f"Registered seek callback: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'} (total callbacks: {len(self._seek_callbacks)})")
 
     def unregister_seek_callback(self, callback):
         """
@@ -207,7 +223,7 @@ class VideoProcessor:
             frame_index: Frame that was seeked to
         """
         if self._seek_callbacks:
-            self.logger.debug(f"🔔 Notifying {len(self._seek_callbacks)} seek callbacks for frame {frame_index}")
+            self.logger.debug(f"Notifying {len(self._seek_callbacks)} seek callbacks for frame {frame_index}")
         for callback in self._seek_callbacks:
             try:
                 callback(frame_index)
@@ -228,7 +244,7 @@ class VideoProcessor:
         """
         if callback not in self._playback_state_callbacks:
             self._playback_state_callbacks.append(callback)
-            self.logger.info(f"✅ Registered playback state callback: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'} (total callbacks: {len(self._playback_state_callbacks)})")
+            self.logger.debug(f"Registered playback state callback: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'} (total callbacks: {len(self._playback_state_callbacks)})")
 
     def unregister_playback_state_callback(self, callback):
         """
@@ -278,147 +294,6 @@ class VideoProcessor:
 
             self._last_timing_update = current_time
 
-    def _compute_nav_buffer_size(self) -> int:
-        """Compute arrow-nav buffer size based on available RAM.
-
-        Each frame is yolo_input_size^2 * 3 bytes.  We cap the buffer at
-        ~10 % of available RAM, with a floor of 120 frames.
-        """
-        frame_bytes = self.yolo_input_size * self.yolo_input_size * 3
-        try:
-            import psutil
-            avail = psutil.virtual_memory().available
-            budget = int(avail * 0.10)  # 10 % of free RAM
-            max_frames = max(120, budget // frame_bytes)
-            # Cap at a reasonable upper bound (1800 = ~1 min at 30fps)
-            max_frames = min(max_frames, 1800)
-        except Exception:
-            max_frames = 300  # Safe default (~360 MB at 640px)
-        self.logger.info(f"Arrow-nav buffer: {max_frames} frames "
-                         f"({max_frames * frame_bytes / (1024*1024):.0f} MB)")
-        return max_frames
-
-    def _start_unified_pipe(self, start_frame: int) -> bool:
-        """Spawn a unified FFmpeg pipe at *start_frame* for arrow nav / pipe reuse.
-
-        Uses the same filter chain as the processing loop so VR projection,
-        scaling, etc. are visually identical to playback.
-        """
-        self._stop_unified_pipe()
-
-        if not self.video_path or not self.video_info or self.fps <= 0:
-            return False
-
-        start_sec = start_frame / self.fps
-        common_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
-
-        effective_vf = self.ffmpeg_filter_string or (
-            f"scale={self.yolo_input_size}:{self.yolo_input_size}"
-            f":force_original_aspect_ratio=decrease,"
-            f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-        )
-
-        hwaccel_args = self._get_ffmpeg_hwaccel_args()
-        cmd = common_prefix + hwaccel_args[:]
-        if start_sec > 0.001:
-            cmd.extend(['-ss', str(start_sec)])
-        cmd.extend(['-i', self._active_video_source_path, '-an', '-sn'])
-        cmd.extend(['-vf', effective_vf])
-        cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
-
-        try:
-            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            self._ffmpeg_pipe = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                bufsize=-1, creationflags=creation_flags,
-            )
-            self._ffmpeg_read_position = start_frame
-            self.logger.debug(f"Unified FFmpeg pipe started at frame {start_frame}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to start unified FFmpeg pipe: {e}")
-            self._ffmpeg_pipe = None
-            return False
-
-    def _stop_unified_pipe(self):
-        """Terminate the unified FFmpeg pipe if running."""
-        if self._ffmpeg_pipe is not None:
-            self._terminate_process(self._ffmpeg_pipe, "UnifiedPipe")
-            self._ffmpeg_pipe = None
-
-    def _pipe_read_one(self) -> Optional[np.ndarray]:
-        """Read exactly one frame from the unified FFmpeg pipe."""
-        if self._ffmpeg_pipe is None or self._ffmpeg_pipe.stdout is None:
-            return None
-        try:
-            raw = self._ffmpeg_pipe.stdout.read(self.frame_size_bytes)
-            if len(raw) < self.frame_size_bytes:
-                return None
-            frame = np.frombuffer(raw, dtype=np.uint8).reshape(
-                self.yolo_input_size, self.yolo_input_size, 3
-            ).copy()
-            self._ffmpeg_read_position += 1
-            return frame
-        except Exception:
-            return None
-
-    def _buffer_lookup(self, target_frame: int) -> Optional[np.ndarray]:
-        """O(1) lookup in the frame buffer by computing offset from first entry."""
-        with self._frame_buffer_lock:
-            if not self._frame_buffer:
-                return None
-            first_idx = self._frame_buffer[0][0]
-            offset = target_frame - first_idx
-            if 0 <= offset < len(self._frame_buffer):
-                stored_idx, frame_data = self._frame_buffer[offset]
-                if stored_idx == target_frame:
-                    return frame_data
-            return None
-
-    def _buffer_append(self, frame_index: int, frame_data: np.ndarray):
-        """Append a frame to the buffer. Clear if non-contiguous."""
-        with self._frame_buffer_lock:
-            if self._frame_buffer:
-                last_idx = self._frame_buffer[-1][0]
-                if frame_index != last_idx + 1:
-                    self._frame_buffer.clear()
-            self._frame_buffer.append((frame_index, frame_data))
-
-    def _clear_nav_state(self):
-        """Clear all navigation state: buffer + pipe.
-
-        Called on position jumps (seek, cache clear, FFmpeg teardown) so stale
-        frames from a previous position are never served.
-        """
-        self._stop_unified_pipe()
-        with self._frame_buffer_lock:
-            self._frame_buffer.clear()
-
-    @property
-    def buffer_info(self) -> dict:
-        """Return buffer stats for status strip display."""
-        with self._frame_buffer_lock:
-            size = len(self._frame_buffer)
-            capacity = self._frame_buffer.maxlen or 0
-            start = self._frame_buffer[0][0] if self._frame_buffer else -1
-            end = self._frame_buffer[-1][0] if self._frame_buffer else -1
-        return {'size': size, 'capacity': capacity, 'start': start, 'end': end,
-                'current': self.current_frame_index}
-
-    def _clear_cache(self):
-        with self.frame_cache_lock:
-            if self.frame_cache is not None:
-                try:
-                    if self.frame_cache is not None:
-                        cache_len = len(self.frame_cache)
-                    else:
-                        cache_len = 0
-                except Exception:
-                    cache_len = 0
-                if cache_len > 0:
-                    self.logger.debug(f"Clearing frame cache (had {cache_len} items).")
-                    self.frame_cache.clear()
-        self._clear_nav_state()
 
     def set_active_video_type_setting(self, video_type: str):
         if video_type not in ['auto', '2D', 'VR']:
@@ -502,10 +377,11 @@ class VideoProcessor:
         if hasattr(self, '_ml_detection_cached'):
             delattr(self, '_ml_detection_cached')
 
-        # Re-read VR unwarp method from settings in case it changed
+        # Re-read VR unwarp method and crop panel from settings in case they changed
         if self.app and hasattr(self.app, 'app_settings'):
             self.vr_unwarp_method_override = self.app.app_settings.get('vr_unwarp_method', 'auto')
-            self.logger.info(f"VR unwarp method from settings: {self.vr_unwarp_method_override}")
+            self.vr_crop_panel = self.app.app_settings.get('vr_crop_panel', 'first')
+            self.logger.debug(f"VR unwarp method from settings: {self.vr_unwarp_method_override}")
 
         self.video_info = self._get_video_info(video_path)
         if not self.video_info or self.video_info.get("total_frames", 0) == 0:
@@ -527,7 +403,7 @@ class VideoProcessor:
 
         if preprocessed_path:
             # Always validate the preprocessed file before using it
-            self.logger.info(f"Found potential preprocessed file: {os.path.basename(preprocessed_path)}. Verifying...")
+            self.logger.debug(f"Found potential preprocessed file: {os.path.basename(preprocessed_path)}. Verifying...")
 
             # Basic validation first
             preprocessed_info = self._get_video_info(preprocessed_path)
@@ -540,7 +416,7 @@ class VideoProcessor:
 
             if is_valid_preprocessed and preprocessed_frames >= original_frames > 0:
                 self._active_video_source_path = preprocessed_path
-                self.logger.info(f"Preprocessed video validation passed. Using as active source.")
+                self.logger.debug(f"Preprocessed video validation passed. Using as active source.")
             else:
                 self.logger.warning(
                     f"Preprocessed file is incomplete or invalid ({preprocessed_frames}/{original_frames} frames). "
@@ -550,20 +426,20 @@ class VideoProcessor:
                 self._cleanup_invalid_preprocessed_file(preprocessed_path)
 
         if self._active_video_source_path == preprocessed_path:
-            self.logger.info(f"VideoProcessor will use preprocessed video as its active source.")
+            self.logger.debug(f"VideoProcessor will use preprocessed video as its active source.")
         else:
-            self.logger.info(f"VideoProcessor will use original video as its active source.")
+            self.logger.debug(f"VideoProcessor will use original video as its active source.")
 
         self._update_video_parameters()
 
         # Initialize GPU unwarp worker for VR videos (needed for seek-to-frame before playback starts)
         self._init_gpu_unwarp_worker()
 
-        # Initialize thumbnail extractor for fast random frame access (OpenCV-based)
-        self._init_thumbnail_extractor()
-
         self.fps = self.video_info['fps']
         self.total_frames = self.video_info['total_frames']
+
+        # Initialize thumbnail extractor for fast random frame access (FFmpeg-based)
+        self._init_thumbnail_extractor()
         self.set_target_fps(self.fps)
         self.current_frame_index = 0
         self.frames_read_from_current_stream = 0
@@ -596,7 +472,7 @@ class VideoProcessor:
                 import asyncio
                 is_remote_video = video_path.startswith(('http://', 'https://'))
                 source_desc = "remote" if is_remote_video else "local"
-                self.logger.info(f"📹 Notifying streamer of {source_desc} video load: {os.path.basename(video_path)}")
+                self.logger.debug(f"Notifying streamer of {source_desc} video load: {os.path.basename(video_path)}")
                 asyncio.run_coroutine_threadsafe(
                     self.sync_server.broadcast_video_loaded(video_path),
                     self.sync_server.loop
@@ -606,315 +482,10 @@ class VideoProcessor:
                 import traceback
                 self.logger.warning(traceback.format_exc())
         else:
-            self.logger.info(f"📹 Streamer not available (sync_server: {hasattr(self, 'sync_server')})")
+            self.logger.debug(f"Streamer not available (sync_server: {hasattr(self, 'sync_server')})")
 
         return True
 
-    @staticmethod
-    def _detect_format_from_filename(filename: str) -> dict:
-        """
-        Detects video format information from filename suffixes.
-
-        Returns:
-            dict with keys:
-            - 'type': 'VR', '2D', or None (if cannot determine)
-            - 'projection': projection type if VR (e.g., 'fisheye', 'he', 'eac')
-            - 'layout': stereoscopic layout if VR (e.g., '_sbs', '_tb', '_lr')
-            - 'fov': FOV value if specific lens detected (e.g., 200 for MKX200)
-        """
-        upper_filename = filename.upper()
-        result = {
-            'type': None,
-            'projection': None,
-            'layout': None,
-            'fov': None
-        }
-
-        # Check for 2D markers first
-        if '_2D' in upper_filename or '_FLAT' in upper_filename:
-            result['type'] = '2D'
-            return result
-
-        # Check for custom fisheye lenses
-        if '_MKX200' in upper_filename or 'MKX200' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'fisheye'
-            result['layout'] = '_sbs'
-            result['fov'] = 200
-            return result
-        elif '_MKX220' in upper_filename or 'MKX220' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'fisheye'
-            result['layout'] = '_sbs'
-            result['fov'] = 220
-            return result
-        elif '_RF52' in upper_filename or 'RF52' in upper_filename or '_VRCA220' in upper_filename or 'VRCA220' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'fisheye'
-            result['layout'] = '_sbs'
-            return result
-
-        # Check for standard fisheye (flexible matching - with or without underscore)
-        if '_F180' in upper_filename or 'F180_' in upper_filename or '_180F' in upper_filename or '180F_' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'fisheye'
-            result['layout'] = '_sbs'
-            result['fov'] = 180
-            return result
-        if 'FISHEYE190' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'fisheye'
-            result['layout'] = '_sbs'
-            result['fov'] = 190
-            return result
-        if 'FISHEYE200' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'fisheye'
-            result['layout'] = '_sbs'
-            result['fov'] = 200
-            return result
-        if 'FISHEYE220' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'fisheye'
-            result['layout'] = '_sbs'
-            result['fov'] = 220
-            return result
-        if 'FISHEYE' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'fisheye'
-            result['layout'] = '_sbs'
-            result['fov'] = 190
-            return result
-
-        # Check for equiangular cubemap
-        if '_EAC360' in upper_filename or '_360EAC' in upper_filename or 'EAC360' in upper_filename or '360EAC' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'eac'
-            if '_LR' in upper_filename:
-                result['layout'] = '_lr'
-            elif '_RL' in upper_filename:
-                result['layout'] = '_rl'
-            elif '_TB' in upper_filename or '_BT' in upper_filename:
-                result['layout'] = '_tb'
-            elif '_3DH' in upper_filename:
-                result['layout'] = '_sbs'
-            elif '_3DV' in upper_filename:
-                result['layout'] = '_tb'
-            else:
-                result['layout'] = '_sbs'
-            return result
-
-        # Check for equirectangular 360
-        if '_360' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'he'
-            if '_LR' in upper_filename:
-                result['layout'] = '_lr'
-            elif '_RL' in upper_filename:
-                result['layout'] = '_rl'
-            elif '_TB' in upper_filename or '_BT' in upper_filename:
-                result['layout'] = '_tb'
-            elif '_3DH' in upper_filename:
-                result['layout'] = '_sbs'
-            elif '_3DV' in upper_filename:
-                result['layout'] = '_tb'
-            else:
-                result['layout'] = '_sbs'
-            return result
-
-        # Check for equirectangular 180
-        if '_180' in upper_filename:
-            result['type'] = 'VR'
-            result['projection'] = 'he'
-            if '_LR' in upper_filename:
-                result['layout'] = '_lr'
-            elif '_RL' in upper_filename:
-                result['layout'] = '_rl'
-            elif '_TB' in upper_filename or '_BT' in upper_filename:
-                result['layout'] = '_tb'
-            elif '_3DH' in upper_filename:
-                result['layout'] = '_sbs'
-            elif '_3DV' in upper_filename:
-                result['layout'] = '_tb'
-            else:
-                result['layout'] = '_sbs'
-            return result
-
-        return result
-
-    @staticmethod
-    def _classify_by_resolution(width: int, height: int) -> str:
-        """
-        Classifies video as '2D', 'most_likely_VR', or 'uncertain' based on resolution.
-
-        Returns:
-            '2D': Definitely 2D based on resolution
-            'most_likely_VR': Resolution suggests VR (should trigger ML)
-            'uncertain': Cannot determine (should check other heuristics)
-        """
-        # < 1080p -> 2D
-        if height < 1080 and width < 1920:
-            return '2D'
-
-        # Exactly 1920x1080p or 3840x2160p -> 2D
-        if (width == 1920 and height == 1080) or (width == 3840 and height == 2160):
-            return '2D'
-
-        # Check if width = 2x height or height = 2x width (VR aspect ratios)
-        is_sbs_aspect = width > 1000 and 1.8 <= (width / height) <= 2.2
-        is_tb_aspect = height > 1000 and 1.8 <= (height / width) <= 2.2
-
-        if is_sbs_aspect or is_tb_aspect:
-            return 'most_likely_VR'
-
-        # Bigger than 2160p -> most likely VR
-        if height > 2160 or width > 3840:
-            return 'most_likely_VR'
-
-        return 'uncertain'
-
-    def _update_video_parameters(self):
-        """
-        Consolidates logic for determining video type and building the FFmpeg filter string.
-        Called from open_video and reapply_video_settings.
-
-        Detection priority:
-        1. Filename-based detection (most specific)
-        2. Resolution-based classification
-        3. ML detection (only if resolution suggests VR)
-        """
-        if not self.video_info:
-            return
-
-        width = self.video_info.get('width', 0)
-        height = self.video_info.get('height', 0)
-
-        # Skip detection if user has manually set the video type
-        if self.video_type_setting != 'auto':
-            self.determined_video_type = self.video_type_setting
-            # Clear VR metadata if manually set to 2D
-            if self.video_type_setting == '2D':
-                self.vr_input_format = ""
-                self.vr_fov = 0
-            self.logger.info(f"Using configured video type: {self.determined_video_type}")
-            self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-            return
-
-        # STEP 1: Try filename-based detection first
-        filename_result = self._detect_format_from_filename(self.video_path)
-
-        if filename_result['type'] == '2D':
-            self.logger.info(f"Filename indicates 2D video (contains _2D or _FLAT)")
-            self.determined_video_type = '2D'
-            # Clear VR metadata for 2D videos
-            self.vr_input_format = ""
-            self.vr_fov = 0
-            self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-            return
-
-        if filename_result['type'] == 'VR':
-            self.logger.info(f"Filename indicates VR video: projection={filename_result['projection']}, layout={filename_result['layout']}, fov={filename_result['fov']}")
-            self.determined_video_type = 'VR'
-
-            # Apply detected format
-            if filename_result['projection'] and filename_result['layout']:
-                self.vr_input_format = f"{filename_result['projection']}{filename_result['layout']}"
-                self.logger.info(f"Set VR format to: {self.vr_input_format}")
-
-            # Apply detected FOV if available
-            if filename_result['fov']:
-                self.vr_fov = filename_result['fov']
-                self.logger.info(f"Set VR FOV to: {self.vr_fov}")
-
-            self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-            return
-
-        # STEP 2: Filename inconclusive - check resolution
-        resolution_classification = self._classify_by_resolution(width, height)
-
-        if resolution_classification == '2D':
-            self.logger.info(f"Resolution {width}x{height} classified as 2D (< 1080p or standard 2D resolution)")
-            self.determined_video_type = '2D'
-            # Clear VR metadata for 2D videos
-            self.vr_input_format = ""
-            self.vr_fov = 0
-            self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-            return
-
-        # STEP 3: Resolution suggests VR - run ML detection
-        if resolution_classification == 'most_likely_VR':
-            self.logger.info(f"Resolution {width}x{height} suggests VR - running ML detection")
-
-            # Try ML detection if model available
-            # Cache ML detection to avoid re-running expensive inference on every settings change
-            if os.path.exists(self.ml_model_path) and not hasattr(self, '_ml_detection_cached'):
-                try:
-                    # Lazy load detector
-                    if self.ml_detector is None:
-                        self.logger.info("Loading ML format detector...")
-                        self.ml_detector = RealMLVRFormatDetector(logger=self.logger)
-                        self.ml_detector.load_model(self.ml_model_path)
-                        self.logger.info("ML format detector loaded successfully")
-
-                    # Detect format
-                    ml_result = self.ml_detector.detect(self.video_path, self.video_info, num_frames=3)
-
-                    if ml_result and ml_result.get('confidence', 0) > 0.5:
-                        self.logger.info(f"ML detected format: {ml_result.get('format_string')} "
-                                       f"(confidence: {ml_result.get('confidence'):.2f})")
-
-                        # Apply ML results
-                        self.determined_video_type = ml_result['video_type']
-
-                        if ml_result['video_type'] == 'VR':
-                            self.vr_input_format = ml_result['format_string']
-                            if ml_result.get('fov'):
-                                self.vr_fov = ml_result['fov']
-                        else:
-                            # ML detected 2D - clear VR metadata
-                            self.vr_input_format = ""
-                            self.vr_fov = 0
-
-                        self._ml_detection_cached = True  # Cache result to avoid re-running on settings changes
-                        self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-                        self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-                        self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
-                        return
-                    else:
-                        self.logger.info("ML detection confidence low, falling back to resolution heuristics")
-
-                except Exception as e:
-                    self.logger.warning(f"ML detection failed: {e}, falling back to resolution heuristics")
-
-        # STEP 4: Fallback - use resolution-based heuristics
-        # Check for VR-like aspect ratios
-        is_sbs_resolution = width > 1000 and 1.8 <= (width / height) <= 2.2
-        is_tb_resolution = height > 1000 and 1.8 <= (height / width) <= 2.2
-
-        if is_sbs_resolution or is_tb_resolution:
-            self.logger.info(f"Resolution aspect ratio suggests VR (SBS: {is_sbs_resolution}, TB: {is_tb_resolution})")
-            self.determined_video_type = 'VR'
-
-            # Determine format based on aspect ratio
-            suggested_base = 'he'
-            suggested_layout = '_tb' if is_tb_resolution else '_sbs'
-
-            self.vr_input_format = f"{suggested_base}{suggested_layout}"
-            self.logger.info(f"Auto-detected VR format: {self.vr_input_format}")
-        else:
-            self.logger.info(f"Resolution {width}x{height} does not suggest VR - defaulting to 2D")
-            self.determined_video_type = '2D'
-            # Clear VR metadata for 2D videos
-            self.vr_input_format = ""
-            self.vr_fov = 0
-
-        self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-        self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-        self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
 
     def reapply_video_settings(self):
         if not self.video_path or not self.video_info:
@@ -1207,76 +778,6 @@ class VideoProcessor:
                     return self.frame_cache[frame_index_abs]
             return None
 
-    @staticmethod
-    def get_video_type_heuristic(video_path: str, use_ml: bool = False) -> str:
-        """
-        A lightweight heuristic to guess the video type (2D/VR) and format (SBS/TB)
-        without fully opening the video. Uses ffprobe for metadata.
-
-        Args:
-            video_path: Path to video file
-            use_ml: If True, attempt ML detection first (requires model in /models)
-
-        Returns:
-            String like "2D", "VR (he_sbs)", "VR (fisheye_tb)", or "Unknown"
-        """
-        if not os.path.exists(video_path):
-            return "Unknown"
-
-        try:
-            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                   '-show_entries', 'stream=width,height,pix_fmt', '-of', 'json', video_path]
-            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, timeout=5, creationflags=creation_flags)
-            data = json.loads(result.stdout)
-            stream_info = data.get('streams', [{}])[0]
-            width = int(stream_info.get('width', 0))
-            height = int(stream_info.get('height', 0))
-            pix_fmt = stream_info.get('pix_fmt', '')
-        except Exception:
-            return "Unknown"
-
-        if width == 0 or height == 0:
-            return "Unknown"
-
-        # Try ML detection if requested
-        if use_ml:
-            try:
-                model_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'vr_detector_model_rf.pkl')
-                if os.path.exists(model_path):
-                    detector = RealMLVRFormatDetector(logger=None)
-                    detector.load_model(model_path)
-
-                    video_info = {'width': width, 'height': height, 'pix_fmt': pix_fmt}
-                    ml_result = detector.detect(video_path, video_info, num_frames=3)
-
-                    if ml_result and ml_result.get('confidence', 0) > 0.5:
-                        if ml_result['video_type'] == '2D':
-                            return "2D"
-                        else:
-                            return f"VR ({ml_result['format_string']})"
-            except Exception:
-                pass  # Fall back to filename heuristics
-
-        # Fallback to filename heuristics
-        is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
-        is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
-        upper_video_path = video_path.upper()
-        vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH', 'MKX200']
-        has_vr_keyword = any(kw in upper_video_path for kw in vr_keywords)
-
-        if not (is_sbs_resolution or is_tb_resolution or has_vr_keyword):
-            return "2D"
-
-        # If VR, guess the specific format
-        suggested_base = 'he'
-        suggested_layout = '_sbs'
-        if is_tb_resolution or any(kw in upper_video_path for kw in ['_TB', 'TB_', 'TOPBOTTOM', 'OVERUNDER', '_OU', 'OU_']):
-            suggested_layout = '_tb'
-        if any(kw in upper_video_path for kw in ['FISHEYE', 'MKX', 'RF52']):
-            suggested_base = 'fisheye'
-
-        return f"VR ({suggested_base}{suggested_layout})"
 
     def _get_video_info(self, filename):
         # TODO: Add ffprobe detection and metadata extraction for YUV videos. Pass metadata to cv2 so it can use the correct decoder. Use metadata + cv2.cvtColor to convert to RGB.
@@ -1342,7 +843,7 @@ class VideoProcessor:
                         audio_channels = int(a_stream.get('channels', 0))
                     except (ValueError, TypeError):
                         audio_channels = 0
-            except Exception:
+            except (subprocess.SubprocessError, json.JSONDecodeError, KeyError, IndexError, OSError):
                 pass
 
             if total_frames == 0:
@@ -1450,376 +951,6 @@ class VideoProcessor:
             self.logger.error(f"Error generating audio waveform: {e}", exc_info=True)
             return None
 
-    def _is_10bit_cuda_pipe_needed(self) -> bool:
-        # TODO: Add bitshift processing for 10-bit videos (fast 10-bit to 8-bit conversion).
-        # Optional: Scale to 640x640 on GPU using tensorrt. This will not use lanczos. So if Lanczos is absolutely necessary, you will have to use other solution.
-        """Checks if the special 2-pipe FFmpeg command for 10-bit CUDA should be used."""
-        if not self.video_info:
-            return False
-
-        is_high_bit_depth = self.video_info.get('bit_depth', 8) > 8
-        hwaccel_args = self._get_ffmpeg_hwaccel_args()
-        # [OPTIMIZED] Simpler check
-        is_cuda_hwaccel = 'cuda' in hwaccel_args
-
-        if is_high_bit_depth and is_cuda_hwaccel:
-            self.logger.info("Conditions for 10-bit CUDA pipe met.")
-            return True
-        return False
-
-    def _is_using_preprocessed_video(self) -> bool:
-        """Checks if the active video source is a preprocessed file."""
-        is_using_preprocessed_by_path_diff = self._active_video_source_path != self.video_path
-        is_preprocessed_by_name = self._active_video_source_path.endswith("_preprocessed.mp4")
-        return is_using_preprocessed_by_path_diff or is_preprocessed_by_name
-
-    def _needs_hw_download(self) -> bool:
-        """Determines if the FFmpeg filter chain requires a 'hwdownload' filter."""
-        current_hw_args = self._get_ffmpeg_hwaccel_args()
-        if '-hwaccel_output_format' in current_hw_args:
-            try:
-                idx = current_hw_args.index('-hwaccel_output_format')
-                hw_output_format = current_hw_args[idx + 1]
-                # These formats are on the GPU and need to be downloaded for CPU-based filters.
-                if hw_output_format in ['cuda', 'nv12', 'p010le', 'qsv', 'vaapi', 'd3d11va', 'dxva2_vld']:
-                    return True
-            except (ValueError, IndexError):
-                self.logger.warning("Could not properly parse -hwaccel_output_format from hw_args.")
-        return False
-
-    def _get_2d_video_filters(self) -> List[str]:
-        """Builds the list of FFmpeg filter segments for standard 2D video."""
-        if not self.video_info:
-            # Fallback if no video info
-            return [
-                f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
-                f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-            ]
-
-        width = self.video_info.get('width', 0)
-        height = self.video_info.get('height', 0)
-
-        if width == 0 or height == 0:
-            # Fallback if dimensions unknown
-            return [
-                f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
-                f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-            ]
-
-        aspect_ratio = width / height
-
-        # Check if video is square (or nearly square)
-        if 0.95 < aspect_ratio < 1.05:
-            # Square video - just scale, no padding needed
-            return [f"scale={self.yolo_input_size}:{self.yolo_input_size}"]
-        elif aspect_ratio > 1.05:
-            # Wider than tall (landscape) - scale and pad top/bottom
-            return [
-                f"scale={self.yolo_input_size}:-1:force_original_aspect_ratio=decrease",
-                f"pad={self.yolo_input_size}:{self.yolo_input_size}:0:(oh-ih)/2:black"
-            ]
-        else:
-            # Taller than wide (portrait) - scale and pad left/right
-            return [
-                f"scale=-1:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
-                f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:0:black"
-            ]
-
-    def _init_gpu_unwarp_worker(self):
-        """Initialize GPU unwarp worker for VR video processing."""
-        from config.constants import ENABLE_GPU_UNWARP, GPU_UNWARP_BACKEND
-
-        # Check if user wants CPU v360 instead of GPU unwarp
-        if self.vr_unwarp_method_override == 'v360':
-            self.logger.info("User selected CPU v360 unwarp method - GPU unwarp disabled")
-            # Clean up existing GPU unwarp worker if switching from GPU to CPU v360
-            if self.gpu_unwarp_worker:
-                self.logger.info("Stopping existing GPU unwarp worker (switching to v360)")
-                self.gpu_unwarp_worker.stop()
-                self.gpu_unwarp_worker = None
-            self.gpu_unwarp_enabled = False
-            return
-
-        # Only initialize for VR videos when GPU unwarp is enabled
-        if self.determined_video_type != 'VR' or not ENABLE_GPU_UNWARP:
-            # Clean up GPU unwarp worker if it exists but shouldn't be used
-            if self.gpu_unwarp_worker:
-                self.logger.info("Stopping GPU unwarp worker (not VR or GPU unwarp disabled)")
-                self.gpu_unwarp_worker.stop()
-                self.gpu_unwarp_worker = None
-            self.gpu_unwarp_enabled = False
-            return
-
-        # If already initialized, skip (prevents duplicate workers)
-        if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
-            self.logger.debug("GPU unwarp worker already initialized, skipping")
-            return
-
-        try:
-            from video.gpu_unwarp_worker import GPUUnwarpWorker
-
-            # Get projection type from VR input format
-            projection_type = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
-            if 'fisheye' in projection_type or 'he' in projection_type:
-                # Map VR format to projection type
-                if projection_type == 'fisheye':
-                    projection_type = f'fisheye{int(self.vr_fov)}'
-                elif projection_type == 'he':
-                    projection_type = 'equirect180'
-
-            # Determine backend based on user override or default
-            if self.vr_unwarp_method_override in ['metal', 'opengl']:
-                backend = self.vr_unwarp_method_override
-            else:
-                backend = GPU_UNWARP_BACKEND  # Use default (auto)
-
-            self.gpu_unwarp_worker = GPUUnwarpWorker(
-                projection_type=projection_type,
-                output_size=self.yolo_input_size,
-                queue_size=16,  # Increased for batch processing
-                backend=backend,
-                pitch=self.vr_pitch,  # Pass directly (matches benchmark behavior)
-                yaw=0.0,
-                roll=0.0,
-                batch_size=4,  # Enable batch processing (12% faster)
-                input_format='bgr24'  # Input is BGR24 from FFmpeg, worker converts to RGBA internally
-            )
-            self.gpu_unwarp_worker.start()
-            self.gpu_unwarp_enabled = True
-            self.logger.info(f"GPU unwarp worker started (backend={backend}, projection={projection_type}, pitch={self.vr_pitch})")
-
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize GPU unwarp worker: {e}. Falling back to CPU v360.")
-            self.gpu_unwarp_worker = None
-            self.gpu_unwarp_enabled = False
-
-    def _init_thumbnail_extractor(self):
-        """Initialize OpenCV-based thumbnail extractor for fast random frame access."""
-        # Close existing extractor if present
-        if self.thumbnail_extractor:
-            self.thumbnail_extractor.close()
-            self.thumbnail_extractor = None
-
-        # Only initialize if we have a valid video
-        if not self._active_video_source_path or not self.video_info:
-            return
-
-        try:
-            # Don't apply VR cropping if using preprocessed video (already cropped/unwrapped)
-            vr_format = None
-            if self.determined_video_type == 'VR' and not self._is_using_preprocessed_video():
-                vr_format = self.vr_input_format
-
-            self.thumbnail_extractor = ThumbnailExtractor(
-                video_path=self._active_video_source_path,
-                logger=self.logger,
-                gpu_unwarp_worker=self.gpu_unwarp_worker,  # Optional: use GPU unwarp for VR thumbnails
-                output_size=self.yolo_input_size,
-                vr_input_format=vr_format
-            )
-            source_type = "preprocessed" if self._is_using_preprocessed_video() else "original"
-            self.logger.info(f"Thumbnail extractor initialized (OpenCV-based, {source_type} video)")
-
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize thumbnail extractor: {e}")
-            self.thumbnail_extractor = None
-
-    def get_thumbnail_frame(self, frame_index: int, use_gpu_unwarp: bool = False) -> Optional[np.ndarray]:
-        """
-        Get a thumbnail frame using OpenCV-based extractor (much faster than FFmpeg spawning).
-
-        This method is optimized for random frame access (e.g., timeline tooltips) and uses
-        OpenCV VideoCapture which maintains a persistent video connection.
-
-        Args:
-            frame_index: Frame index to extract
-            use_gpu_unwarp: Whether to apply GPU unwarp for VR content (slower but accurate)
-
-        Returns:
-            Frame as BGR24 numpy array (yolo_input_size x yolo_input_size) or None
-        """
-        if self.thumbnail_extractor is None:
-            # Fallback to FFmpeg-based extraction if thumbnail extractor not available
-            self.logger.debug("Thumbnail extractor not available, falling back to FFmpeg")
-            return self._get_specific_frame(frame_index, update_current_index=False, use_thumbnail=True)
-
-        try:
-            frame = self.thumbnail_extractor.get_frame(frame_index, use_gpu_unwarp=use_gpu_unwarp)
-            return frame
-
-        except Exception as e:
-            self.logger.warning(f"Thumbnail extraction failed: {e}, falling back to FFmpeg")
-            # Fallback to FFmpeg if OpenCV fails
-            return self._get_specific_frame(frame_index, update_current_index=False, use_thumbnail=True)
-
-    def _get_vr_video_filters(self) -> List[str]:
-        """Builds the list of FFmpeg filter segments for VR video, including cropping and v360."""
-        from config.constants import ENABLE_GPU_UNWARP
-
-        if not self.video_info:
-            return []
-
-        original_width = self.video_info.get('width', 0)
-        original_height = self.video_info.get('height', 0)
-        v_h_FOV = 90  # Default vertical and horizontal FOV for the output projection
-
-        vr_filters = []
-        is_sbs_format = '_sbs' in self.vr_input_format
-        is_tb_format = '_tb' in self.vr_input_format
-        is_lr_format = '_lr' in self.vr_input_format
-        is_rl_format = '_rl' in self.vr_input_format
-
-        if is_sbs_format and original_width > 0 and original_height > 0:
-            crop_w = original_width / 2
-            crop_h = original_height
-            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
-            self.logger.debug(f"Applying SBS pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
-        elif is_tb_format and original_width > 0 and original_height > 0:
-            crop_w = original_width
-            crop_h = original_height / 2
-            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
-            self.logger.info(f"Applying TB pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
-        elif is_lr_format and original_width > 0 and original_height > 0:
-            # LR format: left and right panels side-by-side, select left panel
-            crop_w = original_width / 2
-            crop_h = original_height
-            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
-            self.logger.info(f"Applying LR pre-crop (left panel): w={int(crop_w)} h={int(crop_h)} x=0 y=0")
-        elif is_rl_format and original_width > 0 and original_height > 0:
-            # RL format: right and left panels side-by-side, select right panel
-            crop_w = original_width / 2
-            crop_h = original_height
-            crop_x = int(original_width / 2)
-            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:{crop_x}:0")
-            self.logger.info(f"Applying RL pre-crop (right panel): w={int(crop_w)} h={int(crop_h)} x={crop_x} y=0")
-
-        # Check unwarp method override to decide between GPU unwarp and CPU v360
-        if self.vr_unwarp_method_override == 'v360':
-            # User selected CPU v360 - use FFmpeg v360 filter for unwrapping
-            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '').replace('_lr', '').replace('_rl', '')
-            v360_filter_core = (
-                f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
-                f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
-                f"d_fov={self.vr_fov}:"
-                f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
-                f"pitch={self.vr_pitch}:yaw=0:roll=0:"
-                f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=linear"
-            )
-            vr_filters.append(v360_filter_core)
-            self.logger.info(f"Using CPU v360 filter (user override): {v360_filter_core}")
-        elif ENABLE_GPU_UNWARP:
-            # GPU unwarp enabled (auto/metal/opengl) - skip v360, just scale
-            # Unwrapping will be done by GPU worker in tracker
-            vr_filters.append(f"scale={self.yolo_input_size}:{self.yolo_input_size}")
-            self.logger.info(f"GPU unwarp enabled (method={self.vr_unwarp_method_override}) - using crop+scale (v360 skipped)")
-        else:
-            # Fallback: GPU unwarp disabled globally
-            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '').replace('_lr', '').replace('_rl', '')
-            v360_filter_core = (
-                f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
-                f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
-                f"d_fov={self.vr_fov}:"
-                f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
-                f"pitch={self.vr_pitch}:yaw=0:roll=0:"
-                f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=linear"
-            )
-            vr_filters.append(v360_filter_core)
-            self.logger.info(f"Using CPU v360 filter (GPU unwarp disabled): {v360_filter_core}")
-
-        return vr_filters
-
-    def _build_ffmpeg_filter_string(self) -> str:
-        if self._is_using_preprocessed_video():
-            self.logger.info(f"Using preprocessed video source ('{os.path.basename(self._active_video_source_path)}'). No FFmpeg filters will be applied.")
-            return ""
-
-        if not self.video_info:
-            return ''
-
-        software_filter_segments = []
-        if self.determined_video_type == '2D':
-            software_filter_segments = self._get_2d_video_filters()
-        elif self.determined_video_type == 'VR':
-            software_filter_segments = self._get_vr_video_filters()
-
-        final_filter_chain_parts = []
-        if self._needs_hw_download() and software_filter_segments:
-            final_filter_chain_parts.extend(["hwdownload", "format=nv12"])
-            self.logger.info("Prepending 'hwdownload,format=nv12' to the software filter chain.")
-
-        final_filter_chain_parts.extend(software_filter_segments)
-        ffmpeg_filter = ",".join(final_filter_chain_parts)
-
-        self.logger.debug(
-            f"Built FFmpeg filter (effective for single pipe, or pipe2 of 10bit-CUDA): {ffmpeg_filter if ffmpeg_filter else 'No explicit filter, direct output.'}")
-        return ffmpeg_filter
-
-    def _get_ffmpeg_hwaccel_args(self) -> List[str]:
-        """Determines FFmpeg hardware acceleration arguments based on app settings."""
-        hwaccel_args: List[str] = []
-        selected_hwaccel = getattr(self.app, 'hardware_acceleration_method', 'none') if self.app else "none"
-        available_on_app = getattr(self.app, 'available_ffmpeg_hwaccels', []) if self.app else []
-
-        # Force hardware acceleration to "none" for 10-bit or preprocessed videos
-        is_10bit_video = self.video_info.get('bit_depth', 8) > 8
-        is_preprocessed_video = self._is_using_preprocessed_video()
-        
-        if is_10bit_video or is_preprocessed_video:
-            if is_10bit_video and is_preprocessed_video:
-                self.logger.info("Hardware acceleration forced to 'none' for 10-bit preprocessed video (compatibility)")
-            elif is_10bit_video:
-                self.logger.info("Hardware acceleration forced to 'none' for 10-bit video (compatibility)")
-            elif is_preprocessed_video:
-                self.logger.info("Hardware acceleration forced to 'none' for preprocessed video (compatibility)")
-            return []  # Return empty args = no hardware acceleration
-
-        system = platform.system().lower()
-        self.logger.debug(
-            f"Determining HWAccel. Selected: '{selected_hwaccel}', OS: {system}, App Available: {available_on_app}")
-
-        if selected_hwaccel == "auto":
-            # macOS: CPU-only is 6x faster than VideoToolbox for filter chains
-            # Benchmark: CPU 293 FPS vs VideoToolbox 47 FPS
-            if system == 'darwin':
-                hwaccel_args = []  # Use CPU-only decoding
-                self.logger.debug("Auto-selected CPU-only for macOS (6x faster than VideoToolbox for sequential processing with filters).")
-            # [REDUNDANCY REMOVED] - Combined Linux/Windows logic
-            elif system in ['linux', 'windows']:
-                if 'nvdec' in available_on_app or 'cuda' in available_on_app:
-                    chosen_nvidia_accel = 'nvdec' if 'nvdec' in available_on_app else 'cuda'
-                    hwaccel_args = ['-hwaccel', chosen_nvidia_accel, '-hwaccel_output_format', 'cuda']
-                    self.logger.debug(f"Auto-selected '{chosen_nvidia_accel}' (NVIDIA) for {system.capitalize()}.")
-                elif 'qsv' in available_on_app:
-                    hwaccel_args = ['-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv']
-                    self.logger.debug(f"Auto-selected 'qsv' (Intel) for {system.capitalize()}.")
-                elif system == 'linux' and 'vaapi' in available_on_app:
-                    hwaccel_args = ['-hwaccel', 'vaapi', '-hwaccel_output_format', 'vaapi']
-                    self.logger.debug("Auto-selected 'vaapi' for Linux.")
-                elif system == 'windows' and 'd3d11va' in available_on_app:
-                    hwaccel_args = ['-hwaccel', 'd3d11va']
-                    self.logger.debug("Auto-selected 'd3d11va' for Windows.")
-                elif system == 'windows' and 'dxva2' in available_on_app:
-                    hwaccel_args = ['-hwaccel', 'dxva2']
-                    self.logger.debug("Auto-selected 'dxva2' for Windows.")
-
-            if not hwaccel_args:
-                self.logger.info("Auto hardware acceleration: No compatible method found, using CPU decoding.")
-        elif selected_hwaccel != "none" and selected_hwaccel:
-            if selected_hwaccel in available_on_app:
-                hwaccel_args = ['-hwaccel', selected_hwaccel]
-                if selected_hwaccel == 'qsv':
-                    hwaccel_args.extend(['-hwaccel_output_format', 'qsv'])
-                elif selected_hwaccel in ['cuda', 'nvdec']:
-                    hwaccel_args.extend(['-hwaccel_output_format', 'cuda'])
-                elif selected_hwaccel == 'vaapi':
-                    hwaccel_args.extend(['-hwaccel_output_format', 'vaapi'])
-                self.logger.info(f"User-selected hardware acceleration: '{selected_hwaccel}'. Args: {hwaccel_args}")
-            else:
-                self.logger.warning(
-                    f"Selected HW accel '{selected_hwaccel}' not in FFmpeg's available list. Using CPU.")
-        else:
-            self.logger.debug("Hardware acceleration explicitly disabled (CPU decoding).")
-        return hwaccel_args
 
     def _terminate_process(self, process: Optional[subprocess.Popen], process_name: str, timeout_sec: float = 2.0):
         """
@@ -1842,7 +973,7 @@ class VideoProcessor:
             try:
                 if stream is not None:
                     stream.close()
-            except Exception:
+            except OSError:
                 pass
 
     def _terminate_ffmpeg_processes(self):
@@ -2143,6 +1274,18 @@ class VideoProcessor:
         target_frame = max(0, min(frame_index, self.total_frames - 1))
         self.logger.debug(f"Seek to frame {target_frame} (from {self.current_frame_index})")
 
+        # Update frame index immediately so the timeline doesn't snap back
+        # to the old position while the async decode is in progress
+        self.current_frame_index = target_frame
+
+        # If the target frame is cached, update current_frame immediately
+        # so the display shows the correct frame without waiting for the worker.
+        # Otherwise, clear current_frame to avoid showing the stale old frame.
+        with self.frame_cache_lock:
+            cached = self.frame_cache.get(target_frame)
+        with self.frame_lock:
+            self.current_frame = cached  # None if not cached — display will skip
+
         # Invalidate arrow-nav state since the user jumped to a new position
         self._clear_nav_state()
 
@@ -2188,8 +1331,11 @@ class VideoProcessor:
             # Coalesce loop: drain any pending seek requests that arrived during decode
             while True:
                 # Show instant thumbnail preview only (no buffer loading for scrubbing)
+                # update_current_index=False: seek_video() already set current_frame_index
+                # immediately. Letting _get_specific_frame overwrite it would race with
+                # newer coalesced seeks and cause the timeline to snap back.
                 seek_t0 = time.perf_counter()
-                new_frame = self._get_specific_frame(target_frame, immediate_display=False, use_thumbnail=True)
+                new_frame = self._get_specific_frame(target_frame, immediate_display=False, use_thumbnail=True, update_current_index=False)
                 seek_ms = (time.perf_counter() - seek_t0) * 1000
 
                 # Report scrub decode cost to perf monitor
@@ -2199,16 +1345,18 @@ class VideoProcessor:
                 with self.frame_lock:
                     self.current_frame = new_frame
 
-                if new_frame is None:
-                    self.logger.warning(f"Seek frame {target_frame} decode failed ({seek_ms:.1f}ms)")
-                    self.current_frame_index = target_frame
-
                 # Check if a newer seek target arrived while we were decoding
                 pending = self.seek_request_frame_index
                 if pending is not None and pending != target_frame:
                     target_frame = pending
                     self.seek_request_frame_index = None
                     continue  # Loop to serve the newer target
+
+                # Only update frame index for the FINAL decoded frame.
+                # During the loop, seek_video() already set current_frame_index
+                # immediately for each new seek request — overwriting here with
+                # an intermediate (stale) target would snap the timeline back.
+                self.current_frame_index = target_frame
                 break  # No pending request, we're done
 
             if was_processing and not was_paused:
@@ -2248,96 +1396,6 @@ class VideoProcessor:
             except Exception as e:
                 self.logger.error(f"Error processing frame with tracker in display_current_frame: {e}", exc_info=True)
 
-    def arrow_nav_forward(self, target_frame: int) -> Optional[np.ndarray]:
-        """Navigate forward using unified buffer + pipe.
-
-        3-tier lookup (no cv2 fallback):
-        1. Buffer hit — O(1), instant
-        2. Pipe at correct position — read + append
-        3. Restart pipe at target — read + append
-        """
-        if self.arrow_nav_in_progress:
-            return None
-
-        self.arrow_nav_in_progress = True
-        try:
-            # 1. Buffer lookup (O(1))
-            frame = self._buffer_lookup(target_frame)
-            if frame is not None:
-                self.current_frame_index = target_frame
-                return frame
-
-            # 2. Pipe at correct position — sequential read
-            if (self._ffmpeg_pipe is not None
-                    and self._ffmpeg_pipe.poll() is None
-                    and self._ffmpeg_read_position == target_frame):
-                frame = self._pipe_read_one()
-                if frame is not None:
-                    self._buffer_append(target_frame, frame)
-                    self.current_frame_index = target_frame
-                    return frame
-                else:
-                    self.logger.warning(f"Forward nav pipe read failed at frame {target_frame}")
-
-            # 3. Restart pipe at target
-            if self._start_unified_pipe(target_frame):
-                frame = self._pipe_read_one()
-                if frame is not None:
-                    self._buffer_append(target_frame, frame)
-                    self.current_frame_index = target_frame
-                    return frame
-                else:
-                    self.logger.warning(f"Forward nav pipe restart read failed at frame {target_frame}")
-            else:
-                self.logger.warning(f"Forward nav pipe restart failed at frame {target_frame}")
-
-            return None
-        finally:
-            self.arrow_nav_in_progress = False
-
-    def arrow_nav_backward(self, target_frame: int) -> Optional[np.ndarray]:
-        """Navigate backward using unified buffer + pipe.
-
-        2-tier lookup (no cv2 fallback):
-        1. Buffer hit — O(1), instant
-        2. Buffer miss — rebuild buffer centered on target (50% before, 50% after)
-        """
-        # 1. Buffer lookup (O(1))
-        frame = self._buffer_lookup(target_frame)
-        if frame is not None:
-            self.current_frame_index = target_frame
-            return frame
-
-        # 2. Buffer miss: rebuild centered on target_frame
-        #    Start pipe at target - capacity/2 so cursor lands in the middle.
-        half_buf = (self._frame_buffer.maxlen or 300) // 2
-        pipe_start = max(0, target_frame - half_buf)
-        frames_to_skip = target_frame - pipe_start  # frames to read before target
-
-        with self._frame_buffer_lock:
-            self._frame_buffer.clear()
-
-        if self._start_unified_pipe(pipe_start):
-            # Pre-fill buffer with frames before target
-            for i in range(frames_to_skip):
-                pre_frame = self._pipe_read_one()
-                if pre_frame is not None:
-                    self._buffer_append(pipe_start + i, pre_frame)
-                else:
-                    break
-
-            # Read the target frame itself
-            frame = self._pipe_read_one()
-            if frame is not None:
-                self._buffer_append(target_frame, frame)
-                self.current_frame_index = target_frame
-                return frame
-            else:
-                self.logger.warning(f"Backward nav pipe read failed at frame {target_frame}")
-        else:
-            self.logger.warning(f"Backward nav pipe restart failed at frame {target_frame}")
-
-        return None
 
     def _processing_loop(self):
         if not self.ffmpeg_process or self.ffmpeg_process.stdout is None:
@@ -2374,7 +1432,7 @@ class VideoProcessor:
                 while self.pause_event.is_set():
                     if self.stop_event.is_set():
                         break
-                    time.sleep(0.01)
+                    self.stop_event.wait(0.01)
 
                 if self.stop_event.is_set():
                     break
@@ -2454,7 +1512,8 @@ class VideoProcessor:
                 if speed_mode == constants.ProcessingSpeedMode.REALTIME:
                     target_delay = 1.0 / self.fps if self.fps > 0 else (1.0 / 30.0)
                 elif speed_mode == constants.ProcessingSpeedMode.SLOW_MOTION:
-                    target_delay = 1.0 / 10.0  # Fixed 10 FPS for slow-mo
+                    slo_mo_fps = getattr(self.app.app_state_ui, 'slow_motion_fps', 10.0)
+                    target_delay = 1.0 / max(1.0, slo_mo_fps)
                 else:  # Max Speed
                     target_delay = 0.0
                     
@@ -2508,16 +1567,24 @@ class VideoProcessor:
                 if self.ffmpeg_pipe1_process and self.ffmpeg_pipe1_process.poll() is not None:
                     pipe1_stderr = self.ffmpeg_pipe1_process.stderr.read(4096).decode(
                         errors='ignore') if self.ffmpeg_pipe1_process.stderr else ""
-                    self.logger.warning(
-                        f"FFmpeg Pipe 1 died. Exit: {self.ffmpeg_pipe1_process.returncode}. Stderr: {pipe1_stderr.strip()}. Stopping.")
+                    rc1 = self.ffmpeg_pipe1_process.returncode
+                    if rc1 != 0:
+                        self.logger.warning(
+                            f"FFmpeg Pipe 1 died. Exit: {rc1}. Stderr: {pipe1_stderr.strip()}.")
+                    else:
+                        self.logger.debug("FFmpeg Pipe 1 exited normally.")
                     self.is_processing = False
                     break
 
                 if loop_ffmpeg_process.poll() is not None:
-                    stderr_output = loop_ffmpeg_process.stderr.read(4096).decode(
-                        errors='ignore') if loop_ffmpeg_process.stderr else ""
-                    self.logger.warning(
-                        f"FFmpeg process died (pid={loop_ffmpeg_process.pid}). Exit: {loop_ffmpeg_process.returncode}. Stderr: {stderr_output.strip()}. Stopping.")
+                    rc = loop_ffmpeg_process.returncode
+                    if rc != 0:
+                        stderr_output = loop_ffmpeg_process.stderr.read(4096).decode(
+                            errors='ignore') if loop_ffmpeg_process.stderr else ""
+                        self.logger.warning(
+                            f"FFmpeg process died (pid={loop_ffmpeg_process.pid}). Exit: {rc}. Stderr: {stderr_output.strip()}.")
+                    else:
+                        self.logger.debug(f"FFmpeg process exited normally (pid={loop_ffmpeg_process.pid}).")
                     self.is_processing = False
                     break
 
@@ -2686,6 +1753,16 @@ class VideoProcessor:
                         next_frame_target_time = current_time + target_delay
         finally:
             self.logger.info(f"_processing_loop ending. is_processing: {self.is_processing}, stop_event: {self.stop_event.is_set()}")
+
+            # Notify playback state observers that playback stopped.
+            # stop_processing() does this for explicit stops, but natural exits
+            # (end of video, end frame limit, FFmpeg pipe death) skip stop_processing()
+            # entirely — leaving AudioVideoSync and DeviceControl thinking playback
+            # is still active, which causes audio/device activation on subsequent seeks.
+            if self._playback_state_callbacks:
+                current_time_ms = (self.current_frame_index / self.fps) * 1000.0 if self.fps > 0 else 0.0
+                self._notify_playback_state_callbacks(False, current_time_ms)
+
             self._terminate_process(self.ffmpeg_pipe1_process, "Pipe 1")
             self.ffmpeg_pipe1_process = None
             # Transfer processing pipe to unified pipe for reuse if still alive.
@@ -2703,341 +1780,18 @@ class VideoProcessor:
             self.is_processing = False
             self.last_processed_chapter_id = None
 
-    def _start_ffmpeg_for_segment_streaming(self, start_frame_abs_idx: int, num_frames_to_stream_hint: Optional[int] = None) -> bool:
-        self._terminate_ffmpeg_processes()
 
-        if not self.video_path or not self.video_info or self.video_info.get('fps', 0) <= 0:
-            self.logger.warning("Cannot start FFmpeg for segment: no video/invalid FPS.")
-            return False
-
-        start_time_seconds = start_frame_abs_idx / self.video_info['fps']
-        
-        # Optimize ffmpeg for MAX_SPEED processing (segment streaming)
-        common_ffmpeg_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
-        
-        # Add MAX_SPEED optimizations if in MAX_SPEED mode
-        if (hasattr(self.app, 'app_state_ui') and 
-            hasattr(self.app.app_state_ui, 'selected_processing_speed_mode') and
-            self.app.app_state_ui.selected_processing_speed_mode == constants.ProcessingSpeedMode.MAX_SPEED):
-            # Same aggressive optimizations for segment streaming
-            # Hardware acceleration: Handled by individual pipe paths (don't add to common prefix)
-            
-            # Add speed optimizations (hardware acceleration handled by pipe-specific code)
-            # NOTE: -preset and -tune are encoding options, not decoding options
-            common_ffmpeg_prefix.extend([
-                '-fflags', '+genpts+fastseek', 
-                '-threads', '0',
-                '-probesize', '32',
-                '-analyzeduration', '1'
-            ])
-            self.logger.info("FFmpeg segment streaming optimized for MAX_SPEED with fast decode")
-
-        if self._is_10bit_cuda_pipe_needed():
-            self.logger.info("Using 2-pipe FFmpeg command for 10-bit CUDA segment streaming.")
-            video_height_for_crop = self.video_info.get('height', 0)
-            if video_height_for_crop <= 0:
-                self.logger.error("Cannot construct 10-bit CUDA pipe 1 for segment: video height is unknown.")
-                return False
-
-            pipe1_vf = f"crop={int(video_height_for_crop)}:{int(video_height_for_crop)}:0:0,scale_cuda=1000:1000"
-            cmd1 = common_ffmpeg_prefix[:]
-            cmd1.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
-            if start_time_seconds > 0.001: cmd1.extend(['-ss', str(start_time_seconds)])
-            cmd1.extend(['-i', self._active_video_source_path, '-an', '-sn', '-vf', pipe1_vf])
-            if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
-                cmd1.extend(['-frames:v', str(num_frames_to_stream_hint)])
-            cmd1.extend(['-c:v', 'hevc_nvenc', '-preset', 'fast', '-qp', '0', '-f', 'matroska', 'pipe:1'])
-
-            cmd2 = common_ffmpeg_prefix[:]
-            cmd2.extend(['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn'])
-            effective_vf_pipe2 = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-            cmd2.extend(['-vf', effective_vf_pipe2])
-            if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
-                cmd2.extend(['-frames:v', str(num_frames_to_stream_hint)])
-            # Always use BGR24 - GPU unwarp worker handles BGR->RGBA conversion internally
-            cmd2.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
-
-            self.logger.info(f"Segment Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
-            self.logger.info(f"Segment Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
-            try:
-                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=-1, creationflags=creation_flags)
-                if self.ffmpeg_pipe1_process.stdout is None:
-                    raise IOError("Segment Pipe 1 stdout is None.")
-                self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=-1, creationflags=creation_flags)
-                self.ffmpeg_pipe1_process.stdout.close()
-                return True
-            except Exception as e:
-                self.logger.error(f"Failed to start 2-pipe FFmpeg for segment: {e}", exc_info=True)
-                self._terminate_ffmpeg_processes()
-                return False
-        else:
-            # Standard single FFmpeg process for 8-bit or non-CUDA accelerated video
-            hwaccel_cmd_list = self._get_ffmpeg_hwaccel_args()
-            ffmpeg_input_options = hwaccel_cmd_list[:]
-            if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
-            ffmpeg_cmd = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
-            effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-            ffmpeg_cmd.extend(['-vf', effective_vf])
-
-            if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
-                ffmpeg_cmd.extend(['-frames:v', str(num_frames_to_stream_hint)])
-
-            # Use RGBA for GPU unwarp to skip BGR->RGBA conversion
-            pix_fmt = 'rgba' if self.gpu_unwarp_enabled else 'bgr24'
-            ffmpeg_cmd.extend(['-pix_fmt', pix_fmt, '-f', 'rawvideo', 'pipe:1'])
-            self.logger.info(f"Segment CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
-            try:
-                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=-1, creationflags=creation_flags)
-                return True
-            except Exception as e:
-                self.logger.warning(f"Failed to start FFmpeg for segment: {e}", exc_info=True)
-                self.ffmpeg_process = None
-                return False
-
-    def stream_frames_for_segment(self, start_frame_abs_idx: int, num_frames_to_read: int, stop_event: Optional[threading.Event] = None) -> Iterator[Tuple[int, np.ndarray, dict]]:
-        if num_frames_to_read <= 0:
-            self.logger.warning("num_frames_to_read is not positive, no frames to stream.")
-            return
-
-        if not self._start_ffmpeg_for_segment_streaming(start_frame_abs_idx, num_frames_to_read):
-            self.logger.warning(f"Failed to start FFmpeg for segment from {start_frame_abs_idx}.")
-            return
-
-        frames_yielded = 0
-        segment_ffmpeg_process = self.ffmpeg_process
-        try:
-            for i in range(num_frames_to_read):
-                if stop_event and stop_event.is_set():
-                    self.logger.info("Stop event detected in stream_frames_for_segment. Aborting stream.")
-                    break
-
-                if not segment_ffmpeg_process or segment_ffmpeg_process.stdout is None:
-                    self.logger.warning("FFmpeg process or stdout not available during segment streaming.")
-                    break
-
-                if segment_ffmpeg_process.poll() is not None:
-                    stderr_output = segment_ffmpeg_process.stderr.read(4096).decode(errors='ignore') if segment_ffmpeg_process.stderr else ""
-                    self.logger.warning(
-                        f"FFmpeg process (segment) terminated prematurely. Exit: {segment_ffmpeg_process.returncode}. Stderr: '{stderr_output.strip()}'")
-                    break
-
-                t_decode_start = time.time()
-                raw_frame_bytes = segment_ffmpeg_process.stdout.read(self.frame_size_bytes)
-                decode_ms = (time.time() - t_decode_start) * 1000.0
-                if len(raw_frame_bytes) < self.frame_size_bytes:
-                    stderr_on_short_read = segment_ffmpeg_process.stderr.read(4096).decode(errors='ignore') if segment_ffmpeg_process.stderr else ""
-                    self.logger.info(
-                        f"End of FFmpeg stream or error (read {len(raw_frame_bytes)}/{self.frame_size_bytes}) "
-                        f"after {frames_yielded} frames for segment (start {start_frame_abs_idx}). Stderr: '{stderr_on_short_read.strip()}'")
-                    break
-
-                # Always use BGR24 format (3 bytes per pixel)
-                expected_size = self.yolo_input_size * self.yolo_input_size * 3
-                actual_bytes = len(raw_frame_bytes)
-
-                # Validate frame size
-                if actual_bytes != expected_size:
-                    self.logger.error(f"Invalid frame size: {actual_bytes} bytes (expected {expected_size}). Skipping frame.")
-                    continue
-
-                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
-
-                # Apply GPU unwarp for VR frames if enabled
-                unwarp_ms = 0.0
-                if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
-                    t_unwarp_start = time.time()
-                    current_frame_id = start_frame_abs_idx + frames_yielded
-                    self.gpu_unwarp_worker.submit_frame(current_frame_id, frame_np,
-                                                       timestamp_ms=current_frame_id * (1000.0 / self.fps) if self.fps > 0 else 0.0,
-                                                       timeout=0.1)
-                    unwarp_result = self.gpu_unwarp_worker.get_unwrapped_frame(timeout=0.5)
-                    if unwarp_result is not None:
-                        _, frame_np, _ = unwarp_result
-                    else:
-                        self.logger.warning(f"GPU unwarp timeout for segment frame {current_frame_id}")
-                    unwarp_ms = (time.time() - t_unwarp_start) * 1000.0
-
-                current_frame_id = start_frame_abs_idx + frames_yielded
-                yield current_frame_id, frame_np, {'decode_ms': decode_ms, 'unwarp_ms': unwarp_ms}
-                frames_yielded += 1
-        finally:
-            self._terminate_ffmpeg_processes()
-
-    def set_target_fps(self, fps: float):
-        self.target_fps = max(1.0, fps if fps > 0 else 1.0)
-    
     # ============================================================================
     # Single FFmpeg Dual-Output Integration Methods
     # ============================================================================
     
-    def enable_dual_output_mode(self, fullscreen_resolution: Optional[Tuple[int, int]] = None) -> bool:
-        """
-        Enable single FFmpeg dual-output mode for perfect synchronization.
-        
-        Args:
-            fullscreen_resolution: Target resolution for fullscreen frames
-            
-        Returns:
-            True if enabled successfully
-        """
-        try:
-            if self.dual_output_enabled:
-                self.logger.warning("Dual-output mode already enabled")
-                return True
-            
-            # Enable dual output processor
-            self.dual_output_processor.enable_dual_output_mode(fullscreen_resolution)
-            
-            if self.dual_output_processor.dual_output_enabled:
-                self.dual_output_enabled = True
-                self.logger.info("🎯 VideoProcessor dual-output mode enabled")
-                return True
-            else:
-                self.logger.error("Failed to enable dual-output processor")
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"Error enabling dual-output mode: {e}")
-            return False
     
-    def disable_dual_output_mode(self) -> bool:
-        """
-        Disable dual-output mode and return to standard processing.
-        
-        Returns:
-            True if disabled successfully
-        """
-        try:
-            if not self.dual_output_enabled:
-                self.logger.info("Dual-output mode already disabled")
-                return True
-            
-            # Disable dual output processor
-            self.dual_output_processor.disable_dual_output_mode()
-            self.dual_output_enabled = False
-            
-            self.logger.info("✅ VideoProcessor dual-output mode disabled")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error disabling dual-output mode: {e}")
-            return False
-    
-    def is_dual_output_active(self) -> bool:
-        """Check if dual-output mode is active."""
-        return (self.dual_output_enabled and 
-                self.dual_output_processor.is_dual_output_active())
-    
-    def get_dual_output_frames(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """
-        Get synchronized processing and fullscreen frames from dual output.
-        
-        Returns:
-            Tuple of (processing_frame, fullscreen_frame)
-        """
-        if not self.dual_output_enabled:
-            return None, None
-        return self.dual_output_processor.get_dual_frames()
-    
-    def get_fullscreen_frame(self) -> Optional[np.ndarray]:
-        """Get the latest fullscreen frame for display."""
-        if not self.dual_output_enabled:
-            return None
-        return self.dual_output_processor.get_fullscreen_frame()
-    
-    def get_audio_buffer(self) -> Optional[np.ndarray]:
-        """Get the latest audio buffer for sound."""
-        if not self.dual_output_enabled:
-            return None
-        return self.dual_output_processor.get_audio_buffer()
-    
-    def get_dual_output_stats(self) -> Dict[str, Any]:
-        """Get statistics about dual-output processing."""
-        if not self.dual_output_enabled:
-            return {'dual_output_enabled': False}
-        return self.dual_output_processor.get_frame_stats()
-    
-    def _start_dual_output_ffmpeg_process(self, start_frame_abs_idx=0, num_frames_to_output_ffmpeg=None) -> bool:
-        """
-        Start FFmpeg process using the single FFmpeg dual-output architecture.
-        
-        Args:
-            start_frame_abs_idx: Starting frame index
-            num_frames_to_output_ffmpeg: Number of frames to output (optional)
-            
-        Returns:
-            True if started successfully
-        """
-        try:
-            if not self.dual_output_processor.dual_output_enabled:
-                self.logger.error("Dual output processor not enabled")
-                return False
-            
-            start_time_seconds = start_frame_abs_idx / self.video_info['fps']
-            self.current_stream_start_frame_abs = start_frame_abs_idx
-            self.frames_read_from_current_stream = 0
-            
-            # Build base FFmpeg command
-            base_cmd = self._build_base_ffmpeg_command(start_time_seconds, num_frames_to_output_ffmpeg)
-            
-            # Enhance command for dual output
-            dual_output_cmd = self.dual_output_processor.build_single_ffmpeg_dual_output_command(base_cmd)
-            
-            # Start the single FFmpeg process with dual outputs
-            success = self.dual_output_processor.start_single_ffmpeg_process(dual_output_cmd)
-            
-            if success:
-                self.logger.info("✅ Single FFmpeg dual-output process started successfully")
-                return True
-            else:
-                self.logger.error("❌ Failed to start single FFmpeg dual-output process")
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"Error starting dual-output FFmpeg process: {e}")
-            return False
-    
-    def _build_base_ffmpeg_command(self, start_time_seconds: float, num_frames_to_output: Optional[int] = None) -> List[str]:
-        """
-        Build base FFmpeg command with input arguments and filters.
-        
-        Args:
-            start_time_seconds: Start time in seconds
-            num_frames_to_output: Number of frames to output (optional)
-            
-        Returns:
-            Base FFmpeg command list
-        """
-        cmd = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
-        
-        # Add hardware acceleration arguments
-        hwaccel_args = self._get_ffmpeg_hwaccel_args()
-        cmd.extend(hwaccel_args)
-        
-        # Add input file with seeking
-        cmd.extend(['-ss', str(start_time_seconds), '-i', self.video_path])
-        
-        # Add frame limiting if specified
-        if num_frames_to_output and num_frames_to_output > 0:
-            cmd.extend(['-frames:v', str(num_frames_to_output)])
-        
-        # Add audio and subtitle options
-        cmd.extend(['-an', '-sn'])  # No audio, no subtitles initially (dual processor handles audio separately)
-        
-        # Add video filter for processing
-        effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-        cmd.extend(['-vf', effective_vf])
-        
-        return cmd
-
     def is_video_open(self) -> bool:
         """Checks if a video is currently loaded and has valid information."""
         return bool(self.video_path and self.video_info and self.video_info.get('total_frames', 0) > 0)
 
     def reset(self, close_video=False, skip_tracker_reset=False):
-        self.logger.info("Resetting VideoProcessor...")
+        self.logger.debug("Resetting VideoProcessor...")
         self.stop_processing(join_thread=True)
         self._clear_cache()
         self.current_frame_index = 0
@@ -3055,7 +1809,7 @@ class VideoProcessor:
             self.video_info = {}
             self.determined_video_type = None
             self.ffmpeg_filter_string = ""
-            self.logger.info("Video closed. Params reset.")
+            self.logger.debug("Video closed. Params reset.")
         with self.frame_lock:
             self.current_frame = None
         if self.video_path and self.video_info and not close_video:
@@ -3065,7 +1819,7 @@ class VideoProcessor:
             self.current_frame = None
         if self.app and hasattr(self.app, 'on_processing_stopped'):
             self.app.on_processing_stopped(was_scripting_session=False, scripted_frame_range=None)
-        self.logger.info("VideoProcessor reset complete.")
+        self.logger.debug("VideoProcessor reset complete.")
 
     def _validate_preprocessed_video(self, video_path: str, expected_frames: int, expected_fps: float) -> bool:
         """

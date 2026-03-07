@@ -1,258 +1,158 @@
 """
-OpenCV-based thumbnail extractor for fast random frame access.
+FFmpeg-based thumbnail extractor for frame-accurate random access.
 
-This module provides efficient thumbnail generation using OpenCV's VideoCapture,
-which maintains a persistent video connection for faster seeking compared to
-spawning new FFmpeg processes.
+Uses FFmpeg with input-level -ss seeking for reliable, frame-accurate
+single-frame extraction across all codecs (H.264, HEVC, AV1, etc.).
+
+For VR content, applies the same v360 CPU dewarp filter used by the main
+processing pipeline (benchmark shows it adds negligible cost vs decode).
 """
 
-import cv2
+import subprocess
+import sys
 import numpy as np
 import logging
-from typing import Optional, Tuple
+from typing import Optional
 from threading import Lock
 
 
 class ThumbnailExtractor:
     """
-    Fast thumbnail extractor using OpenCV VideoCapture.
+    Frame-accurate thumbnail extractor using FFmpeg subprocess.
 
-    Advantages over FFmpeg spawning:
-    - Persistent video connection (no process creation overhead)
-    - Faster seeking for random frame access
-    - Optional GPU unwarp integration for VR content
+    Video properties (fps, dimensions, etc.) are passed from the video
+    processor at init time — no redundant ffprobe calls.
     """
 
-    def __init__(self, video_path: str, logger: Optional[logging.Logger] = None,
-                 gpu_unwarp_worker=None, output_size: int = 640,
-                 vr_input_format: str = None):
-        """
-        Initialize thumbnail extractor.
-
-        Args:
-            video_path: Path to video file
-            logger: Optional logger instance
-            gpu_unwarp_worker: Optional GPU unwarp worker for VR content
-            output_size: Size for output thumbnails (width and height)
-            vr_input_format: VR format (e.g., 'fisheye_sbs', 'he_tb') for panel cropping.
-                           If None, video is treated as 2D and will be padded to square.
-        """
+    def __init__(self, video_path: str, fps: float, total_frames: int,
+                 output_size: int = 320, vr_input_format: str = None,
+                 vr_fov: int = 190, vr_pitch: float = 0.0,
+                 logger: Optional[logging.Logger] = None):
         self.video_path = video_path
         self.logger = logger or logging.getLogger(__name__)
-        self.gpu_unwarp_worker = gpu_unwarp_worker
         self.output_size = output_size
+        self.fps = fps
+        self.total_frames = total_frames
         self.vr_input_format = vr_input_format
+        self.vr_fov = vr_fov
+        self.vr_pitch = vr_pitch
 
-        # Thread-safe VideoCapture access
         self.lock = Lock()
-        self.cap: Optional[cv2.VideoCapture] = None
-        self.is_open = False
-        self._last_read_index: int = -1  # Tracks cap position for sequential-read optimisation
-
-        # Video properties
-        self.fps = 0.0
-        self.total_frames = 0
-        self.width = 0
-        self.height = 0
+        self.is_open = fps > 0 and total_frames > 0
 
         # VR format detection
-        # SBS-left includes: _sbs, _lr (left-right) - crop to left panel
-        # SBS-right includes: _rl (right-left) - crop to right panel
-        # TB includes: _tb (top-bottom) - crop to top panel
         vr_fmt = (vr_input_format or '').lower()
         self.is_sbs_left = '_sbs' in vr_fmt or '_lr' in vr_fmt
         self.is_sbs_right = '_rl' in vr_fmt
         self.is_tb = '_tb' in vr_fmt
+        self.is_vr = vr_input_format is not None
 
-        # 2D video handling (if vr_input_format is None, treat as 2D)
-        self.is_2d = vr_input_format is None
+        # Pre-build the filter string once
+        self._vf = self._build_vf_filters()
 
-        # Open video
-        self._open_video()
+        if self.is_open:
+            self.logger.debug(
+                f"ThumbnailExtractor: {fps:.2f} FPS, "
+                f"{total_frames} frames, output={output_size}px"
+            )
 
-    def _open_video(self) -> bool:
-        """Open video with OpenCV VideoCapture."""
-        try:
-            with self.lock:
-                self.cap = cv2.VideoCapture(self.video_path)
+    def _build_vf_filters(self) -> str:
+        """Build FFmpeg video filter string."""
+        filters = []
 
-                if not self.cap.isOpened():
-                    self.logger.error(f"ThumbnailExtractor: Failed to open video: {self.video_path}")
-                    return False
+        if self.is_vr:
+            # VR: crop to single eye panel
+            if self.is_sbs_left:
+                filters.append('crop=iw/2:ih:0:0')
+            elif self.is_sbs_right:
+                filters.append('crop=iw/2:ih:iw/2:0')
+            elif self.is_tb:
+                filters.append('crop=iw:ih/2:0:0')
 
-                # Get video properties
-                self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-                self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            # v360 dewarp (CPU) — negligible cost vs decode on 8K HEVC
+            base_fmt = (self.vr_input_format or '').replace(
+                '_sbs', '').replace('_tb', '').replace('_lr', '').replace('_rl', '')
+            filters.append(
+                f'v360={base_fmt}:in_stereo=0:output=sg:'
+                f'iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:'
+                f'd_fov={self.vr_fov}:'
+                f'v_fov=90:h_fov=90:'
+                f'pitch={self.vr_pitch}:yaw=0:roll=0:'
+                f'w={self.output_size}:h={self.output_size}:interp=linear'
+            )
+        else:
+            # 2D: scale preserving aspect ratio, pad to square
+            filters.append(
+                f'scale={self.output_size}:{self.output_size}'
+                f':force_original_aspect_ratio=decrease,'
+                f'pad={self.output_size}:{self.output_size}'
+                f':(ow-iw)/2:(oh-ih)/2:black'
+            )
 
-                self.is_open = True
-                self.logger.info(
-                    f"ThumbnailExtractor opened: {self.width}x{self.height} @ {self.fps:.2f} FPS, "
-                    f"{self.total_frames} frames"
-                )
-                return True
+        return ','.join(filters)
 
-        except Exception as e:
-            self.logger.error(f"ThumbnailExtractor: Error opening video: {e}")
-            return False
-
-    def get_frame(self, frame_index: int, use_gpu_unwarp: bool = True) -> Optional[np.ndarray]:
+    def get_frame(self, frame_index: int, **_kwargs) -> Optional[np.ndarray]:
         """
-        Extract a single frame at the specified index.
-
-        Args:
-            frame_index: Frame index to extract
-            use_gpu_unwarp: Whether to apply GPU unwarp for VR content (if worker available)
+        Extract a single frame at the specified index using FFmpeg.
 
         Returns:
-            Frame as numpy array (BGR24 format, self.output_size x self.output_size)
-            or None if extraction failed
+            Frame as BGR24 numpy array (output_size x output_size) or None.
         """
-        if not self.is_open or self.cap is None:
-            self.logger.warning("ThumbnailExtractor: Video not open")
+        if not self.is_open:
             return None
 
-        # Validate frame index
-        if frame_index < 0 or (self.total_frames > 0 and frame_index >= self.total_frames):
-            self.logger.warning(
-                f"ThumbnailExtractor: Frame index {frame_index} out of range [0, {self.total_frames})"
-            )
+        if frame_index < 0 or frame_index >= self.total_frames:
             return None
 
         try:
             with self.lock:
-                # Fast path: if we just read frame N-1, the cap is already at N
-                # so we can skip the expensive seek (huge win for HEVC / 8K).
-                if frame_index == self._last_read_index + 1:
-                    ret, frame = self.cap.read()
-                    self.logger.debug(f"ThumbnailExtractor: sequential read frame {frame_index}")
-                else:
-                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-                    ret, frame = self.cap.read()
-                    self.logger.debug(
-                        f"ThumbnailExtractor: seek+read frame {frame_index} "
-                        f"(last was {self._last_read_index})"
-                    )
+                seek_time = frame_index / self.fps
 
-                if not ret or frame is None:
-                    self.logger.warning(f"ThumbnailExtractor: Failed to read frame {frame_index}")
-                    self._last_read_index = -1  # Reset on failure
-                    return None
+                cmd = [
+                    'ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error',
+                    '-ss', f'{seek_time:.6f}',
+                    '-i', self.video_path,
+                    '-vf', self._vf,
+                    '-frames:v', '1',
+                    '-pix_fmt', 'bgr24',
+                    '-f', 'rawvideo',
+                    'pipe:1'
+                ]
 
-                self._last_read_index = frame_index
-
-            # Crop VR panel if needed (left/right for SBS, top for TB)
-            if self.is_sbs_left and frame.shape[1] > 0:
-                # Side-by-side (SBS/LR): crop to left half
-                half_width = frame.shape[1] // 2
-                frame = frame[:, :half_width]
-                self.logger.debug(f"Cropped SBS/LR to left panel: {frame.shape}")
-            elif self.is_sbs_right and frame.shape[1] > 0:
-                # Right-left (RL): crop to right half
-                half_width = frame.shape[1] // 2
-                frame = frame[:, half_width:]
-                self.logger.debug(f"Cropped RL to right panel: {frame.shape}")
-            elif self.is_tb and frame.shape[0] > 0:
-                # Top-bottom: crop to top half
-                half_height = frame.shape[0] // 2
-                frame = frame[:half_height, :]
-                self.logger.debug(f"Cropped TB to top panel: {frame.shape}")
-
-            # For 2D videos, pad to square. For VR, resize (already cropped to single eye)
-            if self.is_2d:
-                # Pad 2D video to square (letterbox/pillarbox)
-                h, w = frame.shape[:2]
-
-                if h == w:
-                    # Already square, just resize
-                    frame_resized = cv2.resize(frame, (self.output_size, self.output_size),
-                                              interpolation=cv2.INTER_AREA)
-                else:
-                    # Calculate scaling to fit within output_size while maintaining aspect ratio
-                    scale = self.output_size / max(h, w)
-                    new_h = int(h * scale)
-                    new_w = int(w * scale)
-
-                    # Resize maintaining aspect ratio
-                    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-
-                    # Create black canvas
-                    frame_resized = np.zeros((self.output_size, self.output_size, 3), dtype=np.uint8)
-
-                    # Center the resized frame on the canvas
-                    y_offset = (self.output_size - new_h) // 2
-                    x_offset = (self.output_size - new_w) // 2
-                    frame_resized[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
-
-                    self.logger.debug(f"Padded 2D frame from {w}x{h} to {self.output_size}x{self.output_size}")
-            else:
-                # VR content: just resize (already cropped to single eye)
-                frame_resized = cv2.resize(frame, (self.output_size, self.output_size),
-                                          interpolation=cv2.INTER_AREA)
-
-            # Apply GPU unwarp for VR content if available
-            if use_gpu_unwarp and self.gpu_unwarp_worker is not None:
-                # Convert BGR to RGBA for GPU unwarp
-                rgba_frame = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGBA)
-
-                # Submit to GPU unwarp worker
-                timestamp_ms = (frame_index / self.fps * 1000.0) if self.fps > 0 else 0.0
-                self.gpu_unwarp_worker.submit_frame(
-                    frame_index, rgba_frame, timestamp_ms=timestamp_ms, timeout=0.1
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                proc = subprocess.run(
+                    cmd, capture_output=True, timeout=10,
+                    creationflags=creation_flags
                 )
 
-                # Get unwrapped result
-                unwarp_result = self.gpu_unwarp_worker.get_unwrapped_frame(timeout=0.5)
+                frame_size = self.output_size * self.output_size * 3
+                if len(proc.stdout) < frame_size:
+                    self.logger.warning(
+                        f"ThumbnailExtractor: Incomplete data for frame {frame_index} "
+                        f"(got {len(proc.stdout)}/{frame_size})"
+                    )
+                    return None
 
-                if unwarp_result is not None:
-                    _, frame_resized, _ = unwarp_result
-                    self.logger.debug(f"GPU unwarp applied to thumbnail frame {frame_index}")
-                else:
-                    self.logger.debug(f"GPU unwarp timeout for thumbnail frame {frame_index}, using original")
-                    # Keep original frame if unwarp fails
+                return np.frombuffer(
+                    proc.stdout[:frame_size], dtype=np.uint8
+                ).reshape(self.output_size, self.output_size, 3)
 
-            return frame_resized
-
+        except subprocess.TimeoutExpired:
+            self.logger.warning(f"ThumbnailExtractor: FFmpeg timeout for frame {frame_index}")
+            return None
         except Exception as e:
             self.logger.error(f"ThumbnailExtractor: Error extracting frame {frame_index}: {e}")
             return None
 
-    def get_frame_at_time(self, time_seconds: float, use_gpu_unwarp: bool = True) -> Optional[np.ndarray]:
-        """
-        Extract frame at specified timestamp.
-
-        Args:
-            time_seconds: Time in seconds
-            use_gpu_unwarp: Whether to apply GPU unwarp for VR content
-
-        Returns:
-            Frame as numpy array or None
-        """
-        if self.fps <= 0:
-            self.logger.warning("ThumbnailExtractor: Invalid FPS")
-            return None
-
-        frame_index = int(time_seconds * self.fps)
-        return self.get_frame(frame_index, use_gpu_unwarp=use_gpu_unwarp)
-
     def close(self):
-        """Release VideoCapture resources."""
-        with self.lock:
-            if self.cap is not None:
-                self.cap.release()
-                self.cap = None
-                self.is_open = False
-                self.logger.info("ThumbnailExtractor closed")
+        """No persistent connection to close."""
+        self.is_open = False
 
     def __del__(self):
-        """Ensure VideoCapture is released on deletion."""
         self.close()
 
     def __enter__(self):
-        """Context manager entry."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
         self.close()

@@ -8,7 +8,6 @@ and axis projection with clear, debuggable logic.
 import cv2
 import numpy as np
 import time
-import logging
 from typing import Optional, Dict, Any, Tuple, List
 from collections import deque
 
@@ -74,8 +73,8 @@ class WorkingAxisProjectionTracker(BaseTracker):
     @property
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
-            name="axis_projection_working",
-            display_name="Working Axis Projection Tracker",
+            name="LEGACY_AXIS_PROJECTION_WORKING",
+            display_name="Working Axis Projection",
             description="Simplified but reliable motion tracking with axis projection",
             category="live",
             version="1.0.0",

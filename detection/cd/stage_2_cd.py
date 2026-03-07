@@ -3,7 +3,7 @@ import msgpack
 import threading
 import math
 import os
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple
 import logging
 import cv2
 from scipy.signal import savgol_filter, find_peaks
@@ -12,7 +12,6 @@ from multiprocessing import Pool
 import multiprocessing
 import psutil
 import time
-import tempfile
 
 from video import VideoProcessor
 from config import constants
@@ -787,171 +786,6 @@ def resilient_tracker_step0(app, frames: List, video_info: Dict, logger: Optiona
     if logger:
         logger.debug(f"Tracking complete. Final ID count: {next_global_track_id - 1}")
 
-
-def prev_resilient_tracker_step0(app, frames: List, video_info: Dict, logger: Optional[logging.Logger]):
-    """
-    An improved IoU-based tracker with state persistence to handle occlusions.
-    This replaces the previous simple tracker.
-    """
-    if not logger:
-        logger = logging.getLogger("ResilientTracker")
-
-    if logger:
-        logger.debug("Starting Step 0: Resilient Object Tracking")
-
-    # --- Configuration for the new tracker ---
-    fps = video_info.get('fps', 30.0)
-    IOU_THRESHOLD = 0.5  # Min overlap to be considered the same object in consecutive frames.
-    MAX_FRAMES_TO_BECOME_LOST = int(fps * 1.5)  # A track is "lost" if unseen for 1.5s.
-    MAX_FRAMES_IN_LOST_STATE = int(fps * 8)  # A "lost" track is permanently deleted after 8s.
-    REID_DISTANCE_THRESHOLD_FACTOR = 1.0  # Search radius for re-identification is 1x the object's size.
-    
-    # Class-specific thresholds
-    CLASS_SPECIFIC_IOU = {
-        'hand': 0.4,  # Hands move quickly, more permissive
-        'finger': 0.35,
-        'pussy': 0.6,  # Body parts should be more stable
-        'butt': 0.6,
-        'face': 0.55,
-        'breast': 0.5,
-        'foot': 0.45
-    }
-    
-    MAX_NEW_TRACKS_PER_FRAME = 3  # Limit new track creation per frame
-
-    next_global_track_id = 1
-    active_tracks: Dict[int, Dict[str, Any]] = {}
-    lost_tracks: Dict[int, Dict[str, Any]] = {}
-
-    for frame_obj in sorted(frames, key=lambda f: f.frame_id):
-        current_detections = [b for b in frame_obj.boxes if not b.is_excluded]
-        unmatched_detections = list(range(len(current_detections)))
-
-        # --- 1. Update and Prune Tracks ---
-        tracks_to_move_to_lost = []
-        for track_id, track_data in active_tracks.items():
-            track_data["frames_unseen"] += 1
-            if track_data["frames_unseen"] > MAX_FRAMES_TO_BECOME_LOST:
-                tracks_to_move_to_lost.append(track_id)
-
-        for track_id in tracks_to_move_to_lost:
-            lost_tracks[track_id] = active_tracks.pop(track_id)
-            if logger:
-                logger.debug(f"Track {track_id} ({lost_tracks[track_id]['class_name']}) moved to 'lost' state.")
-
-        tracks_to_delete_permanently = []
-        for track_id, track_data in lost_tracks.items():
-            track_data["frames_unseen"] += 1
-            if track_data["frames_unseen"] > MAX_FRAMES_IN_LOST_STATE:
-                tracks_to_delete_permanently.append(track_id)
-
-        for track_id in tracks_to_delete_permanently:
-            del lost_tracks[track_id]
-            if logger:
-                logger.debug(f"Track {track_id} permanently deleted.")
-
-        # --- 2. Match Active Tracks ---
-        for track_id, track_data in active_tracks.items():
-            best_match_idx, max_iou = -1, -1
-            class_name = track_data["class_name"]
-            class_iou_threshold = CLASS_SPECIFIC_IOU.get(class_name, IOU_THRESHOLD)
-            
-            for i in unmatched_detections:
-                det_box = current_detections[i]
-                if det_box.class_name == class_name:
-                    iou = _calculate_iou(track_data["box_rec"].bbox, det_box.bbox)
-                    # Additional validation: check size consistency
-                    size_ratio = min(det_box.width / track_data["box_rec"].width, 
-                                   det_box.height / track_data["box_rec"].height)
-                    size_consistency = size_ratio > 0.5 and size_ratio < 2.0  # Allow 50%-200% size variation
-                    
-                    if iou > class_iou_threshold and iou > max_iou and size_consistency:
-                        max_iou = iou
-                        best_match_idx = i
-
-            if best_match_idx != -1:
-                det_box = current_detections[best_match_idx]
-                det_box.track_id = track_id
-                track_data["box_rec"] = det_box
-                track_data["frames_unseen"] = 0
-                unmatched_detections.remove(best_match_idx)
-
-        # --- 3. Re-Identify and Match Lost Tracks ---
-        for i in list(unmatched_detections):  # Iterate over a copy
-            new_det = current_detections[i]
-            best_lost_match_id, min_score = -1, float('inf')
-
-            for track_id, track_data in lost_tracks.items():
-                if new_det.class_name == track_data["class_name"]:
-                    # Use center-to-center distance instead of top-left corner
-                    old_center = (track_data["box_rec"].cx, track_data["box_rec"].cy)
-                    new_center = (new_det.cx, new_det.cy)
-                    center_dist = np.linalg.norm(np.array(new_center) - np.array(old_center))
-                    
-                    # Tighter re-identification threshold
-                    reid_threshold = REID_DISTANCE_THRESHOLD_FACTOR * min(track_data["box_rec"].width,
-                                                                          track_data["box_rec"].height)
-                    
-                    # Size consistency check for re-identification
-                    size_ratio = min(new_det.width / track_data["box_rec"].width,
-                                   new_det.height / track_data["box_rec"].height)
-                    size_consistency = size_ratio > 0.4 and size_ratio < 2.5
-                    
-                    # Combined score: distance + size consistency
-                    if center_dist < reid_threshold and size_consistency:
-                        # Lower score is better (distance-based)
-                        score = center_dist + (1.0 - min(size_ratio, 1.0/size_ratio)) * 50
-                        if score < min_score:
-                            min_score = score
-                            best_lost_match_id = track_id
-
-            if best_lost_match_id != -1:
-                if logger:
-                    logger.debug(f"Re-identified track {best_lost_match_id} with new detection (score: {min_score:.2f}).")
-                new_det.track_id = best_lost_match_id
-                # Reactivate the track
-                reactivated_track = lost_tracks.pop(best_lost_match_id)
-                reactivated_track["box_rec"] = new_det
-                reactivated_track["frames_unseen"] = 0
-                active_tracks[best_lost_match_id] = reactivated_track
-                unmatched_detections.remove(i)
-
-        # --- 4. Create New Tracks (with limits and validation) ---
-        new_tracks_created_this_frame = 0
-        for i in unmatched_detections:
-            if new_tracks_created_this_frame >= MAX_NEW_TRACKS_PER_FRAME:
-                if logger:
-                    logger.debug(f"Reached max new tracks limit ({MAX_NEW_TRACKS_PER_FRAME}) for frame {frame_obj.frame_id}")
-                break
-                
-            det_box = current_detections[i]
-            
-            # Validate new track creation - avoid creating tracks for noise
-            if det_box.confidence < 0.4:  # Minimum confidence for new tracks
-                continue
-                
-            # Check for similarity to recently deleted tracks to avoid immediate recreation
-            skip_creation = False
-            recent_frame_threshold = max(1, int(fps * 0.25))  # Check last 0.25 seconds
-            
-            for recent_frame in range(max(0, frame_obj.frame_id - recent_frame_threshold), frame_obj.frame_id):
-                # This would require tracking recently deleted tracks - simplified for now
-                pass
-            
-            if not skip_creation:
-                det_box.track_id = next_global_track_id
-                active_tracks[next_global_track_id] = {
-                    "box_rec": det_box,
-                    "frames_unseen": 0,
-                    "class_name": det_box.class_name,
-                    "creation_frame": frame_obj.frame_id,
-                    "creation_confidence": det_box.confidence
-                }
-                new_tracks_created_this_frame += 1
-                next_global_track_id += 1
-
-    if logger:
-        logger.debug(f"Resilient tracking complete. Assigned up to global_track_id {next_global_track_id - 1}.")
 
 
 # --- Stage 2 Analysis Steps ---

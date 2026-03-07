@@ -7,8 +7,9 @@ Used to enable/disable features based on user tier (free vs supporter).
 
 import os
 import logging
+import functools
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass
 
 
@@ -86,62 +87,6 @@ class FeatureDetector:
             tier="supporter"
         )
         
-        # Advanced AI Processing (Supporter)
-        features["advanced_ai"] = FeatureInfo(
-            name="advanced_ai",
-            display_name="Advanced AI Models",
-            description="Access to premium AI models and processing modes",
-            folder_path="advanced_ai",
-            required_files=[
-                "advanced_ai/__init__.py",
-                "advanced_ai/models/premium_model.py"
-            ],
-            dependencies=[],
-            tier="supporter"
-        )
-        
-        # Premium Export Formats (Supporter)
-        features["premium_export"] = FeatureInfo(
-            name="premium_export",
-            display_name="Premium Export",
-            description="Export to premium formats and enhanced funscripts",
-            folder_path="premium_export",
-            required_files=[
-                "premium_export/__init__.py",
-                "premium_export/exporters.py"
-            ],
-            dependencies=[],
-            tier="supporter"
-        )
-        
-        # Live Streaming Integration (Supporter)
-        features["live_streaming"] = FeatureInfo(
-            name="live_streaming",
-            display_name="Live Streaming",
-            description="Stream live tracking to external services",
-            folder_path="live_streaming",
-            required_files=[
-                "live_streaming/__init__.py",
-                "live_streaming/streamers.py"
-            ],
-            dependencies=["device_control"],
-            tier="supporter"
-        )
-        
-        # Custom Models (Supporter)
-        features["custom_models"] = FeatureInfo(
-            name="custom_models",
-            display_name="Custom Models",
-            description="Load and use custom trained AI models",
-            folder_path="custom_models",
-            required_files=[
-                "custom_models/__init__.py",
-                "custom_models/model_loader.py"
-            ],
-            dependencies=[],
-            tier="supporter"
-        )
-        
         # Patreon Features Package (Supporter)
         features["patreon_features"] = FeatureInfo(
             name="patreon_features",
@@ -189,8 +134,8 @@ class FeatureDetector:
                 feature_info.available = False
                 feature_info.enabled = False
         
-        self.logger.info(f"Detected {len(self.available_features)} available features")
-        self.logger.info(f"Enabled {len(self.enabled_features)} features")
+        self.logger.debug(f"Detected {len(self.available_features)} available features")
+        self.logger.debug(f"Enabled {len(self.enabled_features)} features")
         
         # Log enabled features
         for feature_name in self.enabled_features:
@@ -203,7 +148,7 @@ class FeatureDetector:
                     version_str = f" (v{module.__version__})"
             except (ImportError, AttributeError):
                 pass
-            self.logger.info(f"  ✓ {feature.display_name}{version_str}")
+            self.logger.info(f"  {feature.display_name}{version_str}")
     
     def _detect_feature(self, feature_info: FeatureInfo) -> bool:
         """Detect if a specific feature is available."""
@@ -314,7 +259,7 @@ class FeatureDetector:
             return True
         return False
     
-    def get_feature_status_summary(self) -> Dict[str, any]:
+    def get_feature_status_summary(self) -> Dict[str, Any]:
         """Get a summary of feature status."""
         return {
             "total_features": len(self.features),
@@ -387,6 +332,7 @@ def get_supporter_features() -> List[FeatureInfo]:
 def require_feature(feature_name: str):
     """Decorator to require a feature for a function."""
     def decorator(func):
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             if not is_feature_enabled(feature_name):
                 raise PermissionError(f"Feature '{feature_name}' is not available")

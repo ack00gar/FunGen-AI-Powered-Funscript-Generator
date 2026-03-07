@@ -3,7 +3,6 @@
 Captures mouse Y position mapped to 0-100 funscript values while
 video plays, then simplifies the result using Ramer-Douglas-Peucker.
 """
-import time
 from typing import List, Dict, Optional
 
 

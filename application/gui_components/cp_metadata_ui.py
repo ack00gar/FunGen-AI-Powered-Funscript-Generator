@@ -78,8 +78,14 @@ class MetadataEditorMixin:
         """Read metadata from project manager."""
         pm = getattr(self.app, 'project_manager', None)
         if pm and hasattr(pm, 'get_metadata'):
-            return pm.get_metadata()
-        # Fallback: store on app instance
+            meta = pm.get_metadata()
+            # Sync any orphaned fallback data into project_manager
+            fallback = getattr(self.app, '_project_metadata', None)
+            if fallback:
+                for k, v in fallback.items():
+                    meta.setdefault(k, v)
+                del self.app._project_metadata
+            return meta
         if not hasattr(self.app, '_project_metadata'):
             self.app._project_metadata = {}
         return self.app._project_metadata
@@ -89,8 +95,6 @@ class MetadataEditorMixin:
         pm = getattr(self.app, 'project_manager', None)
         if pm and hasattr(pm, 'set_metadata'):
             pm.set_metadata(metadata)
+            pm.project_dirty = True
         else:
             self.app._project_metadata = metadata
-        # Mark project as dirty
-        if pm:
-            pm.project_dirty = True

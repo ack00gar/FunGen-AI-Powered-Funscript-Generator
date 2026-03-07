@@ -10,7 +10,6 @@ Author: Migrated from User ROI system
 Version: 1.0.0
 """
 
-import logging
 import time
 import numpy as np
 import cv2
@@ -106,8 +105,8 @@ class UserRoiTracker(BaseTracker):
     def metadata(self) -> TrackerMetadata:
         """Return metadata describing this tracker."""
         return TrackerMetadata(
-            name="user_roi",
-            display_name="User ROI Tracker",
+            name="LIVE_USER_ROI",
+            display_name="User ROI",
             description="Manual ROI definition with optical flow tracking and optional sub-tracking",
             category="live",
             version="1.0.0",

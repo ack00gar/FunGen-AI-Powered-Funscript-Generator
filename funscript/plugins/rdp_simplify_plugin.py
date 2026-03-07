@@ -7,7 +7,6 @@ points while preserving the overall shape using the RDP algorithm.
 
 import numpy as np
 from typing import Dict, Any, List, Optional
-import copy
 
 try:
     from .base_plugin import FunscriptTransformationPlugin

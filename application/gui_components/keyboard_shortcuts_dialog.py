@@ -488,26 +488,39 @@ class KeyboardShortcutsDialog:
         imgui.spacing()
         imgui.text_wrapped(
             "Configure modifier keys for mouse-based timeline interactions. "
-            "Hold the modifier key while left-click dragging to pan the timeline "
-            "(alternative to middle-mouse drag for trackpad users)."
+            "Default: click/drag = range select, double-click = seek video, "
+            "modifier+click = create point or box select."
         )
         imgui.spacing()
 
-        # Pan drag modifier dropdown
+        # Mouse modifier dropdowns
         modifier_options = ["SHIFT", "ALT", "CTRL", "SUPER"]
         display_options = ["SHIFT", "ALT", "CTRL", "CMD" if self._is_macos else "SUPER"]
-        current_mod = self.app.app_settings.get("timeline_pan_drag_modifier", "SHIFT")
-        current_idx = modifier_options.index(current_mod) if current_mod in modifier_options else 0
 
-        imgui.text("Pan Timeline (Drag):")
-        imgui.same_line()
-        imgui.set_next_item_width(120)
-        changed, new_idx = imgui.combo("##PanDragModifier", current_idx, display_options)
-        if changed:
-            self.app.app_settings.set("timeline_pan_drag_modifier", modifier_options[new_idx])
+        _modifier_settings = [
+            ("timeline_pan_drag_modifier", "ALT", "Pan Timeline (Drag):",
+             "Hold this key + left-click drag to pan the timeline.\nAlternative to middle-mouse drag for trackpad users."),
+            ("timeline_create_point_modifier", "SHIFT", "Create Point (Click):",
+             "Hold this key + click on empty space to create a new point."),
+            ("timeline_marquee_modifier", "CTRL", "Box Select (Drag):",
+             "Hold this key + drag to draw a 2D marquee selection rectangle."),
+        ]
+        for setting_key, default, label, tooltip in _modifier_settings:
+            current_mod = self.app.app_settings.get(setting_key, default)
+            current_idx = modifier_options.index(current_mod) if current_mod in modifier_options else 0
+            imgui.text(label)
+            imgui.same_line()
+            imgui.set_next_item_width(120)
+            changed, new_idx = imgui.combo(f"##{setting_key}", current_idx, display_options)
+            if changed:
+                self.app.app_settings.set(setting_key, modifier_options[new_idx])
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(tooltip)
 
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Hold this key + left-click drag to pan the timeline.\nAlternative to middle-mouse drag for trackpad users.")
+        # Reset mouse modifiers to defaults
+        if imgui.button("Reset Mouse Modifiers to Defaults##ResetModifiers"):
+            for setting_key, default, _, _ in _modifier_settings:
+                self.app.app_settings.set(setting_key, default)
 
     def _render_cheat_sheet(self):
         """Render the keyboard shortcuts cheat sheet window"""

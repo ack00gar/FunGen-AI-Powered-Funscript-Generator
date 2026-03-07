@@ -7,7 +7,7 @@ with user-defined add-ins.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 import logging
 
 

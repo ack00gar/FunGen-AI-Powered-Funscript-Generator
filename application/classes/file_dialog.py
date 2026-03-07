@@ -7,7 +7,8 @@ import platform
 import logging
 import string
 
-from config.constants import FUNSCRIPT_METADATA_VERSION # Added
+from config.constants import FUNSCRIPT_METADATA_VERSION
+from application.utils.imgui_helpers import DisabledScope
 
 
 def get_common_dirs():
@@ -504,27 +505,20 @@ class ImGuiFileDialog:
 
         # Enable the action button only if a file/folder is selected
         enabled = bool(self.selected_file) or self.is_save_dialog or self.is_folder_dialog
-        if not enabled:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-        if imgui.button(button_text, width=action_button_width) and enabled:
-            if self.is_save_dialog and not self.is_folder_dialog:
-                if self.selected_file:
-                    file_path = os.path.join(self.current_dir, self.selected_file)
-                    if os.path.exists(file_path):
-                        self.show_overwrite_confirm = True
-                        self.overwrite_file_path = file_path
-                    else:
-                        # For save dialog, we use the entered filename
+        with DisabledScope(not enabled):
+            if imgui.button(button_text, width=action_button_width) and enabled:
+                if self.is_save_dialog and not self.is_folder_dialog:
+                    if self.selected_file:
+                        file_path = os.path.join(self.current_dir, self.selected_file)
+                        if os.path.exists(file_path):
+                            self.show_overwrite_confirm = True
+                            self.overwrite_file_path = file_path
+                        else:
+                            self._handle_file_selection(self.selected_file)
+                elif self.is_folder_dialog:
+                    self._confirm_folder_selection()
+                else:
+                    if self.selected_file:
                         self._handle_file_selection(self.selected_file)
-            elif self.is_folder_dialog:
-                self._confirm_folder_selection()
-            else:
-                if self.selected_file:
-                    # For open dialog, we use the selected file
-                    self._handle_file_selection(self.selected_file)
-        if not enabled:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
 
         return should_close

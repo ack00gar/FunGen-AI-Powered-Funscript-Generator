@@ -41,6 +41,7 @@ class TrackerDisplayInfo:
     additional_axes: List[str] = field(default_factory=list)  # Extra axes beyond primary/secondary
     stages: List = field(default_factory=list)  # List of StageDefinition objects
     properties: Dict[str, Any] = field(default_factory=dict)  # Tracker properties/capabilities
+    version: str = ""  # Tracker version from metadata
     folder_name: str = ""  # Source folder name for prefixing (live, offline, experimental, community)
 
 
@@ -132,6 +133,7 @@ class DynamicTrackerDiscovery:
             additional_axes=getattr(metadata, 'additional_axes', []),
             stages=stages,
             properties=properties,
+            version=getattr(metadata, 'version', ''),
             folder_name=folder_name
         )
     
@@ -192,30 +194,43 @@ class DynamicTrackerDiscovery:
     def _generate_cli_aliases(self, metadata: TrackerMetadata, category: TrackerCategory) -> List[str]:
         """Generate CLI aliases for the tracker."""
         aliases = []
-        
+
         # Primary alias from internal name
         aliases.append(metadata.name)
-        
-        # Category-based aliases
-        if category == TrackerCategory.OFFLINE:
-            if "stage2" in metadata.name or "2_stage" in metadata.name:
-                aliases.extend(["2-stage", "stage2", "offline-2stage"])
-            elif "stage3" in metadata.name or "3_stage" in metadata.name:
-                if "mixed" in metadata.name:
-                    aliases.extend(["3-stage-mixed", "stage3-mixed", "mixed"])
-                else:
-                    aliases.extend(["3-stage", "stage3", "offline-3stage"])
-        elif category == TrackerCategory.LIVE:
-            if "oscillation" in metadata.name:
-                aliases.extend(["oscillation", "osc", "live-osc"])
-                if "experimental" in metadata.name:
-                    aliases.append("oscillation-experimental")
-                elif "legacy" in metadata.name:
-                    aliases.append("oscillation-legacy")
-            elif "yolo" in metadata.name:
-                aliases.extend(["yolo", "live-yolo", "auto-roi"])
+
+        # Also add lowercase version of the internal name as an alias
+        name_lower = metadata.name.lower()
+        if name_lower != metadata.name:
+            aliases.append(name_lower)
+
+        # Determine if tracker is in legacy folder
+        from tracker.tracker_modules import tracker_registry
+        actual_folder = tracker_registry.get_tracker_folder(metadata.name)
+        is_legacy = (actual_folder == "legacy")
+
+        # Specific aliases by tracker name for backward compatibility and convenience
+        if "GUIDED_FLOW" in metadata.name:
+            aliases.extend(["3-stage", "stage3", "guided-flow", "offline-3stage"])
+        elif "CONTACT_ANALYSIS" in metadata.name:
+            aliases.extend(["2-stage", "stage2", "offline-2stage"])
+        elif metadata.name == "LEGACY_STAGE3_MIXED":
+            aliases.extend(["legacy-3-stage-mixed", "stage3-mixed", "mixed"])
+        elif metadata.name == "LEGACY_STAGE3_OPTICAL_FLOW":
+            aliases.extend(["legacy-3-stage", "legacy-stage3"])
+        elif metadata.name == "LIVE_OSCILLATION":
+            aliases.extend(["oscillation", "osc", "live-osc"])
+        elif metadata.name == "LEGACY_OSCILLATION":
+            aliases.extend(["oscillation-legacy"])
+        elif metadata.name == "LIVE_YOLO_ROI":
+            aliases.extend(["yolo", "yolo_roi", "live-yolo", "auto-roi"])
+        elif metadata.name == "LIVE_USER_ROI":
+            aliases.extend(["user_roi"])
+        elif metadata.name == "LIVE_VR_CHAPTER_FLOW":
+            aliases.extend(["vr_chapter_flow", "vr-chapter-flow"])
+        elif metadata.name == "LIVE_VR_FOCUSED":
+            aliases.extend(["vr_focused", "vr-focused"])
         # Note: LIVE_INTERVENTION trackers don't get CLI aliases since they're not batch compatible
-        
+
         return aliases
     
     # Public API Methods

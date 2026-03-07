@@ -326,7 +326,7 @@ class SimpleModeMixin:
                 if imgui.button("Polish Results", width=-1):
                     # Temporarily enable auto post-processing, apply, then restore
                     original_setting = app.app_settings.get("enable_auto_post_processing", False)
-                    app.app_settings.data["enable_auto_post_processing"] = True
+                    app.app_settings.set("enable_auto_post_processing", True)
                     try:
                         fs_proc.apply_automatic_post_processing()
                         self._simple_mode_post_processing_applied = True
@@ -334,7 +334,7 @@ class SimpleModeMixin:
                     except Exception as e:
                         app.logger.error("Post-processing failed: %s" % e, extra={"status_message": True})
                     finally:
-                        app.app_settings.data["enable_auto_post_processing"] = original_setting
+                        app.app_settings.set("enable_auto_post_processing", original_setting)
             _tooltip_if_hovered(
                 "Applies smoothing, simplification, clamping, and amplitude\n"
                 "optimization to improve the generated funscript quality."
@@ -387,22 +387,12 @@ class SimpleModeMixin:
         imgui.pop_style_color()
 
         # Get current stage progress, FPS, and ETA
-        if current_stage == 1:
-            stage_progress = stage_proc.stage1_progress_value
-            fps_str = stage_proc.stage1_processing_fps_str
-            eta_str = stage_proc.stage1_eta_str
-        elif current_stage == 2:
-            stage_progress = stage_proc.stage2_main_progress_value
-            fps_str = stage_proc.stage2_sub_processing_fps_str or ""
-            eta_str = stage_proc.stage2_sub_eta_str or "N/A"
-        elif current_stage == 3:
-            stage_progress = stage_proc.stage3_overall_progress_value
-            fps_str = stage_proc.stage3_processing_fps_str
-            eta_str = stage_proc.stage3_eta_str
-        else:
-            stage_progress = 0.0
-            fps_str = ""
-            eta_str = "N/A"
+        _stage_metrics = {
+            1: (stage_proc.stage1_progress_value, stage_proc.stage1_processing_fps_str, stage_proc.stage1_eta_str),
+            2: (stage_proc.stage2_main_progress_value, stage_proc.stage2_sub_processing_fps_str or "", stage_proc.stage2_sub_eta_str or "N/A"),
+            3: (stage_proc.stage3_overall_progress_value, stage_proc.stage3_processing_fps_str, stage_proc.stage3_eta_str),
+        }
+        stage_progress, fps_str, eta_str = _stage_metrics.get(current_stage, (0.0, "", "N/A"))
 
         # Friendly stage label + step counter
         if num_stages > 1 and current_stage > 0:

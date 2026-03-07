@@ -264,9 +264,9 @@ class AppBatchProcessor:
                 if self.app.stop_batch_event.is_set():
                     self.app.logger.info("Batch processing was aborted by user."); break
 
-                # Pause checkpoint — wait between videos
+                # Pause checkpoint — wait between videos (event-driven, no busy loop)
                 while self.app.pause_batch_event.is_set() and not self.app.stop_batch_event.is_set():
-                    time.sleep(0.5)
+                    self.app.stop_batch_event.wait(0.5)
                 if self.app.stop_batch_event.is_set():
                     self.app.logger.info("Batch processing was aborted while paused."); break
 
@@ -388,9 +388,9 @@ class AppBatchProcessor:
                             success = False
                         self._adaptive_tuning_record_result(self.app.adaptive_tuning_state, fps_val, success)
 
-                    # Pause checkpoint — wait after video analysis
+                    # Pause checkpoint — wait after video analysis (event-driven)
                     while self.app.pause_batch_event.is_set() and not self.app.stop_batch_event.is_set():
-                        time.sleep(0.5)
+                        self.app.stop_batch_event.wait(0.5)
                     if self.app.stop_batch_event.is_set(): break
 
                     # --- LOAD RESULTS IN CLI ---

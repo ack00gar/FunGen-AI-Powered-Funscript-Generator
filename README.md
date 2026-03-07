@@ -328,6 +328,12 @@ These trackers process the video in real-time.
 These trackers process the video in stages for higher accuracy.
 
 - **Contact Analysis (2-Stage):** Offline contact detection and analysis using YOLO detection results.
+- **Guided Flow (3-Stage):** YOLO-guided dense optical flow with chapter-aware analysis strategies. Uses Stage 2 detection data to create targeted ROIs per chapter type (penetration, oral, manual, riding, etc.) for precise motion tracking. The recommended 3-stage tracker.
+
+### Legacy Trackers
+
+These trackers are superseded by Guided Flow but remain available for compatibility.
+
 - **Mixed Processing (3-Stage):** A hybrid approach using Stage 2 signals and selective live ROI tracking for BJ/HJ chapters.
 - **Optical Flow Analysis (3-Stage):** Offline optical flow tracking using live tracker algorithms on Stage 2 segments.
 

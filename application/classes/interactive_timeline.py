@@ -28,7 +28,10 @@ class TimelineTransformer:
     Handles coordinate transformations between Time/Value space and Screen Pixel space.
     Optimized with vectorization support.
     """
-    def __init__(self, pos: Tuple[float, float], size: Tuple[float, float], 
+    # Vertical padding keeps points at 0/100 fully visible inside the canvas
+    POINT_PADDING = 6.0
+
+    def __init__(self, pos: Tuple[float, float], size: Tuple[float, float],
                  pan_ms: float, zoom_ms_px: float):
         self.x_offset = pos[0]
         self.y_offset = pos[1]
@@ -36,7 +39,11 @@ class TimelineTransformer:
         self.height = size[1]
         self.pan_ms = pan_ms
         self.zoom = max(0.001, zoom_ms_px) # Prevent div by zero
-        
+
+        # Usable vertical range after padding
+        self._pad = self.POINT_PADDING
+        self._usable_h = max(1.0, self.height - 2 * self._pad)
+
         # Calculate visible time range
         self.visible_start_ms = pan_ms
         self.visible_end_ms = pan_ms + (self.width * self.zoom)
@@ -45,17 +52,14 @@ class TimelineTransformer:
         return self.x_offset + (t_ms - self.pan_ms) / self.zoom
 
     def val_to_y(self, val: float) -> float:
-        # Funscript 0-100 mapping: 0 is usually bottom, 100 is top
-        # UI Coords: Y increases downwards. 
-        # So Val 100 -> y_offset (top), Val 0 -> y_offset + height (bottom)
-        return self.y_offset + self.height * (1.0 - (val / 100.0))
+        return self.y_offset + self._pad + self._usable_h * (1.0 - (val / 100.0))
 
     def x_to_time(self, x: float) -> float:
         return (x - self.x_offset) * self.zoom + self.pan_ms
 
     def y_to_val(self, y: float) -> int:
-        if self.height == 0: return 0
-        val = (1.0 - (y - self.y_offset) / self.height) * 100.0
+        if self._usable_h <= 0: return 0
+        val = (1.0 - (y - self.y_offset - self._pad) / self._usable_h) * 100.0
         return max(0, min(100, int(round(val))))
 
     # Vectorized versions for numpy arrays (Rendering path)
@@ -63,7 +67,7 @@ class TimelineTransformer:
         return self.x_offset + (times - self.pan_ms) / self.zoom
 
     def vec_val_to_y(self, vals: np.ndarray) -> np.ndarray:
-        return self.y_offset + self.height * (1.0 - (vals / 100.0))
+        return self.y_offset + self._pad + self._usable_h * (1.0 - (vals / 100.0))
 
 
 class InteractiveFunscriptTimeline:
@@ -119,35 +123,45 @@ class InteractiveFunscriptTimeline:
         self.nudge_chapter_only = False  # When True, << >> only affect points in selected chapter
         self._container_mode = False  # Set by render() when inside scrollable container
 
-        # --- OFS-Inspired Features ---
+        # --- Visualization Features ---
 
-        # Heatmap coloring (Phase 1.1)
-        self._show_heatmap_coloring = False
+        # Heatmap coloring — speed-based segment colors enabled by default
+        self._show_heatmap_coloring = True
         self._heatmap_mapper = HeatmapColorMapper(max_speed=400.0)
+        self._heatmap_speeds_cache: Optional[np.ndarray] = None   # full-script speeds
+        self._heatmap_colors_cache: Optional[np.ndarray] = None   # full-script u32 colors
+        self._heatmap_cache_np_id: int = 0  # id() of numpy arrays when cache was built
 
-        # Speed limit visualization (Phase 1.3)
+        # Speed limit visualization
         self._show_speed_warnings = False
         self._speed_limit_threshold = 400.0
 
-        # Bookmarks (Phase 1.6)
+        # Bookmarks
         self._bookmark_manager = BookmarkManager()
         self._bookmark_rename_id: Optional[str] = None
         self._bookmark_rename_buf: str = ""
 
-        # Timeline Mode State Machine (Phase 2.1)
+        # Timeline Mode State Machine
         self._mode = TimelineMode.SELECT
         self._interaction_state = TimelineInteractionState.IDLE
 
-        # Alternating Mode (Phase 2.2)
+        # Alternating Mode
         self._alt_next_is_top = True
         self._alt_top_value = 95
         self._alt_bottom_value = 5
+
+        # Waveform draw cache — skip recomputation when viewport unchanged
+        self._waveform_cache_key: Optional[tuple] = None  # (start_ms, end_ms, width)
+        self._waveform_cache_xs = None
+        self._waveform_cache_ys_top = None
+        self._waveform_cache_ys_bot = None
+        self._waveform_cache_step: int = 0
 
         # Pan-seek throttle for continuous video updates during middle-mouse drag
         self._last_pan_seek_time: float = 0.0
         self._is_modifier_panning: bool = False
 
-        # Recording Mode (Phase 3.2)
+        # Recording Mode
         self._recording_capture: Optional[RecordingCapture] = None
         self._recording_rdp_epsilon = 2.0
 
@@ -159,7 +173,7 @@ class InteractiveFunscriptTimeline:
         self._calibration = None             # CalibrationRoutine when active
         self._show_controller_settings: bool = False
 
-        # BPM/Tempo Overlay (Phase 3.3)
+        # BPM/Tempo Overlay
         self._bpm_config: Optional[BPMOverlayConfig] = None
         self._tap_tempo = TapTempo()
 
@@ -186,9 +200,18 @@ class InteractiveFunscriptTimeline:
             return fs._get_timestamps_for_axis(axis)
         return []
 
+    def _get_cached_numpy_arrays(self):
+        """Return cached (ats_np, poss_np) float32 arrays for this timeline's axis."""
+        fs, axis = self._get_target_funscript_details()
+        if fs and axis:
+            return fs._get_numpy_arrays_for_axis(axis)
+        return None, None
+
     def invalidate_cache(self):
         """Forces updates on next frame"""
         self._ultimate_preview_dirty = True
+        self._heatmap_speeds_cache = None
+        self._heatmap_colors_cache = None
 
     def invalidate_ultimate_preview(self):
         self._ultimate_preview_dirty = True
@@ -342,8 +365,9 @@ class InteractiveFunscriptTimeline:
         if is_hovered and imgui.is_mouse_clicked(0):  # Left click
             app_state.active_timeline_num = self.timeline_num
 
-        # --- Keyboard Shortcuts (Global / Focused) ---
-        if is_focused:
+        # --- Keyboard Shortcuts (active timeline, not dependent on imgui window focus) ---
+        is_active_timeline = (app_state.active_timeline_num == self.timeline_num)
+        if is_active_timeline and not io.want_text_input:
             self._handle_keyboard_shortcuts(app_state, io)
 
         # --- Navigation (Zoom/Pan) ---
@@ -411,54 +435,69 @@ class InteractiveFunscriptTimeline:
         else:
             self._hovered_point_idx = -1
 
-        # Left Click
-        if is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and self._mode == TimelineMode.SELECT:
+        # Double-click: always seek to time (regardless of point hit)
+        if is_hovered and imgui.is_mouse_double_clicked(glfw.MOUSE_BUTTON_LEFT) and self._mode == TimelineMode.SELECT:
+            hit_idx = self._hit_test_point(mouse_pos, actions, tf)
+            if hit_idx != -1:
+                # Double-click on point: select and seek
+                self.multi_selected_action_indices = {hit_idx}
+                self.selected_action_idx = hit_idx
+                self._seek_video(actions[hit_idx]['at'])
+            else:
+                # Double-click on empty space: seek to clicked time
+                self._seek_video(tf.x_to_time(mouse_pos[0]))
+            # Cancel any pending single-click actions
+            self.range_selecting = False
+            self.is_marqueeing = False
+
+        # Left Click (single — handled after double-click check)
+        elif is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and self._mode == TimelineMode.SELECT:
             hit_idx = self._hit_test_point(mouse_pos, actions, tf)
 
             if self._is_pan_modifier_held(io):
-                # Modifier + Drag = Pan (trackpad alternative to middle-mouse)
+                # Pan modifier + Drag = Pan (trackpad alternative to middle-mouse)
                 self._is_modifier_panning = True
 
-            elif io.key_alt:
-                # Alt + Drag = Range Select
-                self.range_selecting = True
-                self.range_start_time = tf.x_to_time(mouse_pos[0])
-                self.range_end_time = self.range_start_time
-                if not io.key_ctrl: self.multi_selected_action_indices.clear()
+            elif self._is_create_modifier_held(io) and hit_idx == -1:
+                # Create-point modifier + click on empty: add new point at cursor
+                t = tf.x_to_time(mouse_pos[0])
+                v = tf.y_to_val(mouse_pos[1])
+                self._add_point(t, v)
 
             elif hit_idx != -1:
-                # Point Clicked
+                # Point Clicked — select only (no seek on single click)
                 self.dragging_action_idx = hit_idx
                 self.drag_start_pos = mouse_pos
-                self.is_dragging_active = False # Wait for drag threshold
+                self.is_dragging_active = False  # Wait for drag threshold
                 self.drag_undo_recorded = False
-                
-                # Selection Logic
-                if not io.key_ctrl:
-                    # If clicking an unselected point, clear others. 
-                    # If clicking a selected point, keep selection (might be starting a multi-drag)
-                    if hit_idx not in self.multi_selected_action_indices:
-                        self.multi_selected_action_indices.clear()
-                        self.multi_selected_action_indices.add(hit_idx)
-                else:
-                    # Toggle selection
+
+                # Multi-select toggle: create-modifier or marquee-modifier on a point
+                if self._is_create_modifier_held(io) or self._is_marquee_modifier_held(io):
                     if hit_idx in self.multi_selected_action_indices:
                         self.multi_selected_action_indices.remove(hit_idx)
                     else:
                         self.multi_selected_action_indices.add(hit_idx)
-                
-                self.selected_action_idx = hit_idx
-                self._seek_video(actions[hit_idx]['at']) # Jump video to point
+                else:
+                    # Plain click: select only this point (keep if already in multi-sel for drag)
+                    if hit_idx not in self.multi_selected_action_indices:
+                        self.multi_selected_action_indices.clear()
+                        self.multi_selected_action_indices.add(hit_idx)
 
-            else:
-                # Empty Space Click -> Marquee or Deselect
-                if not io.key_ctrl:
-                    self.multi_selected_action_indices.clear()
-                    self.selected_action_idx = -1
-                
+                self.selected_action_idx = hit_idx
+
+            elif self._is_marquee_modifier_held(io):
+                # Marquee modifier + drag on empty: box select (2D rectangle)
                 self.is_marqueeing = True
                 self.marquee_start = mouse_pos
                 self.marquee_end = mouse_pos
+
+            else:
+                # Click on empty space: start range selection (time-based, full height)
+                self.multi_selected_action_indices.clear()
+                self.selected_action_idx = -1
+                self.range_selecting = True
+                self.range_start_time = tf.x_to_time(mouse_pos[0])
+                self.range_end_time = self.range_start_time
 
         # --- Dragging Processing ---
         if imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT):
@@ -580,10 +619,10 @@ class InteractiveFunscriptTimeline:
             key_code, mods = tuple_key
 
             pressed = imgui.is_key_pressed(key_code)
-            # Check modifiers
             match = (mods["ctrl"] == io.key_ctrl and
                      mods["alt"] == io.key_alt and
-                     mods["shift"] == io.key_shift)
+                     mods["shift"] == io.key_shift and
+                     mods["super"] == io.key_super)
             return pressed and match
 
         # Helper for persistent/held key actions (like panning)
@@ -594,10 +633,10 @@ class InteractiveFunscriptTimeline:
             key_code, mods = tuple_key
 
             held = imgui.is_key_down(key_code)
-            # Check modifiers
             match = (mods["ctrl"] == io.key_ctrl and
                      mods["alt"] == io.key_alt and
-                     mods["shift"] == io.key_shift)
+                     mods["shift"] == io.key_shift and
+                     mods["super"] == io.key_super)
             return held and match
 
         # 1. Pan Left/Right (Arrow keys) - persistent while held, seek on release
@@ -646,8 +685,8 @@ class InteractiveFunscriptTimeline:
 
         # 5. Nudge Selection (Arrows)
         nudge_val = 0
-        if check_shortcut("nudge_selection_pos_up", "UP_ARROW"): nudge_val = 1
-        if check_shortcut("nudge_selection_pos_down", "DOWN_ARROW"): nudge_val = -1
+        if check_shortcut("nudge_selection_pos_up", "SHIFT+UP_ARROW"): nudge_val = 1
+        if check_shortcut("nudge_selection_pos_down", "SHIFT+DOWN_ARROW"): nudge_val = -1
         
         if nudge_val != 0 and self.multi_selected_action_indices:
             self._nudge_selection_value(nudge_val)
@@ -746,15 +785,10 @@ class InteractiveFunscriptTimeline:
     def _finalize_marquee(self, tf, actions, append: bool):
         if not self.marquee_start or not self.marquee_end: return
 
-        # Check if this was a simple click (not a drag)
+        # Ignore very small drags (accidental)
         dx = abs(self.marquee_end[0] - self.marquee_start[0])
         dy = abs(self.marquee_end[1] - self.marquee_start[1])
-        is_simple_click = (dx < 5 and dy < 5)  # Threshold: less than 5 pixels = click
-
-        if is_simple_click:
-            # Single click on empty space -> seek video to clicked time
-            click_time = tf.x_to_time(self.marquee_start[0])
-            self._seek_video(click_time)
+        if dx < 5 and dy < 5:
             return
 
         # Get marquee rect
@@ -806,14 +840,23 @@ class InteractiveFunscriptTimeline:
                 self.app.processor.seek_video(frame)
                 self.app.app_state_ui.force_timeline_pan_to_current_frame = True
 
-    def _is_pan_modifier_held(self, io) -> bool:
-        """Check if the configured pan drag modifier key is held."""
-        mod = self.app.app_settings.get("timeline_pan_drag_modifier", "SHIFT")
+    def _is_modifier_held(self, io, setting_key: str, default: str) -> bool:
+        """Check if a configured modifier key is held."""
+        mod = self.app.app_settings.get(setting_key, default)
         if mod == "SHIFT": return io.key_shift
         if mod == "ALT": return io.key_alt
         if mod == "CTRL": return io.key_ctrl
         if mod == "SUPER": return io.key_super
         return False
+
+    def _is_pan_modifier_held(self, io) -> bool:
+        return self._is_modifier_held(io, "timeline_pan_drag_modifier", "ALT")
+
+    def _is_create_modifier_held(self, io) -> bool:
+        return self._is_modifier_held(io, "timeline_create_point_modifier", "SHIFT")
+
+    def _is_marquee_modifier_held(self, io) -> bool:
+        return self._is_modifier_held(io, "timeline_marquee_modifier", "CTRL")
 
     def _seek_video_no_pan(self, time_ms: float):
         """Seek video without forcing timeline pan. Used during drag to update
@@ -1098,11 +1141,17 @@ class InteractiveFunscriptTimeline:
                            imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND))
         
         # 2. Horizontal Lines (0, 25, 50, 75, 100)
+        # Pre-compute u32 colors used in grid drawing loops
+        grid_major_u32 = imgui.get_color_u32_rgba(*TimelineColors.GRID_MAJOR_LINES)
+        grid_minor_u32 = imgui.get_color_u32_rgba(*TimelineColors.GRID_LINES)
+        grid_labels_u32 = imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS)
+        canvas_bg_u32 = imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND)
+
         for val in [0, 25, 50, 75, 100]:
             y = tf.val_to_y(val)
-            col = TimelineColors.GRID_MAJOR_LINES if val == 50 else TimelineColors.GRID_LINES
+            col_u32 = grid_major_u32 if val == 50 else grid_minor_u32
             thick = 1.5 if val == 50 else 1.0
-            dl.add_line(tf.x_offset, y, tf.x_offset + tf.width, y, imgui.get_color_u32_rgba(*col), thick)
+            dl.add_line(tf.x_offset, y, tf.x_offset + tf.width, y, col_u32, thick)
 
             # Position labels
             label_text = str(val)
@@ -1121,13 +1170,13 @@ class InteractiveFunscriptTimeline:
                     label_y - padding,
                     tf.x_offset + 2 + text_size[0] + padding,
                     label_y + text_size[1] + padding,
-                    imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND)
+                    canvas_bg_u32
                 )
             else:
                 # 0: above the line
                 label_y = y - 12
 
-            dl.add_text(tf.x_offset + 2, label_y, imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS), label_text)
+            dl.add_text(tf.x_offset + 2, label_y, grid_labels_u32, label_text)
 
         # 3. Vertical Lines (Adaptive Time Steps)
         pixels_per_sec = 1000.0 / tf.zoom
@@ -1145,11 +1194,10 @@ class InteractiveFunscriptTimeline:
             x = tf.time_to_x(curr_ms)
             if x >= tf.x_offset:
                 is_major = (curr_ms % (step_ms * 5) == 0)
-                col = TimelineColors.GRID_MAJOR_LINES if is_major else TimelineColors.GRID_LINES
-                dl.add_line(x, tf.y_offset, x, tf.y_offset + tf.height, imgui.get_color_u32_rgba(*col))
-                # Only show time labels for non-negative times
+                dl.add_line(x, tf.y_offset, x, tf.y_offset + tf.height,
+                            grid_major_u32 if is_major else grid_minor_u32)
                 if is_major and curr_ms >= 0:
-                     dl.add_text(x + 3, tf.y_offset + tf.height - 15, imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS), f"{curr_ms/1000:.1f}s")
+                     dl.add_text(x + 3, tf.y_offset + tf.height - 15, grid_labels_u32, f"{curr_ms/1000:.1f}s")
             curr_ms += step_ms
 
     def _draw_audio_waveform(self, dl, tf: TimelineTransformer):
@@ -1158,40 +1206,51 @@ class InteractiveFunscriptTimeline:
         total_frames = self.app.processor.total_frames
         fps = self.app.processor.fps
         if total_frames <= 0 or fps <= 0: return
-        
+
         duration_ms = (total_frames / fps) * 1000.0
-        
+
         # Map visible range to data indices
-        idx_start = int((tf.visible_start_ms / duration_ms) * len(data))
-        idx_end = int((tf.visible_end_ms / duration_ms) * len(data))
-        
-        idx_start = max(0, idx_start)
-        idx_end = min(len(data), idx_end)
-        
+        idx_start = max(0, int((tf.visible_start_ms / duration_ms) * len(data)))
+        idx_end = min(len(data), int((tf.visible_end_ms / duration_ms) * len(data)))
         if idx_end <= idx_start: return
 
         # Decimate for performance (Max 1 sample per pixel)
         step = max(1, (idx_end - idx_start) // int(tf.width))
-        subset = data[idx_start:idx_end:step]
-        
-        # Coordinates
-        times = np.linspace(tf.visible_start_ms, tf.visible_end_ms, len(subset))
-        xs = tf.vec_time_to_x(times)
-        
-        center_y = tf.y_offset + tf.height / 2
-        # Scaling amplitude to timeline height
-        ys_top = center_y - (subset * tf.height / 2)
-        ys_bot = center_y + (subset * tf.height / 2)
-        
+
+        # Cache key: viewport range + canvas geometry (rounded to avoid float jitter)
+        cache_key = (round(tf.visible_start_ms, 1), round(tf.visible_end_ms, 1),
+                     int(tf.width), int(tf.height), round(tf.y_offset, 1))
+        if self._waveform_cache_key == cache_key and self._waveform_cache_xs is not None:
+            xs = self._waveform_cache_xs
+            ys_top = self._waveform_cache_ys_top
+            ys_bot = self._waveform_cache_ys_bot
+            step = self._waveform_cache_step
+        else:
+            subset = data[idx_start:idx_end:step]
+            times = np.linspace(tf.visible_start_ms, tf.visible_end_ms, len(subset))
+            xs = tf.vec_time_to_x(times)
+            center_y = tf.y_offset + tf.height / 2
+            ys_top = center_y - (subset * tf.height / 2)
+            ys_bot = center_y + (subset * tf.height / 2)
+            self._waveform_cache_key = cache_key
+            self._waveform_cache_xs = xs
+            self._waveform_cache_ys_top = ys_top
+            self._waveform_cache_ys_bot = ys_bot
+            self._waveform_cache_step = step
+
         col = imgui.get_color_u32_rgba(*TimelineColors.AUDIO_WAVEFORM)
-        
+
         # LOD: Lines vs Polylines
         if step > 10:
-            for i in range(len(xs)):
-                dl.add_line(xs[i], ys_top[i], xs[i], ys_bot[i], col)
+            xs_l = xs.tolist()
+            yt_l = ys_top.tolist()
+            yb_l = ys_bot.tolist()
+            _add_line = dl.add_line
+            for i in range(len(xs_l)):
+                _add_line(xs_l[i], yt_l[i], xs_l[i], yb_l[i], col)
         else:
-            pts_top = list(zip(xs, ys_top))
-            pts_bot = list(zip(xs, ys_bot))
+            pts_top = np.column_stack((xs, ys_top)).tolist()
+            pts_bot = np.column_stack((xs, ys_bot)).tolist()
             dl.add_polyline(pts_top, col, False, 1.0)
             dl.add_polyline(pts_bot, col, False, 1.0)
 
@@ -1217,11 +1276,16 @@ class InteractiveFunscriptTimeline:
         if e_idx - s_idx < 2: return
 
         visible_actions = actions[s_idx:e_idx]
-        
-        # 2. Vectorized Transform
-        ats = np.array([a['at'] for a in visible_actions], dtype=np.float32)
-        poss = np.array([a['pos'] for a in visible_actions], dtype=np.float32)
-        
+
+        # 2. Vectorized Transform — use cached numpy arrays, slice instead of rebuild
+        all_ats, all_poss = self._get_cached_numpy_arrays()
+        if all_ats is not None and len(all_ats) == len(actions):
+            ats = all_ats[s_idx:e_idx]
+            poss = all_poss[s_idx:e_idx]
+        else:
+            ats = np.array([a['at'] for a in visible_actions], dtype=np.float32)
+            poss = np.array([a['pos'] for a in visible_actions], dtype=np.float32)
+
         xs = tf.vec_time_to_x(ats)
         ys = tf.vec_val_to_y(poss)
 
@@ -1243,7 +1307,7 @@ class InteractiveFunscriptTimeline:
             col_u32 = imgui.get_color_u32_rgba(col[0], col[1], col[2], 0.5 * alpha)
             
             # Draw simplified polyline for shape
-            pts = list(zip(xs, ys))
+            pts = np.column_stack((xs, ys)).tolist()
             dl.add_polyline(pts, col_u32, False, 1.0)
             return
 
@@ -1252,7 +1316,7 @@ class InteractiveFunscriptTimeline:
         col_u32 = imgui.get_color_u32_rgba(base_col[0], base_col[1], base_col[2], base_col[3] * alpha)
         thick = 1.5 if is_preview else 2.0
         
-        pts = list(zip(xs, ys))
+        pts = np.column_stack((xs, ys)).tolist()
         dl.add_polyline(pts, col_u32, False, thick)
 
         # -- LOD C: Points (Zoomed In) --
@@ -1261,47 +1325,53 @@ class InteractiveFunscriptTimeline:
         
         if should_draw_points and not force_lines_only:
             radius = self.app.app_state_ui.timeline_point_radius
-            
+
+            # Pre-compute color u32 values outside the per-point loop
+            _default_c = TimelineColors.POINT_DEFAULT if not is_preview else TimelineColors.PREVIEW_POINTS
+            col_default = imgui.get_color_u32_rgba(_default_c[0], _default_c[1], _default_c[2], _default_c[3] * alpha)
+            col_drag = imgui.get_color_u32_rgba(*TimelineColors.POINT_DRAGGING[:3], TimelineColors.POINT_DRAGGING[3] * alpha)
+            col_sel = imgui.get_color_u32_rgba(*TimelineColors.POINT_SELECTED[:3], TimelineColors.POINT_SELECTED[3] * alpha)
+            col_hover = imgui.get_color_u32_rgba(*TimelineColors.POINT_HOVER[:3], TimelineColors.POINT_HOVER[3] * alpha)
+            col_sel_border = imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER)
+            r_drag = radius + 2
+            r_sel = radius + 1
+            r_hover = radius + 1
+
+            _sel_set = self.multi_selected_action_indices
+            _drag_idx = self.dragging_action_idx
+            _hover_idx = self._hovered_point_idx
+            sparse = pixels_per_point < 5
+            xs_l = xs.tolist()
+            ys_l = ys.tolist()
+
             for i in range(len(visible_actions)):
                 real_idx = s_idx + i
-                
-                # Check interaction state
-                is_sel = real_idx in self.multi_selected_action_indices
-                is_drag = (real_idx == self.dragging_action_idx)
-                is_hover = (real_idx == self._hovered_point_idx)
-                is_interactive = is_sel or is_drag or is_hover
 
-                # Skip drawing non-selected points if zoomed out too far
-                if not is_interactive and pixels_per_point < 5:
+                is_sel = real_idx in _sel_set
+                is_drag = (real_idx == _drag_idx)
+                is_hover = (real_idx == _hover_idx)
+
+                if sparse and not (is_sel or is_drag or is_hover):
                     continue
 
-                px, py = xs[i], ys[i]
+                px, py = xs_l[i], ys_l[i]
 
-                # Colors
                 if is_drag:
-                    c_tuple = TimelineColors.POINT_DRAGGING
-                    r = radius + 2
+                    dl.add_circle_filled(px, py, r_drag, col_drag)
                 elif is_sel:
-                    c_tuple = TimelineColors.POINT_SELECTED
-                    r = radius + 1
+                    dl.add_circle_filled(px, py, r_sel, col_sel)
+                    dl.add_circle(px, py, r_sel + 1, col_sel_border)
                 elif is_hover:
-                    c_tuple = TimelineColors.POINT_HOVER
-                    r = radius + 1
+                    dl.add_circle_filled(px, py, r_hover, col_hover)
                 else:
-                    c_tuple = TimelineColors.POINT_DEFAULT if not is_preview else TimelineColors.PREVIEW_POINTS
-                    r = radius
-
-                dl.add_circle_filled(px, py, r, imgui.get_color_u32_rgba(c_tuple[0], c_tuple[1], c_tuple[2], c_tuple[3] * alpha))
-
-                if is_sel:
-                    dl.add_circle(px, py, r+1, imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER))
+                    dl.add_circle_filled(px, py, radius, col_default)
 
     # ==================================================================================
-    # OFS-INSPIRED DRAWING METHODS
+    # VISUALIZATION DRAWING METHODS
     # ==================================================================================
 
     def _draw_curve_heatmap(self, dl, tf: TimelineTransformer, actions: List[Dict]):
-        """Draw the main curve with per-segment heatmap coloring (Phase 1.1)."""
+        """Draw the main curve with per-segment heatmap coloring."""
         if not actions or len(actions) < 2:
             return
 
@@ -1319,9 +1389,14 @@ class InteractiveFunscriptTimeline:
 
         visible_actions = actions[s_idx:e_idx]
 
-        # Vectorized transform
-        ats = np.array([a['at'] for a in visible_actions], dtype=np.float32)
-        poss = np.array([a['pos'] for a in visible_actions], dtype=np.float32)
+        # Vectorized transform — use cached numpy arrays when available
+        all_ats, all_poss = self._get_cached_numpy_arrays()
+        if all_ats is not None and len(all_ats) == len(actions):
+            ats = all_ats[s_idx:e_idx]
+            poss = all_poss[s_idx:e_idx]
+        else:
+            ats = np.array([a['at'] for a in visible_actions], dtype=np.float32)
+            poss = np.array([a['pos'] for a in visible_actions], dtype=np.float32)
         xs = tf.vec_time_to_x(ats)
         ys = tf.vec_val_to_y(poss)
 
@@ -1330,47 +1405,71 @@ class InteractiveFunscriptTimeline:
         safe_max_x = tf.x_offset + tf.width + 5000
         xs = np.clip(xs, safe_min_x, safe_max_x)
 
-        # Compute per-segment speeds
-        speeds = HeatmapColorMapper.compute_segment_speeds(visible_actions)
-        colors = self._heatmap_mapper.speeds_to_colors_rgba(speeds)
+        # Heatmap colors: cache for full script, slice visible range
+        all_ats_full, all_poss_full = self._get_cached_numpy_arrays()
+        np_id = id(all_ats_full) if all_ats_full is not None else 0
+        if self._heatmap_colors_cache is None or self._heatmap_cache_np_id != np_id:
+            # Rebuild cache for entire funscript
+            if all_ats_full is not None and all_poss_full is not None and len(all_ats_full) >= 2:
+                self._heatmap_speeds_cache = HeatmapColorMapper.compute_segment_speeds(
+                    actions, ats_np=all_ats_full, poss_np=all_poss_full)
+                self._heatmap_colors_cache = self._heatmap_mapper.speeds_to_colors_u32(
+                    self._heatmap_speeds_cache)
+            else:
+                self._heatmap_speeds_cache = HeatmapColorMapper.compute_segment_speeds(actions)
+                self._heatmap_colors_cache = self._heatmap_mapper.speeds_to_colors_u32(
+                    self._heatmap_speeds_cache)
+            self._heatmap_cache_np_id = np_id
 
-        # Draw per-segment colored lines
-        for i in range(len(speeds)):
-            c = colors[i]
-            col_u32 = imgui.get_color_u32_rgba(float(c[0]), float(c[1]), float(c[2]), float(c[3]))
-            dl.add_line(float(xs[i]), float(ys[i]), float(xs[i + 1]), float(ys[i + 1]), col_u32, 2.0)
+        # Slice cached colors for visible range (segments = points - 1)
+        seg_start = max(0, s_idx)
+        seg_end = min(len(self._heatmap_colors_cache), e_idx - 1)
+        colors_u32 = self._heatmap_colors_cache[seg_start:seg_end]
+
+        # Draw per-segment colored lines — pre-convert to Python lists to avoid
+        # per-element numpy indexing overhead in the loop
+        n_segs = len(colors_u32)
+        xs_list = xs.tolist()
+        ys_list = ys.tolist()
+        colors_list = colors_u32.tolist()
+        _add_line = dl.add_line
+        for i in range(n_segs):
+            _add_line(xs_list[i], ys_list[i], xs_list[i + 1], ys_list[i + 1], colors_list[i], 2.0)
 
         # Draw points (same logic as standard _draw_curve)
         radius = self.app.app_state_ui.timeline_point_radius
         pixels_per_point = tf.width / max(1, len(xs))
         if pixels_per_point > 5:
+            # Pre-compute color u32 values outside loop
+            col_default = imgui.get_color_u32_rgba(*TimelineColors.POINT_DEFAULT)
+            col_drag = imgui.get_color_u32_rgba(*TimelineColors.POINT_DRAGGING)
+            col_sel = imgui.get_color_u32_rgba(*TimelineColors.POINT_SELECTED)
+            col_hover = imgui.get_color_u32_rgba(*TimelineColors.POINT_HOVER)
+            col_sel_border = imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER)
+            r_drag, r_sel, r_hover = radius + 2, radius + 1, radius + 1
+            _sel_set = self.multi_selected_action_indices
+            _drag_idx = self.dragging_action_idx
+            _hover_idx = self._hovered_point_idx
+
             for i in range(len(visible_actions)):
                 real_idx = s_idx + i
-                is_sel = real_idx in self.multi_selected_action_indices
-                is_drag = (real_idx == self.dragging_action_idx)
-                is_hover = (real_idx == self._hovered_point_idx)
+                is_sel = real_idx in _sel_set
+                is_drag = (real_idx == _drag_idx)
+                is_hover = (real_idx == _hover_idx)
 
+                px, py = xs_list[i], ys_list[i]
                 if is_drag:
-                    c_tuple = TimelineColors.POINT_DRAGGING
-                    r = radius + 2
+                    dl.add_circle_filled(px, py, r_drag, col_drag)
                 elif is_sel:
-                    c_tuple = TimelineColors.POINT_SELECTED
-                    r = radius + 1
+                    dl.add_circle_filled(px, py, r_sel, col_sel)
+                    dl.add_circle(px, py, r_sel + 1, col_sel_border)
                 elif is_hover:
-                    c_tuple = TimelineColors.POINT_HOVER
-                    r = radius + 1
+                    dl.add_circle_filled(px, py, r_hover, col_hover)
                 else:
-                    c_tuple = TimelineColors.POINT_DEFAULT
-                    r = radius
-
-                dl.add_circle_filled(float(xs[i]), float(ys[i]), r,
-                                     imgui.get_color_u32_rgba(*c_tuple))
-                if is_sel:
-                    dl.add_circle(float(xs[i]), float(ys[i]), r + 1,
-                                  imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER))
+                    dl.add_circle_filled(px, py, radius, col_default)
 
     def _draw_speed_limit_overlay(self, dl, tf: TimelineTransformer, actions: List[Dict]):
-        """Draw red semi-transparent bands for speed limit violations (Phase 1.3)."""
+        """Draw red semi-transparent bands for speed limit violations."""
         if not actions or len(actions) < 2:
             return
 
@@ -1387,10 +1486,20 @@ class InteractiveFunscriptTimeline:
             return
 
         visible_actions = actions[s_idx:e_idx]
-        speeds = HeatmapColorMapper.compute_segment_speeds(visible_actions)
+        # Use cached speeds if available (built by heatmap renderer)
+        if self._heatmap_speeds_cache is not None and len(self._heatmap_speeds_cache) == len(actions) - 1:
+            seg_start = max(0, s_idx)
+            seg_end = min(len(self._heatmap_speeds_cache), e_idx - 1)
+            speeds = self._heatmap_speeds_cache[seg_start:seg_end]
+        else:
+            speeds = HeatmapColorMapper.compute_segment_speeds(visible_actions)
         threshold = self._speed_limit_threshold
 
-        ats = np.array([a['at'] for a in visible_actions], dtype=np.float32)
+        all_ats, _ = self._get_cached_numpy_arrays()
+        if all_ats is not None and len(all_ats) == len(actions):
+            ats = all_ats[s_idx:e_idx]
+        else:
+            ats = np.array([a['at'] for a in visible_actions], dtype=np.float32)
         xs = tf.vec_time_to_x(ats)
         xs = np.clip(xs, tf.x_offset - 100, tf.x_offset + tf.width + 100)
 
@@ -1479,7 +1588,7 @@ class InteractiveFunscriptTimeline:
             dl.add_line(x, tf.y_offset, x, tf.y_offset + tf.height, col, thick)
 
     def _draw_bookmarks(self, dl, tf: TimelineTransformer):
-        """Draw bookmark markers on the timeline (Phase 1.6)."""
+        """Draw bookmark markers on the timeline."""
         visible = self._bookmark_manager.get_in_range(tf.visible_start_ms, tf.visible_end_ms)
         if not visible:
             return
@@ -1510,7 +1619,7 @@ class InteractiveFunscriptTimeline:
 
     def _handle_alternating_mode_input(self, app_state, tf: TimelineTransformer,
                                         mouse_pos, is_hovered, io):
-        """Handle input for alternating mode (Phase 2.2).
+        """Handle input for alternating mode.
 
         Left-click places a point at click X, with Y alternating between
         top and bottom values. Inspects last action to auto-determine direction.
@@ -1525,7 +1634,7 @@ class InteractiveFunscriptTimeline:
             actions = self._get_actions()
             if actions:
                 # Find nearest previous action
-                nearest_idx = bisect_left([a['at'] for a in actions], click_time)
+                nearest_idx = bisect_left(self._get_cached_timestamps() or [a['at'] for a in actions], click_time)
                 if nearest_idx > 0:
                     prev_pos = actions[nearest_idx - 1]['pos']
                     mid = (self._alt_top_value + self._alt_bottom_value) / 2
@@ -1538,7 +1647,7 @@ class InteractiveFunscriptTimeline:
 
     def _handle_recording_mode_input(self, app_state, tf: TimelineTransformer,
                                       mouse_pos, is_hovered, io):
-        """Handle input for recording mode (Phase 3.2).
+        """Handle input for recording mode.
 
         While recording: map mouse Y (or gamepad stick) in canvas to 0-100,
         capture each frame.
@@ -1690,7 +1799,7 @@ class InteractiveFunscriptTimeline:
 
     def _handle_injection_mode_input(self, app_state, tf: TimelineTransformer,
                                       mouse_pos, is_hovered, io):
-        """Handle input for injection mode (Phase 2.3).
+        """Handle input for injection mode.
 
         Click on a segment to inject intermediate points into it.
         """
@@ -1705,7 +1814,7 @@ class InteractiveFunscriptTimeline:
         click_time = tf.x_to_time(center_x)
 
         # Highlight segment under cursor (visual feedback)
-        timestamps = [a['at'] for a in actions]
+        timestamps = self._get_cached_timestamps() or [a['at'] for a in actions]
         idx = bisect_left(timestamps, click_time)
         if idx <= 0 or idx >= len(actions):
             return
@@ -1746,10 +1855,19 @@ class InteractiveFunscriptTimeline:
                 self._finalize_action_and_update_ui()
 
     def _draw_ui_overlays(self, dl, tf: TimelineTransformer):
-        # 1. Playhead (Center)
-        center_x = tf.x_offset + (tf.width / 2)
-        dl.add_line(center_x, tf.y_offset, center_x, tf.y_offset + tf.height, 
-                    imgui.get_color_u32_rgba(*TimelineColors.CENTER_MARKER), 2.0)
+        # 1. Playhead (Center) — line + inverted triangle at top
+        # Round to nearest pixel + 0.5 so the 1px-wide visual center of the
+        # 2px line lands exactly on a pixel boundary, and the triangle tip aligns.
+        center_x = round(tf.x_offset + tf.width / 2) + 0.5
+        marker_color = imgui.get_color_u32_rgba(*TimelineColors.CENTER_MARKER)
+        tri_top = tf.y_offset
+        dl.add_triangle_filled(
+            center_x - 6, tri_top,
+            center_x + 6, tri_top,
+            center_x, tri_top + 8,
+            marker_color)
+        dl.add_line(center_x, tri_top, center_x, tf.y_offset + tf.height,
+                    marker_color, 1.0)
         
         # Playhead Time Info (timecode + frame number)
         time_ms = tf.x_to_time(center_x)
@@ -1962,7 +2080,7 @@ class InteractiveFunscriptTimeline:
             self.app.app_settings.set(f"timeline{self.timeline_num}_show_ultimate_preview", self.show_ultimate_autotune_preview)
             self.invalidate_ultimate_preview()
 
-        # --- OFS-Inspired Visualization Toggles ---
+        # --- Visualization Toggles ---
         imgui.same_line()
         imgui.text("|")
         imgui.same_line()
@@ -1970,7 +2088,7 @@ class InteractiveFunscriptTimeline:
         # Heatmap toggle
         _, self._show_heatmap_coloring = imgui.checkbox(f"Heat##{self.timeline_num}", self._show_heatmap_coloring)
         if imgui.is_item_hovered():
-            imgui.set_tooltip("OFS-style heatmap coloring (speed-based segment colors)")
+            imgui.set_tooltip("Speed-based heatmap coloring for line segments")
         imgui.same_line()
 
         # Speed warnings toggle
@@ -1986,8 +2104,9 @@ class InteractiveFunscriptTimeline:
         _MODE_DESCRIPTIONS = {
             TimelineMode.SELECT: (
                 "Select Mode\n"
-                "Click to add points. Click+drag to move.\n"
-                "Alt+drag for range selection. Ctrl+click for multi-select."
+                "Click: select point | Double-click: seek video\n"
+                "Drag empty: range select | Ctrl+drag: box select\n"
+                "Shift+click empty: create point | Shift/Ctrl+click: multi-select"
             ),
             TimelineMode.ALTERNATING: (
                 "Alternating Mode\n"

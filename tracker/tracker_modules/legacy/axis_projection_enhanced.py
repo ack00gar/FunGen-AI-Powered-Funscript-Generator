@@ -17,7 +17,6 @@ Enhanced features:
 import cv2
 import numpy as np
 import time
-import logging
 from typing import Optional, Dict, Any, Tuple, List
 from collections import deque
 from dataclasses import dataclass
@@ -341,8 +340,8 @@ class AxisProjectionEnhancedTracker(BaseTracker):
     @property
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
-            name="axis_projection_enhanced",
-            display_name="Experimental - Enhanced Axis Projection Tracker",
+            name="LEGACY_AXIS_PROJECTION_ENHANCED",
+            display_name="Enhanced Axis Projection",
             description="Production-grade motion tracking with multi-scale analysis, temporal coherence, and adaptive thresholding",
             category="live",
             version="2.0.0",

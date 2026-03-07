@@ -2,8 +2,6 @@ import time
 import logging
 import subprocess
 import os
-import sys
-import math
 import platform
 import threading
 from typing import Optional, Dict, Tuple, List, Any
@@ -77,45 +75,13 @@ class ApplicationLogic:
         Path("logs").mkdir(exist_ok=True)
         self.app_log_file_path = 'logs/fungen.log'  # Define app_log_file_path
 
-        # --- Start of Log Purge ---
-        try:
-            # Purge log entries older than 7 days, correctly handling multi-line entries.
-            if os.path.exists(self.app_log_file_path):
-                cutoff_date = datetime.now() - timedelta(days=7)
-
-                with open(self.app_log_file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    all_lines = f.readlines()
-
-                first_line_to_keep_index = -1
-                for i, line in enumerate(all_lines):
-                    try:
-                        # Log format: "YYYY-MM-DD HH:MM:SS - ..."
-                        line_timestamp_str = line[:19]
-                        line_date = datetime.strptime(line_timestamp_str, "%Y-%m-%d %H:%M:%S")
-
-                        if line_date >= cutoff_date:
-                            # This is the first entry we want to keep.
-                            # All previous lines will be discarded.
-                            first_line_to_keep_index = i
-                            break
-                    except (ValueError, IndexError):
-                        # This line is part of a multi-line entry.
-                        # Continue searching for the next valid timestamp.
-                        continue
-
-                lines_to_keep = []
-                if first_line_to_keep_index != -1:
-                    # We found a recent entry, so we keep everything from that point on.
-                    lines_to_keep = all_lines[first_line_to_keep_index:]
-
-                # Rewrite the log file with only the recent content.
-                # If no recent entries were found, this will clear the file.
-                with open(self.app_log_file_path, 'w', encoding='utf-8') as f:
-                    if lines_to_keep:
-                        f.writelines(lines_to_keep)
-        except Exception:
-            # If purging fails, it's a non-critical error, so we allow the app to continue.
-            pass
+        # Log purge runs in background — non-critical for startup
+        threading.Thread(
+            target=self._purge_old_log_entries,
+            args=(self.app_log_file_path,),
+            daemon=True,
+            name="LogPurge",
+        ).start()
 
         self._logger_instance = AppLogger(
             app_logic_instance=self,
@@ -147,6 +113,7 @@ class ApplicationLogic:
         self.show_first_run_setup_popup = False
         self.first_run_progress = 0.0
         self.first_run_status_message = ""
+        self.first_run_error = False
         self.first_run_thread: Optional[threading.Thread] = None
 
         # --- Autotuner State ---
@@ -159,27 +126,16 @@ class ApplicationLogic:
         self.autotuner_forced_hwaccel: Optional[str] = None
         self._autotuner_lock = threading.Lock()  # Protects autotuner_results, _best_combination, _best_fps, _status_message
 
-        # --- Hardware Acceleration
-        # Query ffmpeg for available hardware accelerations
-        self.available_ffmpeg_hwaccels = self._get_available_ffmpeg_hwaccels()
-
-        # Get the hardware acceleration method from settings and validate it
-        default_hw_accel = "auto"
-        if "auto" not in self.available_ffmpeg_hwaccels:
-            self.logger.warning("'auto' not in available hwaccels. Defaulting to 'none' or first available.")
-            default_hw_accel = "none" if "none" in self.available_ffmpeg_hwaccels else \
-                (self.available_ffmpeg_hwaccels[0] if self.available_ffmpeg_hwaccels else "none")
-
-        current_hw_method_from_settings = self.app_settings.get("hardware_acceleration_method", default_hw_accel)
-
-        if current_hw_method_from_settings not in self.available_ffmpeg_hwaccels:
-            self.logger.warning(
-                f"Configured hardware acceleration '{current_hw_method_from_settings}' "
-                f"not listed by ffmpeg ({self.available_ffmpeg_hwaccels}). Falling back to '{default_hw_accel}'.")
-            self.hardware_acceleration_method = default_hw_accel
-            self.app_settings.set("hardware_acceleration_method", default_hw_accel)
-        else:
-            self.hardware_acceleration_method = current_hw_method_from_settings
+        # --- Hardware Acceleration ---
+        # Start with sensible defaults; real query runs in background
+        self.available_ffmpeg_hwaccels = ["auto", "none"]
+        self.hardware_acceleration_method = self.app_settings.get("hardware_acceleration_method", "auto")
+        self._hwaccel_query_done = threading.Event()
+        threading.Thread(
+            target=self._query_hwaccels_background,
+            daemon=True,
+            name="HWAccelQuery",
+        ).start()
 
         # --- Tracking Axis Configuration (ensure these are initialized before tracker if tracker uses them in __init__) ---
         self.tracking_axis_mode = self.app_settings.get("tracking_axis_mode", "both")
@@ -252,7 +208,7 @@ class ApplicationLogic:
                 self._audio_player.set_volume(self.app_settings.get("audio_volume", 0.8))
                 self._audio_player.set_mute(self.app_settings.get("audio_muted", False))
                 self._audio_sync.start()
-                self.logger.info("Audio playback initialized")
+                self.logger.debug("Audio playback initialized")
             except Exception as e:
                 self.logger.warning(f"Audio playback init failed: {e}", exc_info=True)
                 self._audio_player = None
@@ -276,7 +232,7 @@ class ApplicationLogic:
                 else:
                     from video.mpv_playback_controller import MpvPlaybackController
                     self._mpv_controller = MpvPlaybackController(self)
-                    self.logger.info(f"MpvPlaybackController initialized (binary: {mpv_bin})")
+                    self.logger.debug(f"MpvPlaybackController initialized (binary: {mpv_bin})")
             except Exception as e:
                 self.logger.warning(f"MpvPlaybackController unavailable: {e}")
 
@@ -301,7 +257,7 @@ class ApplicationLogic:
         self.project_manager = ProjectManager(self)
         self.shortcut_manager = ShortcutManager(self)
 
-        # Pattern Library (OFS-inspired feature)
+        # Pattern Library
         try:
             from funscript.pattern_library import PatternLibrary
             self.pattern_library = PatternLibrary()
@@ -365,12 +321,6 @@ class ApplicationLogic:
         self.app_state_ui.timeline_comparison_results = None
         self.app_state_ui.timeline_comparison_reference_num = 1 # Default to T1 as reference
 
-        # --- GPU Timeline Rendering Integration ---
-        self.gpu_integration = None
-        self.gpu_timeline_enabled = False
-        if not self.is_cli_mode:  # Only initialize GPU in GUI mode
-            self._initialize_gpu_timeline()
-
         # --- Final Setup Steps ---
         self._apply_loaded_settings()
         self.funscript_processor._ensure_undo_managers_linked()
@@ -403,6 +353,33 @@ class ApplicationLogic:
         elif timeline_num >= 3 and hasattr(self, 'gui_instance') and self.gui_instance:
             return self.gui_instance._extra_timeline_editors.get(timeline_num)
         return None
+
+    @staticmethod
+    def _purge_old_log_entries(log_file_path: str):
+        """Purge log entries older than 7 days. Runs in a background thread."""
+        try:
+            if not os.path.exists(log_file_path):
+                return
+            cutoff_date = datetime.now() - timedelta(days=7)
+            with open(log_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                all_lines = f.readlines()
+
+            first_line_to_keep_index = -1
+            for i, line in enumerate(all_lines):
+                try:
+                    line_date = datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S")
+                    if line_date >= cutoff_date:
+                        first_line_to_keep_index = i
+                        break
+                except (ValueError, IndexError):
+                    continue
+
+            lines_to_keep = all_lines[first_line_to_keep_index:] if first_line_to_keep_index != -1 else []
+            with open(log_file_path, 'w', encoding='utf-8') as f:
+                if lines_to_keep:
+                    f.writelines(lines_to_keep)
+        except Exception:
+            pass  # Non-critical — swallow silently
 
     def _configure_third_party_logging(self):
         """Configure third-party library logging to reduce startup noise."""
@@ -469,7 +446,7 @@ class ApplicationLogic:
 
                 if not success:
                     self.first_run_status_message = "Detection model download failed."
-                    time.sleep(3)
+                    self.first_run_error = True
                     return
 
                 final_det_model_path = det_model_path_pt
@@ -483,8 +460,7 @@ class ApplicationLogic:
                         self.logger.info(f"Successfully converted detection model to {final_det_model_path}")
                     except Exception as e:
                         self.logger.error(f"Failed to convert detection model to CoreML: {e}", exc_info=True)
-                        self.first_run_status_message = "Detection model conversion to CoreML failed."
-                        time.sleep(3)
+                        self.first_run_status_message = "Detection model conversion to CoreML failed. Using .pt format."
                         # Continue with the .pt file if conversion fails
 
                 self.app_settings.set("yolo_det_model_path", final_det_model_path)
@@ -505,7 +481,7 @@ class ApplicationLogic:
 
                 if not success:
                     self.first_run_status_message = "Pose model download failed."
-                    time.sleep(3)
+                    self.first_run_error = True
                     return
 
                 final_pose_model_path = pose_model_path_pt
@@ -519,8 +495,7 @@ class ApplicationLogic:
                         self.logger.info(f"Successfully converted pose model to {final_pose_model_path}")
                     except Exception as e:
                         self.logger.error(f"Failed to convert pose model to CoreML: {e}", exc_info=True)
-                        self.first_run_status_message = "Pose model conversion to CoreML failed."
-                        time.sleep(3)
+                        self.first_run_status_message = "Pose model conversion to CoreML failed. Using .pt format."
                         # Continue with the .pt file if conversion fails
 
                 self.app_settings.set("yolo_pose_model_path", final_pose_model_path)
@@ -935,26 +910,43 @@ class ApplicationLogic:
                 return funscript_obj, 'secondary'
         return None, None
 
+    def _query_hwaccels_background(self):
+        """Background thread: query ffmpeg, then validate the configured method."""
+        queried = self._get_available_ffmpeg_hwaccels()
+        self.available_ffmpeg_hwaccels = queried
+
+        default_hw = "auto"
+        if "auto" not in queried:
+            default_hw = "none" if "none" in queried else (queried[0] if queried else "none")
+
+        current = self.app_settings.get("hardware_acceleration_method", default_hw)
+        if current not in queried:
+            self.logger.warning(
+                f"Configured hardware acceleration '{current}' not listed by ffmpeg "
+                f"({queried}). Falling back to '{default_hw}'.")
+            self.hardware_acceleration_method = default_hw
+            self.app_settings.set("hardware_acceleration_method", default_hw)
+        else:
+            self.hardware_acceleration_method = current
+        self._hwaccel_query_done.set()
+
     def _get_available_ffmpeg_hwaccels(self) -> List[str]:
         """Queries FFmpeg for available hardware acceleration methods."""
         try:
-            # Consider making ffmpeg_path configurable via app_settings
-            ffmpeg_path = self.app_settings.get("ffmpeg_path") or "ffmpeg" # Without 'or' it would accept "" or None as valid values (Is what Cluade told me)
+            ffmpeg_path = self.app_settings.get("ffmpeg_path") or "ffmpeg"
             result = subprocess.run(
                 [ffmpeg_path, '-hide_banner', '-hwaccels'],
                 capture_output=True, text=True, check=True, timeout=5
             )
             lines = result.stdout.strip().split('\n')
             hwaccels = []
-            if lines and "Hardware acceleration methods:" in lines[0]:  #
-                # Parse the methods, excluding 'none' if FFmpeg lists it, as we add it manually.
+            if lines and "Hardware acceleration methods:" in lines[0]:
                 hwaccels = [line.strip() for line in lines[1:] if line.strip() and line.strip() != "none"]
 
-                # Ensure "auto" and "none" are always present and prioritized
             standard_options = ["auto", "none"]
             unique_hwaccels = [h for h in hwaccels if h not in standard_options]
             final_options = standard_options + unique_hwaccels
-            log_func = self.logger.info if hasattr(self, 'logger') and self.logger else print
+            log_func = self.logger.debug if hasattr(self, 'logger') and self.logger else print
             log_func(f"Available FFmpeg hardware accelerations: {final_options}")
             return final_options
         except FileNotFoundError:
@@ -971,10 +963,10 @@ class ApplicationLogic:
         return self.model_manager._check_model_paths()
 
     def set_application_logging_level(self, level_name: str):
-        """Sets the application-wide logging level."""
+        """Sets the application-wide logging level (root logger + all handlers)."""
         numeric_level = getattr(logging, level_name.upper(), None)
-        if numeric_level is not None and hasattr(self, '_logger_instance') and hasattr(self._logger_instance, 'logger'):
-            self._logger_instance.logger.setLevel(numeric_level)
+        if numeric_level is not None and hasattr(self, '_logger_instance'):
+            self._logger_instance.set_level(numeric_level)
             self.logging_level_setting = level_name
             self.logger.info(f"Logging level changed to: {level_name}", extra={'status_message': True})
         else:
@@ -1055,18 +1047,18 @@ class ApplicationLogic:
 
     def _load_last_project_on_startup(self):
         """Checks for and loads the most recently used project on application start."""
-        self.logger.info("Checking for last opened project...")
+        self.logger.debug("Checking for last opened project...")
 
         # Read from the new dedicated setting, not the recent projects list.
         last_project_path = self.app_settings.get("last_opened_project_path")
 
         if not last_project_path:
-            self.logger.info("No last project found to load. Starting fresh.")
+            self.logger.debug("No last project found to load. Starting fresh.")
             return
 
         if os.path.exists(last_project_path):
             try:
-                self.logger.info(f"Loading last opened project: {last_project_path}")
+                self.logger.debug(f"Loading last opened project: {last_project_path}")
                 self.project_manager.load_project(last_project_path)
             except Exception as e:
                 self.logger.error(f"Failed to load last project '{last_project_path}': {e}", exc_info=True)
@@ -1077,48 +1069,10 @@ class ApplicationLogic:
                 # Clear the missing path so it doesn't try again next time
                 self.app_settings.set("last_opened_project_path", None)
     
-    def _initialize_gpu_timeline(self):
-        """Initialize GPU timeline rendering system with automatic fallback"""
-        try:
-            from application.gpu_rendering import GPUTimelineIntegration, RenderBackend, GPU_RENDERING_AVAILABLE
-            
-            if not GPU_RENDERING_AVAILABLE:
-                self.logger.info("GPU timeline rendering dependencies not available - using optimized CPU mode")
-                return
-            
-            # Check if GPU rendering is enabled in settings
-            gpu_enabled = self.app_settings.get("timeline_gpu_enabled", True)  # Default to enabled
-            
-            if not gpu_enabled:
-                self.logger.info("GPU timeline rendering disabled in settings")
-                return
-            
-            # Initialize GPU integration
-            self.gpu_integration = GPUTimelineIntegration(
-                app_instance=self,
-                preferred_backend=RenderBackend.AUTO,  # Auto-select best backend
-                logger=self.logger
-            )
-            
-            self.gpu_timeline_enabled = True
-            self.logger.info("GPU timeline rendering system initialized successfully")
-            
-            # Log performance expectations
-            self.logger.info("Timeline performance improvements enabled:")
-            self.logger.info("  • 50x+ faster for large datasets (50k+ points)")
-            self.logger.info("  • Automatic fallback to CPU if GPU unavailable") 
-            self.logger.info("  • Intelligent backend selection based on data size")
-            
-        except ImportError as e:
-            self.logger.info(f"GPU timeline rendering not available - missing dependencies: {e}")
-            self.logger.info("Install PyOpenGL for GPU acceleration: pip install PyOpenGL PyOpenGL_accelerate")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize GPU timeline rendering: {e}")
-            self.logger.info("Continuing with optimized CPU rendering")
 
     def reset_project_state(self, for_new_project: bool = True):
         """Resets the application to a clean state for a new or loaded project."""
-        self.logger.info(f"Resetting project state ({'new project' if for_new_project else 'project load'})...")
+        self.logger.debug(f"Resetting project state ({'new project' if for_new_project else 'project load'})...")
 
         # Preserve current bar visibility states
         prev_show_heatmap = getattr(self.app_state_ui, 'show_heatmap', True)

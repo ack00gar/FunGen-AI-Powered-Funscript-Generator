@@ -118,7 +118,7 @@ class AppEventHandlers:
             return
         if not self.app.tracker: self.logger.error("Tracker not initialized."); return
         
-        self.app.tracker.set_tracking_mode("yolo_roi")  # Ensure correct mode
+        self.app.tracker.set_tracking_mode("LIVE_YOLO_ROI")  # Ensure correct mode
         self.app.stage_processor.start_full_analysis(processing_mode=self.app.app_state_ui.selected_tracker_name)
         self.app.energy_saver.reset_activity_timer()
 
@@ -181,7 +181,7 @@ class AppEventHandlers:
             )
             
             # Debug logging for ROI validation
-            self.logger.info(f"🔍 User ROI validation: user_roi_fixed={self.app.tracker.user_roi_fixed}, "
+            self.logger.info(f"User ROI validation: user_roi_fixed={self.app.tracker.user_roi_fixed}, "
                            f"initial_point={self.app.tracker.user_roi_initial_point_relative}, "
                            f"tracked_point={self.app.tracker.user_roi_tracked_point_relative}, "
                            f"has_global_roi={has_global_roi}")
@@ -412,7 +412,7 @@ class AppEventHandlers:
                 
                 # Native fullscreen auto-syncs via single FFmpeg dual-output
                 if hasattr(video_ui, 'native_fullscreen') and video_ui.native_fullscreen.is_active():
-                    self.logger.info("🎯 Native fullscreen auto-synced via single FFmpeg dual-output")
+                    self.logger.info("Native fullscreen auto-synced via single FFmpeg dual-output")
 
     def _sync_fullscreen_pause_state(self, paused: bool):
         """Legacy method - no longer needed with single FFmpeg dual-output architecture."""

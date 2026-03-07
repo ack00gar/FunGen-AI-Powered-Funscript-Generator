@@ -380,6 +380,15 @@ class MpvIPCBridge:
                     elif prop_id == 2 and data is not None:  # pause
                         with self._state_lock:
                             self._is_playing = not data
+                            pos_ms = self._position_ms
+                        # Fire position callbacks so observers (device_control)
+                        # detect the play/pause transition immediately, even
+                        # though time-pos doesn't change when paused.
+                        for cb in self._position_callbacks:
+                            try:
+                                cb(pos_ms, self._duration_ms)
+                            except Exception:
+                                pass
                     elif prop_id == 3 and data is not None:  # duration
                         with self._state_lock:
                             self._duration_ms = data * 1000.0

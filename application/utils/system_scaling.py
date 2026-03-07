@@ -112,7 +112,7 @@ def _get_macos_scaling_info(logger: logging.Logger) -> Tuple[float, float, str]:
                 dpi = scale_factor * 72
                 # Convert to our standard scaling factor (based on 96 DPI)
                 standard_scaling_factor = dpi / 96.0
-                logger.info(f"macOS scale factor: {scale_factor} (standard scaling: {standard_scaling_factor:.2f})")
+                logger.debug(f"macOS scale factor: {scale_factor} (standard scaling: {standard_scaling_factor:.2f})")
                 return (standard_scaling_factor, dpi, "macOS")
         except ImportError:
             logger.debug("PyObjC not available for macOS scaling detection")

@@ -163,11 +163,11 @@ class MovementBarWindow:
             draw_list.add_triangle_filled(f1[0], f1[1], f3[0], f3[1], f4[0], f4[1], fill_color)
         
         # Draw scale markers on the left side (not rotated - fixed reference)
+        marker_color = imgui.get_color_u32_rgba(0.6, 0.6, 0.6, 0.7)
         for i in range(5):  # 0%, 25%, 50%, 75%, 100%
             marker_y = center_y + half_h - (i / 4.0) * bar_height  # Fixed vertical positions
             marker_x1 = center_x - half_w - 15
             marker_x2 = center_x - half_w - 10
-            marker_color = imgui.get_color_u32_rgba(0.6, 0.6, 0.6, 0.7)
             draw_list.add_line(marker_x1, marker_y, marker_x2, marker_y, marker_color, thickness=1)
         
         # Clean interface - no text needed

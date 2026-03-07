@@ -6,6 +6,7 @@ from OpenGL.GL.shaders import compileProgram, compileShader
 import glfw
 from PIL import Image
 import os
+import logging
 
 def check_gl_error(operation="Operation"):
     error = glGetError()
@@ -27,6 +28,13 @@ class Simulator3DWindow:
         self.rbo = None
         self.window_size = (400, 500)
         self.logo_texture = None  # OpenGL texture for logo
+
+        # Cached GL uniform locations (set in init_opengl, -1 = invalid)
+        self._uloc_vertical = -1
+        self._uloc_roll = -1
+        self._uloc_pitch = -1
+        self._uloc_logo_tex = -1
+        self._uloc_use_tex = -1
 
         # Performance: Dirty flags to prevent unnecessary re-renders
         self.needs_render = True  # Force initial render
@@ -291,12 +299,19 @@ class Simulator3DWindow:
             # Check for linking errors
             if not glGetProgramiv(self.shader, GL_LINK_STATUS):
                 error_log = glGetProgramInfoLog(self.shader)
-                print(f"❌ Shader linking failed: {error_log}")
+                print(f"Shader linking failed: {error_log}")
                 return
 
             glDeleteShader(vertex_shader)
             glDeleteShader(fragment_shader)
             check_gl_error("Shader deletion")
+
+            # Cache uniform locations (avoids per-frame glGetUniformLocation calls)
+            self._uloc_vertical = glGetUniformLocation(self.shader, "verticalPos")
+            self._uloc_roll = glGetUniformLocation(self.shader, "rollAngle")
+            self._uloc_pitch = glGetUniformLocation(self.shader, "pitchAngle")
+            self._uloc_logo_tex = glGetUniformLocation(self.shader, "logoTexture")
+            self._uloc_use_tex = glGetUniformLocation(self.shader, "useTexture")
 
             # Create and bind VBO
             self.vbo = glGenBuffers(1)
@@ -351,11 +366,11 @@ class Simulator3DWindow:
 
                     glBindTexture(GL_TEXTURE_2D, 0)
                     check_gl_error("Logo texture loading")
-                    print(f"✓ Loaded logo texture from {logo_path}")
+                    logging.getLogger(__name__).debug(f"Loaded logo texture from {logo_path}")
                 else:
-                    print(f"⚠ Logo not found at {logo_path}, using default colors")
+                    logging.getLogger(__name__).warning(f"Logo not found at {logo_path}, using default colors")
             except Exception as e:
-                print(f"⚠ Failed to load logo texture: {e}")
+                logging.getLogger(__name__).warning(f"Failed to load logo texture: {e}")
 
             # Create framebuffer for imgui rendering
             self.fbo = glGenFramebuffers(1)
@@ -381,7 +396,7 @@ class Simulator3DWindow:
 
             # Check framebuffer status
             if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
-                print("❌ Framebuffer is not complete!")
+                print("Framebuffer is not complete!")
                 check_gl_error("Framebuffer completeness check")
 
             glBindFramebuffer(GL_FRAMEBUFFER, 0)
@@ -527,39 +542,25 @@ class Simulator3DWindow:
         roll_angle = np.radians((secondary_pos - 50) * 0.9)  # ±45° max roll
         pitch_angle = np.radians((tertiary_pos - 50) * 0.6) if tertiary_pos != 50 else 0.0  # ±30° max pitch
 
-        # Set shader uniforms
-        vertical_loc = glGetUniformLocation(self.shader, "verticalPos")
-        roll_loc = glGetUniformLocation(self.shader, "rollAngle")
-        pitch_loc = glGetUniformLocation(self.shader, "pitchAngle")
-
-        if vertical_loc != -1:
-            glUniform1f(vertical_loc, vertical_pos)
-
-        if roll_loc != -1:
-            glUniform1f(roll_loc, roll_angle)
-
-        if pitch_loc != -1:
-            glUniform1f(pitch_loc, pitch_angle)
+        # Set shader uniforms (using cached locations)
+        if self._uloc_vertical != -1:
+            glUniform1f(self._uloc_vertical, vertical_pos)
+        if self._uloc_roll != -1:
+            glUniform1f(self._uloc_roll, roll_angle)
+        if self._uloc_pitch != -1:
+            glUniform1f(self._uloc_pitch, pitch_angle)
 
         # Bind logo texture if available and enabled in settings
         if self.logo_texture is not None and logo_enabled:
             glActiveTexture(GL_TEXTURE0)
             glBindTexture(GL_TEXTURE_2D, self.logo_texture)
-
-            # Set texture uniform to use texture unit 0
-            texture_loc = glGetUniformLocation(self.shader, "logoTexture")
-            if texture_loc != -1:
-                glUniform1i(texture_loc, 0)
-
-            # Enable texture flag
-            use_texture_loc = glGetUniformLocation(self.shader, "useTexture")
-            if use_texture_loc != -1:
-                glUniform1i(use_texture_loc, 1)
+            if self._uloc_logo_tex != -1:
+                glUniform1i(self._uloc_logo_tex, 0)
+            if self._uloc_use_tex != -1:
+                glUniform1i(self._uloc_use_tex, 1)
         else:
-            # Disable texture flag
-            use_texture_loc = glGetUniformLocation(self.shader, "useTexture")
-            if use_texture_loc != -1:
-                glUniform1i(use_texture_loc, 0)
+            if self._uloc_use_tex != -1:
+                glUniform1i(self._uloc_use_tex, 0)
 
         glBindVertexArray(self.vao)
         check_gl_error("Binding VAO")
@@ -671,38 +672,26 @@ class Simulator3DWindow:
         roll_angle = np.radians((secondary_pos - 50) * 0.9)
         pitch_angle = np.radians((tertiary_pos - 50) * 0.6) if tertiary_pos != 50 else 0.0
 
-        # Set shader uniforms
-        vertical_loc = glGetUniformLocation(self.shader, "verticalPos")
-        roll_loc = glGetUniformLocation(self.shader, "rollAngle")
-        pitch_loc = glGetUniformLocation(self.shader, "pitchAngle")
-
-        if vertical_loc != -1:
-            glUniform1f(vertical_loc, vertical_pos)
-        if roll_loc != -1:
-            glUniform1f(roll_loc, roll_angle)
-        if pitch_loc != -1:
-            glUniform1f(pitch_loc, pitch_angle)
+        # Set shader uniforms (using cached locations)
+        if self._uloc_vertical != -1:
+            glUniform1f(self._uloc_vertical, vertical_pos)
+        if self._uloc_roll != -1:
+            glUniform1f(self._uloc_roll, roll_angle)
+        if self._uloc_pitch != -1:
+            glUniform1f(self._uloc_pitch, pitch_angle)
 
         # Bind logo texture if available and enabled in settings
         logo_enabled = self.app.app_settings.get('show_3d_simulator_logo', True)
         if self.logo_texture is not None and logo_enabled:
             glActiveTexture(GL_TEXTURE0)
             glBindTexture(GL_TEXTURE_2D, self.logo_texture)
-
-            # Set texture uniform to use texture unit 0
-            texture_loc = glGetUniformLocation(self.shader, "logoTexture")
-            if texture_loc != -1:
-                glUniform1i(texture_loc, 0)
-
-            # Enable texture flag
-            use_texture_loc = glGetUniformLocation(self.shader, "useTexture")
-            if use_texture_loc != -1:
-                glUniform1i(use_texture_loc, 1)
+            if self._uloc_logo_tex != -1:
+                glUniform1i(self._uloc_logo_tex, 0)
+            if self._uloc_use_tex != -1:
+                glUniform1i(self._uloc_use_tex, 1)
         else:
-            # Disable texture flag
-            use_texture_loc = glGetUniformLocation(self.shader, "useTexture")
-            if use_texture_loc != -1:
-                glUniform1i(use_texture_loc, 0)
+            if self._uloc_use_tex != -1:
+                glUniform1i(self._uloc_use_tex, 0)
 
         # Draw the 3D cuboid
         glBindVertexArray(self.vao)
