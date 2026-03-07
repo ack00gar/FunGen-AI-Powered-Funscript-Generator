@@ -278,8 +278,43 @@ class DialogRendererMixin:
         # Keyboard Shortcuts Dialog (accessible via F1 or Help menu)
         self.keyboard_shortcuts_dialog.render()
 
+        # One-time shortcut migration notice
+        self._render_shortcuts_reset_notice()
+
         # Legacy first-run popup (only shown if wizard was skipped, e.g. manual re-trigger from menu)
         self._render_first_run_setup_popup()
+
+    def _render_shortcuts_reset_notice(self):
+        """One-time notice shown after v0.7.0 shortcut migration."""
+        if not self.app.app_settings.shortcuts_were_reset:
+            return
+
+        popup_id = "Shortcuts Updated###ShortcutsReset"
+        if not imgui.is_popup_open(popup_id):
+            imgui.open_popup(popup_id)
+
+        center_next_window(450)
+        if imgui.begin_popup_modal(popup_id)[0]:
+            imgui.text("Keyboard Shortcuts Reset")
+            imgui.separator()
+            imgui.spacing()
+            imgui.text_wrapped(
+                "Your keyboard shortcuts have been reset to the new defaults. "
+                "The shortcut system was restructured in v0.7.0 and old bindings "
+                "could cause unexpected behavior (e.g. drag acting as pan, "
+                "Shift+Arrow not working)."
+            )
+            imgui.spacing()
+            imgui.text_wrapped(
+                "Press F1 at any time to review and customize shortcuts."
+            )
+            imgui.spacing()
+            button_width = 120
+            imgui.set_cursor_pos_x((imgui.get_window_width() - button_width) * 0.5)
+            if imgui.button("OK", width=button_width):
+                self.app.app_settings.shortcuts_were_reset = False
+                imgui.close_current_popup()
+            imgui.end_popup()
 
     def _render_first_run_setup_popup(self):
         app = self.app
