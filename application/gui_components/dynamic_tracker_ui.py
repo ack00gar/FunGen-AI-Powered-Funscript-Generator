@@ -196,17 +196,16 @@ class DynamicTrackerUI:
 
         # Very long videos (>90 min): prefer 2-stage for speed
         if duration > 90 * 60:
-            if "OFFLINE_2_STAGE" in all_trackers:
-                return "OFFLINE_2_STAGE", "Fast processing for long videos"
+            if "OFFLINE_CONTACT_ANALYSIS" in all_trackers:
+                return "OFFLINE_CONTACT_ANALYSIS", "Fast processing for long videos"
 
-        # Short videos (<2 min): prefer mixed 3-stage for quality
-        if duration < 2 * 60 and duration > 0:
-            if "OFFLINE_3_STAGE_MIXED" in all_trackers:
-                return "OFFLINE_3_STAGE_MIXED", "Highest quality for short videos"
+        # Default: Guided Flow (3-stage) — best quality with chapter-aware strategies
+        if "OFFLINE_GUIDED_FLOW" in all_trackers:
+            return "OFFLINE_GUIDED_FLOW", "Best quality with chapter-aware strategies"
 
-        # Default: 3-stage balanced
-        if "OFFLINE_3_STAGE" in all_trackers:
-            return "OFFLINE_3_STAGE", "Best balance of quality and speed"
+        # Fallback to legacy 3-stage trackers
+        if "LEGACY_STAGE3_OPTICAL_FLOW" in all_trackers:
+            return "LEGACY_STAGE3_OPTICAL_FLOW", "Legacy 3-stage balanced"
 
         # Fallback to whatever is available
         from config.constants import DEFAULT_TRACKER_NAME

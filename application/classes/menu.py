@@ -6,25 +6,7 @@ from config.element_group_colors import MenuColors
 from application.utils import get_logo_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
-
-def _center_popup(width, height):
-    mv = imgui.get_main_viewport()
-    # Avoid tuple creation and repeated attr lookups
-    main_viewport_pos_x, main_viewport_pos_y = mv.pos[0], mv.pos[1]
-    main_viewport_w, main_viewport_h = mv.size[0], mv.size[1]
-    pos_x = main_viewport_pos_x + (main_viewport_w - width) * 0.5
-    pos_y = main_viewport_pos_y + (main_viewport_h - height) * 0.5
-    imgui.set_next_window_position(pos_x, pos_y, condition=imgui.APPEARING)
-    # height=0 -> auto-resize vertical; we still set width for consistent centering
-    imgui.set_next_window_size(width, 0, condition=imgui.APPEARING)
-
-def _begin_modal_popup(name, width, height):
-    imgui.open_popup(name)
-    _center_popup(width, height)
-    opened, _ = imgui.begin_popup_modal(
-        name, True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE
-    )
-    return opened
+from application.utils.imgui_helpers import begin_modal_centered
 
 def _menu_item_simple(label, enabled=True):
     clicked, _ = imgui.menu_item(label, enabled=enabled)
@@ -207,7 +189,7 @@ class MainMenu:
 
         name = "Select Reference Timeline##TimelineSelectPopup"
         # 450x220 used for centering; height auto
-        if _begin_modal_popup(name, 450, 220):
+        if begin_modal_centered(name, 450, 220):
             imgui.text("Which timeline has the correct timing?")
             imgui.text_wrapped(
                 "The offset will be calculated for the other timeline "
@@ -243,7 +225,7 @@ class MainMenu:
             return
 
         name = "Timeline Comparison Results##TimelineResultsPopup"
-        if _begin_modal_popup(name, 400, 240): # 400x240 used for centering; height auto
+        if begin_modal_centered(name, 400, 240): # 400x240 used for centering; height auto
             results = app_state.timeline_comparison_results
             if results:
                 # Localize lookups
@@ -314,23 +296,7 @@ class MainMenu:
         from config import constants
 
         # Center and open popup
-        imgui.open_popup("About FunGen##AboutDialog")
-
-        # Center on main viewport
-        mv = imgui.get_main_viewport()
-        main_viewport_pos_x, main_viewport_pos_y = mv.pos[0], mv.pos[1]
-        main_viewport_w, main_viewport_h = mv.size[0], mv.size[1]
-        dialog_width = 450
-        pos_x = main_viewport_pos_x + (main_viewport_w - dialog_width) * 0.5
-        pos_y = main_viewport_pos_y + main_viewport_h * 0.3  # Center vertically (slightly higher)
-        imgui.set_next_window_position(pos_x, pos_y, condition=imgui.ONCE)
-        imgui.set_next_window_size(dialog_width, 0, condition=imgui.ONCE)
-
-        opened, _ = imgui.begin_popup_modal(
-            "About FunGen##AboutDialog",
-            True,
-            flags=imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE
-        )
+        opened = begin_modal_centered("About FunGen##AboutDialog", 450)
 
         if opened:
             # App name and version
@@ -368,16 +334,14 @@ class MainMenu:
             imgui.spacing()
 
             # Donate button
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.8, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.6, 0.15, 1.0)
-            if imgui.button("Donate on Ko-fi", width=-1):
-                try:
-                    webbrowser.open("https://ko-fi.com/k00gar")
-                except Exception as e:
-                    if hasattr(self.app, 'logger') and self.app.logger:
-                        self.app.logger.warning(f"Could not open Ko-fi link: {e}")
-            imgui.pop_style_color(3)
+            from application.utils import primary_button_style
+            with primary_button_style():
+                if imgui.button("Donate on Ko-fi", width=-1):
+                    try:
+                        webbrowser.open("https://ko-fi.com/k00gar")
+                    except Exception as e:
+                        if hasattr(self.app, 'logger') and self.app.logger:
+                            self.app.logger.warning(f"Could not open Ko-fi link: {e}")
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Donate, become a supporter, unlock features!")
 
@@ -532,7 +496,7 @@ class MainMenu:
         fs_proc = app.funscript_processor
 
         if imgui.begin_menu("Edit", True):
-            # Focused undo/redo (OFS-style: last-edited timeline)
+            # Focused undo/redo (last-edited timeline)
             focused_tl = fs_proc._last_edited_timeline
             focused_mgr = fs_proc._get_undo_manager(focused_tl)
             can_undo_f = focused_mgr.can_undo() if focused_mgr else False
@@ -618,6 +582,24 @@ class MainMenu:
             if clicked:
                 app_state.show_video_controls_overlay = val
                 self.app.project_manager.project_dirty = True
+
+            # Enter Fullscreen (mpv - supporter exclusive)
+            mpv = getattr(self.app, '_mpv_controller', None)
+            is_fs_active = mpv is not None and mpv.is_active
+            from application.utils.feature_detection import is_feature_available as _is_feature_available
+            fs_available = _is_feature_available("patreon_features") and mpv is not None
+            fs_label = "Exit Fullscreen" if is_fs_active else "Enter Fullscreen (Patreon Exclusive)"
+            clicked, _ = imgui.menu_item(fs_label, "F11", selected=is_fs_active, enabled=fs_available)
+            if clicked and fs_available:
+                if is_fs_active:
+                    mpv.stop()
+                else:
+                    file_manager = getattr(self.app, 'file_manager', None)
+                    video_path = file_manager.video_path if file_manager else None
+                    if video_path:
+                        processor = self.app.processor
+                        start_frame = processor.current_frame_index if processor else 0
+                        mpv.start(video_path, start_frame=start_frame, fullscreen=True)
 
             imgui.separator()
 
@@ -1054,7 +1036,7 @@ class MainMenu:
             imgui.separator()
 
             # Calibration & Analysis submenu
-            if imgui.begin_menu("Calibration && Analysis"):
+            if imgui.begin_menu("Calibration & Analysis"):
                 can_calibrate = file_mgr.video_path is not None
                 if _menu_item_simple("Start Latency Calibration...", enabled=can_calibrate):
                     calibration = getattr(app, "calibration", None)
@@ -1196,6 +1178,30 @@ class MainMenu:
                     )
 
                 imgui.end_menu()
+
+            imgui.separator()
+
+            # System Report — copy to clipboard
+            if _menu_item_simple("Copy System Report"):
+                try:
+                    from application.utils.system_report import generate_report
+                    report = generate_report()
+                    try:
+                        import pyperclip
+                        pyperclip.copy(report)
+                    except ImportError:
+                        import subprocess as _sp
+                        proc = _sp.Popen(['pbcopy'], stdin=_sp.PIPE, text=True)
+                        proc.communicate(report)
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.info("System report copied to clipboard.",
+                                        extra={'status_message': True, 'duration': 3.0})
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not generate system report: {e}",
+                                           extra={'status_message': True})
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Generate a system report and copy it to the clipboard.\nUseful for bug reports.")
 
             imgui.end_menu()
 

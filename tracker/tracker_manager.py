@@ -4,7 +4,7 @@ Replaces ModularTrackerBridge with clean, scalable architecture.
 """
 import logging
 import numpy as np
-from typing import List, Dict, Tuple, Optional, Any, Union
+from typing import List, Dict, Tuple, Optional, Any
 
 from tracker.tracker_modules import tracker_registry
 from funscript.multi_axis_funscript import MultiAxisFunscript
@@ -127,7 +127,7 @@ class TrackerManager:
             self.rolling_autotune_window_ms = 5000  # Process last 5 seconds of data
         self.rolling_autotune_last_time = 0  # Last time autotune was applied
 
-        self.logger.info("TrackerManager initialized - Direct modular tracker interface")
+        self.logger.debug("TrackerManager initialized - Direct modular tracker interface")
 
     def set_tracking_mode(self, mode_name: str) -> bool:
         """Set tracking mode with direct tracker instantiation."""
@@ -178,7 +178,7 @@ class TrackerManager:
             # Apply any pending configurations
             self._apply_pending_configurations()
             
-            self.logger.info(f"Native tracker instantiated: {mode_name} ({tracker_info.display_name})")
+            self.logger.debug(f"Native tracker instantiated: {mode_name} ({tracker_info.display_name})")
             return True
             
         except Exception as e:
@@ -379,7 +379,7 @@ class TrackerManager:
                     roi_abs_coords, point_abs_coords_in_frame, current_frame_for_patch
                 )
                 if result:
-                    self.logger.info(f"✅ User ROI set: ROI={roi_abs_coords}, Point={point_abs_coords_in_frame}")
+                    self.logger.info(f"User ROI set: ROI={roi_abs_coords}, Point={point_abs_coords_in_frame}")
                     # Sync manager state for GUI compatibility
                     self.user_roi_fixed = roi_abs_coords
                     # Calculate relative point in ROI coordinates
@@ -388,7 +388,7 @@ class TrackerManager:
                     self.user_roi_initial_point_relative = (x_rel, y_rel)
                     self.user_roi_tracked_point_relative = (x_rel, y_rel)
                 else:
-                    self.logger.warning("❌ Tracker rejected user ROI setting")
+                    self.logger.warning("Tracker rejected user ROI setting")
                 return result
             except Exception as e:
                 self.logger.error(f"Error setting user ROI: {e}")
@@ -405,7 +405,7 @@ class TrackerManager:
         if self._current_tracker and hasattr(self._current_tracker, 'set_axis'):
             try:
                 result = self._current_tracker.set_axis(point_a, point_b)
-                self.logger.info(f"✅ Axis set: A={point_a}, B={point_b}")
+                self.logger.info(f"Axis set: A={point_a}, B={point_b}")
                 return result
             except Exception as e:
                 self.logger.error(f"Error setting axis: {e}")
@@ -843,7 +843,7 @@ class TrackerManager:
                             axes_processed.append(f"secondary({len(secondary_indices)} pts)")
 
             if axes_processed:
-                self.logger.info(f"🔧 Rolling autotune applied to {', '.join(axes_processed)} "
+                self.logger.info(f"Rolling autotune applied to {', '.join(axes_processed)} "
                                f"({start_time}ms - {current_time_ms}ms)")
             else:
                 self.logger.debug(f"Not enough data for rolling autotune in window")

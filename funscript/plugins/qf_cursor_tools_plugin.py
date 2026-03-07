@@ -10,7 +10,6 @@ Four tools that operate relative to the video playhead position:
 Algorithms by Quickfix (EroScripts community).
 """
 
-import math
 from typing import Dict, Any, Optional
 
 try:

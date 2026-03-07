@@ -57,6 +57,45 @@ class TrackerSettingsMixin:
         if imgui.collapsing_header("Tracker Debug##TrackerDebugPanel")[0]:
             tracker_instance.render_debug_ui()
 
+    # ---- Setting helpers ----
+
+    @staticmethod
+    def _setting_slider_float(settings, target, label, key, attr, lo, hi,
+                              fmt="%.2f", tooltip=None, clamp_min=None):
+        """Render a slider_float bound to a setting key and target attribute."""
+        cur = settings.get(key)
+        ch, nv = imgui.slider_float(label, cur, lo, hi, fmt)
+        if tooltip:
+            _tooltip_if_hovered(tooltip)
+        if ch:
+            if clamp_min is not None:
+                nv = max(clamp_min, nv)
+            if nv != cur:
+                settings.set(key, nv)
+                setattr(target, attr, nv)
+
+    @staticmethod
+    def _setting_input_int(settings, target, label, key, attr, min_val=0, tooltip=None):
+        """Render an input_int bound to a setting key and target attribute."""
+        cur = settings.get(key)
+        ch, nv = imgui.input_int(label, cur)
+        if tooltip:
+            _tooltip_if_hovered(tooltip)
+        if ch:
+            v = max(min_val, nv)
+            if v != cur:
+                settings.set(key, v)
+                setattr(target, attr, v)
+
+    @staticmethod
+    def _setting_checkbox(settings, target, label, key, attr):
+        """Render a checkbox bound to a setting key and target attribute."""
+        cur = settings.get(key)
+        ch, nv = imgui.checkbox(label, cur)
+        if ch:
+            settings.set(key, nv)
+            setattr(target, attr, nv)
+
     # ---- Legacy per-tracker renders (kept as fallback) ----
 
     def _render_live_tracker_settings(self):
@@ -67,57 +106,32 @@ class TrackerSettingsMixin:
             return
 
         settings = app.app_settings
+        _sf = self._setting_slider_float
+        _si = self._setting_input_int
 
         with _section_card("Detection & ROI Definition##ROIDetectionTrackerMenu", tier="primary") as is_open:
             if is_open:
-                cur_conf = settings.get("live_tracker_confidence_threshold")
-                ch, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", cur_conf, 0.1, 0.95, "%.2f")
-                _tooltip_if_hovered("Minimum confidence for object detection (higher = fewer false positives, lower = more detections)")
-                if ch and new_conf != cur_conf:
-                    settings.set("live_tracker_confidence_threshold", new_conf)
-                    tr.confidence_threshold = new_conf
-
-                cur_pad = settings.get("live_tracker_roi_padding")
-                ch, new_pad = imgui.input_int("ROI Padding##ROIPadTrackerMenu", cur_pad)
-                _tooltip_if_hovered("Pixels to expand the region of interest beyond detected object (larger = more context)")
-                if ch:
-                    v = max(0, new_pad)
-                    if v != cur_pad:
-                        settings.set("live_tracker_roi_padding", v)
-                        tr.roi_padding = v
-
-                cur_int = settings.get("live_tracker_roi_update_interval")
-                ch, new_int = imgui.input_int("ROI Update Interval (frames)##ROIIntervalTrackerMenu", cur_int)
-                _tooltip_if_hovered("How often to run object detection (higher = better performance, lower = more responsive tracking)")
-                if ch:
-                    v = max(1, new_int)
-                    if v != cur_int:
-                        settings.set("live_tracker_roi_update_interval", v)
-                        tr.roi_update_interval = v
-
-                cur_sm = settings.get("live_tracker_roi_smoothing_factor")
-                ch, new_sm = imgui.slider_float("ROI Smoothing Factor##ROISmoothTrackerMenu", cur_sm, 0.0, 1.0, "%.2f")
-                _tooltip_if_hovered("Smooths ROI position changes between frames (0=instant changes, 1=maximum smoothing)")
-                if ch and new_sm != cur_sm:
-                    settings.set("live_tracker_roi_smoothing_factor", new_sm)
-                    tr.roi_smoothing_factor = new_sm
-
-                cur_persist = settings.get("live_tracker_roi_persistence_frames")
-                ch, new_pf = imgui.input_int("ROI Persistence (frames)##ROIPersistTrackerMenu", cur_persist)
-                _tooltip_if_hovered("How many frames to keep tracking after losing detection (0=stop immediately, higher=keep tracking longer)")
-                if ch:
-                    v = max(0, new_pf)
-                    if v != cur_persist:
-                        settings.set("live_tracker_roi_persistence_frames", v)
-                        tr.max_frames_for_roi_persistence = v
+                _sf(settings, tr, "Obj. Confidence##ROIConfTrackerMenu",
+                    "live_tracker_confidence_threshold", "confidence_threshold", 0.1, 0.95,
+                    tooltip="Minimum confidence for object detection (higher = fewer false positives, lower = more detections)")
+                _si(settings, tr, "ROI Padding##ROIPadTrackerMenu",
+                    "live_tracker_roi_padding", "roi_padding", min_val=0,
+                    tooltip="Pixels to expand the region of interest beyond detected object (larger = more context)")
+                _si(settings, tr, "ROI Update Interval (frames)##ROIIntervalTrackerMenu",
+                    "live_tracker_roi_update_interval", "roi_update_interval", min_val=1,
+                    tooltip="How often to run object detection (higher = better performance, lower = more responsive tracking)")
+                _sf(settings, tr, "ROI Smoothing Factor##ROISmoothTrackerMenu",
+                    "live_tracker_roi_smoothing_factor", "roi_smoothing_factor", 0.0, 1.0,
+                    tooltip="Smooths ROI position changes between frames (0=instant changes, 1=maximum smoothing)")
+                _si(settings, tr, "ROI Persistence (frames)##ROIPersistTrackerMenu",
+                    "live_tracker_roi_persistence_frames", "max_frames_for_roi_persistence", min_val=0,
+                    tooltip="How many frames to keep tracking after losing detection (0=stop immediately, higher=keep tracking longer)")
 
         with _section_card("Optical Flow##ROIFlowTrackerMenu", tier="primary") as is_open:
             if is_open:
+                self._setting_checkbox(settings, tr, "Use Sparse Optical Flow##ROISparseFlowTrackerMenu",
+                                       "live_tracker_use_sparse_flow", "use_sparse_flow")
                 cur_sparse = settings.get("live_tracker_use_sparse_flow")
-                ch, new_sparse = imgui.checkbox("Use Sparse Optical Flow##ROISparseFlowTrackerMenu", cur_sparse)
-                if ch:
-                    settings.set("live_tracker_use_sparse_flow", new_sparse)
-                    tr.use_sparse_flow = new_sparse
 
                 imgui.text("DIS Dense Flow Settings:")
                 with _DisabledScope(cur_sparse):
@@ -143,15 +157,8 @@ class TrackerSettingsMixin:
                         tr.update_dis_flow_config(finest_scale=new_scale)
 
                 imgui.spacing()
-
-                # Flow smoothing (was orphaned — now inside Optical Flow where it belongs)
-                cur_smooth = settings.get("live_tracker_flow_smoothing_window")
-                ch, nv = imgui.input_int("Flow Smoothing Window##ROIFlowSmoothWinTrackerMenu", cur_smooth)
-                if ch:
-                    v = max(1, nv)
-                    if v != cur_smooth:
-                        settings.set("live_tracker_flow_smoothing_window", v)
-                        tr.flow_history_window_smooth = v
+                _si(settings, tr, "Flow Smoothing Window##ROIFlowSmoothWinTrackerMenu",
+                    "live_tracker_flow_smoothing_window", "flow_history_window_smooth", min_val=1)
 
                 imgui.text("Output Delay (frames):")
                 cur_delay = settings.get("funscript_output_delay_frames")
@@ -163,38 +170,25 @@ class TrackerSettingsMixin:
 
         with _section_card("Output Signal Generation##ROISignalTrackerMenu", tier="primary") as is_open:
             if is_open:
-                cur_sens = settings.get("live_tracker_sensitivity")
-                ch, ns = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu", cur_sens, 0.0, 100.0, "%.1f")
-                _tooltip_if_hovered("How responsive the output is to motion changes (higher = more sensitive to small movements)")
-                if ch and ns != cur_sens:
-                    settings.set("live_tracker_sensitivity", ns)
-                    tr.sensitivity = ns
-
-                cur_amp = settings.get("live_tracker_base_amplification")
-                ch, na = imgui.slider_float("Base Amplification##ROIBaseAmpTrackerMenu", cur_amp, 0.1, 5.0, "%.2f")
-                _tooltip_if_hovered("Multiplier for output range (higher = more movement, lower = gentler motion)")
-                if ch:
-                    v = max(0.1, na)
-                    if v != cur_amp:
-                        settings.set("live_tracker_base_amplification", v)
-                        tr.base_amplification_factor = v
+                _sf(settings, tr, "Output Sensitivity##ROISensTrackerMenu",
+                    "live_tracker_sensitivity", "sensitivity", 0.0, 100.0, "%.1f",
+                    tooltip="How responsive the output is to motion changes (higher = more sensitive to small movements)")
+                _sf(settings, tr, "Base Amplification##ROIBaseAmpTrackerMenu",
+                    "live_tracker_base_amplification", "base_amplification_factor", 0.1, 5.0,
+                    tooltip="Multiplier for output range (higher = more movement, lower = gentler motion)",
+                    clamp_min=0.1)
 
                 imgui.text("Class-Specific Amplification Multipliers:")
                 cur = settings.get("live_tracker_class_amp_multipliers", {})
                 changed = False
-
-                face = cur.get("face", 1.0)
-                ch, nv = imgui.slider_float("Face Amp. Mult.##ROIFaceAmpTrackerMenu", face, 0.1, 5.0, "%.2f")
-                if ch:
-                    cur["face"] = max(0.1, nv)
-                    changed = True
-
-                hand = cur.get("hand", 1.0)
-                ch, nv = imgui.slider_float("Hand Amp. Mult.##ROIHandAmpTrackerMenu", hand, 0.1, 5.0, "%.2f")
-                if ch:
-                    cur["hand"] = max(0.1, nv)
-                    changed = True
-
+                for cls_name in ("face", "hand"):
+                    val = cur.get(cls_name, 1.0)
+                    ch, nv = imgui.slider_float(
+                        f"{cls_name.capitalize()} Amp. Mult.##ROI{cls_name.capitalize()}AmpTrackerMenu",
+                        val, 0.1, 5.0, "%.2f")
+                    if ch:
+                        cur[cls_name] = max(0.1, nv)
+                        changed = True
                 if changed:
                     settings.set("live_tracker_class_amp_multipliers", cur)
                     tr.class_specific_amplification_multipliers = cur
@@ -212,7 +206,9 @@ class TrackerSettingsMixin:
         disable_axis_controls = (
             stage_proc.full_analysis_active
             or self.app.is_setting_user_roi_mode
-            or (processor and processor.is_processing and not processor.pause_event.is_set())
+            or (processor and processor.is_processing
+                and getattr(processor, 'enable_tracker_processing', False)
+                and not processor.pause_event.is_set())
         )
         with _DisabledScope(disable_axis_controls):
             imgui.set_next_item_width(-1)
@@ -260,6 +256,12 @@ class TrackerSettingsMixin:
             "80=Very Fine"
         )
 
+        def _set_osc_setting(key, value, tracker_method):
+            settings.set(key, value)
+            tr = app.tracker
+            if tr:
+                getattr(tr, tracker_method)()
+
         cur_grid = settings.get("oscillation_detector_grid_size", 20)
         imgui.push_item_width(200)
         ch, nv = imgui.slider_int("##GridSize", cur_grid, 8, 80)
@@ -267,18 +269,10 @@ class TrackerSettingsMixin:
             valid = [8, 10, 16, 20, 32, 40, 64, 80]
             closest = min(valid, key=lambda x: abs(x - nv))
             if closest != cur_grid:
-                settings.set("oscillation_detector_grid_size", closest)
-                tr = app.tracker
-                if tr:
-                    tr.update_oscillation_grid_size()
+                _set_osc_setting("oscillation_detector_grid_size", closest, "update_oscillation_grid_size")
         imgui.same_line()
-        if imgui.button("Reset##ResetGridSize"):
-            default_grid = 20
-            if cur_grid != default_grid:
-                settings.set("oscillation_detector_grid_size", default_grid)
-                tr = app.tracker
-                if tr:
-                    tr.update_oscillation_grid_size()
+        if imgui.button("Reset##ResetGridSize") and cur_grid != 20:
+            _set_osc_setting("oscillation_detector_grid_size", 20, "update_oscillation_grid_size")
         imgui.pop_item_width()
 
         imgui.text("Detection Sensitivity")
@@ -291,18 +285,10 @@ class TrackerSettingsMixin:
         imgui.push_item_width(200)
         ch, nv = imgui.slider_float("##Sensitivity", cur_sens, 0.1, 3.0, "%.2f")
         if ch and nv != cur_sens:
-            settings.set("oscillation_detector_sensitivity", nv)
-            tr = app.tracker
-            if tr:
-                tr.update_oscillation_sensitivity()
+            _set_osc_setting("oscillation_detector_sensitivity", nv, "update_oscillation_sensitivity")
         imgui.same_line()
-        if imgui.button("Reset##ResetSensitivity"):
-            default_sens = 1.0
-            if cur_sens != default_sens:
-                settings.set("oscillation_detector_sensitivity", default_sens)
-                tr = app.tracker
-                if tr:
-                    tr.update_oscillation_sensitivity()
+        if imgui.button("Reset##ResetSensitivity") and cur_sens != 1.0:
+            _set_osc_setting("oscillation_detector_sensitivity", 1.0, "update_oscillation_sensitivity")
         imgui.pop_item_width()
 
         imgui.text("Oscillation Area Selection")
@@ -331,21 +317,19 @@ class TrackerSettingsMixin:
 
         if has_area:
             imgui.same_line()
-            # Clear Oscillation Area button (DESTRUCTIVE - clears user data)
             with destructive_button_style():
                 if imgui.button("Clear Oscillation Area##ClearOscillationArea", width=btn_w):
                     tr.clear_oscillation_area_and_point()
-                if hasattr(app, "is_setting_oscillation_area_mode"):
                     app.is_setting_oscillation_area_mode = False
-                gi = getattr(app, "gui_instance", None)
-                if gi and hasattr(gi, "video_display_ui"):
-                    v = gi.video_display_ui
-                    v.is_drawing_oscillation_area = False
-                    v.drawn_oscillation_area_video_coords = None
-                    v.waiting_for_oscillation_point_click = False
-                    v.oscillation_area_draw_start_screen_pos = (0, 0)
-                    v.oscillation_area_draw_current_screen_pos = (0, 0)
-                app.logger.info("Oscillation area cleared.", extra={"status_message": True})
+                    gi = getattr(app, "gui_instance", None)
+                    if gi and hasattr(gi, "video_display_ui"):
+                        v = gi.video_display_ui
+                        v.is_drawing_oscillation_area = False
+                        v.drawn_oscillation_area_video_coords = None
+                        v.waiting_for_oscillation_point_click = False
+                        v.oscillation_area_draw_start_screen_pos = (0, 0)
+                        v.oscillation_area_draw_current_screen_pos = (0, 0)
+                    app.logger.info("Oscillation area cleared.", extra={"status_message": True})
         # Overlays
         imgui.text("Overlays")
         _tooltip_if_hovered("Visualization layers for the Oscillation Detector.")

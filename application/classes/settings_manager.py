@@ -110,7 +110,9 @@ class AppSettings:
             "global_font_scale": 1.0,
             "auto_system_scaling_enabled": True,  # Automatically detect and apply system scaling
             "timeline_pan_speed_multiplier": 20,
-            "timeline_pan_drag_modifier": "SHIFT",  # Modifier key for left-drag pan (trackpad alternative to middle-mouse)
+            "timeline_pan_drag_modifier": "ALT",  # Modifier key for left-drag pan (trackpad alternative to middle-mouse)
+            "timeline_create_point_modifier": "SHIFT",  # Modifier key for click-to-create-point
+            "timeline_marquee_modifier": "CTRL",  # Modifier key for box/marquee selection drag
             "tracker_show_legacy": False,        # Show legacy trackers in dropdown
             "tracker_show_experimental": True,   # Show experimental trackers in dropdown
             "tracker_show_community": True,      # Show community trackers in dropdown
@@ -118,9 +120,7 @@ class AppSettings:
             "show_funscript_interactive_timeline2": False,
             "show_funscript_timeline": True,
             
-            # Timeline Performance & GPU Settings
-            "timeline_gpu_enabled": True,  # GPU rendering enabled by default for better performance
-            "timeline_gpu_threshold_points": 5000,  # Use GPU above this point count
+            # Timeline Performance
             "show_timeline_optimization_indicator": False,  # Performance indicators hidden by default
             "timeline_performance_logging": False,  # Log timeline performance stats
             "show_heatmap": True,
@@ -303,7 +303,7 @@ class AppSettings:
         try:
             with open(settings_file, 'w') as f:
                 json.dump(self.data, f, indent=4)
-            self.logger.info(f"Settings saved to {settings_file}.")
+            self.logger.debug(f"Settings saved to {settings_file}.")
         except Exception as e:
             self.logger.error(f"Error saving settings to '{settings_file}': {e}", exc_info=True)
 

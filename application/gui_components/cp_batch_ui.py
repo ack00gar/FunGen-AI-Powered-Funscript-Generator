@@ -18,171 +18,155 @@ from config.element_group_colors import ControlPanelColors as _CPColors
 
 logger = logging.getLogger(__name__)
 
-# ── Module-level state (batch) ──────────────────────────────────────────────
-_watched_folder_processor = None
-_batch_queue = None
-_batch_worker = None
-
-# ── Module-level state (live capture) ───────────────────────────────────────
-_capture_manager = None
-
-_cached_windows: List = []
-_windows_loading = False
-_windows_loaded = False
-
-_url_validation_result: Optional[str] = None
-_url_validating = False
-
-_source_type = 0  # 0=Screen, 1=Window, 2=Stream
-_selected_window = 0
-_stream_url = ""
-_window_filter = ""
-
-_selected_tracker_idx = 0
-_tracker_names: List[str] = []
-_tracker_display_names: List[str] = []
-_trackers_loaded = False
-_connect_device = False
-_save_funscript = True
-
 _SOURCE_LABELS = ["Screen", "Window", "Stream URL"]
 _CAPTURE_WIDTH = 640
 _CAPTURE_HEIGHT = 640
-
-
-# ── Lazy-init helpers ───────────────────────────────────────────────────────
-
-def _get_batch_components(app):
-    """Import batch logic from addon, or return (None, None, None) for preview mode."""
-    global _watched_folder_processor, _batch_queue, _batch_worker
-
-    try:
-        if _batch_queue is None:
-            from patreon_features.batch.batch_queue import BatchQueue
-            _batch_queue = BatchQueue()
-
-        if _watched_folder_processor is None:
-            from patreon_features.batch.watched_folder import WatchedFolderProcessor
-
-            def on_new_video(path):
-                _batch_queue.add(path)
-
-            _watched_folder_processor = WatchedFolderProcessor(on_new_video=on_new_video)
-
-        if _batch_worker is None:
-            from patreon_features.batch.batch_worker import BatchWorker
-            _batch_worker = BatchWorker(app, _batch_queue)
-
-        return _watched_folder_processor, _batch_queue, _batch_worker
-    except ImportError:
-        return None, None, None
-
-
-def _get_capture_manager():
-    """Import capture manager from addon, or return None."""
-    global _capture_manager
-    if _capture_manager is None:
-        try:
-            from patreon_features.live_capture.capture_manager import CaptureManager
-            _capture_manager = CaptureManager(width=_CAPTURE_WIDTH, height=_CAPTURE_HEIGHT)
-        except ImportError:
-            return None
-    return _capture_manager
-
-
-def _load_tracker_list():
-    """Load available trackers from the tracker discovery system."""
-    global _tracker_names, _tracker_display_names, _trackers_loaded, _selected_tracker_idx
-
-    try:
-        from config.tracker_discovery import get_tracker_discovery
-        discovery = get_tracker_discovery()
-        display_names, internal_names = discovery.get_gui_display_list()
-        _tracker_display_names = list(display_names)
-        _tracker_names = list(internal_names)
-        _trackers_loaded = True
-    except Exception as e:
-        logger.warning(f"Failed to load tracker list: {e}")
-        _tracker_display_names = ["(no trackers found)"]
-        _tracker_names = [""]
-        _trackers_loaded = True
-
-
-def _sync_tracker_selection(app):
-    """Sync the tracker combo with the app's current tracker selection."""
-    global _selected_tracker_idx
-    if not _tracker_names:
-        return
-    current = getattr(app.app_state_ui, 'selected_tracker_name', '')
-    if current and current in _tracker_names:
-        _selected_tracker_idx = _tracker_names.index(current)
-
-
-def _refresh_windows_async():
-    """Refresh window list in a background thread."""
-    global _windows_loading, _windows_loaded, _cached_windows
-
-    if _windows_loading:
-        return
-
-    _windows_loading = True
-
-    def _do_refresh():
-        global _cached_windows, _windows_loading, _windows_loaded
-        try:
-            from patreon_features.live_capture.window_list import get_available_windows
-            result = get_available_windows()
-            _cached_windows = result
-        except Exception as e:
-            logger.warning(f"Failed to list windows: {e}")
-            _cached_windows = []
-        _windows_loading = False
-        _windows_loaded = True
-
-    threading.Thread(target=_do_refresh, daemon=True, name="WindowListRefresh").start()
-
-
-def _validate_url_async(url: str):
-    """Validate a stream URL in a background thread."""
-    global _url_validation_result, _url_validating
-
-    def _do_validate():
-        global _url_validation_result, _url_validating
-        try:
-            from patreon_features.live_capture.capture_sources import StreamCaptureSource
-            ok, msg = StreamCaptureSource.validate_url(url)
-            _url_validation_result = msg if not ok else "Valid"
-        except Exception as e:
-            _url_validation_result = str(e)
-        _url_validating = False
-
-    _url_validating = True
-    _url_validation_result = None
-    threading.Thread(target=_do_validate, daemon=True).start()
-
-
-def _open_folder_dialog(app, watcher):
-    """Open the app's folder dialog to pick a watch folder."""
-    def _on_folder_selected(folder_path):
-        app_state = app.app_state_ui
-        app_state._batch_watch_path = folder_path
-        app.app_settings.set("batch_watch_path", folder_path)
-
-    gi = getattr(app, "gui_instance", None)
-    if gi and hasattr(gi, "file_dialog"):
-        initial = app.app_settings.get("batch_watch_path", "")
-        gi.file_dialog.show(
-            title="Select Watch Folder",
-            callback=_on_folder_selected,
-            is_folder_dialog=True,
-            initial_path=initial if initial and os.path.isdir(initial) else None,
-        )
 
 
 # ── Mixin class ─────────────────────────────────────────────────────────────
 
 class BatchMixin:
     """Mixin providing Batch Processing & Live Capture tab rendering methods."""
+
+    def _init_batch_state(self):
+        """Initialize all batch/capture state. Called from ControlPanelUI.__init__."""
+        # Backend singletons (lazy-init)
+        self._batch_watcher = None
+        self._batch_queue = None
+        self._batch_worker = None
+        self._capture_manager = None
+        self._batch_init_lock = threading.Lock()
+
+        # Live capture UI state
+        self._capture_source_type = 0  # 0=Screen, 1=Window, 2=Stream
+        self._capture_selected_window = 0
+        self._capture_stream_url = ""
+        self._capture_window_filter = ""
+        self._cached_windows: List = []
+        self._windows_loading = False
+        self._windows_loaded = False
+        self._url_validation_result: Optional[str] = None
+        self._url_validating = False
+
+        # Tracker selection for capture
+        self._capture_tracker_idx = 0
+        self._capture_tracker_names: List[str] = []
+        self._capture_tracker_display_names: List[str] = []
+        self._capture_trackers_loaded = False
+        self._capture_connect_device = False
+        self._capture_save_funscript = True
+
+    # ── Lazy-init helpers ──────────────────────────────────────────────
+
+    def _get_batch_components(self):
+        """Import batch logic from addon, or return (None, None, None)."""
+        if self._batch_queue is not None and self._batch_watcher is not None and self._batch_worker is not None:
+            return self._batch_watcher, self._batch_queue, self._batch_worker
+
+        with self._batch_init_lock:
+            try:
+                if self._batch_queue is None:
+                    from patreon_features.batch.batch_queue import BatchQueue
+                    self._batch_queue = BatchQueue()
+
+                if self._batch_watcher is None:
+                    from patreon_features.batch.watched_folder import WatchedFolderProcessor
+                    queue = self._batch_queue
+                    self._batch_watcher = WatchedFolderProcessor(on_new_video=lambda path: queue.add(path))
+
+                if self._batch_worker is None:
+                    from patreon_features.batch.batch_worker import BatchWorker
+                    self._batch_worker = BatchWorker(self.app, self._batch_queue)
+
+                return self._batch_watcher, self._batch_queue, self._batch_worker
+            except ImportError:
+                return None, None, None
+
+    def _get_capture_manager(self):
+        """Import capture manager from addon, or return None."""
+        if self._capture_manager is not None:
+            return self._capture_manager
+        with self._batch_init_lock:
+            if self._capture_manager is None:
+                try:
+                    from patreon_features.live_capture.capture_manager import CaptureManager
+                    self._capture_manager = CaptureManager(width=_CAPTURE_WIDTH, height=_CAPTURE_HEIGHT)
+                except ImportError:
+                    return None
+        return self._capture_manager
+
+    def _load_capture_tracker_list(self):
+        """Load available trackers from the tracker discovery system."""
+        try:
+            from config.tracker_discovery import get_tracker_discovery
+            discovery = get_tracker_discovery()
+            display_names, internal_names = discovery.get_gui_display_list()
+            self._capture_tracker_display_names = list(display_names)
+            self._capture_tracker_names = list(internal_names)
+        except Exception as e:
+            logger.warning(f"Failed to load tracker list: {e}")
+            self._capture_tracker_display_names = ["(no trackers found)"]
+            self._capture_tracker_names = [""]
+        self._capture_trackers_loaded = True
+
+    def _sync_capture_tracker_selection(self):
+        """Sync the tracker combo with the app's current tracker selection."""
+        if not self._capture_tracker_names:
+            return
+        current = getattr(self.app.app_state_ui, 'selected_tracker_name', '')
+        if current and current in self._capture_tracker_names:
+            self._capture_tracker_idx = self._capture_tracker_names.index(current)
+
+    def _refresh_windows_async(self):
+        """Refresh window list in a background thread."""
+        if self._windows_loading:
+            return
+        self._windows_loading = True
+
+        def _do_refresh():
+            try:
+                from patreon_features.live_capture.window_list import get_available_windows
+                self._cached_windows = get_available_windows()
+            except Exception as e:
+                logger.warning(f"Failed to list windows: {e}")
+                self._cached_windows = []
+            self._windows_loading = False
+            self._windows_loaded = True
+
+        threading.Thread(target=_do_refresh, daemon=True, name="WindowListRefresh").start()
+
+    def _validate_url_async(self, url: str):
+        """Validate a stream URL in a background thread."""
+        self._url_validating = True
+        self._url_validation_result = None
+
+        def _do_validate():
+            try:
+                from patreon_features.live_capture.capture_sources import StreamCaptureSource
+                ok, msg = StreamCaptureSource.validate_url(url)
+                self._url_validation_result = msg if not ok else "Valid"
+            except Exception as e:
+                self._url_validation_result = str(e)
+            self._url_validating = False
+
+        threading.Thread(target=_do_validate, daemon=True).start()
+
+    def _open_batch_folder_dialog(self):
+        """Open the app's folder dialog to pick a watch folder."""
+        app = self.app
+        def _on_folder_selected(folder_path):
+            app.app_state_ui._batch_watch_path = folder_path
+            app.app_settings.set("batch_watch_path", folder_path)
+
+        gi = getattr(app, "gui_instance", None)
+        if gi and hasattr(gi, "file_dialog"):
+            initial = app.app_settings.get("batch_watch_path", "")
+            gi.file_dialog.show(
+                title="Select Watch Folder",
+                callback=_on_folder_selected,
+                is_folder_dialog=True,
+                initial_path=initial if initial and os.path.isdir(initial) else None,
+            )
 
     def _render_supporter_batch_tab(self):
         """Render the Patreon Exclusive tab (supporter feature).
@@ -197,7 +181,7 @@ class BatchMixin:
         # Version info
         self._render_addon_version_label("patreon_features", "Patreon Exclusive")
 
-        watcher, queue, worker = _get_batch_components(self.app)
+        watcher, queue, worker = self._get_batch_components()
         if watcher is None:
             imgui.text_colored("Batch module could not be loaded", *_CPColors.ERROR_TEXT)
             return
@@ -243,7 +227,7 @@ class BatchMixin:
                 app_state._batch_watch_path = app.app_settings.get("batch_watch_path", "")
 
             if imgui.button("Browse...##WatchFolderBrowse"):
-                _open_folder_dialog(app, watcher)
+                self._open_batch_folder_dialog()
             imgui.same_line()
             path_display = app_state._batch_watch_path or "(no folder selected)"
             imgui.text(path_display)
@@ -367,16 +351,14 @@ class BatchMixin:
 
     def _render_capture_panel(self):
         """Render the live capture panel."""
-        global _source_type
-
-        manager = _get_capture_manager()
+        manager = self._get_capture_manager()
         if manager is None:
             imgui.text_colored("Live capture module not available", *_CPColors.ERROR_TEXT)
             return
 
-        if not _trackers_loaded:
-            _load_tracker_list()
-            _sync_tracker_selection(self.app)
+        if not self._capture_trackers_loaded:
+            self._load_capture_tracker_list()
+            self._sync_capture_tracker_selection()
 
         status = manager.get_status()
         is_capturing = manager.is_capturing
@@ -387,18 +369,18 @@ class BatchMixin:
         for i, label in enumerate(_SOURCE_LABELS):
             if i > 0:
                 imgui.same_line()
-            if imgui.radio_button(label, _source_type == i):
-                _source_type = i
-                if i == 1 and not _windows_loaded and not _windows_loading:
-                    _refresh_windows_async()
+            if imgui.radio_button(label, self._capture_source_type == i):
+                self._capture_source_type = i
+                if i == 1 and not self._windows_loaded and not self._windows_loading:
+                    self._refresh_windows_async()
 
         imgui.spacing()
 
-        if _source_type == 0:
+        if self._capture_source_type == 0:
             self._render_capture_screen_controls()
-        elif _source_type == 1:
+        elif self._capture_source_type == 1:
             self._render_capture_window_controls()
-        elif _source_type == 2:
+        elif self._capture_source_type == 2:
             self._render_capture_stream_controls()
 
         imgui.spacing()
@@ -450,8 +432,6 @@ class BatchMixin:
         imgui.text("Captures your primary screen.")
 
     def _render_capture_window_controls(self):
-        global _selected_window, _window_filter
-
         imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.WARNING_TEXT)
         imgui.text_wrapped(
             "Note: GPU-accelerated apps (Chrome, Firefox) may show a black/white screen. "
@@ -459,31 +439,32 @@ class BatchMixin:
         imgui.pop_style_color()
         imgui.spacing()
 
-        if not _windows_loaded and not _windows_loading:
-            _refresh_windows_async()
+        if not self._windows_loaded and not self._windows_loading:
+            self._refresh_windows_async()
 
-        if _windows_loading:
+        if self._windows_loading:
             imgui.text("Scanning windows...")
             return
 
         if imgui.small_button("Refresh##WindowRefresh"):
-            _refresh_windows_async()
+            self._refresh_windows_async()
             return
 
-        if not _cached_windows:
+        if not self._cached_windows:
             imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
             imgui.text("No windows found.")
             imgui.pop_style_color()
             return
 
-        changed, _window_filter = imgui.input_text("Filter##WindowFilter", _window_filter, 256)
+        changed, self._capture_window_filter = imgui.input_text(
+            "Filter##WindowFilter", self._capture_window_filter, 256)
 
-        if _window_filter:
-            filt = _window_filter.lower()
-            filtered = [(i, w) for i, w in enumerate(_cached_windows)
+        if self._capture_window_filter:
+            filt = self._capture_window_filter.lower()
+            filtered = [(i, w) for i, w in enumerate(self._cached_windows)
                         if filt in w.display_label.lower()]
         else:
-            filtered = list(enumerate(_cached_windows))
+            filtered = list(enumerate(self._cached_windows))
 
         window_labels = [w.display_label for _, w in filtered]
         if not window_labels:
@@ -494,55 +475,52 @@ class BatchMixin:
 
         display_idx = 0
         for di, (orig_idx, _) in enumerate(filtered):
-            if orig_idx == _selected_window:
+            if orig_idx == self._capture_selected_window:
                 display_idx = di
                 break
 
         clicked, new_display_idx = imgui.combo("##WindowSelect", display_idx, window_labels)
         if clicked and 0 <= new_display_idx < len(filtered):
-            _selected_window = filtered[new_display_idx][0]
+            self._capture_selected_window = filtered[new_display_idx][0]
 
     def _render_capture_stream_controls(self):
-        global _stream_url
-
-        changed, _stream_url = imgui.input_text("URL##StreamURL", _stream_url, 1024)
+        changed, self._capture_stream_url = imgui.input_text(
+            "URL##StreamURL", self._capture_stream_url, 1024)
 
         imgui.same_line()
-        if _url_validating:
+        if self._url_validating:
             imgui.text("Testing...")
         else:
             if imgui.small_button("Test URL"):
-                if _stream_url.strip():
-                    _validate_url_async(_stream_url.strip())
+                if self._capture_stream_url.strip():
+                    self._validate_url_async(self._capture_stream_url.strip())
 
-        if _url_validation_result:
-            if _url_validation_result == "Valid":
+        if self._url_validation_result:
+            if self._url_validation_result == "Valid":
                 imgui.text_colored("URL is valid", *_CPColors.SUCCESS_TEXT)
             else:
-                imgui.text_colored(_url_validation_result, *_CPColors.ERROR_TEXT)
+                imgui.text_colored(self._url_validation_result, *_CPColors.ERROR_TEXT)
 
     def _render_capture_tracker_options(self):
-        global _selected_tracker_idx, _connect_device, _save_funscript
-
-        if _tracker_display_names:
+        if self._capture_tracker_display_names:
             imgui.text("Tracker:")
             imgui.same_line()
-            avail_w = imgui.get_content_region_available()[0]
-            imgui.push_item_width(avail_w)
-            changed, _selected_tracker_idx = imgui.combo(
-                "##CaptureTracker", _selected_tracker_idx, _tracker_display_names)
+            imgui.push_item_width(imgui.get_content_region_available()[0])
+            changed, self._capture_tracker_idx = imgui.combo(
+                "##CaptureTracker", self._capture_tracker_idx, self._capture_tracker_display_names)
             imgui.pop_item_width()
         else:
             imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
             imgui.text("No trackers available")
             imgui.pop_style_color()
 
-        from application.utils.feature_detection import is_feature_available
-        if is_feature_available("device_control"):
-            _, _connect_device = imgui.checkbox("Connect Device##CaptureDevice", _connect_device)
+        if self._feat_device:
+            _, self._capture_connect_device = imgui.checkbox(
+                "Connect Device##CaptureDevice", self._capture_connect_device)
             _tooltip_if_hovered("Send tracker output to connected device in real-time")
 
-        _, _save_funscript = imgui.checkbox("Save funscript on stop##CaptureSave", _save_funscript)
+        _, self._capture_save_funscript = imgui.checkbox(
+            "Save funscript on stop##CaptureSave", self._capture_save_funscript)
 
     def _start_capture(self, manager):
         """Create the appropriate capture source and start capturing."""
@@ -551,29 +529,30 @@ class BatchMixin:
         manager.height = h
 
         tracker_name = ""
-        if _tracker_names and 0 <= _selected_tracker_idx < len(_tracker_names):
-            tracker_name = _tracker_names[_selected_tracker_idx]
+        names = self._capture_tracker_names
+        if names and 0 <= self._capture_tracker_idx < len(names):
+            tracker_name = names[self._capture_tracker_idx]
 
         try:
-            if _source_type == 0:
+            if self._capture_source_type == 0:
                 from patreon_features.live_capture.capture_sources import ScreenCaptureSource
                 source = ScreenCaptureSource(screen_index=0, width=w, height=h)
-            elif _source_type == 1:
+            elif self._capture_source_type == 1:
                 from patreon_features.live_capture.capture_sources import WindowCaptureSource
-                if _cached_windows and 0 <= _selected_window < len(_cached_windows):
-                    win = _cached_windows[_selected_window]
+                if self._cached_windows and 0 <= self._capture_selected_window < len(self._cached_windows):
+                    win = self._cached_windows[self._capture_selected_window]
                     source = WindowCaptureSource(
                         window_title=win.title or win.app_name,
                         window_id=win.window_id, width=w, height=h)
                 else:
                     logger.warning("No window selected")
                     return
-            elif _source_type == 2:
+            elif self._capture_source_type == 2:
                 from patreon_features.live_capture.capture_sources import StreamCaptureSource
-                if not _stream_url.strip():
+                if not self._capture_stream_url.strip():
                     logger.warning("No stream URL provided")
                     return
-                source = StreamCaptureSource(url=_stream_url.strip(), width=w, height=h)
+                source = StreamCaptureSource(url=self._capture_stream_url.strip(), width=w, height=h)
             else:
                 return
 
@@ -584,8 +563,8 @@ class BatchMixin:
 
             manager.start(source, self.app,
                           tracker_name=tracker_name,
-                          device_control=_connect_device,
-                          save_funscript=_save_funscript)
+                          device_control=self._capture_connect_device,
+                          save_funscript=self._capture_save_funscript)
         except Exception as e:
             logger.error(f"Failed to start capture: {e}")
 

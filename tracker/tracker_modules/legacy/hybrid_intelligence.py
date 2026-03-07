@@ -156,8 +156,8 @@ class HybridIntelligenceTracker(BaseTracker):
     @property
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
-            name="hybrid_intelligence",
-            display_name="Hybrid Intelligence Tracker",
+            name="LEGACY_HYBRID_INTELLIGENCE",
+            display_name="Hybrid Intelligence",
             description="Multi-modal approach combining frame diff, optical flow, YOLO, and oscillation detection",
             category="live",
             version="1.0.0",
@@ -702,7 +702,7 @@ class HybridIntelligenceTracker(BaseTracker):
             # Log final positions if available
             primary_pos = getattr(self, 'last_primary_position', 100.0)  # VR POV default
             secondary_pos = getattr(self, 'last_secondary_position', 50.0)
-            self.logger.info(f"Hybrid Intelligence Tracker stopped at final positions: P={primary_pos:.1f}, S={secondary_pos:.1f}")
+            self.logger.debug(f"Hybrid Intelligence Tracker stopped at final positions: P={primary_pos:.1f}, S={secondary_pos:.1f}")
             return True
         except Exception as e:
             self.logger.error(f"Failed to stop tracking: {e}")
@@ -747,7 +747,7 @@ class HybridIntelligenceTracker(BaseTracker):
                 # Signal amplifier cleanup is handled internally
                 pass
                 
-            self.logger.info("Hybrid Intelligence Tracker cleaned up")
+            self.logger.debug("Hybrid Intelligence Tracker cleaned up")
         except Exception as e:
             self.logger.error(f"Cleanup error: {e}")
     

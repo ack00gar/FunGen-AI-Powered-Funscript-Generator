@@ -154,7 +154,7 @@ def _validate_preprocessed_video_completeness(video_path: str, expected_frames: 
                     logger.warning(f"Preprocessed video duration mismatch: expected {expected_duration:.2f}s, got {duration:.2f}s")
                     return False
 
-        logger.info(f"Preprocessed video validation passed: {video_path}")
+        logger.debug(f"Preprocessed video validation passed: {video_path}")
         return True
 
     except Exception as e:

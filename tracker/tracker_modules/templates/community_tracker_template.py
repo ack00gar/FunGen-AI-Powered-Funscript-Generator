@@ -69,7 +69,7 @@ class CommunityExampleTracker(BaseTracker):
         """
         return TrackerMetadata(
             # ---- CHANGE THESE ----
-            name="community_example",           # unique internal id (no spaces)
+            name="COMMUNITY_EXAMPLE",              # unique SCREAMING_SNAKE id (no spaces)
             display_name="Community Example Tracker",  # shown in UI dropdown
             description="Template tracker showing basic motion detection and funscript generation",
             author="Community Template",

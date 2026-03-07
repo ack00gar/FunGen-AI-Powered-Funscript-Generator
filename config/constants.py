@@ -1,8 +1,7 @@
 import platform
 import os
-import enum
 from typing import Dict, List, Tuple, Any
-from enum import Enum, auto
+from enum import Enum
 
 # Attempt to import torch for device detection, but fail gracefully if it's not available.
 try:
@@ -14,7 +13,7 @@ except ImportError:
 # META & VERSIONING
 ####################################################################################################
 APP_NAME = "FunGen"
-APP_VERSION = "0.6.4"
+APP_VERSION = "0.7.0"
 APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION} - AI Computer Vision"
 FUNSCRIPT_AUTHOR = "FunGen"
 
@@ -89,35 +88,11 @@ class ProcessingSpeedMode(Enum):
 ####################################################################################################
 # UI COLORS (Toolbar button states)
 ####################################################################################################
-# Button color scheme for different states
-# Format: (R, G, B, A) normalized to 0.0-1.0 range
-
-# Green: For active "running" states (Play when playing, Start Tracking when tracking)
-TOOLBAR_BUTTON_GREEN_ACTIVE = (0.0, 0.7, 0.0, 0.7)
-TOOLBAR_BUTTON_GREEN_HOVERED = (0.0, 0.85, 0.0, 0.85)
-TOOLBAR_BUTTON_GREEN_PRESSED = (0.0, 0.6, 0.0, 0.9)
-
-# Blue: For toggle features (Mode, Show Video, Speed modes, Timeline toggles, etc.)
-TOOLBAR_BUTTON_BLUE_ACTIVE = (0.3, 0.5, 0.7, 0.8)
-TOOLBAR_BUTTON_BLUE_HOVERED = (0.4, 0.6, 0.8, 0.9)
-TOOLBAR_BUTTON_BLUE_PRESSED = (0.2, 0.4, 0.6, 1.0)
-
-# Red: For "stop" or "inactive but important" states
-TOOLBAR_BUTTON_RED_ACTIVE = (0.7, 0.0, 0.0, 0.7)
-TOOLBAR_BUTTON_RED_HOVERED = (0.85, 0.0, 0.0, 0.85)
-TOOLBAR_BUTTON_RED_PRESSED = (0.6, 0.0, 0.0, 0.9)
-
-# Default: Normal button state (inactive)
-TOOLBAR_BUTTON_DEFAULT = (0.0, 0.0, 0.0, 0.0)
-TOOLBAR_BUTTON_DEFAULT_HOVERED = (0.5, 0.5, 0.55, 0.2)
-TOOLBAR_BUTTON_DEFAULT_PRESSED = (0.4, 0.4, 0.45, 0.35)
-
-
 # TrackerMode enum removed - now using dynamic tracker discovery system
 # See config/tracker_discovery.py for the new dynamic approach
 
 # Default tracker will be resolved dynamically from available trackers
-DEFAULT_TRACKER_NAME = "oscillation"  # Internal name, resolved at runtime
+DEFAULT_TRACKER_NAME = "LIVE_OSCILLATION"  # Internal name, resolved at runtime
 
 ####################################################################################################
 # AI & MODELS

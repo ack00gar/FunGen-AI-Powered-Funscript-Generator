@@ -160,7 +160,7 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     # Note: send2trash is included because it's imported by application.utils.__init__.py -> generated_file_manager.py
     bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging', 'send2trash'], pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
 
-    logger.info("=== Checking Application Dependencies ===")
+    logger.info("--- Dependency Check ---")
 
     # 2. Detect GPU environment and select appropriate requirements
     requirements_file, env_description = detect_gpu_environment()
@@ -177,17 +177,17 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
 
     core_changed = False
     if core_packages:
-        logger.info("Checking core packages...")
+        logger.debug("Checking core packages...")
         core_changed = _ensure_packages(core_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
 
     # 3.5. macOS-specific: Check PyObjC for Metal GPU backend support
     macos_changed = False
     if platform.system() == "Darwin":
-        logger.info("Checking macOS Metal backend dependencies...")
+        logger.debug("Checking macOS Metal backend dependencies...")
         macos_packages = ['pyobjc-framework-Metal>=10.0', 'pyobjc-framework-MetalKit>=10.0']
         macos_changed = _ensure_packages(macos_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
         if macos_changed:
-            logger.info("✅ Metal backend support installed for GPU unwarp acceleration")
+            logger.info("Metal backend support installed for GPU unwarp acceleration")
 
     # 4. Load and install GPU-specific requirements if needed
     gpu_changed = False
@@ -281,21 +281,21 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     major_changes = bootstrap_changed or core_changed or macos_changed or gpu_changed
     
     if major_changes:
-        logger.warning("\n=== Package Installation Complete ===")
+        logger.warning("--- Package Installation Complete ---")
         logger.warning("IMPORTANT: Major packages were installed/upgraded.")
         logger.warning("Please restart the application to ensure all changes take effect.")
-        logger.warning("=== Exiting for Restart ===")
+        logger.warning("--- Restarting ---")
         sys.exit(0)  # Clean exit to allow restart
     
-    logger.info("All required packages are installed and up to date.")
+    logger.debug("All required packages are installed and up to date.")
 
     # 5. Verify PyTorch installation
     try:
         version('torch')
         version('torchvision')
-        logger.info("PyTorch (torch and torchvision) is installed.")
+        logger.debug("PyTorch (torch and torchvision) is installed.")
     except PackageNotFoundError:
-        logger.error("\n=== PyTorch Installation Failed ===")
+        logger.error("--- PyTorch Installation Failed ---")
         logger.error("PyTorch installation may have failed. Please check the installation.")
         logger.error("Installation guide: https://pytorch.org/get-started/locally/")
         sys.exit(1)
@@ -312,7 +312,7 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     # 9. Download UI control icons (optional, non-blocking)
     check_and_download_ui_icons(auto_download=auto_install)
 
-    logger.info("=== Dependency Check Finished ===\n")
+    logger.info("--- Dependency Check Complete ---")
 
 
 def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = False):
@@ -420,10 +420,10 @@ def check_and_download_emojis(*, auto_download: bool = True):
         return
 
     if not auto_download:
-        logger.info(f"💬 {len(missing_emojis)}/{len(SPLASH_EMOJI_URLS)} splash screen emojis missing (skipping auto-download)")
+        logger.info(f"{len(missing_emojis)}/{len(SPLASH_EMOJI_URLS)} splash screen emojis missing (skipping auto-download)")
         return
 
-    logger.info(f"💬 Downloading {len(missing_emojis)}/{len(SPLASH_EMOJI_URLS)} splash screen emojis...")
+    logger.info(f"Downloading {len(missing_emojis)}/{len(SPLASH_EMOJI_URLS)} splash screen emojis...")
 
     downloaded = 0
     failed = []
@@ -456,19 +456,19 @@ def check_and_download_emojis(*, auto_download: bool = True):
             if os.path.getsize(filepath) < 1000:  # Emojis should be at least 1KB
                 os.remove(filepath)
                 failed.append(filename)
-                logger.debug(f"  ✗ {filename} (file too small, removed)")
+                logger.debug(f"  {filename} (file too small, removed)")
             else:
                 downloaded += 1
-                logger.debug(f"  ✓ {filename}")
+                logger.debug(f"  {filename}")
 
         except Exception as e:
             failed.append(filename)
-            logger.debug(f"  ✗ {filename}: {str(e)}")
+            logger.debug(f"  {filename}: {str(e)}")
             if os.path.exists(filepath):
                 os.remove(filepath)
 
     if downloaded > 0:
-        logger.info(f"✅ Downloaded {downloaded} splash screen emoji(s)")
+        logger.info(f"Downloaded {downloaded} splash screen emoji(s)")
 
     if failed:
         logger.debug(f"Failed to download {len(failed)} emoji(s): {', '.join(failed)}")
@@ -510,10 +510,10 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
         return
 
     if not auto_download:
-        logger.info(f"🎨 {len(missing_icons)}/{len(UI_CONTROL_ICON_URLS)} UI control icons missing (skipping auto-download)")
+        logger.info(f"{len(missing_icons)}/{len(UI_CONTROL_ICON_URLS)} UI control icons missing (skipping auto-download)")
         return
 
-    logger.info(f"🎨 Downloading {len(missing_icons)}/{len(UI_CONTROL_ICON_URLS)} UI control icons...")
+    logger.info(f"Downloading {len(missing_icons)}/{len(UI_CONTROL_ICON_URLS)} UI control icons...")
 
     downloaded = 0
     failed = []
@@ -547,7 +547,7 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
             if os.path.getsize(filepath) < 1000:  # Icons should be at least 1KB
                 os.remove(filepath)
                 failed.append(filename)
-                logger.debug(f"  ✗ {filename} (file too small, removed)")
+                logger.debug(f"  {filename} (file too small, removed)")
                 # Create failed marker to prevent repeated download attempts
                 try:
                     with open(failed_marker, 'w') as f:
@@ -556,11 +556,11 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
                     pass
             else:
                 downloaded += 1
-                logger.debug(f"  ✓ {filename}")
+                logger.debug(f"  {filename}")
 
         except Exception as e:
             failed.append(filename)
-            logger.debug(f"  ✗ {filename}: {str(e)}")
+            logger.debug(f"  {filename}: {str(e)}")
             if os.path.exists(filepath):
                 os.remove(filepath)
             # Create failed marker to prevent repeated download attempts
@@ -571,7 +571,7 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
                 pass
 
     if downloaded > 0:
-        logger.info(f"✅ Downloaded {downloaded} UI control icon(s)")
+        logger.info(f"Downloaded {downloaded} UI control icon(s)")
 
     if failed:
         logger.debug(f"Failed to download {len(failed)} icon(s) (marked to skip future attempts): {', '.join(failed)}")
@@ -613,7 +613,7 @@ def _check_feature_dependencies(*, non_interactive: bool = True, auto_install: b
         feature_name = feature_path.name
         metadata = feature_metadata.get(feature_name, {'icon': '📦', 'description': feature_name})
 
-        logger.info(f"{metadata['icon']} {feature_name} feature detected - checking dependencies...")
+        logger.debug(f"{feature_name} feature detected - checking dependencies...")
 
         try:
             with open(requirements_file, 'r') as f:
@@ -623,7 +623,7 @@ def _check_feature_dependencies(*, non_interactive: bool = True, auto_install: b
                 logger.debug(f"No dependencies listed in {requirements_file}")
                 continue
 
-            logger.info(f"Found {len(lines)} {metadata['description']} dependencies to check...")
+            logger.debug(f"Found {len(lines)} {metadata['description']} dependencies to check...")
             packages = []
 
             for line in lines:
@@ -635,15 +635,15 @@ def _check_feature_dependencies(*, non_interactive: bool = True, auto_install: b
                         packages.append(package)
 
             if packages:
-                logger.info(f"Checking {metadata['description']} dependencies...")
+                logger.debug(f"Checking {metadata['description']} dependencies...")
                 changed = _ensure_packages(packages, pip_args=None,
                                          non_interactive=non_interactive, auto_install=auto_install)
 
                 if changed:
-                    logger.info(f"✅ {feature_name} dependencies installed successfully!")
+                    logger.info(f"{feature_name} dependencies installed successfully!")
                     any_changed = True
                 else:
-                    logger.info(f"✅ {feature_name} dependencies already satisfied")
+                    logger.debug(f"{feature_name} dependencies already satisfied")
             else:
                 logger.debug(f"No valid packages found in {requirements_file}")
 

@@ -94,6 +94,11 @@ class MpvPlaybackController:
             self._bridge.stop()
             self._bridge = None
 
+        # Seek the processor to the current frame so the video display updates
+        processor = getattr(self._app, 'processor', None)
+        if processor and hasattr(processor, 'seek_video'):
+            processor.seek_video(processor.current_frame_index)
+
         audio_sync = getattr(self._app, '_audio_sync', None)
         if audio_sync:
             try:

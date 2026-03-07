@@ -1,8 +1,8 @@
 import imgui
 import os
 import logging
-from application.utils import GeneratedFileManager
-from config.constants_colors import CurrentTheme
+from application.utils import GeneratedFileManager, destructive_button_style
+from application.utils.imgui_helpers import DisabledScope, begin_modal_centered
 
 # TODO: Comprehensive delete options and settings. by date/days old, extension, size, etc.
 
@@ -86,7 +86,7 @@ class GeneratedFileManagerWindow:
         if changed:
             self.file_manager.delete_funscript_files = new_val
         imgui.same_line(max(0, window_width - button_width - 15))
-        if imgui.button(button_text): imgui.open_popup("ConfirmDeleteAll")
+        if imgui.button(button_text): imgui.open_popup("Delete All Files?###ConfirmDeleteAll")
         imgui.separator()
 
     def _delete_path_with_status(self, path, delete_func, type_name):
@@ -159,37 +159,34 @@ class GeneratedFileManagerWindow:
         imgui.text_disabled(f"{file_info['size_mb']:.3f} MB")
         imgui.same_line(imgui.get_window_width() - 80)
         imgui.push_id(file_info['path'])
-        imgui.push_style_color(imgui.COLOR_BUTTON, *CurrentTheme.BUTTON_DESTRUCTIVE[:3])
         is_funscript = file_info['name'].endswith('.funscript')
         delete_enabled = self.file_manager.delete_funscript_files or not is_funscript
-        if not delete_enabled:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-        if imgui.button("Delete"):
-            self._delete_path_with_status(file_info['path'], self.file_manager.delete_file, "file")
-        if not delete_enabled:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
-        imgui.pop_style_color()
+        with DisabledScope(not delete_enabled):
+            with destructive_button_style():
+                if imgui.button("Delete"):
+                    self._delete_path_with_status(file_info['path'], self.file_manager.delete_file, "file")
         imgui.pop_id()
 
     def _render_delete_all_popup(self):
         """Renders the modal popup for confirming deletion of all generated files."""
-        opened, visible = imgui.begin_popup_modal("ConfirmDeleteAll")
+        if not imgui.is_popup_open("Delete All Files?###ConfirmDeleteAll"):
+            return
+        imgui.set_next_window_size(480, 0)
+        opened, visible = imgui.begin_popup_modal("Delete All Files?###ConfirmDeleteAll")
         if opened:
-            imgui.text_ansi_colored("WARNING: This will delete ALL subfolders and files in the output directory!", *CurrentTheme.RED[:3])
-            imgui.text(f"Directory: {os.path.abspath(self.output_folder)}")
+            imgui.text_wrapped("WARNING: This will delete ALL subfolders and files in the output directory!")
+            imgui.text_wrapped(f"Directory: {os.path.abspath(self.output_folder)}")
             imgui.text("Contents will be moved to the recycle bin.")
             imgui.separator()
-            if imgui.button("YES, DELETE EVERYTHING", width=200):
-                # Respect the user's checkbox for deleting .funscript files
-                include_funscripts = self.file_manager.delete_funscript_files
-                if self.file_manager.delete_all(include_funscript_files=include_funscripts):
-                    self.app.set_status_message("SUCCESS: All generated files have been deleted.", level=logging.INFO)
-                else:
-                    self.app.set_status_message(f"ERROR deleting all files in {self.output_folder}", level=logging.ERROR)
-                self.file_manager._scan_files()
-                imgui.close_current_popup()
+            with destructive_button_style():
+                if imgui.button("YES, DELETE EVERYTHING", width=200):
+                    include_funscripts = self.file_manager.delete_funscript_files
+                    if self.file_manager.delete_all(include_funscript_files=include_funscripts):
+                        self.app.set_status_message("SUCCESS: All generated files have been deleted.", level=logging.INFO)
+                    else:
+                        self.app.set_status_message(f"ERROR deleting all files in {self.output_folder}", level=logging.ERROR)
+                    self.file_manager._scan_files()
+                    imgui.close_current_popup()
             imgui.same_line()
             if imgui.button("Cancel", width=120):
                 imgui.close_current_popup()

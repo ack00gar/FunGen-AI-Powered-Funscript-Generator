@@ -58,7 +58,7 @@ class HTTPClientManager:
             async with cls._lock:
                 if cls._instance is None:
                     cls._instance = cls()
-                    cls._logger.debug("✅ HTTP Client Manager initialized")
+                    cls._logger.debug("HTTP Client Manager initialized")
         return cls._instance
 
     async def get_session(self, timeout: Optional[aiohttp.ClientTimeout] = None) -> aiohttp.ClientSession:

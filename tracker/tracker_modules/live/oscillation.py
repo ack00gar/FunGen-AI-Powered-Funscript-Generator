@@ -15,7 +15,6 @@ Features:
 - Hybrid frequency scoring combining both approaches
 """
 
-import logging
 import time
 import numpy as np
 import cv2
@@ -41,7 +40,7 @@ class OscillationExperimental2Tracker(BaseTracker):
     @property
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
-            name="oscillation",
+            name="LIVE_OSCILLATION",
             display_name="Oscillation Detector",
             description="Hybrid approach combining experimental timing precision with legacy amplification and signal conditioning",
             category="live",
@@ -130,7 +129,7 @@ class OscillationExperimental2Tracker(BaseTracker):
             self._initialize_optical_flow()
             self._initialized = True
             
-            self.logger.info("Oscillation Experimental 2 tracker initialized successfully")
+            self.logger.debug("Oscillation Experimental 2 tracker initialized successfully")
             return True
             
         except Exception as e:
@@ -142,12 +141,12 @@ class OscillationExperimental2Tracker(BaseTracker):
         try:
             # Try ultrafast preset first for better performance
             self.flow_dense_osc = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
-            self.logger.info("DIS optical flow initialized (ultrafast preset) for Oscillation Experimental 2")
+            self.logger.debug("DIS optical flow initialized (ultrafast preset) for Oscillation Experimental 2")
         except AttributeError:
             try:
                 # Fallback to medium preset
                 self.flow_dense_osc = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
-                self.logger.info("DIS optical flow initialized (medium preset) for Oscillation Experimental 2")
+                self.logger.debug("DIS optical flow initialized (medium preset) for Oscillation Experimental 2")
             except Exception as e:
                 self.logger.error(f"Failed to initialize DIS optical flow: {e}")
                 self.flow_dense_osc = None

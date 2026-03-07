@@ -25,7 +25,6 @@ import platform
 import tempfile
 import time
 from typing import Optional, Tuple, List, Dict, Any
-import logging
 
 class SingleFFmpegDualOutputProcessor:
     """
@@ -121,7 +120,7 @@ class SingleFFmpegDualOutputProcessor:
             # Setup cross-platform pipes
             self._setup_cross_platform_pipes()
             
-            self.logger.info(f"🎯 Single FFmpeg dual-output mode enabled")
+            self.logger.info(f"Single FFmpeg dual-output mode enabled")
             self.logger.info(f"   Processing: {self.processing_frame_size} ({self.processing_frame_bytes} bytes)")
             self.logger.info(f"   Fullscreen: {self.fullscreen_frame_size} ({self.fullscreen_frame_bytes} bytes)")
             self.logger.info(f"   Platform: {self.platform_system}")
@@ -169,7 +168,7 @@ class SingleFFmpegDualOutputProcessor:
             self.pipe_threads.clear()
             self.stop_event.clear()
             
-            self.logger.info("✅ Single FFmpeg dual-output mode disabled")
+            self.logger.info("Single FFmpeg dual-output mode disabled")
             
         except Exception as e:
             self.logger.error(f"Error disabling dual-output mode: {e}")
@@ -298,9 +297,9 @@ class SingleFFmpegDualOutputProcessor:
                 f'pipe:{self.named_pipes["audio"]}'
             ])
             
-            self.logger.info(f"🏗️ Built single FFmpeg dual-output command")
-            self.logger.info(f"🔀 Filter complex: {filter_complex}")
-            self.logger.info(f"📊 Outputs: Processing({self.processing_frame_size}), Fullscreen({self.fullscreen_frame_size}), Audio({self.audio_sample_rate}Hz)")
+            self.logger.info(f"Built single FFmpeg dual-output command")
+            self.logger.info(f"Filter complex: {filter_complex}")
+            self.logger.info(f"Outputs: Processing({self.processing_frame_size}), Fullscreen({self.fullscreen_frame_size}), Audio({self.audio_sample_rate}Hz)")
             
             return enhanced_cmd
             
@@ -386,8 +385,8 @@ class SingleFFmpegDualOutputProcessor:
                 # Start pipe reader threads
                 self._start_pipe_reader_threads()
                 
-                self.logger.info("✅ Single FFmpeg dual-output process started")
-                self.logger.info(f"🔄 PID: {self.ffmpeg_process.pid}")
+                self.logger.info("Single FFmpeg dual-output process started")
+                self.logger.info(f"PID: {self.ffmpeg_process.pid}")
                 return True
             
         except Exception as e:

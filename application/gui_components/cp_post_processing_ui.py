@@ -113,22 +113,19 @@ class PostProcessingMixin:
                 if not cat_open:
                     continue
 
-                if cat == "Quickfix Tools":
-                    # Separate selection vs cursor tools
-                    sel_tools = []
-                    cur_tools = []
-                    for pn in plugin_names:
-                        ctx = plugin_manager.plugin_contexts.get(pn)
-                        if ctx and ctx.plugin_instance and getattr(ctx.plugin_instance, 'requires_cursor', False):
-                            cur_tools.append(pn)
-                        else:
-                            sel_tools.append(pn)
-
-                    for pn in sel_tools:
+                def _render_plugins(names):
+                    for pn in names:
                         ui_data = plugin_manager.get_plugin_ui_data(pn)
                         if ui_data and ui_data['available']:
                             self._render_plugin_section(pn, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
 
+                if cat == "Quickfix Tools":
+                    # Separate selection vs cursor tools
+                    cur_tools = [pn for pn in plugin_names
+                                 if (ctx := plugin_manager.plugin_contexts.get(pn))
+                                 and ctx.plugin_instance and getattr(ctx.plugin_instance, 'requires_cursor', False)]
+                    sel_tools = [pn for pn in plugin_names if pn not in cur_tools]
+                    _render_plugins(sel_tools)
                     if cur_tools:
                         imgui.spacing()
                         imgui.separator()
@@ -136,15 +133,9 @@ class PostProcessingMixin:
                         imgui.text("Cursor-based (position playhead first)")
                         imgui.pop_style_color()
                         imgui.spacing()
-                        for pn in cur_tools:
-                            ui_data = plugin_manager.get_plugin_ui_data(pn)
-                            if ui_data and ui_data['available']:
-                                self._render_plugin_section(pn, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
+                        _render_plugins(cur_tools)
                 else:
-                    for pn in plugin_names:
-                        ui_data = plugin_manager.get_plugin_ui_data(pn)
-                        if ui_data and ui_data['available']:
-                            self._render_plugin_section(pn, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
+                    _render_plugins(plugin_names)
 
     def _render_plugin_section(self, plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice):
         """Render a collapsible section for a plugin with its parameters and apply button."""
@@ -205,42 +196,36 @@ class PostProcessingMixin:
                 if param_name in ['start_time_ms', 'end_time_ms', 'selected_indices']:
                     continue
 
-                # Render different UI elements based on parameter type
-                # Compare against Python type objects, not strings
-                if param_type == float or param_type == 'float':
+                # Normalize type (schemas may use type objects or strings)
+                _type_map = {float: 'float', 'float': 'float', int: 'int', 'int': 'int',
+                             bool: 'bool', 'bool': 'bool', str: 'str', 'str': 'str', 'choice': 'choice'}
+                norm_type = _type_map.get(param_type)
+                uid = f"##PP_{plugin_name}_{param_name}"
+
+                if norm_type == 'float':
                     if current_value is None:
-                        current_value = default_value if default_value is not None else 0.0
+                        current_value = default_value or 0.0
                     imgui.push_item_width(200)
                     _, new_value = imgui.slider_float(
-                        f"{param_label}##PP_{plugin_name}_{param_name}",
-                        float(current_value),
-                        float(param_min),
-                        float(param_max),
-                        "%.2f"
-                    )
+                        f"{param_label}{uid}", float(current_value),
+                        float(param_min), float(param_max), "%.2f")
                     imgui.pop_item_width()
                     params[param_name] = new_value
-                elif param_type == int or param_type == 'int':
+                elif norm_type == 'int':
                     if current_value is None:
-                        current_value = default_value if default_value is not None else 0
+                        current_value = default_value or 0
                     imgui.push_item_width(200)
                     _, new_value = imgui.slider_int(
-                        f"{param_label}##PP_{plugin_name}_{param_name}",
-                        int(current_value),
-                        int(param_min),
-                        int(param_max)
-                    )
+                        f"{param_label}{uid}", int(current_value),
+                        int(param_min), int(param_max))
                     imgui.pop_item_width()
                     params[param_name] = new_value
-                elif param_type == bool or param_type == 'bool':
+                elif norm_type == 'bool':
                     if current_value is None:
-                        current_value = default_value if default_value is not None else False
-                    _, new_value = imgui.checkbox(
-                        f"{param_label}##PP_{plugin_name}_{param_name}",
-                        bool(current_value)
-                    )
+                        current_value = default_value or False
+                    _, new_value = imgui.checkbox(f"{param_label}{uid}", bool(current_value))
                     params[param_name] = new_value
-                elif param_type == str or param_type == 'str' or param_type == 'choice':
+                elif norm_type in ('str', 'choice'):
                     choices = constraints.get('choices', [])
                     if choices:
                         try:
@@ -248,11 +233,7 @@ class PostProcessingMixin:
                         except (ValueError, TypeError):
                             current_idx = 0
                         imgui.push_item_width(200)
-                        _, new_idx = imgui.combo(
-                            f"{param_label}##PP_{plugin_name}_{param_name}",
-                            current_idx,
-                            choices
-                        )
+                        _, new_idx = imgui.combo(f"{param_label}{uid}", current_idx, choices)
                         imgui.pop_item_width()
                         params[param_name] = choices[new_idx]
 
@@ -278,20 +259,16 @@ class PostProcessingMixin:
     def _apply_plugin(self, plugin_name, parameters, timeline_choice, scope_choice, fs_proc):
         """Apply a plugin with the given parameters."""
         try:
-            # Determine axis from timeline choice index
-            if timeline_choice == 0:
-                axis = "primary"
-            elif timeline_choice == 1:
-                axis = "secondary"
-            else:
-                # T3+: resolve axis name from funscript assignments
+            # Determine axis from timeline choice index via axis assignments
+            _default_axes = {0: "primary", 1: "secondary"}
+            axis = _default_axes.get(timeline_choice)
+            if axis is None:
+                # T3+: resolve from funscript axis assignments (timeline_num = choice + 1)
                 axis = "primary"  # fallback
                 funscript_obj = fs_proc.get_funscript_obj() if hasattr(fs_proc, 'get_funscript_obj') else None
-                if funscript_obj and hasattr(funscript_obj, 'additional_axes'):
-                    sorted_axes = sorted(funscript_obj.additional_axes.keys())
-                    extra_idx = timeline_choice - 2
-                    if 0 <= extra_idx < len(sorted_axes):
-                        axis = sorted_axes[extra_idx]
+                if funscript_obj and hasattr(funscript_obj, '_axis_assignments'):
+                    tl_num = timeline_choice + 1
+                    axis = funscript_obj._axis_assignments.get(tl_num, "primary")
 
             # Get the funscript object
             funscript_obj = fs_proc.get_funscript_obj()
@@ -667,37 +644,30 @@ class PostProcessingMixin:
             ):
                 fs_proc.operation_target_mode = "apply_to_selected_points"
 
-            def prep_op():
+            def _do_op(op_name):
                 if fs_proc.operation_target_mode == "apply_to_selected_points":
-                    editor = (
-                        self.timeline_editor1
-                        if fs_proc.selected_axis_for_processing == "primary"
-                        else self.timeline_editor2
-                    )
+                    editor = (self.timeline_editor1
+                              if fs_proc.selected_axis_for_processing == "primary"
+                              else self.timeline_editor2)
                     fs_proc.current_selection_indices = list(
-                        editor.multi_selected_action_indices
-                    ) if editor else []
+                        editor.multi_selected_action_indices) if editor else []
                     if not fs_proc.current_selection_indices:
                         app.logger.info("No points selected for operation.", extra={"status_message": True})
+                fs_proc.handle_funscript_operation(op_name)
 
             imgui.text("Points operations")
             if imgui.button("Clamp to 0##Clamp0"):
-                prep_op()
-                fs_proc.handle_funscript_operation("clamp_0")
+                _do_op("clamp_0")
             imgui.same_line()
             if imgui.button("Clamp to 100##Clamp100"):
-                prep_op()
-                fs_proc.handle_funscript_operation("clamp_100")
+                _do_op("clamp_100")
             imgui.same_line()
             if imgui.button("Invert##InvertPoints"):
-                prep_op()
-                fs_proc.handle_funscript_operation("invert")
+                _do_op("invert")
             imgui.same_line()
-            # Clear button (DESTRUCTIVE - deletes all points)
             with destructive_button_style():
                 if imgui.button("Clear##ClearPoints"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("clear")
+                    _do_op("clear")
 
             imgui.text("Amplify Values")
             ch, nv = imgui.slider_float("Factor##AmplifyFactor", fs_proc.amplify_factor_input, 0.1, 3.0, "%.2f")
@@ -709,8 +679,7 @@ class PostProcessingMixin:
             # Apply button (PRIMARY - positive action)
             with primary_button_style():
                 if imgui.button("Apply Amplify##ApplyAmplify"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("amplify")
+                    _do_op("amplify")
 
             imgui.text("Savitzky-Golay Filter")
             ch, nv = imgui.slider_int("Window Length##SGWin", fs_proc.sg_window_length_input, 3, 99)
@@ -724,8 +693,7 @@ class PostProcessingMixin:
             # Apply button (PRIMARY - positive action)
             with primary_button_style():
                 if imgui.button("Apply Savitzky-Golay##ApplySG"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("apply_sg")
+                    _do_op("apply_sg")
 
             imgui.text("RDP Simplification")
             ch, nv = imgui.slider_float("Epsilon##RDPEps", fs_proc.rdp_epsilon_input, 0.01, 20.0, "%.2f")
@@ -736,8 +704,7 @@ class PostProcessingMixin:
             # Apply button (PRIMARY - positive action)
             with primary_button_style():
                 if imgui.button("Apply RDP##ApplyRDP"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("apply_rdp")
+                    _do_op("apply_rdp")
 
             imgui.text("Dynamic Amplification")
             if not hasattr(fs_proc, "dynamic_amp_window_ms_input"):
@@ -750,8 +717,7 @@ class PostProcessingMixin:
             # Apply button (PRIMARY - positive action)
             with primary_button_style():
                 if imgui.button("Apply Dynamic Amplify##ApplyDynAmp"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("apply_dynamic_amp")
+                    _do_op("apply_dynamic_amp")
 
         # If disabled, show a tooltip on hover (outside the disabled scope)
         if disabled and imgui.is_item_hovered():

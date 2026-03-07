@@ -16,7 +16,6 @@ Version: 1.0.0
 
 import os
 import json
-import time
 import logging
 from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
@@ -364,7 +363,7 @@ class ChapterTypeManager:
         filepath = os.path.join(os.getcwd(), self.CUSTOM_TYPES_FILE)
 
         if not os.path.exists(filepath):
-            self.logger.info("No custom chapter types file found, starting fresh")
+            self.logger.debug("No custom chapter types file found, starting fresh")
             return
 
         try:

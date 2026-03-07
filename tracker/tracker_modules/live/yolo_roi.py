@@ -22,7 +22,6 @@ VR_ROI_MULTIPLIER_FACE_HAND = 2.5
 VR_ROI_MULTIPLIER_DEFAULT = 2
 FPS_UPDATE_FRAME_COUNT = 30
 
-import logging
 import time
 import numpy as np
 import cv2
@@ -172,8 +171,8 @@ class YoloRoiTracker(BaseTracker):
     def metadata(self) -> TrackerMetadata:
         """Return metadata describing this tracker."""
         return TrackerMetadata(
-            name="yolo_roi",
-            display_name="YOLO ROI Tracker",
+            name="LIVE_YOLO_ROI",
+            display_name="YOLO ROI",
             description="Automatic ROI detection using YOLO object detection with optical flow tracking",
             category="live",
             version="1.0.0",

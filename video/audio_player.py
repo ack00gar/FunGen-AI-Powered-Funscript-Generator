@@ -77,7 +77,7 @@ class AudioPlayer:
 
         self._lock = threading.Lock()  # guards start/stop/seek
 
-        logger.info(f"AudioPlayer init: device sample_rate={self._sample_rate}")
+        logger.debug(f"AudioPlayer init: device sample_rate={self._sample_rate}")
 
     # ------------------------------------------------------------------
     # Public API

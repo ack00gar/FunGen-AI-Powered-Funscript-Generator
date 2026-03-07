@@ -46,7 +46,7 @@ class AppFunscriptProcessor:
         self.amplify_factor_input: float = 1.1
         self.amplify_center_input: int = 50
 
-        # Focused undo/redo: track the last-edited timeline (OFS-style)
+        # Focused undo/redo: track the last-edited timeline
         self._last_edited_timeline: int = 1
 
         # Clipboard
@@ -309,14 +309,14 @@ class AppFunscriptProcessor:
         if self.app.undo_manager_t1 is None:
             from application.classes import UndoRedoManager
             self.app.undo_manager_t1 = UndoRedoManager(max_history=50)
-            self.logger.info("UndoManager T1 created dynamically.")
+            self.logger.debug("UndoManager T1 created dynamically.")
         if self.app.undo_manager_t1._actions_list_reference is not funscript_obj.primary_actions:
             self.app.undo_manager_t1.set_actions_reference(funscript_obj.primary_actions)
 
         if self.app.undo_manager_t2 is None:
             from application.classes import UndoRedoManager
             self.app.undo_manager_t2 = UndoRedoManager(max_history=50)
-            self.logger.info("UndoManager T2 created dynamically.")
+            self.logger.debug("UndoManager T2 created dynamically.")
         if self.app.undo_manager_t2._actions_list_reference is not funscript_obj.secondary_actions:
             self.app.undo_manager_t2.set_actions_reference(funscript_obj.secondary_actions)
 
@@ -331,7 +331,7 @@ class AppFunscriptProcessor:
             if not hasattr(self.app, manager_attr) or getattr(self.app, manager_attr) is None:
                 from application.classes import UndoRedoManager
                 setattr(self.app, manager_attr, UndoRedoManager(max_history=50))
-                self.logger.info(f"UndoManager T{t_num} created dynamically.")
+                self.logger.debug(f"UndoManager T{t_num} created dynamically.")
             manager = getattr(self.app, manager_attr)
             actions_list = funscript_obj.additional_axes[axis_name]
             if manager._actions_list_reference is not actions_list:
@@ -682,7 +682,7 @@ class AppFunscriptProcessor:
             self.logger.warning(f"Could not record undo for T{timeline_num}: Undo manager not found.")
 
     def perform_undo_redo_focused(self, direction: str):
-        """Undo/redo on the last-edited timeline (OFS-style)."""
+        """Undo/redo on the last-edited timeline."""
         self.perform_undo_redo(self._last_edited_timeline, direction)
 
     def perform_undo_redo(self, timeline_num: int, operation: str):  # operation is 'undo' or 'redo'

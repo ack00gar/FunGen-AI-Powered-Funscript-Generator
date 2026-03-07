@@ -244,18 +244,3 @@ class RTSSmoother:
             'measurement_noise_diagonal': np.diag(self.r_ext),
             'measurement_matrix_shape': self.h_ext.shape
         }
-
-
-# Convenience function for backward compatibility
-def run_rts_smoother_numpy(track_array: np.ndarray) -> np.ndarray:
-    """
-    Convenience function that maintains the original API.
-    
-    Args:
-        track_array: A 2D NumPy array with columns [frame_id, cx, cy, width, height].
-    
-    Returns:
-        A 2D NumPy array with smoothed [cx, cy, width, height] data.
-    """
-    smoother = RTSSmoother()
-    return smoother.smooth_trajectory(track_array)

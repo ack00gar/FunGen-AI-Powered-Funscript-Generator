@@ -1,14 +1,14 @@
 {
   "addons": {
     "device_control": {
-      "version": "5.5.6",
+      "version": "5.7.2",
       "display_name": "Device Control",
-      "changelog": "Fix HDSP speed clamping init, HDSP tooltip clarification"
+      "changelog": "TCode continuous PCHIP interpolation, fix OSR disconnect cross-loop error"
     },
     "streamer": {
-      "version": "3.5.1",
+      "version": "3.6.2",
       "display_name": "Video Streamer",
-      "changelog": "UI form factor unification"
+      "changelog": "Keyframe-based device dispatch for pre-loaded funscripts (real inter-keyframe duration)"
     },
     "patreon_features": {
       "version": "1.1.4",

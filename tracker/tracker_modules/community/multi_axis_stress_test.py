@@ -50,7 +50,7 @@ class MultiAxisStressTestTracker(BaseTracker):
     @property
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
-            name="multi_axis_stress_test",
+            name="COMMUNITY_MULTI_AXIS_STRESS_TEST",
             display_name="Multi-Axis Stress Test",
             description=(
                 "Generates sine-wave funscript data on all 6 axes simultaneously. "

@@ -9,8 +9,7 @@ import threading
 import queue
 import time
 import logging
-import traceback
-from typing import Dict, Any, Optional, Callable, List, Union
+from typing import Dict, Any, Optional, Callable, List
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
@@ -130,6 +129,7 @@ class ProcessingThreadManager:
         # Thread safety
         self.task_lock = threading.RLock()
         self.stats_lock = threading.RLock()
+        self._task_done = threading.Condition(self.task_lock)
         
         # Progress tracking
         self.progress_callbacks: Dict[str, Callable[[str, float, str], None]] = {}
@@ -155,12 +155,12 @@ class ProcessingThreadManager:
             self.logger.info(f"GPU available: {torch.cuda.get_device_name()}")
         else:
             self.primary_gpu_device = None
-            self.logger.info("Running in CPU-only mode")
-        
+            self.logger.debug("Running in CPU-only mode")
+
         # Start worker threads
         self._start_worker_threads()
-        
-        self.logger.info(f"ProcessingThreadManager initialized with {max_worker_threads} worker threads")
+
+        self.logger.debug(f"ProcessingThreadManager initialized with {max_worker_threads} worker threads")
     
     def _start_worker_threads(self):
         """Start the worker threads."""
@@ -363,7 +363,8 @@ class ProcessingThreadManager:
                 self.completed_tasks[task_id] = task
                 if task_id in self.active_tasks:
                     del self.active_tasks[task_id]
-            
+                self._task_done.notify_all()
+
             # Post-task GPU cleanup for memory-intensive tasks
             self._post_task_gpu_cleanup(task, thread_name)
             
@@ -390,7 +391,8 @@ class ProcessingThreadManager:
                 self.completed_tasks[task_id] = task
                 if task_id in self.active_tasks:
                     del self.active_tasks[task_id]
-            
+                self._task_done.notify_all()
+
             self.logger.error(f"[{thread_name}] Task {task_id} failed: {e}", exc_info=True)
             
             # Call error callback
@@ -508,7 +510,8 @@ class ProcessingThreadManager:
                 
                 self.completed_tasks[task_id] = task
                 del self.active_tasks[task_id]
-                
+                self._task_done.notify_all()
+
                 self.logger.info(f"Cancelled task {task_id}")
                 return True
         
@@ -537,25 +540,26 @@ class ProcessingThreadManager:
     def wait_for_task(self, task_id: str, timeout: Optional[float] = None) -> bool:
         """
         Wait for a task to complete.
-        
+
         Args:
             task_id: ID of task to wait for
             timeout: Maximum time to wait in seconds
-            
+
         Returns:
             True if task completed, False if timeout
         """
-        start_time = time.time()
-        
-        while True:
-            status = self.get_task_status(task_id)
-            if status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
-                return True
-            
-            if timeout and (time.time() - start_time) > timeout:
-                return False
-            
-            time.sleep(0.1)
+        deadline = (time.time() + timeout) if timeout else None
+        _terminal = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+
+        with self._task_done:
+            while True:
+                status = self.get_task_status(task_id)
+                if status in _terminal:
+                    return True
+                remaining = (deadline - time.time()) if deadline else None
+                if remaining is not None and remaining <= 0:
+                    return False
+                self._task_done.wait(timeout=remaining)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get processing statistics."""

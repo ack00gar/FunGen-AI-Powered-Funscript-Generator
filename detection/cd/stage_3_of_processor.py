@@ -1,3 +1,4 @@
+import bisect
 import time
 import logging
 import cv2
@@ -266,11 +267,16 @@ def stage3_worker_proc(
             output_start_ms = int(round((output_start / common_app_config.get('video_fps', 30.0)) * 1000.0))
             output_end_ms = int(round((output_end / common_app_config.get('video_fps', 30.0)) * 1000.0))
             
-            # Filter actions to only include those in the output time range
-            filtered_primary_actions = [action for action in chunk_funscript.primary_actions 
-                                      if output_start_ms <= action['at'] <= output_end_ms]
-            filtered_secondary_actions = [action for action in chunk_funscript.secondary_actions 
-                                        if output_start_ms <= action['at'] <= output_end_ms]
+            # Filter actions using bisect on sorted timestamps (O(log n) vs O(n) scan)
+            p_ts = chunk_funscript._get_timestamps_for_axis('primary')
+            s_idx_p = bisect.bisect_left(p_ts, output_start_ms)
+            e_idx_p = bisect.bisect_right(p_ts, output_end_ms)
+            filtered_primary_actions = chunk_funscript.primary_actions[s_idx_p:e_idx_p]
+
+            s_ts = chunk_funscript._get_timestamps_for_axis('secondary')
+            s_idx_s = bisect.bisect_left(s_ts, output_start_ms)
+            e_idx_s = bisect.bisect_right(s_ts, output_end_ms)
+            filtered_secondary_actions = chunk_funscript.secondary_actions[s_idx_s:e_idx_s]
 
             result_queue.put({
                 "primary_actions": filtered_primary_actions,

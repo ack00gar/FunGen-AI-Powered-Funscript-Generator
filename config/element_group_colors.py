@@ -204,13 +204,6 @@ class BoxStyleColors:
     EXCLUDED = CurrentTheme.BOX_EXCLUDED
 
 
-class FloatingWidgetColors:
-    """Color constants for floating widget components."""
-    BACKGROUND = CurrentTheme.FLOATING_WIDGET_BG
-    BORDER = CurrentTheme.FLOATING_WIDGET_BORDER
-    TEXT = CurrentTheme.FLOATING_WIDGET_TEXT
-
-
 class GeneralColors:
     """General color constants for common UI elements."""
     WHITE = CurrentTheme.WHITE
@@ -287,12 +280,12 @@ class StatusStripColors:
 
 class ToolbarColors:
     """Color constants for toolbar components."""
-    BG_TOP = (0.18, 0.18, 0.20, 0.98)
-    BG_BOTTOM = (0.13, 0.13, 0.14, 0.98)
     LABEL_TEXT = (0.45, 0.45, 0.50, 0.7)
     SEPARATOR = (0.35, 0.35, 0.40, 0.3)
-    SHADOW_1 = (0.0, 0.0, 0.0, 0.25)
-    SHADOW_2 = (0.0, 0.0, 0.0, 0.10)
+    # Active/toggled button highlight — matches sidebar accent at reduced alpha
+    ACTIVE_BUTTON = (0.3, 0.5, 0.9, 0.25)
+    ACTIVE_BUTTON_HOVERED = (0.3, 0.5, 0.9, 0.4)
+    ACTIVE_BUTTON_PRESSED = (0.3, 0.5, 0.9, 0.55)
 
 
 class ButtonColors:

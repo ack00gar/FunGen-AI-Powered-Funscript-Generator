@@ -79,7 +79,7 @@ class ShortcutHandlerMixin:
         elif check_and_run_shortcut("open_project", self._handle_open_project_shortcut):
             pass
 
-        # Editing — focused undo/redo (OFS-style: operates on last-edited timeline)
+        # Editing — focused undo/redo (operates on last-edited timeline)
         elif check_and_run_shortcut("undo_timeline1", fs_proc.perform_undo_redo_focused, 'undo'):
             pass
         elif check_and_run_shortcut("redo_timeline1", fs_proc.perform_undo_redo_focused, 'redo'):
@@ -798,7 +798,7 @@ class ShortcutHandlerMixin:
         self.app.logger.info("Video zoom/pan reset", extra={'status_message': True})
 
     def _handle_toggle_fullscreen_shortcut(self):
-        """Handle keyboard shortcut for toggling fullscreen (F11) — mpv supporter feature."""
+        """Handle keyboard shortcut for toggling fullscreen (F11) - mpv supporter feature."""
         from application.utils.feature_detection import is_feature_available as _is_feature_available
         if not _is_feature_available("patreon_features"):
             return

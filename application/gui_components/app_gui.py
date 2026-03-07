@@ -16,7 +16,6 @@ from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
 from application.gui_components.bookmark_list_window import BookmarkListWindow
-from application.gui_components.fullscreen_display import NativeFullscreenManager
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority, get_icon_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
@@ -28,6 +27,8 @@ from application.gui_components.first_run_wizard import FirstRunWizard
 
 _STATUS_STRIP_HEIGHT = 22
 _HINT_ROTATION_INTERVAL_S = 10.0
+_FIXED_PANEL_BASE_WIDTH = 450  # Base width for control panel and info graphs (scaled by font_scale)
+_VIDEO_NAV_BAR_HEIGHT = 150
 
 
 class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
@@ -122,7 +123,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
         self.autotuner_window_ui = AutotunerWindow(app)
         self.keyboard_shortcuts_dialog = KeyboardShortcutsDialog(app)
-        self.fullscreen_manager = NativeFullscreenManager(app, self)
 
         # First-run wizard (full-window overlay, replaces old popup)
         self._first_run_wizard = (
@@ -164,7 +164,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             'continuous_start_time': 0,  # When continuous (accelerating) mode began
         }
         self.arrow_nav_reading_fps = 0.0    # instantaneous frames/sec during arrow key seeking
-        self._reading_fps_frames = []     # (timestamp, frame_count) per tick
+        self._reading_fps_frames = deque()  # (timestamp, frame_count) per tick
         self._reading_fps_display = 0.0   # value shown in status bar (updated once/sec)
         self._reading_fps_last_update = 0.0  # last time display value was refreshed
 
@@ -642,7 +642,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                             
                             if enhanced_preview_enabled:
                                 # Always show timestamp + script zoom instantly, then add video frame after delay
-                                show_video_frame = hover_duration > 0.3  # Video frame only after 300ms for responsiveness
+                                show_video_frame = hover_duration > 0.1  # Video frame after 100ms hover stability
                                 
                                 # Check if we have cached data for this position (with tight tolerance)
                                 if (self._preview_cached_tooltip_data is not None and 
@@ -674,9 +674,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                                                 finally:
                                                     self._preview_frame_fetch_pending = False
 
-                                            import threading
                                             threading.Thread(target=fetch_frame_async, daemon=True).start()
-                                    
+
                                     # Use cached tooltip data (frame number and video frame are consistent)
                                     self._render_instant_enhanced_tooltip(self._preview_cached_tooltip_data, show_video_frame)
                                 else:
@@ -708,7 +707,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                                                     finally:
                                                         self._preview_frame_fetch_pending = False
 
-                                                import threading
                                                 threading.Thread(target=fetch_frame_async, daemon=True).start()
 
                                         self._render_instant_enhanced_tooltip(tooltip_data, show_video_frame)
@@ -956,6 +954,194 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 pool.append((self._format_shortcut_hint(key_str), display_name))
         return pool
 
+    def _render_fixed_layout(self, app_state, font_scale, toolbar_height, status_strip_h):
+        """Render fixed-position layout with calculated panel geometry."""
+        panel_y_start = self.main_menu_bar_height + toolbar_height
+        timeline1_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline else 0
+        timeline2_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline2 else 0
+        extra_timelines_total_height = len(self._visible_extra_timelines) * app_state.timeline_base_height
+        interactive_timelines_total_height = timeline1_render_h + timeline2_render_h + extra_timelines_total_height
+        max_timeline_area_h = int(self.window_height * 0.45)
+        capped_timelines_h = min(interactive_timelines_total_height, max_timeline_area_h)
+        timelines_need_scroll = interactive_timelines_total_height > max_timeline_area_h
+        available_height_for_main_panels = max(100, self.window_height - panel_y_start - capped_timelines_h - status_strip_h)
+        if not hasattr(app_state, 'fixed_layout_geometry') or app_state.fixed_layout_geometry is None:
+            app_state.fixed_layout_geometry = {}
+        else:
+            app_state.fixed_layout_geometry.clear()
+        is_full_width_nav = getattr(app_state, 'full_width_nav', False)
+        control_panel_w = _FIXED_PANEL_BASE_WIDTH * font_scale
+        graphs_panel_w = _FIXED_PANEL_BASE_WIDTH * font_scale
+        video_nav_bar_h = _VIDEO_NAV_BAR_HEIGHT
+
+        if is_full_width_nav:
+            top_panels_h = max(50, available_height_for_main_panels - video_nav_bar_h)
+            nav_y_start = panel_y_start + top_panels_h
+            if True:
+                video_panel_w = self.window_width - control_panel_w - graphs_panel_w
+                if video_panel_w < 100:
+                    video_panel_w = 100
+                    graphs_panel_w = max(100, self.window_width - control_panel_w - video_panel_w)
+                video_area_x_start = control_panel_w
+                graphs_area_x_start = control_panel_w + video_panel_w
+                app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w, top_panels_h)}
+                imgui.set_next_window_position(0, panel_y_start)
+                imgui.set_next_window_size(control_panel_w, top_panels_h)
+                self._time_render("ControlPanelUI", self.control_panel_ui.render)
+                app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start), 'size': (video_panel_w, top_panels_h)}
+                imgui.set_next_window_position(video_area_x_start, panel_y_start)
+                imgui.set_next_window_size(video_panel_w, top_panels_h)
+                self._time_render("VideoDisplayUI", self.video_display_ui.render)
+                app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start), 'size': (graphs_panel_w, top_panels_h)}
+                imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
+                imgui.set_next_window_size(graphs_panel_w, top_panels_h)
+                self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
+            else:
+                control_panel_w_no_vid = self.window_width / 2
+                graphs_panel_w_no_vid = self.window_width - control_panel_w_no_vid
+                graphs_area_x_start_no_vid = control_panel_w_no_vid
+                app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w_no_vid, top_panels_h)}
+                imgui.set_next_window_position(0, panel_y_start)
+                imgui.set_next_window_size(control_panel_w_no_vid, top_panels_h)
+                self._time_render("ControlPanelUI", self.control_panel_ui.render)
+                app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start_no_vid, panel_y_start), 'size': (graphs_panel_w_no_vid, top_panels_h)}
+                imgui.set_next_window_position(graphs_area_x_start_no_vid, panel_y_start)
+                imgui.set_next_window_size(graphs_panel_w_no_vid, top_panels_h)
+                self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
+            app_state.fixed_layout_geometry['VideoNavigation'] = {'pos': (0, nav_y_start), 'size': (self.window_width, video_nav_bar_h)}
+            imgui.set_next_window_position(0, nav_y_start)
+            imgui.set_next_window_size(self.window_width, video_nav_bar_h)
+            self._time_render("VideoNavigationUI", self.video_navigation_ui.render, self.window_width)
+        else:
+            if True:
+                video_panel_w = self.window_width - control_panel_w - graphs_panel_w
+                if video_panel_w < 100:
+                    video_panel_w = 100
+                    graphs_panel_w = max(100, self.window_width - control_panel_w - video_panel_w)
+                video_render_h = max(50, available_height_for_main_panels - video_nav_bar_h)
+                video_area_x_start = control_panel_w
+                graphs_area_x_start = control_panel_w + video_panel_w
+                app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w, available_height_for_main_panels)}
+                imgui.set_next_window_position(0, panel_y_start)
+                imgui.set_next_window_size(control_panel_w, available_height_for_main_panels)
+                self._time_render("ControlPanelUI", self.control_panel_ui.render)
+                app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start), 'size': (video_panel_w, video_render_h)}
+                imgui.set_next_window_position(video_area_x_start, panel_y_start)
+                imgui.set_next_window_size(video_panel_w, video_render_h)
+                self._time_render("VideoDisplayUI", self.video_display_ui.render)
+                app_state.fixed_layout_geometry['VideoNavigation'] = {
+                    'pos': (video_area_x_start, panel_y_start + video_render_h),
+                    'size': (video_panel_w, video_nav_bar_h)}
+                imgui.set_next_window_position(video_area_x_start, panel_y_start + video_render_h)
+                imgui.set_next_window_size(video_panel_w, video_nav_bar_h)
+                self._time_render("VideoNavigationUI", self.video_navigation_ui.render, video_panel_w)
+                app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start), 'size': (graphs_panel_w, available_height_for_main_panels)}
+                imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
+                imgui.set_next_window_size(graphs_panel_w, available_height_for_main_panels)
+                self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
+            else:
+                control_panel_w_no_vid = self.window_width / 2
+                graphs_panel_w_no_vid = self.window_width - control_panel_w_no_vid
+                graphs_area_x_start_no_vid = control_panel_w_no_vid
+                app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w_no_vid, available_height_for_main_panels)}
+                imgui.set_next_window_position(0, panel_y_start)
+                imgui.set_next_window_size(control_panel_w_no_vid, available_height_for_main_panels)
+                self._time_render("ControlPanelUI", self.control_panel_ui.render)
+                app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start_no_vid, panel_y_start), 'size': (graphs_panel_w_no_vid, available_height_for_main_panels)}
+                imgui.set_next_window_position(graphs_area_x_start_no_vid, panel_y_start)
+                imgui.set_next_window_size(graphs_panel_w_no_vid, available_height_for_main_panels)
+                self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
+
+        timeline_area_y = panel_y_start + available_height_for_main_panels
+        per_tl_h = app_state.timeline_base_height
+
+        if timelines_need_scroll:
+            imgui.set_next_window_position(0, timeline_area_y)
+            imgui.set_next_window_size(self.window_width, capped_timelines_h)
+            container_flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE |
+                               imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
+            if imgui.begin("##TimelineScrollContainer", True, container_flags):
+                if app_state.show_funscript_interactive_timeline:
+                    self._time_render("TimelineEditor1", self.timeline_editor1.render,
+                                      0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
+                if app_state.show_funscript_interactive_timeline2:
+                    self._time_render("TimelineEditor2", self.timeline_editor2.render,
+                                      0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
+                for t_num in self._visible_extra_timelines:
+                    editor = self._get_or_create_timeline_editor(t_num)
+                    self._time_render(f"TimelineEditor{t_num}", editor.render,
+                                      0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
+            imgui.end()
+            app_state.fixed_layout_geometry['TimelineContainer'] = {
+                'pos': (0, timeline_area_y), 'size': (self.window_width, capped_timelines_h)}
+        else:
+            timeline_current_y_start = timeline_area_y
+            if app_state.show_funscript_interactive_timeline:
+                app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline1_render_h)}
+                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h, view_mode=app_state.ui_view_mode)
+                timeline_current_y_start += timeline1_render_h
+            if app_state.show_funscript_interactive_timeline2:
+                app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline2_render_h)}
+                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h, view_mode=app_state.ui_view_mode)
+                timeline_current_y_start += timeline2_render_h
+            for t_num in self._visible_extra_timelines:
+                editor = self._get_or_create_timeline_editor(t_num)
+                extra_h = per_tl_h
+                app_state.fixed_layout_geometry[f'Timeline{t_num}'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, extra_h)}
+                self._time_render(f"TimelineEditor{t_num}", editor.render, timeline_current_y_start, extra_h, view_mode=app_state.ui_view_mode)
+                timeline_current_y_start += extra_h
+
+    def _render_floating_layout(self, app_state):
+        """Render floating-window layout."""
+        if app_state.just_switched_to_floating:
+            if 'ControlPanel' in app_state.fixed_layout_geometry:
+                geom = app_state.fixed_layout_geometry['ControlPanel']
+                imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
+                imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
+            if 'VideoDisplay' in app_state.fixed_layout_geometry:
+                geom = app_state.fixed_layout_geometry['VideoDisplay']
+                imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
+                imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
+
+        self._time_render("ControlPanelUI", self.control_panel_ui.render)
+        self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
+        self._time_render("VideoDisplayUI", self.video_display_ui.render)
+        self._time_render("VideoNavigationUI", self.video_navigation_ui.render)
+        self._time_render("TimelineEditor1", self.timeline_editor1.render)
+        self._time_render("TimelineEditor2", self.timeline_editor2.render)
+
+        for t_num in self._visible_extra_timelines:
+            editor = self._get_or_create_timeline_editor(t_num)
+            self._time_render(f"TimelineEditor{t_num}", editor.render)
+
+        if app_state.just_switched_to_floating:
+            app_state.just_switched_to_floating = False
+
+    def _render_dialogs_and_overlays(self, app_state):
+        """Render floating dialogs, popups, and overlay windows."""
+        if hasattr(app_state, 'show_chapter_list_window') and app_state.show_chapter_list_window:
+            self._time_render("ChapterListWindow", self.chapter_list_window_ui.render)
+        if hasattr(app_state, 'show_chapter_type_manager') and app_state.show_chapter_type_manager:
+            self._time_render("ChapterTypeManager", self.chapter_type_manager_ui.render)
+        if getattr(app_state, 'show_bookmark_list_window', False):
+            self._time_render("BookmarkListWindow", self.bookmark_list_window_ui.render)
+        self._time_render("Popups", self._render_all_popups)
+        self._time_render("ErrorPopup", self._render_error_popup)
+
+        if hasattr(self.app, 'tensorrt_compiler_window') and self.app.tensorrt_compiler_window:
+            self._time_render("TensorRTCompiler", self.app.tensorrt_compiler_window.render)
+
+        if self.app.app_state_ui.show_generated_file_manager:
+            self._time_render("GeneratedFileManager", self.generated_file_manager_ui.render)
+
+        self._time_render("AutotunerWindow", self.autotuner_window_ui.render)
+
+        if hasattr(app_state, 'show_ai_models_dialog') and app_state.show_ai_models_dialog:
+            self._time_render("AIModelsDialog", self._render_ai_models_dialog)
+
+        self._render_go_to_frame_popup()
+        self.app.addon_checker.tick_status_ads()
+
     def _render_status_strip(self, strip_h):
         """Render a unified status strip at the very bottom of the window."""
         from config.element_group_colors import StatusStripColors
@@ -975,265 +1161,271 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         if imgui.begin("##StatusStrip", True, flags):
             app_state = self.app.app_state_ui
             stage_proc = self.app.stage_processor
-            text_color = StatusStripColors.TEXT
-
-            # Left: energy saver state or workflow state
-            proc = self.app.processor
-            if self.app.energy_saver.energy_saver_active:
-                icon_mgr = get_icon_texture_manager()
-                leaf_tex, _, _ = icon_mgr.get_icon_texture('energy-leaf.png')
-                if leaf_tex:
-                    imgui.image(leaf_tex, 16, 16)
-                    imgui.same_line()
-                imgui.push_style_color(imgui.COLOR_TEXT, *StatusStripColors.ENERGY_SAVER)
-                imgui.text("Energy Saver")
-                imgui.pop_style_color()
-            else:
-                if not proc or not proc.is_video_open():
-                    state_text = "No video loaded"
-                    state_color = text_color
-                elif stage_proc.full_analysis_active:
-                    state_text = "Tracking..."
-                    state_color = StatusStripColors.ACCENT
-                elif proc and getattr(proc, 'is_processing', False) and getattr(proc, 'enable_tracker_processing', False):
-                    if hasattr(proc, 'pause_event') and proc.pause_event.is_set():
-                        state_text = "Live Tracking Paused"
-                        state_color = StatusStripColors.WARNING
-                    else:
-                        state_text = "Live Tracking"
-                        state_color = StatusStripColors.ACCENT
-                elif proc and getattr(proc, 'is_processing', False) and not getattr(proc, 'enable_tracker_processing', False):
-                    if hasattr(proc, 'pause_event') and proc.pause_event.is_set():
-                        state_text = "Paused"
-                        state_color = text_color
-                    else:
-                        state_text = "Playing"
-                        state_color = StatusStripColors.ACCENT
-                else:
-                    state_text = "Ready"
-                    state_color = text_color
-                imgui.push_style_color(imgui.COLOR_TEXT, *state_color)
-                imgui.text(state_text)
-                imgui.pop_style_color()
-
-            # Center: progress % during tracking, status message, or shortcut hints
-            _has_status_msg = app_state.status_message and time.time() < app_state.status_message_time
-
-            if stage_proc.full_analysis_active:
-                progress = getattr(stage_proc, 'overall_progress', 0.0)
-                progress_text = f"{int(progress * 100)}%"
-                center_x = self.window_width * 0.5
-                text_w = imgui.calc_text_size(progress_text)[0]
-                imgui.same_line(position=center_x - text_w * 0.5)
-                imgui.push_style_color(imgui.COLOR_TEXT, *StatusStripColors.ACCENT)
-                imgui.text(progress_text)
-                imgui.pop_style_color()
-            elif _has_status_msg:
-                msg = app_state.status_message
-                center_x = self.window_width * 0.5
-                text_w = imgui.calc_text_size(msg)[0]
-                imgui.same_line(position=center_x - text_w * 0.5)
-                imgui.push_style_color(imgui.COLOR_TEXT, *StatusStripColors.ACCENT)
-                imgui.text(msg)
-                imgui.pop_style_color()
-            else:
-                # Clear expired messages
-                if app_state.status_message and time.time() >= app_state.status_message_time:
-                    app_state.status_message = ""
-                # Dynamic shortcut hints
-                shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
-
-                # Detect context: video, timeline hover, selection, active mode
-                has_video = proc and proc.is_video_open()
-                tl_hovered = False
-                has_sel = False
-                active_tl_mode = TimelineMode.SELECT
-                try:
-                    t1 = self.timeline_editor1
-                    t2 = self.timeline_editor2
-                    if t1 and t1.is_hovered:
-                        tl_hovered = True
-                        active_tl_mode = getattr(t1, '_mode', TimelineMode.SELECT)
-                    if t2 and t2.is_hovered:
-                        tl_hovered = True
-                        active_tl_mode = getattr(t2, '_mode', TimelineMode.SELECT)
-                    if t1 and t1.multi_selected_action_indices:
-                        has_sel = True
-                    if not has_sel and t2 and t2.multi_selected_action_indices:
-                        has_sel = True
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).debug(f"Timeline hover detection error: {e}")
-
-                fixed_hints = self._get_contextual_hints(shortcuts, tl_hovered, has_sel, active_tl_mode)
-                ctx_key = (has_video, tl_hovered, has_sel, active_tl_mode)
-
-                # Rebuild rotating pool on context change
-                if ctx_key != self._hint_last_context:
-                    fixed_actions = set()
-                    if not has_video:
-                        fixed_actions.add("open_project")
-                    elif has_sel:
-                        fixed_actions.update(("delete_selected_point", "nudge_selection_pos_up",
-                                              "nudge_selection_pos_down", "copy_selection"))
-                    elif tl_hovered:
-                        fixed_actions.add("select_all_points")
-                    else:
-                        fixed_actions.update(("toggle_playback", "seek_prev_frame", "seek_next_frame"))
-                    self._hint_pool_cache = self._build_rotating_hint_pool(shortcuts, fixed_actions)
-                    self._hint_last_context = ctx_key
-                    self._hint_rotate_index = 0
-
-                # Rotate discovery tip every 10s
-                now = time.time()
-                if self._hint_pool_cache and now - self._hint_last_rotate >= _HINT_ROTATION_INTERVAL_S:
-                    self._hint_rotate_index = (self._hint_rotate_index + 1) % len(self._hint_pool_cache)
-                    self._hint_last_rotate = now
-
-                # Build display string: "Key Action · Key Action · Key Action"
-                parts = []
-                for key_disp, label in fixed_hints:
-                    parts.append(f"{key_disp} {label}")
-                if self._hint_pool_cache:
-                    rot = self._hint_pool_cache[self._hint_rotate_index % len(self._hint_pool_cache)]
-                    parts.append(f"{rot[0]} {rot[1]}")
-
-                if parts:
-                    hint_text = "  \u00b7  ".join(parts)
-                    center_x = self.window_width * 0.5
-                    text_w = imgui.calc_text_size(hint_text)[0]
-                    imgui.same_line(position=center_x - text_w * 0.5)
-                    imgui.push_style_color(imgui.COLOR_TEXT, 0.50, 0.50, 0.55, 0.75)
-                    imgui.text(hint_text)
-                    imgui.pop_style_color()
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Press F1 to see all keyboard shortcuts")
-
-            # Right section: GUI FPS xx - Video FPS xxx - Frame Buffer [bar]
-            io = imgui.get_io()
-            dim_color = (0.50, 0.50, 0.55, 0.75)
-            sep = "  -  "
-            sep_w = imgui.calc_text_size(sep)[0]
             proc = self.app.processor
 
-            # --- Compute Video FPS (1-second windowed, updated once/sec) ---
-            now_t = time.time()
-            # Prune frame samples older than 1 second
-            samples = self._reading_fps_frames
-            self._reading_fps_frames = [(t, n) for t, n in samples if now_t - t < 1.0]
-            # Update display value once per second for stability
-            if now_t - self._reading_fps_last_update >= 1.0:
-                if self._reading_fps_frames:
-                    total_frames = sum(n for _, n in self._reading_fps_frames)
-                    window = now_t - self._reading_fps_frames[0][0]
-                    self._reading_fps_display = total_frames / window if window > 0.01 else 0.0
-                else:
-                    self._reading_fps_display = 0.0
-                self._reading_fps_last_update = now_t
-
-            # If video open, show native fps; during seeking show reading rate instead
-            video_fps_text = ""
-            if proc and proc.is_video_open():
-                if self._reading_fps_display > 0.5:
-                    video_fps_text = f"Video FPS {self._reading_fps_display:.0f}"
-                elif proc.fps > 0:
-                    video_fps_text = f"Video FPS {proc.fps:.0f}"
-
-            # --- Compute Frame Buffer bar (always shown when video open) ---
-            buf_label = "Frame Buffer "
-            buf_label_w = imgui.calc_text_size(buf_label)[0]
-            bar_w = 60
-            has_buf = False
-            green_start_frac = 0.0
-            green_end_frac = 0.0
-            cursor_frac = 0.0
-            buf_size = 0
-            buf_capacity = 1
-            buf_start = buf_end = buf_current = 0
-            if proc and proc.is_video_open():
-                has_buf = True
-                if hasattr(proc, 'buffer_info'):
-                    buf = proc.buffer_info
-                    buf_size = buf['size']
-                    buf_capacity = buf['capacity'] if buf['capacity'] > 0 else 1
-                    if buf_size > 0:
-                        buf_start = buf['start']
-                        buf_end = buf['end']
-                        buf_current = buf.get('current', buf_start)
-                        bar_left = buf_end - buf_capacity + 1
-                        green_start_frac = max(0.0, (buf_start - bar_left) / buf_capacity)
-                        green_end_frac = min(1.0, (buf_end - bar_left + 1) / buf_capacity)
-                        cursor_frac = max(0.0, min(1.0, (buf_current - bar_left + 0.5) / buf_capacity))
-
-            # --- Layout: measure total width from right edge ---
-            right_margin = 28
-            total_w = 0
-            gui_fps_text = f"GUI FPS {io.framerate:.0f}"
-            gui_fps_w = imgui.calc_text_size(gui_fps_text)[0]
-            total_w += gui_fps_w
-            if video_fps_text:
-                total_w += sep_w + imgui.calc_text_size(video_fps_text)[0]
-            if has_buf:
-                total_w += sep_w + buf_label_w + bar_w
-
-            start_x = self.window_width - total_w - right_margin
-
-            # --- Render left to right ---
-            imgui.same_line(position=start_x)
-            imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
-            imgui.text(gui_fps_text)
-            imgui.pop_style_color()
-
-            if video_fps_text:
-                imgui.same_line()
-                imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
-                imgui.text(sep + video_fps_text)
-                imgui.pop_style_color()
-
-            if has_buf:
-                imgui.same_line()
-                imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
-                imgui.text(sep + buf_label)
-                imgui.pop_style_color()
-
-                # Mini bar via draw_list
-                imgui.same_line()
-                bar_cursor = imgui.get_cursor_screen_pos()
-                bar_h = imgui.get_text_line_height() - 2
-                bar_y = bar_cursor[1] + 1
-                bx = bar_cursor[0]
-                draw_list = imgui.get_window_draw_list()
-
-                bg_color = imgui.get_color_u32_rgba(0.25, 0.25, 0.28, 1.0)
-                draw_list.add_rect_filled(bx, bar_y, bx + bar_w, bar_y + bar_h, bg_color, 3.0)
-
-                gx0 = bx + bar_w * green_start_frac
-                gx1 = bx + bar_w * green_end_frac
-                if gx1 - gx0 > 0.5:
-                    fill_color = imgui.get_color_u32_rgba(0.2, 0.7, 0.3, 0.8)
-                    draw_list.add_rect_filled(gx0, bar_y, gx1, bar_y + bar_h, fill_color, 3.0)
-
-                mx = bx + bar_w * cursor_frac
-                marker_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.9)
-                draw_list.add_line(mx, bar_y, mx, bar_y + bar_h, marker_color, 1.5)
-
-                imgui.dummy(bar_w, bar_h)
-
-                if imgui.is_item_hovered():
-                    if buf_size > 0:
-                        buf_pct = int(100 * (buf_current - (buf_end - buf_capacity + 1)) / buf_capacity) if buf_capacity > 0 else 0
-                        imgui.set_tooltip(
-                            f"Frame Buffer: {buf_size}/{buf_capacity}\n"
-                            f"Range: {buf_start}\u2013{buf_end}\n"
-                            f"Current Frame: {buf_current}\n"
-                            f"Position: {buf_pct}%"
-                        )
-                    else:
-                        imgui.set_tooltip(f"Frame Buffer: empty ({buf_capacity} capacity)")
+            self._render_status_left(proc, stage_proc, StatusStripColors)
+            self._render_status_center(proc, app_state, stage_proc, StatusStripColors)
+            self._render_status_right(proc)
 
         imgui.end()
         imgui.pop_style_var()
         imgui.pop_style_color()
+
+    def _render_status_left(self, proc, stage_proc, colors):
+        """Render left section: energy saver state or workflow state."""
+        if self.app.energy_saver.energy_saver_active:
+            icon_mgr = get_icon_texture_manager()
+            leaf_tex, _, _ = icon_mgr.get_icon_texture('energy-leaf.png')
+            if leaf_tex:
+                imgui.image(leaf_tex, 16, 16)
+                imgui.same_line()
+            imgui.push_style_color(imgui.COLOR_TEXT, *colors.ENERGY_SAVER)
+            imgui.text("Energy Saver")
+            imgui.pop_style_color()
+        else:
+            if not proc or not proc.is_video_open():
+                state_text = "No video loaded"
+                state_color = colors.TEXT
+            elif stage_proc.full_analysis_active:
+                state_text = "Tracking..."
+                state_color = colors.ACCENT
+            elif proc and getattr(proc, 'is_processing', False) and getattr(proc, 'enable_tracker_processing', False):
+                if hasattr(proc, 'pause_event') and proc.pause_event.is_set():
+                    state_text = "Live Tracking Paused"
+                    state_color = colors.WARNING
+                else:
+                    state_text = "Live Tracking"
+                    state_color = colors.ACCENT
+            elif proc and getattr(proc, 'is_processing', False) and not getattr(proc, 'enable_tracker_processing', False):
+                if hasattr(proc, 'pause_event') and proc.pause_event.is_set():
+                    state_text = "Paused"
+                    state_color = colors.TEXT
+                else:
+                    state_text = "Playing"
+                    state_color = colors.ACCENT
+            else:
+                state_text = "Ready"
+                state_color = colors.TEXT
+            imgui.push_style_color(imgui.COLOR_TEXT, *state_color)
+            imgui.text(state_text)
+            imgui.pop_style_color()
+
+    def _render_status_center(self, proc, app_state, stage_proc, colors):
+        """Render center section: progress %, status message, or shortcut hints."""
+        _has_status_msg = app_state.status_message and time.time() < app_state.status_message_time
+
+        if stage_proc.full_analysis_active:
+            progress = getattr(stage_proc, 'overall_progress', 0.0)
+            progress_text = f"{int(progress * 100)}%"
+            center_x = self.window_width * 0.5
+            text_w = imgui.calc_text_size(progress_text)[0]
+            imgui.same_line(position=center_x - text_w * 0.5)
+            imgui.push_style_color(imgui.COLOR_TEXT, *colors.ACCENT)
+            imgui.text(progress_text)
+            imgui.pop_style_color()
+        elif _has_status_msg:
+            msg = app_state.status_message
+            center_x = self.window_width * 0.5
+            text_w = imgui.calc_text_size(msg)[0]
+            imgui.same_line(position=center_x - text_w * 0.5)
+            imgui.push_style_color(imgui.COLOR_TEXT, *colors.ACCENT)
+            imgui.text(msg)
+            imgui.pop_style_color()
+        else:
+            # Clear expired messages
+            if app_state.status_message and time.time() >= app_state.status_message_time:
+                app_state.status_message = ""
+            # Dynamic shortcut hints
+            shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
+
+            # Detect context: video, timeline hover, selection, active mode
+            has_video = proc and proc.is_video_open()
+            tl_hovered = False
+            has_sel = False
+            active_tl_mode = TimelineMode.SELECT
+            try:
+                t1 = self.timeline_editor1
+                t2 = self.timeline_editor2
+                if t1 and t1.is_hovered:
+                    tl_hovered = True
+                    active_tl_mode = getattr(t1, '_mode', TimelineMode.SELECT)
+                if t2 and t2.is_hovered:
+                    tl_hovered = True
+                    active_tl_mode = getattr(t2, '_mode', TimelineMode.SELECT)
+                if t1 and t1.multi_selected_action_indices:
+                    has_sel = True
+                if not has_sel and t2 and t2.multi_selected_action_indices:
+                    has_sel = True
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Timeline hover detection error: {e}")
+
+            fixed_hints = self._get_contextual_hints(shortcuts, tl_hovered, has_sel, active_tl_mode)
+            ctx_key = (has_video, tl_hovered, has_sel, active_tl_mode)
+
+            # Rebuild rotating pool on context change
+            if ctx_key != self._hint_last_context:
+                fixed_actions = set()
+                if not has_video:
+                    fixed_actions.add("open_project")
+                elif has_sel:
+                    fixed_actions.update(("delete_selected_point", "nudge_selection_pos_up",
+                                          "nudge_selection_pos_down", "copy_selection"))
+                elif tl_hovered:
+                    fixed_actions.add("select_all_points")
+                else:
+                    fixed_actions.update(("toggle_playback", "seek_prev_frame", "seek_next_frame"))
+                self._hint_pool_cache = self._build_rotating_hint_pool(shortcuts, fixed_actions)
+                self._hint_last_context = ctx_key
+                self._hint_rotate_index = 0
+
+            # Rotate discovery tip every 10s
+            now = time.time()
+            if self._hint_pool_cache and now - self._hint_last_rotate >= _HINT_ROTATION_INTERVAL_S:
+                self._hint_rotate_index = (self._hint_rotate_index + 1) % len(self._hint_pool_cache)
+                self._hint_last_rotate = now
+
+            # Build display string: "Key Action · Key Action · Key Action"
+            parts = []
+            for key_disp, label in fixed_hints:
+                parts.append(f"{key_disp} {label}")
+            if self._hint_pool_cache:
+                rot = self._hint_pool_cache[self._hint_rotate_index % len(self._hint_pool_cache)]
+                parts.append(f"{rot[0]} {rot[1]}")
+
+            if parts:
+                hint_text = "  \u00b7  ".join(parts)
+                center_x = self.window_width * 0.5
+                text_w = imgui.calc_text_size(hint_text)[0]
+                imgui.same_line(position=center_x - text_w * 0.5)
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.50, 0.50, 0.55, 0.75)
+                imgui.text(hint_text)
+                imgui.pop_style_color()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Press F1 to see all keyboard shortcuts")
+
+    def _render_status_right(self, proc):
+        """Render right section: GUI FPS, Video FPS, Frame Buffer visualization."""
+        io = imgui.get_io()
+        dim_color = (0.50, 0.50, 0.55, 0.75)
+        sep = "  -  "
+        # Cache separator width (constant string, font doesn't change mid-session)
+        if not hasattr(self, '_sep_w'):
+            self._sep_w = imgui.calc_text_size(sep)[0]
+        sep_w = self._sep_w
+
+        # --- Compute Video FPS (1-second windowed, updated once/sec) ---
+        now_t = time.time()
+        # Evict stale samples from front of deque (O(k) where k = expired count)
+        while self._reading_fps_frames and now_t - self._reading_fps_frames[0][0] >= 1.0:
+            self._reading_fps_frames.popleft()
+        if now_t - self._reading_fps_last_update >= 1.0:
+            if self._reading_fps_frames:
+                total_frames = sum(n for _, n in self._reading_fps_frames)
+                window = now_t - self._reading_fps_frames[0][0]
+                self._reading_fps_display = total_frames / window if window > 0.01 else 0.0
+            else:
+                self._reading_fps_display = 0.0
+            self._reading_fps_last_update = now_t
+
+        video_fps_text = ""
+        if proc and proc.is_video_open():
+            if self._reading_fps_display > 0.5:
+                video_fps_text = f"Video FPS {self._reading_fps_display:.0f}"
+            elif proc.fps > 0:
+                video_fps_text = f"Video FPS {proc.fps:.0f}"
+
+        # --- Compute Frame Buffer bar ---
+        buf_label = "Frame Buffer "
+        buf_label_w = imgui.calc_text_size(buf_label)[0]
+        bar_w = 60
+        has_buf = False
+        green_start_frac = 0.0
+        green_end_frac = 0.0
+        cursor_frac = 0.0
+        buf_size = 0
+        buf_capacity = 1
+        buf_start = buf_end = buf_current = 0
+        if proc and proc.is_video_open():
+            has_buf = True
+            if hasattr(proc, 'buffer_info'):
+                buf = proc.buffer_info
+                buf_size = buf['size']
+                buf_capacity = buf['capacity'] if buf['capacity'] > 0 else 1
+                if buf_size > 0:
+                    buf_start = buf['start']
+                    buf_end = buf['end']
+                    buf_current = buf.get('current', buf_start)
+                    bar_left = buf_end - buf_capacity + 1
+                    green_start_frac = max(0.0, (buf_start - bar_left) / buf_capacity)
+                    green_end_frac = min(1.0, (buf_end - bar_left + 1) / buf_capacity)
+                    cursor_frac = max(0.0, min(1.0, (buf_current - bar_left + 0.5) / buf_capacity))
+
+        # --- Layout: measure total width from right edge ---
+        right_margin = 28
+        total_w = 0
+        gui_fps_text = f"GUI FPS {io.framerate:.0f}"
+        gui_fps_w = imgui.calc_text_size(gui_fps_text)[0]
+        total_w += gui_fps_w
+        if video_fps_text:
+            total_w += sep_w + imgui.calc_text_size(video_fps_text)[0]
+        if has_buf:
+            total_w += sep_w + buf_label_w + bar_w
+
+        start_x = self.window_width - total_w - right_margin
+
+        # --- Render left to right ---
+        imgui.same_line(position=start_x)
+        imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
+        imgui.text(gui_fps_text)
+        imgui.pop_style_color()
+
+        if video_fps_text:
+            imgui.same_line()
+            imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
+            imgui.text(sep + video_fps_text)
+            imgui.pop_style_color()
+
+        if has_buf:
+            imgui.same_line()
+            imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
+            imgui.text(sep + buf_label)
+            imgui.pop_style_color()
+
+            # Mini bar via draw_list
+            imgui.same_line()
+            bar_cursor = imgui.get_cursor_screen_pos()
+            bar_h = imgui.get_text_line_height() - 2
+            bar_y = bar_cursor[1] + 1
+            bx = bar_cursor[0]
+            draw_list = imgui.get_window_draw_list()
+
+            bg_color = imgui.get_color_u32_rgba(0.25, 0.25, 0.28, 1.0)
+            draw_list.add_rect_filled(bx, bar_y, bx + bar_w, bar_y + bar_h, bg_color, 3.0)
+
+            gx0 = bx + bar_w * green_start_frac
+            gx1 = bx + bar_w * green_end_frac
+            if gx1 - gx0 > 0.5:
+                fill_color = imgui.get_color_u32_rgba(0.2, 0.7, 0.3, 0.8)
+                draw_list.add_rect_filled(gx0, bar_y, gx1, bar_y + bar_h, fill_color, 3.0)
+
+            mx = bx + bar_w * cursor_frac
+            marker_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.9)
+            draw_list.add_line(mx, bar_y, mx, bar_y + bar_h, marker_color, 1.5)
+
+            imgui.dummy(bar_w, bar_h)
+
+            if imgui.is_item_hovered():
+                if buf_size > 0:
+                    buf_pct = int(100 * (buf_current - (buf_end - buf_capacity + 1)) / buf_capacity) if buf_capacity > 0 else 0
+                    imgui.set_tooltip(
+                        f"Frame Buffer: {buf_size}/{buf_capacity}\n"
+                        f"Range: {buf_start}-{buf_end}\n"
+                        f"Current Frame: {buf_current}\n"
+                        f"Position: {buf_pct}%"
+                    )
+                else:
+                    imgui.set_tooltip(f"Frame Buffer: empty ({buf_capacity} capacity)")
 
     def _render_go_to_frame_popup(self):
         """Render the Go to Frame popup (Ctrl+G)."""
@@ -1325,6 +1517,16 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Cache feature detection flags for this frame
         self._feat_supporter = _is_feature_available("patreon_features")
 
+        # Cache visible extra timeline numbers (avoids per-frame getattr + f-string)
+        if self._feat_supporter:
+            app_state = self.app.app_state_ui
+            self._visible_extra_timelines = [
+                t for t in EXTRA_TIMELINE_RANGE
+                if getattr(app_state, f"show_funscript_interactive_timeline{t}", False)
+            ]
+        else:
+            self._visible_extra_timelines = []
+
         # Energy detection can be done before new_frame
         self._time_render("EnergyDetection", self._handle_energy_saver_interaction_detection)
 
@@ -1366,16 +1568,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Keep video texture fresh even when normal video panel is skipped
         self.video_display_ui.update_frame_texture_if_needed()
 
-        # Native fullscreen mode — render only video + controls, skip all other UI
-        if self.fullscreen_manager.is_active:
-            self._time_render("Fullscreen", self.fullscreen_manager.render)
-            self.perf_frame_count += 1
-            self._time_render("ImGuiRender", imgui.render)
-            if self.impl:
-                draw_data = imgui.get_draw_data()
-                self.impl.render(draw_data)
-            return
-
         main_viewport = imgui.get_main_viewport()
         self.window_width, self.window_height = main_viewport.size
         app_state = self.app.app_state_ui
@@ -1408,212 +1600,11 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         status_strip_h = _STATUS_STRIP_HEIGHT
 
         if app_state.ui_layout_mode == 'fixed':
-            panel_y_start = self.main_menu_bar_height + toolbar_height
-            timeline1_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline else 0
-            timeline2_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline2 else 0
-            extra_timelines_total_height = 0
-            if self._feat_supporter:
-                for _t in EXTRA_TIMELINE_RANGE:
-                    if getattr(app_state, f"show_funscript_interactive_timeline{_t}", False):
-                        extra_timelines_total_height += app_state.timeline_base_height
-            interactive_timelines_total_height = timeline1_render_h + timeline2_render_h + extra_timelines_total_height
-            # Cap timeline area to prevent it from taking over the whole window
-            max_timeline_area_h = int(self.window_height * 0.45)
-            capped_timelines_h = min(interactive_timelines_total_height, max_timeline_area_h)
-            timelines_need_scroll = interactive_timelines_total_height > max_timeline_area_h
-            available_height_for_main_panels = max(100, self.window_height - panel_y_start - capped_timelines_h - status_strip_h)
-            app_state.fixed_layout_geometry = {}
-            is_full_width_nav = getattr(app_state, 'full_width_nav', False)
-            control_panel_w = 450 * font_scale
-            graphs_panel_w = 450 * font_scale
-            video_nav_bar_h = 150
-
-            if is_full_width_nav:
-                top_panels_h = max(50, available_height_for_main_panels - video_nav_bar_h)
-                nav_y_start = panel_y_start + top_panels_h
-                # In fixed mode, video display is always shown
-                if True:
-                    video_panel_w = self.window_width - control_panel_w - graphs_panel_w
-                    if video_panel_w < 100:
-                        video_panel_w = 100
-                        graphs_panel_w = max(100, self.window_width - control_panel_w - video_panel_w)
-                    video_area_x_start = control_panel_w
-                    graphs_area_x_start = control_panel_w + video_panel_w
-                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w, top_panels_h)}
-                    imgui.set_next_window_position(0, panel_y_start)
-                    imgui.set_next_window_size(control_panel_w, top_panels_h)
-                    self._time_render("ControlPanelUI", self.control_panel_ui.render)
-                    app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start), 'size': (video_panel_w, top_panels_h)}
-                    imgui.set_next_window_position(video_area_x_start, panel_y_start)
-                    imgui.set_next_window_size(video_panel_w, top_panels_h)
-                    self._time_render("VideoDisplayUI", self.video_display_ui.render)
-                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start), 'size': (graphs_panel_w, top_panels_h)}
-                    imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
-                    imgui.set_next_window_size(graphs_panel_w, top_panels_h)
-                    self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
-                else:
-                    control_panel_w_no_vid = self.window_width / 2
-                    graphs_panel_w_no_vid = self.window_width - control_panel_w_no_vid
-                    graphs_area_x_start_no_vid = control_panel_w_no_vid
-                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w_no_vid, top_panels_h)}
-                    imgui.set_next_window_position(0, panel_y_start)
-                    imgui.set_next_window_size(control_panel_w_no_vid, top_panels_h)
-                    self._time_render("ControlPanelUI", self.control_panel_ui.render)
-                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start_no_vid, panel_y_start), 'size': (graphs_panel_w_no_vid, top_panels_h)}
-                    imgui.set_next_window_position(graphs_area_x_start_no_vid, panel_y_start)
-                    imgui.set_next_window_size(graphs_panel_w_no_vid, top_panels_h)
-                    self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
-                app_state.fixed_layout_geometry['VideoNavigation'] = {'pos': (0, nav_y_start), 'size': (self.window_width, video_nav_bar_h)}
-                imgui.set_next_window_position(0, nav_y_start)
-                imgui.set_next_window_size(self.window_width, video_nav_bar_h)
-                self._time_render("VideoNavigationUI", self.video_navigation_ui.render, self.window_width)
-            else:
-                # In fixed mode, video display is always shown
-                if True:
-                    video_panel_w = self.window_width - control_panel_w - graphs_panel_w
-                    if video_panel_w < 100:
-                        video_panel_w = 100
-                        graphs_panel_w = max(100, self.window_width - control_panel_w - video_panel_w)
-                    video_render_h = max(50, available_height_for_main_panels - video_nav_bar_h)
-                    video_area_x_start = control_panel_w
-                    graphs_area_x_start = control_panel_w + video_panel_w
-                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w, available_height_for_main_panels)}
-                    imgui.set_next_window_position(0, panel_y_start)
-                    imgui.set_next_window_size(control_panel_w, available_height_for_main_panels)
-                    self._time_render("ControlPanelUI", self.control_panel_ui.render)
-                    app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start), 'size': (video_panel_w, video_render_h)}
-                    imgui.set_next_window_position(video_area_x_start, panel_y_start)
-                    imgui.set_next_window_size(video_panel_w, video_render_h)
-                    self._time_render("VideoDisplayUI", self.video_display_ui.render)
-                    app_state.fixed_layout_geometry['VideoNavigation'] = {
-                        'pos': (video_area_x_start, panel_y_start + video_render_h),
-                        'size': (video_panel_w, video_nav_bar_h)}
-                    imgui.set_next_window_position(video_area_x_start, panel_y_start + video_render_h)
-                    imgui.set_next_window_size(video_panel_w, video_nav_bar_h)
-                    self._time_render("VideoNavigationUI", self.video_navigation_ui.render, video_panel_w)
-                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start), 'size': (graphs_panel_w, available_height_for_main_panels)}
-                    imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
-                    imgui.set_next_window_size(graphs_panel_w, available_height_for_main_panels)
-                    self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
-                else:
-                    control_panel_w_no_vid = self.window_width / 2
-                    graphs_panel_w_no_vid = self.window_width - control_panel_w_no_vid
-                    graphs_area_x_start_no_vid = control_panel_w_no_vid
-                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w_no_vid, available_height_for_main_panels)}
-                    imgui.set_next_window_position(0, panel_y_start)
-                    imgui.set_next_window_size(control_panel_w_no_vid, available_height_for_main_panels)
-                    self._time_render("ControlPanelUI", self.control_panel_ui.render)
-                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start_no_vid, panel_y_start), 'size': (graphs_panel_w_no_vid, available_height_for_main_panels)}
-                    imgui.set_next_window_position(graphs_area_x_start_no_vid, panel_y_start)
-                    imgui.set_next_window_size(graphs_panel_w_no_vid, available_height_for_main_panels)
-                    self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
-
-            timeline_area_y = panel_y_start + available_height_for_main_panels
-            per_tl_h = app_state.timeline_base_height
-
-            if timelines_need_scroll:
-                # Scrollable container for all timelines
-                imgui.set_next_window_position(0, timeline_area_y)
-                imgui.set_next_window_size(self.window_width, capped_timelines_h)
-                container_flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE |
-                                   imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
-                if imgui.begin("##TimelineScrollContainer", True, container_flags):
-                    if app_state.show_funscript_interactive_timeline:
-                        self._time_render("TimelineEditor1", self.timeline_editor1.render,
-                                          0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
-                    if app_state.show_funscript_interactive_timeline2:
-                        self._time_render("TimelineEditor2", self.timeline_editor2.render,
-                                          0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
-                    if self._feat_supporter:
-                        for t_num in EXTRA_TIMELINE_RANGE:
-                            vis_attr = f"show_funscript_interactive_timeline{t_num}"
-                            if getattr(app_state, vis_attr, False):
-                                editor = self._get_or_create_timeline_editor(t_num)
-                                self._time_render(f"TimelineEditor{t_num}", editor.render,
-                                                  0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
-                imgui.end()
-                app_state.fixed_layout_geometry['TimelineContainer'] = {
-                    'pos': (0, timeline_area_y), 'size': (self.window_width, capped_timelines_h)}
-            else:
-                # No scrolling needed — render each timeline as its own window
-                timeline_current_y_start = timeline_area_y
-                if app_state.show_funscript_interactive_timeline:
-                    app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline1_render_h)}
-                    self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h, view_mode=app_state.ui_view_mode)
-                    timeline_current_y_start += timeline1_render_h
-                if app_state.show_funscript_interactive_timeline2:
-                    app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline2_render_h)}
-                    self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h, view_mode=app_state.ui_view_mode)
-                    timeline_current_y_start += timeline2_render_h
-                if self._feat_supporter:
-                    for t_num in EXTRA_TIMELINE_RANGE:
-                        vis_attr = f"show_funscript_interactive_timeline{t_num}"
-                        if getattr(app_state, vis_attr, False):
-                            editor = self._get_or_create_timeline_editor(t_num)
-                            extra_h = per_tl_h
-                            app_state.fixed_layout_geometry[f'Timeline{t_num}'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, extra_h)}
-                            self._time_render(f"TimelineEditor{t_num}", editor.render, timeline_current_y_start, extra_h, view_mode=app_state.ui_view_mode)
-                            timeline_current_y_start += extra_h
+            self._render_fixed_layout(app_state, font_scale, toolbar_height, status_strip_h)
         else:
-            if app_state.just_switched_to_floating:
-                if 'ControlPanel' in app_state.fixed_layout_geometry:
-                    geom = app_state.fixed_layout_geometry['ControlPanel']
-                    imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
-                    imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
-                if 'VideoDisplay' in app_state.fixed_layout_geometry:
-                    geom = app_state.fixed_layout_geometry['VideoDisplay']
-                    imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
-                    imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
+            self._render_floating_layout(app_state)
 
-            self._time_render("ControlPanelUI", self.control_panel_ui.render)
-            self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
-            self._time_render("VideoDisplayUI", self.video_display_ui.render)
-            self._time_render("VideoNavigationUI", self.video_navigation_ui.render)
-            self._time_render("TimelineEditor1", self.timeline_editor1.render)
-            self._time_render("TimelineEditor2", self.timeline_editor2.render)
-
-            # Render additional timelines in floating mode (supporter only)
-            if self._feat_supporter:
-                for t_num in EXTRA_TIMELINE_RANGE:
-                    vis_attr = f"show_funscript_interactive_timeline{t_num}"
-                    if getattr(app_state, vis_attr, False):
-                        editor = self._get_or_create_timeline_editor(t_num)
-                        self._time_render(f"TimelineEditor{t_num}", editor.render)
-
-            if app_state.just_switched_to_floating:
-                app_state.just_switched_to_floating = False
-
-        if hasattr(app_state, 'show_chapter_list_window') and app_state.show_chapter_list_window:
-            self._time_render("ChapterListWindow", self.chapter_list_window_ui.render)
-        if hasattr(app_state, 'show_chapter_type_manager') and app_state.show_chapter_type_manager:
-            self._time_render("ChapterTypeManager", self.chapter_type_manager_ui.render)
-        if getattr(app_state, 'show_bookmark_list_window', False):
-            self._time_render("BookmarkListWindow", self.bookmark_list_window_ui.render)
-        self._time_render("Popups", self._render_all_popups)
-
-        # TODO: Move this to a separate class/error management module  
-        self._time_render("ErrorPopup", self._render_error_popup)
-
-        # Render TensorRT Compiler Window if open
-        if hasattr(self.app, 'tensorrt_compiler_window') and self.app.tensorrt_compiler_window:
-            self._time_render("TensorRTCompiler", self.app.tensorrt_compiler_window.render)
-
-        # --- Render Generated File Manager window ---
-        if self.app.app_state_ui.show_generated_file_manager:
-            self._time_render("GeneratedFileManager", self.generated_file_manager_ui.render)
-
-        # --- Render Autotuner Window ---
-        self._time_render("AutotunerWindow", self.autotuner_window_ui.render)
-
-        # --- Render AI Models Dialog ---
-        if hasattr(app_state, 'show_ai_models_dialog') and app_state.show_ai_models_dialog:
-            self._time_render("AIModelsDialog", self._render_ai_models_dialog)
-
-        # Go to Frame popup (Ctrl+G)
-        self._render_go_to_frame_popup()
-
-        # Tick addon status-strip ads (non-intrusive, once per frame)
-        self.app.addon_checker.tick_status_ads()
+        self._render_dialogs_and_overlays(app_state)
 
         # Render status strip at bottom of window
         self._render_status_strip(status_strip_h)
@@ -1739,7 +1730,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 except queue.Full:
                     pass
             for t in self.preview_worker_threads:
-                t.join()
+                t.join(timeout=5.0)
 
             if self.frame_texture_id: gl.glDeleteTextures([self.frame_texture_id]); self.frame_texture_id = 0
             if self.heatmap_texture_id: gl.glDeleteTextures([self.heatmap_texture_id]); self.heatmap_texture_id = 0

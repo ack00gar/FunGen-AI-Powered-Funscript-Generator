@@ -80,7 +80,7 @@ class Stage3MixedTracker(BaseOfflineTracker):
         self.stage2_signal_chapters = ["CG/Miss", "Doggy", "Cowgirl", "NR"]  # Use Stage 2 signal directly
         
         # Live tracker integration for selective chapters
-        self.live_tracker_name = "yolo_roi"  # Use YOLO ROI tracker for BJ/HJ
+        self.live_tracker_name = "LIVE_YOLO_ROI"  # Use YOLO ROI tracker for BJ/HJ
         self.tracker_manager = None
         
         # ROI adaptation settings
@@ -127,8 +127,8 @@ class Stage3MixedTracker(BaseOfflineTracker):
     def metadata(self) -> TrackerMetadata:
         """Return metadata describing this tracker."""
         return TrackerMetadata(
-            name="OFFLINE_3_STAGE_MIXED",
-            display_name="Offline - High Quality (3-Stage Mixed)",
+            name="LEGACY_STAGE3_MIXED",
+            display_name="Stage 3 Mixed",
             description="Hybrid approach: Stage 2 signals + selective live ROI tracking for BJ/HJ chapters",
             category="offline",
             version="1.0.0", 

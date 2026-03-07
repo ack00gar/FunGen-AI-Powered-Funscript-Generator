@@ -5,6 +5,7 @@ import time
 from application.gui_components.engine_compiler.tensorrt_validation_panel import ValidationPanel
 from application.logic.tensorrt_compiler_logic import TensorRTCompilerLogic
 from application.utils import primary_button_style, destructive_button_style
+from application.utils.imgui_helpers import DisabledScope
 from config.constants import TENSORRT_OUTPUT_DISPLAY_HEIGHT
 from config.element_group_colors import CompilerToolColors
 
@@ -102,36 +103,20 @@ class TensorRTCompilerWindow:
 
         # Compile/Stop button
         if is_compiling:
-            # Show Stop button when compiling (DESTRUCTIVE - stops process)
-            if not button_enabled:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-            with destructive_button_style():
-                if imgui.button("Stop Compilation", width=120):
-                    if button_enabled:
-                        self.logic.request_stop_compilation()
-                        self.last_button_time = current_time
-
-            if not button_enabled:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
+            with DisabledScope(not button_enabled):
+                with destructive_button_style():
+                    if imgui.button("Stop Compilation", width=120):
+                        if button_enabled:
+                            self.logic.request_stop_compilation()
+                            self.last_button_time = current_time
         else:
-            # Show Compile button when not compiling (PRIMARY - positive action)
             disabled = not can_compile or not button_enabled
-            if disabled:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-            with primary_button_style():
-                if imgui.button("Compile", width=120):
-                    if can_compile and button_enabled:
-                        self.logic.start_compilation()
-                        self.last_button_time = current_time
-
-            if disabled:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
+            with DisabledScope(disabled):
+                with primary_button_style():
+                    if imgui.button("Compile", width=120):
+                        if can_compile and button_enabled:
+                            self.logic.start_compilation()
+                            self.last_button_time = current_time
         
         imgui.same_line()
         if imgui.button("Close", width=80):

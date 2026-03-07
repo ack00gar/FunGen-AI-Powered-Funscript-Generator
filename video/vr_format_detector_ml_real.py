@@ -495,4 +495,4 @@ class RealMLVRFormatDetector:
                 self.projection_clf = data['projection_clf']
                 self.fov_clf = data['fov_clf']
                 self.training_stats = data.get('training_stats')
-        self.logger.info(f"Model loaded from: {model_path}")
+        self.logger.debug(f"Model loaded from: {model_path}")

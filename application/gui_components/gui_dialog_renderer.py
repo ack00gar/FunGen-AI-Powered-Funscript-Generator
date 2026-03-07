@@ -1,7 +1,7 @@
 """Dialog and popup rendering mixin for GUI."""
 import imgui
 import os
-import time
+from application.utils.imgui_helpers import center_next_window, begin_modal_centered
 
 
 class DialogRendererMixin:
@@ -14,11 +14,13 @@ class DialogRendererMixin:
 
         colors = self.colors
         imgui.open_popup("Batch Processing Setup")
-        main_viewport = imgui.get_main_viewport()
-        imgui.set_next_window_size(main_viewport.size[0] * 0.7, main_viewport.size[1] * 0.8, condition=imgui.APPEARING)
-        popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                     main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-        imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5, condition=imgui.APPEARING)
+        mv = imgui.get_main_viewport()
+        imgui.set_next_window_size(mv.size[0] * 0.7, mv.size[1] * 0.8, condition=imgui.APPEARING)
+        imgui.set_next_window_position(
+            mv.pos[0] + mv.size[0] * 0.5,
+            mv.pos[1] + mv.size[1] * 0.5,
+            pivot_x=0.5, pivot_y=0.5, condition=imgui.APPEARING
+        )
 
         if imgui.begin_popup_modal("Batch Processing Setup", True)[0]:
             imgui.text(f"Found {len(self.batch_videos_data)} videos for batch processing.")
@@ -148,11 +150,9 @@ class DialogRendererMixin:
                 if tracker_info and tracker_info.properties:
                     has_3_stages = tracker_info.properties.get("num_stages", 0) >= 3
 
-            if not has_3_stages:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True); imgui.push_style_var(imgui.STYLE_ALPHA, 0.5)
-            _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if has_3_stages else False)
-            if not has_3_stages:
-                imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            from application.utils.imgui_helpers import DisabledScope
+            with DisabledScope(not has_3_stages):
+                _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if has_3_stages else False)
 
             # Adaptive performance tuning checkbox
             _, self.batch_adaptive_tuning_ui = imgui.checkbox("Adaptive performance tuning", self.batch_adaptive_tuning_ui)
@@ -183,11 +183,7 @@ class DialogRendererMixin:
         app_state = app.app_state_ui
 
         window_flags = imgui.WINDOW_NO_COLLAPSE
-        main_viewport = imgui.get_main_viewport()
-        center_x = main_viewport.pos[0] + main_viewport.size[0] * 0.5
-        center_y = main_viewport.pos[1] + main_viewport.size[1] * 0.5
-        imgui.set_next_window_position(center_x, center_y, imgui.ONCE, 0.5, 0.5)
-        imgui.set_next_window_size(700, 400, imgui.ONCE)
+        center_next_window(700, 400)
 
         is_open, app_state.show_ai_models_dialog = imgui.begin(
             "AI Models Configuration##AIModelsDialog",
@@ -217,37 +213,23 @@ class DialogRendererMixin:
     def _render_error_popup(self):
         """Render error popup with early return to avoid expensive operations when not needed."""
         # Early return if no error popup is active - avoids expensive ImGui operations
-        if not self.error_popup_active and not imgui.is_popup_open("ErrorPopup"):
+        popup_id = "Error###ErrorPopup"
+        if not self.error_popup_active and not imgui.is_popup_open(popup_id):
             return
 
         if self.error_popup_active:
-            imgui.open_popup("ErrorPopup")
+            imgui.open_popup(popup_id)
 
-        # Center the popup and set a normal size (compatibility for imgui versions)
-        if hasattr(imgui, 'get_main_viewport'):
-            main_viewport = imgui.get_main_viewport()
-            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-        else:
-            # Fallback: center on window size if viewport not available
-            popup_pos = (self.window_width * 0.5, self.window_height * 0.5)
-            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-        popup_width = 600
-        imgui.set_next_window_size(popup_width, 0)  # Wider width, auto height
-        if imgui.begin_popup_modal("ErrorPopup")[0]:
-            # Center title
+        center_next_window(600)
+        if imgui.begin_popup_modal(popup_id)[0]:
+            # Title
             window_width = imgui.get_window_width()
             title_width = imgui.calc_text_size(self.error_popup_title)[0]
             imgui.set_cursor_pos_x((window_width - title_width) * 0.5)
             imgui.text(self.error_popup_title)
             imgui.separator()
-            # Center message
-            message_lines = self.error_popup_message.split('\n')
-            for line in message_lines:
-                line_width = imgui.calc_text_size(line)[0]
-                imgui.set_cursor_pos_x((window_width - line_width) * 0.5)
-                imgui.text(line)
+            # Message (wrapped to fit window)
+            imgui.text_wrapped(self.error_popup_message)
             imgui.spacing()
             # Center button
             button_width = 120
@@ -307,19 +289,16 @@ class DialogRendererMixin:
         if hasattr(self, '_first_run_wizard') and self._first_run_wizard is not None:
             return
 
-        imgui.open_popup("First-Time Setup")
-        main_viewport = imgui.get_main_viewport()
-        popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                     main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-        imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-
         status_msg = app.first_run_status_message.lower()
         is_complete = "complete" in status_msg
         is_failed = "failed" in status_msg
         closable = is_complete or is_failed
-        popup_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE
 
-        opened, visible = imgui.begin_popup_modal("First-Time Setup", closable, flags=popup_flags)
+        imgui.open_popup("First-Time Setup")
+        center_next_window(450)
+        opened, visible = imgui.begin_popup_modal(
+            "First-Time Setup", closable, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE
+        )
         if opened:
             imgui.text("Welcome to FunGen!")
             imgui.spacing()

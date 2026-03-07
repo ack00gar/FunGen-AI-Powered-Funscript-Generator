@@ -154,25 +154,3 @@ def get_icon_texture_manager():
     if _icon_manager is None:
         _icon_manager = IconTextureManager()
     return _icon_manager
-
-
-# Convenience function for common playback icons
-def preload_playback_icons():
-    """Preload all playback control icons for immediate availability."""
-    manager = get_icon_texture_manager()
-    playback_icons = [
-        'jump-start.png',
-        'prev-frame.png',
-        'play.png',
-        'pause.png',
-        'stop.png',
-        'next-frame.png',
-        'jump-end.png',
-        'zoom-in.png',
-        'zoom-out.png',
-        'fullscreen.png',
-        'fullscreen-exit.png',
-        'settings.png',
-    ]
-    manager.preload_icons(playback_icons)
-    logger.debug(f"Preloaded {len(playback_icons)} playback control icons")
