@@ -77,6 +77,7 @@ class AppSettings:
             self.logger.info("AppSettings using its own configured fallback logger.")
 
         self.is_first_run = False
+        self.shortcuts_were_reset = False  # Set by migration; GUI shows one-time notice
         self.load_settings()
         
         # Auto-detect and set hardware acceleration on first run
@@ -290,9 +291,19 @@ class AppSettings:
                     self.data["funscript_editor_shortcuts"] = merged_shortcuts
                 else:
                     self.data["funscript_editor_shortcuts"] = defaults.get("funscript_editor_shortcuts", {})
+
+                # --- v0.7.0 migration: reset shortcuts if from older version ---
+                stored_sc_version = loaded_settings.get("_shortcuts_version", "0.0.0")
+                if stored_sc_version < "0.7.0":
+                    self.data["funscript_editor_shortcuts"] = defaults.get("funscript_editor_shortcuts", {})
+                    self.data["_shortcuts_version"] = constants.APP_VERSION
+                    self.shortcuts_were_reset = True
+                    self.save_settings()
+                    self.logger.info("Shortcuts reset to v0.7.0 defaults (layout restructured).")
             else:
                 self.is_first_run = True
                 self.data = defaults
+                self.data["_shortcuts_version"] = constants.APP_VERSION
                 self.save_settings()  # Save defaults if no settings file exists
         except Exception as e:
             self.logger.error(f"Error loading settings from '{settings_file}': {e}. Using default settings.", exc_info=True)
