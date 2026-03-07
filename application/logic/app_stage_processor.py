@@ -740,6 +740,8 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
 
                 if self._is_mixed_stage3_tracker(selected_mode):
                     s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3, s2_output_data)
+                elif self._has_modular_stage3(mode_name):
+                    s3_results_dict = self._execute_stage3_modular_tracker(mode_name, segments_for_s3, preprocessed_path_for_s3)
                 else:
                     s3_results_dict = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
                 stage3_success = s3_results_dict is not None

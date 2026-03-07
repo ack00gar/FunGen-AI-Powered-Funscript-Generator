@@ -770,6 +770,79 @@ class StageExecutorMixin:
             return None
 
     # ------------------------------------------------------------------
+    # Stage 3 — modular offline tracker (process_stage API)
+    # ------------------------------------------------------------------
+
+    def _execute_stage3_modular_tracker(self, tracker_name: str,
+                                        segments_objects: List[Any],
+                                        preprocessed_video_path: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Execute Stage 3 via a modular offline tracker's process_stage() method."""
+        from tracker.tracker_modules import create_tracker
+        from tracker.tracker_modules.core.base_offline_tracker import OfflineProcessingStage
+
+        fm = self.app.file_manager
+        if not fm or not fm.video_path:
+            self.logger.error("Stage 3 modular: Video path not available.")
+            return None
+
+        tracker = create_tracker(tracker_name)
+        if tracker is None:
+            self.logger.error(f"Stage 3 modular: Could not create tracker '{tracker_name}'")
+            return None
+
+        if not tracker.initialize(self.app):
+            self.logger.error(f"Stage 3 modular: Tracker '{tracker_name}' initialization failed")
+            return None
+
+        # Set stop event so tracker can check for cancellation
+        if hasattr(tracker, 'set_stop_event'):
+            tracker.set_stop_event(self.stop_stage_event)
+
+        # Build input_files for the tracker
+        s2_overlay_path = getattr(fm, 'stage2_output_msgpack_path', None)
+        if not s2_overlay_path:
+            # Try to derive from video path
+            try:
+                s2_overlay_path = fm.get_output_path_for_file(fm.video_path, "_stage2_overlay.msgpack")
+            except Exception:
+                pass
+
+        input_files = {}
+        if s2_overlay_path and os.path.exists(s2_overlay_path):
+            input_files['stage2'] = s2_overlay_path
+            input_files['stage2_output'] = s2_overlay_path
+        if preprocessed_video_path and os.path.exists(preprocessed_video_path):
+            input_files['preprocessed_video'] = preprocessed_video_path
+
+        try:
+            result = tracker.process_stage(
+                stage=OfflineProcessingStage.STAGE_3,
+                video_path=fm.video_path,
+                input_files=input_files,
+                progress_callback=self.on_stage3_progress,
+            )
+
+            if result and result.success and result.output_data:
+                return result.output_data
+            else:
+                error_msg = getattr(result, 'error_message', 'Unknown error') if result else 'No result'
+                self.logger.error(f"Stage 3 modular tracker failed: {error_msg}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Stage 3 modular tracker execution failed: {e}", exc_info=True)
+            return None
+
+    def _has_modular_stage3(self, tracker_name: str) -> bool:
+        """Check if the named tracker has its own process_stage method (new offline API)."""
+        from tracker.tracker_modules import tracker_registry
+        tracker_class = tracker_registry.get_tracker(tracker_name)
+        if tracker_class is None:
+            return False
+        # Check if it's an offline tracker with process_stage (not the legacy perform_stage3_analysis)
+        return (hasattr(tracker_class, 'process_stage')
+                and hasattr(tracker_class, 'processing_stages'))
+
+    # ------------------------------------------------------------------
     # Artifact validation
     # ------------------------------------------------------------------
 
