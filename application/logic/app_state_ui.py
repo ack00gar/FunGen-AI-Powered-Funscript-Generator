@@ -33,16 +33,42 @@ class AppStateUI:
         self.status_message_time: float = 0.0
 
         # Load last used tracker using dynamic discovery
-        self.selected_tracker_name: str = self.app_settings.get(
+        _TRACKER_MIGRATION = {
+            # Legacy offline → new offline
+            "OFFLINE_3_STAGE": "OFFLINE_GUIDED_FLOW",
+            "OFFLINE_3_STAGE_MIXED": "OFFLINE_GUIDED_FLOW",
+            "OFFLINE_2_STAGE": "OFFLINE_CONTACT_ANALYSIS",
+            # Old snake_case live → new SCREAMING_SNAKE
+            "oscillation": "LIVE_OSCILLATION",
+            "yolo_roi": "LIVE_YOLO_ROI",
+            "user_roi": "LIVE_USER_ROI",
+            "vr_chapter_flow": "LIVE_VR_CHAPTER_FLOW",
+            "vr_focused": "LIVE_VR_FOCUSED",
+            # Old legacy names → new LEGACY_ prefix
+            "oscillation_legacy": "LEGACY_OSCILLATION",
+            "axis_projection_enhanced": "LEGACY_AXIS_PROJECTION_ENHANCED",
+            "axis_projection_working": "LEGACY_AXIS_PROJECTION_WORKING",
+            "hybrid_intelligence": "LEGACY_HYBRID_INTELLIGENCE",
+            "relative_distance": "LEGACY_RELATIVE_DISTANCE",
+            # Old community names
+            "multi_axis_stress_test": "COMMUNITY_MULTI_AXIS_STRESS_TEST",
+        }
+        saved_tracker = self.app_settings.get(
             "selected_tracker_name",
             defaults.get("selected_tracker_name", DEFAULT_TRACKER_NAME)
         )
+        if saved_tracker in _TRACKER_MIGRATION:
+            saved_tracker = _TRACKER_MIGRATION[saved_tracker]
+            self.app_settings.set("selected_tracker_name", saved_tracker)
+        self.selected_tracker_name: str = saved_tracker
         # Load saved processing speed mode, default to REALTIME
         saved_speed_mode = self.app_settings.get("selected_processing_speed_mode", "REALTIME")
         try:
             self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode[saved_speed_mode]
         except KeyError:
             self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode.REALTIME
+        # Slow-motion target FPS (1–30, default 10)
+        self.slow_motion_fps: float = self.app_settings.get("slow_motion_fps", 10.0)
 
         # UI visibility states
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", False))
@@ -65,7 +91,7 @@ class AppStateUI:
 
         self.show_generated_file_manager = False
 
-        # OFS-Inspired Feature Settings
+        # Visualization Feature Settings
         self.speed_limit_threshold: float = self.app_settings.get("speed_limit_threshold", 400.0)
         self.show_bpm_overlay: bool = self.app_settings.get("show_bpm_overlay", False)
 
@@ -528,3 +554,4 @@ class AppStateUI:
 
         self.app_settings.set("interactive_refinement_mode_enabled", self.interactive_refinement_mode_enabled)
         self.app_settings.set("selected_processing_speed_mode", self.selected_processing_speed_mode.name)
+        self.app_settings.set("slow_motion_fps", self.slow_motion_fps)

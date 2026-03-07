@@ -1,6 +1,8 @@
 import imgui
 from config.constants import DEFAULT_S1_NUM_PRODUCERS, DEFAULT_S1_NUM_CONSUMERS
+from config.element_group_colors import GeneralColors
 from application.utils import primary_button_style
+from application.utils.imgui_helpers import DisabledScope
 
 class AutotunerWindow:
     def __init__(self, app_logic):
@@ -29,41 +31,26 @@ class AutotunerWindow:
                 is_running = self.app.is_autotuning_active
 
                 if not is_ready:
-                    imgui.text_colored("Please load a video first.", 1.0, 0.5, 0.5, 1.0) # TODO: move to theme, red
+                    imgui.text_colored("Please load a video first.", *GeneralColors.RED_LIGHT)
 
                 # --- UI for selecting test mode ---
                 hwaccel_options = ["Default (Test CPU + Best GPU)"] + self.app.available_ffmpeg_hwaccels
-                if is_running:
-                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-                imgui.text("Test Mode:")
-                imgui.set_next_item_width(-1)
-                _, self.selected_hwaccel_idx = imgui.combo("##Test Mode", self.selected_hwaccel_idx, hwaccel_options)
-
-                if is_running:
-                    imgui.pop_style_var()
-                    imgui.internal.pop_item_flag()
+                with DisabledScope(is_running):
+                    imgui.text("Test Mode:")
+                    imgui.set_next_item_width(-1)
+                    _, self.selected_hwaccel_idx = imgui.combo("##Test Mode", self.selected_hwaccel_idx, hwaccel_options)
 
                 # --- Start Button ---
-                if is_running:
-                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-                # Start Autotune button (PRIMARY - positive action)
-                with primary_button_style():
-                    if imgui.button("Start Autotune", width=-1):
-                        if is_ready:
-                            force_hwaccel = None
-                            if self.selected_hwaccel_idx > 0:
-                                selected_option = hwaccel_options[self.selected_hwaccel_idx]
-                                if selected_option != "Default (Test CPU + Best GPU)":
-                                    force_hwaccel = selected_option
-                            self.app.start_autotuner(force_hwaccel=force_hwaccel)
-
-                if is_running:
-                    imgui.pop_style_var()
-                    imgui.internal.pop_item_flag()
+                with DisabledScope(is_running):
+                    with primary_button_style():
+                        if imgui.button("Start Autotune", width=-1):
+                            if is_ready:
+                                force_hwaccel = None
+                                if self.selected_hwaccel_idx > 0:
+                                    selected_option = hwaccel_options[self.selected_hwaccel_idx]
+                                    if selected_option != "Default (Test CPU + Best GPU)":
+                                        force_hwaccel = selected_option
+                                self.app.start_autotuner(force_hwaccel=force_hwaccel)
 
                 imgui.separator()
 
@@ -73,7 +60,7 @@ class AutotunerWindow:
                 # --- Status & Progress ---
                 imgui.text("Status:")
                 imgui.same_line()
-                imgui.text_colored(snapshot["status_message"], 0.2, 0.8, 1.0, 1.0) # TODO: move to theme, blue
+                imgui.text_colored(snapshot["status_message"], *GeneralColors.BLUE_LIGHT)
 
                 if is_running:
                     stage_proc = self.app.stage_processor
@@ -103,7 +90,7 @@ class AutotunerWindow:
                         # If this is the best row, push a new text color
                         if is_best:
                             # Push a bright green color for the text
-                            imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 1.0, 0.4, 1.0) # TODO: move to theme, green
+                            imgui.push_style_color(imgui.COLOR_TEXT, *GeneralColors.GREEN_LIGHT)
 
                         imgui.table_set_column_index(0)
                         imgui.text(accel)

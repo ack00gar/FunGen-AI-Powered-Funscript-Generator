@@ -10,7 +10,6 @@ Author: Migrated from legacy codebase
 Version: 1.0.0
 """
 
-import logging
 import time
 import numpy as np
 import cv2
@@ -79,7 +78,7 @@ class OscillationLegacyTracker(BaseTracker):
     def metadata(self) -> TrackerMetadata:
         """Return metadata describing this tracker."""
         return TrackerMetadata(
-            name="oscillation_legacy",
+            name="LEGACY_OSCILLATION",
             display_name="Oscillation Detector (Legacy)",
             description="Original oscillation tracker with cohesion analysis and superior amplification",
             category="live",

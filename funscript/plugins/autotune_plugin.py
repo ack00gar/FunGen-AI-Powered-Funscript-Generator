@@ -7,7 +7,6 @@ saturation (points at extremes) while preserving the overall signal shape.
 
 import numpy as np
 from typing import Dict, Any, List, Optional
-import copy
 
 try:
     from .base_plugin import FunscriptTransformationPlugin

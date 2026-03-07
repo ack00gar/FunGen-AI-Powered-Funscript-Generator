@@ -14,7 +14,7 @@ import logging
 import cv2
 import os
 import numpy as np
-from typing import Optional, List, Dict, Any, Tuple, Union
+from typing import Optional, List, Dict, Any, Tuple
 from multiprocessing import Event
 
 from funscript import MultiAxisFunscript

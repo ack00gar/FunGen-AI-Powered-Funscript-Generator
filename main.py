@@ -73,9 +73,9 @@ def _setup_bootstrap_logger():
         RED = "\x1b[31m"
         BOLD_RED = "\x1b[31;1m"
         RESET = "\x1b[0m"
-        
+
         format_base = f"[{git_info}] - %(levelname)-8s - %(message)s"
-        
+
         FORMATS = {
             logging.DEBUG: GREY + format_base + RESET,
             logging.INFO: GREEN + format_base + RESET,
@@ -83,11 +83,15 @@ def _setup_bootstrap_logger():
             logging.ERROR: RED + format_base + RESET,
             logging.CRITICAL: BOLD_RED + format_base + RESET
         }
-        
+
+        # Pre-build formatters to avoid creating new objects on every log call
+        _FORMATTERS = {level: logging.Formatter(fmt) for level, fmt in FORMATS.items()}
+
         def format(self, record):
-            log_fmt = self.FORMATS.get(record.levelno)
-            formatter = logging.Formatter(log_fmt)
-            return formatter.format(record)
+            formatter = self._FORMATTERS.get(record.levelno)
+            if formatter:
+                return formatter.format(record)
+            return super().format(record)
     
     # Add console handler with bootstrap formatter
     console_handler = logging.StreamHandler()
@@ -208,14 +212,23 @@ def main():
             pass
 
     # Step 4: Parse command-line arguments
+    from config.constants import APP_VERSION
+
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation and Processing")
+    parser.add_argument('--version', action='version', version=f'FunGen {APP_VERSION}')
     parser.add_argument('input_path', nargs='?', default=None, help='Path to a video file, folder of videos, or funscript file. If omitted, GUI will start.')
-    
+
+    # Output control
+    parser.add_argument('--output', '-o', metavar='DIR', default=None, help='Override output directory for this run.')
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument('--quiet', '-q', action='store_true', help='Suppress info messages, show only warnings and errors.')
+    verbosity.add_argument('--verbose', '-v', action='store_true', help='Show debug-level messages.')
+
     # Funscript filtering mode
     parser.add_argument('--funscript-mode', action='store_true', help='Process funscript files instead of videos. Apply filters to existing funscripts.')
-    parser.add_argument('--filter', choices=['ultimate-autotune', 'rdp-simplify', 'savgol-filter', 'speed-limiter', 'anti-jerk', 'amplify', 'clamp', 'invert', 'keyframe'], 
+    parser.add_argument('--filter', choices=['ultimate-autotune', 'rdp-simplify', 'savgol-filter', 'speed-limiter', 'anti-jerk', 'amplify', 'clamp', 'invert', 'keyframe'],
                         help='Filter to apply to funscript(s). Only works with --funscript-mode.')
-    
+
     # Dynamic mode selection - get available modes from discovery system
     try:
         from config.tracker_discovery import get_tracker_discovery
@@ -223,22 +236,44 @@ def main():
         available_modes = discovery.get_supported_cli_modes()
         batch_modes = [info.cli_aliases[0] for info in discovery.get_batch_compatible_trackers() if info.cli_aliases]
         default_mode = batch_modes[0] if batch_modes else '3-stage'
-        
-        parser.add_argument('--mode', choices=available_modes, default=default_mode, 
+
+        parser.add_argument('--mode', choices=available_modes, default=default_mode,
                         help='The processing mode to use for analysis. Only works with video processing.')
-    except Exception as e:
+    except Exception:
         # Fallback if discovery system fails
         parser.add_argument('--mode', default='3-stage', help='Processing mode (discovery system unavailable)')
-    
+
+    parser.add_argument('--list-modes', action='store_true', help='List available processing modes and exit.')
     parser.add_argument('--od-mode', choices=['current', 'legacy'], default='current', help='Oscillation detector mode to use in Stage 3 (current=experimental, legacy=f5ae40f).')
     parser.add_argument('--overwrite', action='store_true', help='Force processing and overwrite existing funscripts. Default is to skip videos with existing funscripts.')
     parser.add_argument('--no-autotune', action='store_false', dest='autotune', help='Disable applying the default Ultimate Autotune settings after generation.')
     parser.add_argument('--no-copy', action='store_false', dest='copy', help='Do not save a copy of the final funscript next to the video file (will save to output folder only).')
     parser.add_argument('--generate-roll', action='store_true', help='Generate secondary axis (.roll.funscript) file for supported multi-axis devices.')
     parser.add_argument('--recursive', '-r', action='store_true', help='If input_path is a folder, process it recursively.')
-    parser.add_argument('--watch', metavar='FOLDER', help='Watch folder for new videos (requires patreon_features)')
+    parser.add_argument('--watch', metavar='FOLDER', help='Watch folder for new videos (requires patreon_features add-on).')
 
     args = parser.parse_args()
+
+    # Apply verbosity settings
+    if args.quiet:
+        logging.getLogger().setLevel(logging.WARNING)
+    elif args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    # --list-modes: print available modes and exit
+    if args.list_modes:
+        try:
+            from config.tracker_discovery import get_tracker_discovery
+            disc = get_tracker_discovery()
+            print("Available processing modes:")
+            for name, info in disc.get_all_trackers().items():
+                aliases = ", ".join(info.cli_aliases) if info.cli_aliases else "(no CLI alias)"
+                batch = "batch" if info.supports_batch else "live-only"
+                ver = f"v{info.version}" if info.version else ""
+                print(f"  {info.display_name:<35s}  {ver:<8s}  cli: {aliases:<25s}  [{batch}]  ({info.folder_name})")
+        except Exception as e:
+            logger.error(f"Could not list modes: {e}")
+        sys.exit(0)
 
     # Step 5: Validate arguments and start the appropriate interface
     if args.watch:
@@ -246,13 +281,11 @@ def main():
         try:
             from application.utils.feature_detection import is_feature_available
             if not is_feature_available("patreon_features"):
-                logger.error("--watch requires the patreon_features add-on")
-                sys.exit(1)
+                parser.error("--watch requires the patreon_features add-on")
             from patreon_features.batch.watched_folder import WatchedFolderProcessor
             from patreon_features.batch.batch_queue import BatchQueue
         except ImportError as e:
-            logger.error(f"--watch requires patreon_features: {e}")
-            sys.exit(1)
+            parser.error(f"--watch requires patreon_features: {e}")
 
         queue = BatchQueue()
         watcher = WatchedFolderProcessor(on_new_video=lambda p: queue.add(p))
@@ -268,11 +301,15 @@ def main():
     elif args.input_path:
         # Validate funscript mode arguments
         if args.funscript_mode and not args.filter:
-            logger.error("--funscript-mode requires --filter to be specified")
-            sys.exit(1)
+            parser.error("--funscript-mode requires --filter to be specified")
         if args.filter and not args.funscript_mode:
-            logger.error("--filter can only be used with --funscript-mode")
-            sys.exit(1)
+            parser.error("--filter can only be used with --funscript-mode")
+
+        # Apply output directory override
+        if args.output:
+            from application.classes.settings_manager import AppSettings
+            settings = AppSettings()
+            settings.set("output_folder_path", args.output)
 
         run_cli(args)
     else:

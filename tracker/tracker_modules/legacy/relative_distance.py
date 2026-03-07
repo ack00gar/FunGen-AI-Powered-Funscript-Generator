@@ -24,7 +24,6 @@ import numpy as np
 import cv2
 from collections import deque
 from typing import Dict, Any, Optional, List, Tuple
-import threading
 from concurrent.futures import ThreadPoolExecutor
 import traceback
 from config.constants_colors import RGBColors
@@ -796,8 +795,8 @@ class RelativeDistanceTracker(BaseTracker):
     @property
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
-            name="relative_distance",
-            display_name="Relative Distance Tracker",
+            name="LEGACY_RELATIVE_DISTANCE",
+            display_name="Relative Distance",
             description="Advanced multi-modal tracker with velocity prediction, scene context awareness, and intelligent signal fusion",
             category="live",
             version="3.0.0",
@@ -1592,7 +1591,7 @@ class RelativeDistanceTracker(BaseTracker):
                         # Enhanced debug logging for interpolation quality
                         quality = interpolated_box.get('interpolation_quality', 0.0)
                         confidence = interpolated_box.get('confidence', 0.0)
-                        self.logger.info(f"✓ Interpolated {touch_info['class_name']} for {frames_missing} frames | Quality: {quality:.2f} | Confidence: {confidence:.2f}")
+                        self.logger.info(f"Interpolated {touch_info['class_name']} for {frames_missing} frames | Quality: {quality:.2f} | Confidence: {confidence:.2f}")
                     else:
                         # Interpolated box no longer touches - remove from tracking
                         boxes_to_remove.append(box_id)
@@ -1655,7 +1654,7 @@ class RelativeDistanceTracker(BaseTracker):
                         'priority': self.master_priorities.get(class_name, 0)
                     }
                     
-                    self.logger.debug(f"🎯 Velocity prediction: {class_name} predicted for {frames_missing} frames "
+                    self.logger.debug(f"Velocity prediction: {class_name} predicted for {frames_missing} frames "
                                     f"(vel: {velocity_magnitude:.1f}, reliability: {predicted_contact['prediction_reliability']})")
                     
                     return predicted_contact
@@ -1861,7 +1860,7 @@ class RelativeDistanceTracker(BaseTracker):
                     # Enhanced logging with fusion quality metrics
                     quality = fusion_result.get('fusion_quality', 'unknown')
                     contributors = ', '.join(fusion_result.get('contributors', [primary_touching_contact['class_name']]))
-                    self.logger.debug(f"🔗 Advanced fusion: {primary_signal:.1f} → {primary_pos:.1f} "
+                    self.logger.debug(f"Advanced fusion: {primary_signal:.1f} → {primary_pos:.1f} "
                                     f"({quality} quality, {contributors})")
                     
                 else:
@@ -1914,7 +1913,7 @@ class RelativeDistanceTracker(BaseTracker):
                     stroke_enhancement = min(2.0, stroke_frequency / 2.0)  # Max 2x enhancement
                     primary_pos = np.clip(primary_pos * stroke_enhancement, 0, 100)
                     
-                    self.logger.debug(f"🎵 Stroke pattern detected: {stroke_frequency:.1f}Hz, enhanced signal")
+                    self.logger.debug(f"Stroke pattern detected: {stroke_frequency:.1f}Hz, enhanced signal")
             
             # Apply scene-aware adjustments if context is available
             if 'scene_context' in contact_info:
@@ -1928,7 +1927,7 @@ class RelativeDistanceTracker(BaseTracker):
                     
                     if scene_adjusted_pos != primary_pos:
                         scene_type = scene_context.get('scene_type', 'unknown')
-                        self.logger.debug(f"🎬 Scene adjustment ({scene_type}): {primary_pos:.1f} → {scene_adjusted_pos:.1f}")
+                        self.logger.debug(f"Scene adjustment ({scene_type}): {primary_pos:.1f} → {scene_adjusted_pos:.1f}")
                         primary_pos = scene_adjusted_pos
             
             # Apply smoothing only for touch-based positions

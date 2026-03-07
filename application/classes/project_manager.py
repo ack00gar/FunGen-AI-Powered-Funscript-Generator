@@ -339,7 +339,7 @@ class ProjectManager:
             # StageProcessor Data (mostly status, as progress is transient)
             "stage2_status_text": stage_proc_data.get("stage2_status_text", "Not run."),
 
-            # Metadata & Bookmarks (OFS-inspired features)
+            # Metadata & Bookmarks
             "script_metadata": self._metadata,
             "bookmarks": self._get_bookmarks_data(),
         }

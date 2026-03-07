@@ -41,11 +41,40 @@ class ShortcutManager:
         return True
 
     def _initialize_reverse_key_map(self):
-        """Initializes a map from key names to GLFW key codes."""
-        self._reverse_key_map = {}
-        for i in range(ord('A'), ord('Z') + 1): self._reverse_key_map[chr(i)] = i
-        for i in range(ord('0'), ord('9') + 1): self._reverse_key_map[chr(i)] = i
+        """Initializes a map from key names to GLFW key codes.
 
+        Uses glfw.get_key_name() for printable keys to support non-QWERTY
+        layouts (AZERTY, QWERTZ). GLFW key codes are physical-position-based,
+        so KEY_Z always means the physical QWERTY-Z position regardless of
+        layout. get_key_name() returns the character that key produces on the
+        current layout, letting us build a correct character→keycode map.
+        """
+        self._reverse_key_map = {}
+
+        # Build layout-aware map for printable keys via glfw.get_key_name().
+        # This maps the CHARACTER a key produces → its GLFW key code.
+        # e.g. on AZERTY: 'Z' → KEY_W (physical QWERTY-W produces 'z')
+        layout_char_to_keycode = {}
+        for key_code in range(glfw.KEY_SPACE, glfw.KEY_GRAVE_ACCENT + 1):
+            try:
+                name = glfw.get_key_name(key_code, 0)
+                if name and len(name) == 1:
+                    layout_char_to_keycode[name.upper()] = key_code
+            except Exception:
+                pass
+
+        # A-Z: prefer layout-aware mapping, fall back to identity
+        for i in range(ord('A'), ord('Z') + 1):
+            char = chr(i)
+            self._reverse_key_map[char] = layout_char_to_keycode.get(char, i)
+
+        # 0-9: prefer layout-aware mapping, fall back to identity
+        for i in range(ord('0'), ord('9') + 1):
+            char = chr(i)
+            self._reverse_key_map[char] = layout_char_to_keycode.get(char, i)
+
+        # Punctuation / symbol keys — use layout-aware mapping when available,
+        # but also keep named aliases (EQUAL, MINUS, etc.) for default shortcuts
         key_map_direct = {
             "SPACE": glfw.KEY_SPACE, "'": glfw.KEY_APOSTROPHE, ",": glfw.KEY_COMMA,
             "-": glfw.KEY_MINUS, ".": glfw.KEY_PERIOD, "/": glfw.KEY_SLASH,
@@ -63,8 +92,25 @@ class ShortcutManager:
             "NUM_LOCK": glfw.KEY_NUM_LOCK, "PRINT_SCREEN": glfw.KEY_PRINT_SCREEN,
             "PAUSE": glfw.KEY_PAUSE,
             "ESCAPE": glfw.KEY_ESCAPE,
+            # Named aliases so DEFAULT_SHORTCUTS can use e.g. "SUPER+EQUAL"
+            "EQUAL": glfw.KEY_EQUAL, "MINUS": glfw.KEY_MINUS,
+            "COMMA": glfw.KEY_COMMA, "PERIOD": glfw.KEY_PERIOD,
+            "SEMICOLON": glfw.KEY_SEMICOLON, "SLASH": glfw.KEY_SLASH,
+            "APOSTROPHE": glfw.KEY_APOSTROPHE,
         }
         self._reverse_key_map.update(key_map_direct)
+
+        # Override symbol entries with layout-aware codes where available
+        symbol_keys = {
+            "=": glfw.KEY_EQUAL, "-": glfw.KEY_MINUS, ",": glfw.KEY_COMMA,
+            ".": glfw.KEY_PERIOD, ";": glfw.KEY_SEMICOLON, "/": glfw.KEY_SLASH,
+            "'": glfw.KEY_APOSTROPHE, "[": glfw.KEY_LEFT_BRACKET,
+            "]": glfw.KEY_RIGHT_BRACKET, "\\": glfw.KEY_BACKSLASH,
+            "`": glfw.KEY_GRAVE_ACCENT,
+        }
+        for char, default_code in symbol_keys.items():
+            if char in layout_char_to_keycode:
+                self._reverse_key_map[char] = layout_char_to_keycode[char]
 
         for i in range(1, 26):  # F1-F25
             glfw_key_const = getattr(glfw, f"KEY_F{i}", None)
@@ -130,8 +176,21 @@ class ShortcutManager:
             self.is_recording_shortcut_for = None
 
     def glfw_key_to_name(self, glfw_key_code: int) -> Optional[str]:
-        """Converts a GLFW key code to a human-readable string name."""
-        # Alphanumeric keys (A-Z, 0-9)
+        """Converts a GLFW key code to a human-readable string name.
+
+        Uses glfw.get_key_name() for printable keys so the returned name
+        reflects the character the key produces on the current keyboard
+        layout (e.g. on AZERTY, physical QWERTY-W → 'Z').
+        """
+        # Layout-aware name for printable keys
+        try:
+            layout_name = glfw.get_key_name(glfw_key_code, 0)
+            if layout_name and len(layout_name) == 1 and layout_name.isprintable():
+                return layout_name.upper()
+        except Exception:
+            pass
+
+        # Fallback for alphanumeric (should rarely be needed)
         if glfw.KEY_A <= glfw_key_code <= glfw.KEY_Z:
             return chr(glfw_key_code)
         if glfw.KEY_0 <= glfw_key_code <= glfw.KEY_9:

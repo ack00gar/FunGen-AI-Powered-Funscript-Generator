@@ -1,6 +1,7 @@
 """Advanced Settings tab UI mixin for ControlPanelUI."""
 import imgui
 import os
+import time
 import config
 from application.utils import get_icon_texture_manager, destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
@@ -9,10 +10,10 @@ from funscript.axis_registry import FunscriptAxis, AXIS_FILE_SUFFIX, AXIS_TCODE,
 
 
 def _readonly_input(label_id, value, width=-1):
-    if width is not None and width >= 0:
+    if width >= 0:
         imgui.push_item_width(width)
     imgui.input_text(label_id, value or "Not set", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
-    if width is not None and width >= 0:
+    if width >= 0:
         imgui.pop_item_width()
 
 
@@ -21,35 +22,34 @@ class AdvancedSettingsMixin:
 
     # ------- Model path updates -------
 
-    def _update_detection_model_path(self, path):
+    def _update_model_path(self, path, kind):
+        """Update a model path (kind='detection' or 'pose') and reload."""
         app = self.app
         tracker = app.tracker
-        if not path or (tracker and path == tracker.det_model_path):
+        if kind == "detection":
+            tracker_attr, setting_key = "det_model_path", "yolo_det_model_path"
+            app_setting_attr, app_path_attr = "yolo_detection_model_path_setting", "yolo_det_model_path"
+        else:
+            tracker_attr, setting_key = "pose_model_path", "yolo_pose_model_path"
+            app_setting_attr, app_path_attr = "yolo_pose_model_path_setting", "yolo_pose_model_path"
+
+        if not path or (tracker and path == getattr(tracker, tracker_attr, None)):
             return
         app.cached_class_names = None
-        app.yolo_detection_model_path_setting = path
-        app.app_settings.set("yolo_det_model_path", path)
-        app.yolo_det_model_path = path
+        setattr(app, app_setting_attr, path)
+        app.app_settings.set(setting_key, path)
+        setattr(app, app_path_attr, path)
         app.project_manager.project_dirty = True
-        app.logger.info("Detection model path updated to: %s. Reloading models." % path)
+        app.logger.info("%s model path updated to: %s. Reloading models." % (kind.capitalize(), path))
         if tracker:
-            tracker.det_model_path = path
+            setattr(tracker, tracker_attr, path)
             tracker._load_models()
 
+    def _update_detection_model_path(self, path):
+        self._update_model_path(path, "detection")
+
     def _update_pose_model_path(self, path):
-        app = self.app
-        tracker = app.tracker
-        if not path or (tracker and path == tracker.pose_model_path):
-            return
-        app.cached_class_names = None
-        app.yolo_pose_model_path_setting = path
-        app.app_settings.set("yolo_pose_model_path", path)
-        app.yolo_pose_model_path = path
-        app.project_manager.project_dirty = True
-        app.logger.info("Pose model path updated to: %s. Reloading models." % path)
-        if tracker:
-            tracker.pose_model_path = path
-            tracker._load_models()
+        self._update_model_path(path, "pose")
 
     def _update_artifacts_dir_path(self, path):
         app = self.app
@@ -64,7 +64,6 @@ class AdvancedSettingsMixin:
 
     def _render_settings_profiles_section(self):
         """Render settings profiles UI in the Advanced tab."""
-        import time
         app = self.app
         settings = app.app_settings
 
@@ -198,7 +197,7 @@ class AdvancedSettingsMixin:
             "live_tracker": "live tracker settings roi detection optical flow confidence padding interval smoothing persistence sparse dis preset scale sensitivity amplification delay face hand class",
             "class_filter": "class filtering filter person face hand foot genitals body parts",
             "oscillation": "oscillation detector frequency amplitude threshold smoothing window peak valley timing",
-            "interface": "interface performance gpu theme font scale dark light color vsync fps timeline rendering",
+            "interface": "interface performance theme font scale dark light color vsync fps timeline rendering",
             "file_output": "file output save export path format funscript metadata json axis assignment tcode ofs naming",
             "logging": "logging autosave log debug verbose checkpoint interval backup"
         }
@@ -210,55 +209,38 @@ class AdvancedSettingsMixin:
             keywords = section_keywords.get(section_key, "")
             return any(term in keywords for term in search_query.split())
 
-        # ---- Tier 1: Always visible settings ----
-
-        # File & Output settings (Tier 1 - directly affects output quality)
-        if matches_section("file_output"):
-            _open_default = bool(search_query and matches_section("file_output"))
-            with section_card("File & Output##AdvancedFileOutput",
-                              tier="secondary", open_by_default=_open_default) as _open:
+        # Helper: render a section card only if it matches the search query
+        def _filtered_section(label, section_keys, render_fn, extra_guard=True):
+            if not extra_guard:
+                return
+            matched = any(matches_section(k) for k in section_keys)
+            if not matched:
+                return
+            with section_card(label, tier="primary",
+                              open_by_default=bool(search_query and matched)) as _open:
                 if _open:
-                    self._render_settings_file_output()
+                    render_fn()
+
+        # ---- Tier 1: Always visible settings ----
+        _filtered_section("File & Output##AdvancedFileOutput",
+                          ["file_output"], self._render_settings_file_output)
 
         # ---- Tier 2: Behind "Show All Settings" toggle ----
-
         if show_all:
-            # Interface & Performance settings
-            if matches_section("interface"):
-                _open_default = bool(search_query and matches_section("interface"))
-                with section_card("Interface & Performance##AdvancedInterfacePerf",
-                                  tier="secondary", open_by_default=_open_default) as _open:
-                    if _open:
-                        self._render_settings_interface_perf()
+            _filtered_section("Interface & Performance##AdvancedInterfacePerf",
+                              ["interface"], self._render_settings_interface_perf)
 
-            # Logging & Autosave settings
-            if app_state.show_advanced_options:
-                if matches_section("logging"):
-                    _open_default = bool(search_query and matches_section("logging"))
-                    with section_card("Logging & Autosave##AdvancedLogging",
-                                      tier="secondary", open_by_default=_open_default) as _open:
-                        if _open:
-                            self._render_settings_logging_autosave()
+            _filtered_section("Logging & Autosave##AdvancedLogging",
+                              ["logging"], self._render_settings_logging_autosave)
 
-            # Live Tracker Settings (dynamic dispatch)
-            adv = app_state.show_advanced_options
-            if self._is_live_tracker(tmode) and adv:
-                if matches_section("live_tracker") or matches_section("oscillation"):
-                    _open_default = bool(search_query and (matches_section("live_tracker") or matches_section("oscillation")))
-                    with section_card("Live Tracker Settings##AdvancedLiveTracker",
-                                      tier="secondary", open_by_default=_open_default) as _open:
-                        if _open:
-                            self._render_tracker_dynamic_settings()
+            _filtered_section("Live Tracker Settings##AdvancedLiveTracker",
+                              ["live_tracker", "oscillation"], self._render_tracker_dynamic_settings,
+                              extra_guard=self._is_live_tracker(tmode))
 
-            # Class filtering — only for trackers that use YOLO class detection
             tracker_inst = self._get_current_tracker_instance()
-            if adv and tracker_inst and getattr(tracker_inst, 'uses_class_detection', False):
-                if matches_section("class_filter"):
-                    _open_default = bool(search_query and matches_section("class_filter"))
-                    with section_card("Class Filtering##AdvancedClassFilter",
-                                      tier="secondary", open_by_default=_open_default) as _open:
-                        if _open:
-                            self._render_class_filtering_content()
+            _filtered_section("Class Filtering##AdvancedClassFilter",
+                              ["class_filter"], self._render_class_filtering_content,
+                              extra_guard=bool(tracker_inst and getattr(tracker_inst, 'uses_class_detection', False)))
 
         imgui.spacing()
 
@@ -308,51 +290,48 @@ class AdvancedSettingsMixin:
         is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi
 
         with _DisabledScope(is_any_process_active):
-            def show_model_file_dialog(title, current_path, callback):
-                gi = getattr(app, "gui_instance", None)
-                if not gi:
-                    return
-                init_dir = os.path.dirname(current_path) if current_path else None
-                gi.file_dialog.show(
-                    title=title,
-                    is_save=False,
-                    callback=callback,
-                    extension_filter=self.AI_modelExtensionsFilter,
-                    initial_path=init_dir,
-                )
-
-            # Precompute widths
+            # Precompute widths and shared icon
             tp = style.frame_padding.x * 2
             browse_w = imgui.calc_text_size("Browse").x + tp
             unload_w = imgui.calc_text_size("Unload").x + tp
             total_btn_w = browse_w + unload_w + style.item_spacing.x
             avail_w = imgui.get_content_region_available_width()
             input_w = avail_w - total_btn_w - style.item_spacing.x
+            icon_mgr = get_icon_texture_manager()
+            folder_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
+            btn_size = imgui.get_frame_height()
+
+            def _browse_button(imgui_id, on_click):
+                """Render a browse button (icon or text fallback). Call on_click if pressed."""
+                imgui.push_id(imgui_id)
+                clicked = False
+                if folder_tex:
+                    clicked = imgui.image_button(folder_tex, btn_size, btn_size)
+                else:
+                    clicked = imgui.button("Browse")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Browse...")
+                imgui.pop_id()
+                if clicked:
+                    on_click()
+
+            def _show_model_dialog(title, current_path, callback):
+                gi = getattr(app, "gui_instance", None)
+                if not gi:
+                    return
+                gi.file_dialog.show(
+                    title=title, is_save=False, callback=callback,
+                    extension_filter=self.AI_modelExtensionsFilter,
+                    initial_path=os.path.dirname(current_path) if current_path else None,
+                )
 
             # Detection model
             imgui.text("Detection Model")
             _readonly_input("##S1YOLOPath", app.yolo_detection_model_path_setting, input_w)
             imgui.same_line()
-            # Browse button with folder-open icon
-            icon_mgr = get_icon_texture_manager()
-            folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
-            btn_size = imgui.get_frame_height()
-            if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
-                show_model_file_dialog(
-                    "Select YOLO Detection Model",
-                    app.yolo_detection_model_path_setting,
-                    self._update_detection_model_path,
-                )
-            elif not folder_open_tex and imgui.button("Browse##S1YOLOBrowse"):
-                show_model_file_dialog(
-                    "Select YOLO Detection Model",
-                    app.yolo_detection_model_path_setting,
-                    self._update_detection_model_path,
-                )
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Browse for detection model file")
+            _browse_button("S1YOLOBrowse", lambda: _show_model_dialog(
+                "Select YOLO Detection Model", app.yolo_detection_model_path_setting, self._update_detection_model_path))
             imgui.same_line()
-            # Unload button (DESTRUCTIVE - unloads model from memory)
             with destructive_button_style():
                 if imgui.button("Unload##S1YOLOUnload"):
                     app.unload_model("detection")
@@ -362,39 +341,20 @@ class AdvancedSettingsMixin:
             imgui.text("Pose Model")
             _readonly_input("##PoseYOLOPath", app.yolo_pose_model_path_setting, input_w)
             imgui.same_line()
-            # Browse button with folder-open icon
-            imgui.push_id("PoseYOLOBrowse")
-            folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
-            if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
-                show_model_file_dialog(
-                    "Select YOLO Pose Model",
-                    app.yolo_pose_model_path_setting,
-                    self._update_pose_model_path,
-                )
-            elif not folder_open_tex and imgui.button("Browse"):
-                show_model_file_dialog(
-                    "Select YOLO Pose Model",
-                    app.yolo_pose_model_path_setting,
-                    self._update_pose_model_path,
-                )
-            imgui.pop_id()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Browse for pose model file")
+            _browse_button("PoseYOLOBrowse", lambda: _show_model_dialog(
+                "Select YOLO Pose Model", app.yolo_pose_model_path_setting, self._update_pose_model_path))
             imgui.same_line()
-            # Unload button (DESTRUCTIVE - unloads model from memory)
             with destructive_button_style():
                 if imgui.button("Unload##PoseYOLOUnload"):
                     app.unload_model("pose")
             _tooltip_if_hovered("Path to the YOLO pose estimation model file (%s). This model is optional." % self.AI_modelTooltipExtensions)
 
+            # Pose model artifacts directory
             imgui.text("Pose Model Artifacts Dir")
             dir_input_w = avail_w - browse_w - style.item_spacing.x if avail_w > browse_w else -1
             _readonly_input("##PoseArtifactsDirPath", app.pose_model_artifacts_dir, dir_input_w)
             imgui.same_line()
-            # Browse button with folder-open icon
-            imgui.push_id("PoseArtifactsDirBrowse")
-            folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
-            if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
+            def _browse_artifacts():
                 gi = getattr(app, "gui_instance", None)
                 if gi:
                     gi.file_dialog.show(
@@ -403,18 +363,7 @@ class AdvancedSettingsMixin:
                         is_folder_dialog=True,
                         initial_path=app.pose_model_artifacts_dir,
                     )
-            elif not folder_open_tex and imgui.button("Browse"):
-                gi = getattr(app, "gui_instance", None)
-                if gi:
-                    gi.file_dialog.show(
-                        title="Select Pose Model Artifacts Directory",
-                        callback=self._update_artifacts_dir_path,
-                        is_folder_dialog=True,
-                        initial_path=app.pose_model_artifacts_dir,
-                    )
-            imgui.pop_id()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Browse for pose model artifacts directory")
+            _browse_button("PoseArtifactsDirBrowse", _browse_artifacts)
             _tooltip_if_hovered(
                 "Path to the folder containing your trained classifier,\n"
                 "imputer, and other .joblib model artifacts."
@@ -547,37 +496,8 @@ class AdvancedSettingsMixin:
         imgui.pop_item_width()
         _tooltip_if_hovered("Multiplier for keyboard-based timeline panning speed.")
 
-        # --- Timeline Performance & GPU Settings ---
+        # --- Timeline Performance ---
         imgui.text("Timeline Performance")
-
-        # GPU Enable/Disable
-        gpu_enabled = settings.get("timeline_gpu_enabled", False)
-        changed, gpu_enabled = imgui.checkbox("Enable GPU Rendering##GPUTimeline", gpu_enabled)
-        if changed:
-            settings.set("timeline_gpu_enabled", gpu_enabled)
-            app.energy_saver.reset_activity_timer()
-            # Reinitialize GPU if being enabled
-            if gpu_enabled and hasattr(app, '_initialize_gpu_timeline'):
-                app._initialize_gpu_timeline()
-            app.logger.info(f"GPU timeline rendering {'enabled' if gpu_enabled else 'disabled'}", extra={"status_message": True})
-        _tooltip_if_hovered(
-            "Enable GPU-accelerated timeline rendering for massive performance improvements.\n"
-            "Best for datasets with 10,000+ points. Automatic fallback to CPU if GPU fails."
-        )
-
-        if gpu_enabled:
-            imgui.text("GPU Threshold")
-            imgui.same_line()
-            imgui.push_item_width(120)
-            gpu_threshold = settings.get("timeline_gpu_threshold_points", 5000)
-            changed, gpu_threshold = imgui.input_int("##GPUThreshold", gpu_threshold)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Minimum points to use GPU rendering (higher = use CPU more often, lower = use GPU more often)")
-            if changed:
-                gpu_threshold = max(1000, min(100000, gpu_threshold))  # Clamp between 1k-100k
-                settings.set("timeline_gpu_threshold_points", gpu_threshold)
-            imgui.pop_item_width()
-            _tooltip_if_hovered("Use GPU rendering when timeline has more than this many points")
 
         # Performance indicators
         show_perf = settings.get("show_timeline_optimization_indicator", False)
@@ -585,34 +505,6 @@ class AdvancedSettingsMixin:
         if changed:
             settings.set("show_timeline_optimization_indicator", show_perf)
         _tooltip_if_hovered("Display performance indicators on timeline (render time, optimization modes)")
-
-        # Performance stats (if GPU enabled and available)
-        if gpu_enabled and hasattr(app, 'gpu_integration') and app.gpu_integration:
-            try:
-                stats = app.gpu_integration.get_performance_summary()
-                imgui.text(f"GPU Backend: {stats.get('current_backend', 'Unknown')}")
-
-                if 'gpu_details' in stats:
-                    gpu_stats = stats['gpu_details']
-                    render_time = gpu_stats.get('render_time_ms', 0)
-                    points_rendered = gpu_stats.get('points_rendered', 0)
-                    imgui.text(f"Last Render: {render_time:.2f}ms, {points_rendered:,} pts")
-
-                    # Show GPU performance color coding
-                    if render_time < 5.0:
-                        imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 1.0, 0.0, 1.0)  # Green
-                        imgui.text("Excellent Performance")
-                    elif render_time < 16.67:  # 60fps threshold
-                        imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 0.0, 1.0)  # Yellow
-                        imgui.text("Good Performance")
-                    else:
-                        imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.5, 0.0, 1.0)  # Orange
-                        imgui.text("High Load")
-                    imgui.pop_style_color()
-            except Exception as e:
-                imgui.text_disabled(f"GPU stats unavailable: {str(e)[:30]}...")
-        elif gpu_enabled:
-            imgui.text_disabled("GPU not available - using CPU fallback")
 
         imgui.text("Video Decoding")
         imgui.same_line()
@@ -641,35 +533,24 @@ class AdvancedSettingsMixin:
 
         if energy.energy_saver_enabled:
             imgui.push_item_width(100)
-            imgui.text("Normal FPS")
-            imgui.same_line()
-            nf = int(energy.main_loop_normal_fps_target)
-            ch, val = imgui.input_int("##NormalFPS", nf)
-            if ch:
-                v = max(config.constants.ENERGY_SAVER_NORMAL_FPS_MIN, val)
-                if v != nf:
-                    energy.main_loop_normal_fps_target = v
-                    settings.set("main_loop_normal_fps_target", v)
-
-            imgui.text("Idle After (s)")
-            imgui.same_line()
-            th = int(energy.energy_saver_threshold_seconds)
-            ch, val = imgui.input_int("##ESThreshold", th)
-            if ch:
-                v = float(max(config.constants.ENERGY_SAVER_THRESHOLD_MIN, val))
-                if v != energy.energy_saver_threshold_seconds:
-                    energy.energy_saver_threshold_seconds = v
-                    settings.set("energy_saver_threshold_seconds", v)
-
-            imgui.text("Idle FPS")
-            imgui.same_line()
-            ef = int(energy.energy_saver_fps)
-            ch, val = imgui.input_int("##ESFPS", ef)
-            if ch:
-                v = max(config.constants.ENERGY_SAVER_IDLE_FPS_MIN, val)
-                if v != ef:
-                    energy.energy_saver_fps = v
-                    settings.set("energy_saver_fps", v)
+            _es_fields = [
+                ("Normal FPS", "##NormalFPS", "main_loop_normal_fps_target",
+                 config.constants.ENERGY_SAVER_NORMAL_FPS_MIN),
+                ("Idle After (s)", "##ESThreshold", "energy_saver_threshold_seconds",
+                 config.constants.ENERGY_SAVER_THRESHOLD_MIN),
+                ("Idle FPS", "##ESFPS", "energy_saver_fps",
+                 config.constants.ENERGY_SAVER_IDLE_FPS_MIN),
+            ]
+            for label, imgui_id, attr, min_val in _es_fields:
+                imgui.text(label)
+                imgui.same_line()
+                cur = int(getattr(energy, attr))
+                ch, val = imgui.input_int(imgui_id, cur)
+                if ch:
+                    v = max(min_val, val)
+                    if v != cur:
+                        setattr(energy, attr, float(v) if attr == "energy_saver_threshold_seconds" else v)
+                        settings.set(attr, float(v) if attr == "energy_saver_threshold_seconds" else v)
             imgui.pop_item_width()
 
     # ------- Settings: file/output -------

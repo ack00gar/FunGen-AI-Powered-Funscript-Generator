@@ -33,11 +33,15 @@ class MultiAxisFunscript:
         self._secondary_timestamps_cache: List[int] = []
         self._cache_dirty_primary: bool = True
         self._cache_dirty_secondary: bool = True
+        # Numpy array caches for timeline drawing (invalidated with timestamps)
+        self._primary_np_cache = None    # (ats_f32, poss_f32) or None
+        self._secondary_np_cache = None
 
         # Additional axes for multi-timeline (supporter feature)
         self.additional_axes: Dict[str, List[Dict]] = {}
         self._additional_timestamps_cache: Dict[str, List[int]] = {}
         self._additional_cache_dirty: Dict[str, bool] = {}
+        self._additional_np_cache: Dict[str, tuple] = {}
         self._additional_last_timestamps: Dict[str, int] = {}
 
         # Timeline-to-axis assignment mapping (timeline_num -> axis_name string)
@@ -159,7 +163,7 @@ class MultiAxisFunscript:
         # Force log if any simplification happened
         if (self._simplification_stats_primary['total_considered'] > 0 or
             self._simplification_stats_secondary['total_considered'] > 0):
-            self.logger.info("📊 Final Point Simplification Summary:")
+            self.logger.info("Final Point Simplification Summary:")
             self._log_simplification_stats_internal()
             # Reset stats for next session
             self._simplification_stats_primary = {'total_removed': 0, 'total_considered': 0, 'start_time_ms': 0}
@@ -236,19 +240,60 @@ class MultiAxisFunscript:
         if axis == 'primary':
             if self._cache_dirty_primary:
                 self._primary_timestamps_cache = [a["at"] for a in self.primary_actions]
+                self._primary_np_cache = None
                 self._cache_dirty_primary = False
             return self._primary_timestamps_cache
         elif axis == 'secondary':
             if self._cache_dirty_secondary:
                 self._secondary_timestamps_cache = [a["at"] for a in self.secondary_actions]
+                self._secondary_np_cache = None
                 self._cache_dirty_secondary = False
             return self._secondary_timestamps_cache
         elif axis in self.additional_axes:
             if self._additional_cache_dirty.get(axis, True):
                 self._additional_timestamps_cache[axis] = [a["at"] for a in self.additional_axes[axis]]
+                self._additional_np_cache.pop(axis, None)
                 self._additional_cache_dirty[axis] = False
             return self._additional_timestamps_cache.get(axis, [])
         return []
+
+    def _get_numpy_arrays_for_axis(self, axis: str):
+        """Return cached (ats_np, poss_np) float32 arrays for the axis.
+
+        Rebuilt only when the timestamp cache is dirty (i.e. actions changed).
+        Timeline drawing can slice these directly instead of rebuilding per frame.
+        """
+        actions = self.get_axis_actions(axis)
+        if not actions:
+            _empty = np.empty(0, dtype=np.float32)
+            return _empty, _empty
+
+        # Determine cache slot
+        if axis == 'primary':
+            self._get_timestamps_for_axis(axis)  # ensure dirty flag processed
+            if self._primary_np_cache is not None:
+                return self._primary_np_cache
+            ats = np.array([a['at'] for a in actions], dtype=np.float32)
+            poss = np.array([a['pos'] for a in actions], dtype=np.float32)
+            self._primary_np_cache = (ats, poss)
+            return ats, poss
+        elif axis == 'secondary':
+            self._get_timestamps_for_axis(axis)
+            if self._secondary_np_cache is not None:
+                return self._secondary_np_cache
+            ats = np.array([a['at'] for a in actions], dtype=np.float32)
+            poss = np.array([a['pos'] for a in actions], dtype=np.float32)
+            self._secondary_np_cache = (ats, poss)
+            return ats, poss
+        else:
+            self._get_timestamps_for_axis(axis)
+            cached = self._additional_np_cache.get(axis)
+            if cached is not None:
+                return cached
+            ats = np.array([a['at'] for a in actions], dtype=np.float32)
+            poss = np.array([a['pos'] for a in actions], dtype=np.float32)
+            self._additional_np_cache[axis] = (ats, poss)
+            return ats, poss
 
     def _process_action_for_axis(self,
                                  actions_target_list: List[Dict],
@@ -583,6 +628,9 @@ class MultiAxisFunscript:
         raw_assignments = data.get("axis_assignments", {})
         if raw_assignments:
             obj._axis_assignments = {int(k): v for k, v in raw_assignments.items()}
+        # Restore chapters
+        if "chapters" in data:
+            obj.chapters = list(data["chapters"])
         obj._invalidate_cache('both')
         return obj
 
@@ -592,18 +640,18 @@ class MultiAxisFunscript:
         strictly after the current frame.
         """
         if not fps > 0: return None
-        actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
-        if not actions_list: return None
+        timestamps = self._get_timestamps_for_axis(axis)
+        if not timestamps: return None
 
         current_time_ms = current_frame * (1000.0 / fps)
 
-        # Find the first action strictly after the current time
-        for action in actions_list:
-            if action['at'] > current_time_ms:
-                target_frame = int(action['at'] * (fps / 1000.0))
-                # Ensure we are actually moving to a new frame
-                if target_frame > current_frame:
-                    return target_frame
+        # O(log n) bisect to find first action after current time
+        idx = bisect.bisect_right(timestamps, current_time_ms)
+        while idx < len(timestamps):
+            target_frame = int(timestamps[idx] * (fps / 1000.0))
+            if target_frame > current_frame:
+                return target_frame
+            idx += 1
         return None
 
     def find_prev_jump_frame(self, current_frame: int, fps: float, axis: str = 'primary') -> Optional[int]:
@@ -612,22 +660,19 @@ class MultiAxisFunscript:
         strictly before the current frame.
         """
         if not fps > 0: return None
-        actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
-        if not actions_list: return None
+        timestamps = self._get_timestamps_for_axis(axis)
+        if not timestamps: return None
 
-        last_valid_frame = None
-        # Find the last action that is on a frame strictly before the current one
-        for action in actions_list:
-            # We must use a strict < comparison on time to find previous points
-            if action['at'] < (current_frame * (1000.0 / fps)):
-                target_frame = int(action['at'] * (fps / 1000.0))
-                # Ensure it's a different frame before we consider it
-                if target_frame < current_frame:
-                    last_valid_frame = target_frame
-            else:
-                # List is sorted, no more valid points past this
-                break
-        return last_valid_frame
+        current_time_ms = current_frame * (1000.0 / fps)
+
+        # O(log n) bisect to find last action before current time
+        idx = bisect.bisect_left(timestamps, current_time_ms) - 1
+        while idx >= 0:
+            target_frame = int(timestamps[idx] * (fps / 1000.0))
+            if target_frame < current_frame:
+                return target_frame
+            idx -= 1
+        return None
 
     @property
     def actions(self) -> List[Dict]:
@@ -648,8 +693,8 @@ class MultiAxisFunscript:
                     "Invalid value for actions setter: Must be a list of action dicts {'at': ms, 'pos': val}.")
                 self.primary_actions = []
             else:
-                # Create a new list from sorted items to ensure we don't keep a reference to a mutable 'value'
-                self.primary_actions = sorted(list(item for item in value), key=lambda x: x["at"])
+                # Create a new sorted list to avoid keeping a reference to the caller's mutable list
+                self.primary_actions = sorted(value, key=lambda x: x["at"])
 
             self.last_timestamp_primary = self.primary_actions[-1]["at"] if self.primary_actions else 0
             self._invalidate_cache('primary') # Invalidate cache

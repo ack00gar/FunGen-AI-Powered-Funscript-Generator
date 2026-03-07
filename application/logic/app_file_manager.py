@@ -1,6 +1,5 @@
 import os
 import glob as glob_module
-import json
 import orjson
 import msgpack
 import time
@@ -89,12 +88,16 @@ class AppFileManager:
         defaults = {1: "stroke", 2: "roll"}
         return defaults.get(timeline_num, f"axis_{timeline_num}")
 
-    def _resolve_tracker_display_name(self) -> Optional[str]:
-        """Resolve the human-readable tracker name via priority chain."""
+    def _resolve_tracker_info(self) -> Tuple[Optional[str], Optional[str]]:
+        """Resolve the tracker display name and version via priority chain.
+
+        Returns (display_name, version) tuple.
+        """
         # 1. Active tracker instance
         try:
             if self.app.processor and self.app.processor.tracker:
-                return self.app.processor.tracker.metadata.display_name
+                md = self.app.processor.tracker.metadata
+                return md.display_name, getattr(md, 'version', None)
         except (AttributeError, TypeError):
             pass
 
@@ -111,9 +114,14 @@ class AppFileManager:
         if internal_name:
             info = discovery.get_tracker_info(internal_name)
             if info:
-                return info.display_name
+                return info.display_name, getattr(info, 'version', None)
 
-        return None
+        return None, None
+
+    def _resolve_tracker_display_name(self) -> Optional[str]:
+        """Resolve the human-readable tracker name via priority chain."""
+        name, _ = self._resolve_tracker_info()
+        return name
 
     def _build_generation_metadata(self, multi_axis: bool = False) -> dict:
         """Return FunGen generation metadata for funscript exports."""
@@ -124,9 +132,11 @@ class AppFileManager:
             "creation_date": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             "funscript_type": "multi-axis" if multi_axis else "single-axis",
         }
-        tracker_name = self._resolve_tracker_display_name()
+        tracker_name, tracker_version = self._resolve_tracker_info()
         if tracker_name:
             meta["tracker_name"] = tracker_name
+        if tracker_version:
+            meta["tracker_version"] = tracker_version
         return meta
 
     def _get_funscript_path_for_axis(self, video_path: str, axis_name: str) -> str:
@@ -1051,7 +1061,7 @@ class AppFileManager:
                 if self.app._audio_player:
                     has_audio = self.app.processor.video_info.get("has_audio", False)
                     fps = self.app.processor.fps
-                    self.app.logger.info(f"Audio: set_video has_audio={has_audio} fps={fps}")
+                    self.app.logger.debug(f"Audio: set_video has_audio={has_audio} fps={fps}")
                     self.app._audio_player.set_video(file_path, has_audio, fps)
 
                 # If it was a new project, auto-discover and load adjacent funscripts.
@@ -1130,7 +1140,7 @@ class AppFileManager:
         self.app.funscript_processor.update_funscript_stats_for_timeline(1, "Video Closed")
         self.app.funscript_processor.update_funscript_stats_for_timeline(2, "Video Closed")
 
-        self.logger.info("Video closed.", extra={'status_message': True})
+        self.logger.debug("Video closed.", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
         self.app.app_state_ui.heatmap_dirty = True
         self.app.app_state_ui.funscript_preview_dirty = True

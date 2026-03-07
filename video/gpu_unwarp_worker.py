@@ -1006,30 +1006,3 @@ class GPUUnwarpWorker:
         except Exception:
             return False
 
-
-# Example usage
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-
-    # Create worker
-    worker = GPUUnwarpWorker(projection_type='fisheye190', output_size=640)
-    worker.start()
-
-    # Simulate frame processing
-    for i in range(100):
-        # Create dummy fisheye frame
-        fisheye_frame = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
-
-        # Submit to worker
-        worker.submit_frame(i, fisheye_frame, timestamp_ms=i * 16.67)
-
-        # Get unwrapped frame (non-blocking)
-        result = worker.get_unwrapped_frame(timeout=0.001)
-        if result:
-            frame_idx, unwrapped, timestamp = result
-            print(f"Got unwrapped frame {frame_idx}")
-
-        time.sleep(0.001)  # Simulate processing time
-
-    # Stop worker
-    worker.stop()

@@ -1,12 +1,9 @@
 """First-run wizard — 6-step guided setup shown on initial launch."""
 
 import imgui
-import os
 import sys
 import platform
-import threading
 import logging
-import time
 
 from application.utils.logo_texture import get_logo_texture_manager
 from application.utils.system_scaling import get_system_scaling_info

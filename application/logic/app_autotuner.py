@@ -53,7 +53,7 @@ class AppAutotuner:
                 autotune_frame_range = (start_frame, end_frame)
 
                 self.app.stage_processor.start_full_analysis(
-                    processing_mode="stage3_mixed",
+                    processing_mode="OFFLINE_GUIDED_FLOW",
                     override_producers=p,
                     override_consumers=c,
                     completion_event=completion_event,

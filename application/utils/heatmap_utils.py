@@ -1,22 +1,24 @@
-"""OFS-standard heatmap color mapping for funscript speed visualization.
+"""Heatmap color mapping for funscript speed visualization.
 
-Maps funscript segment speeds to the classic OFS color gradient:
-Black -> DodgerBlue -> Cyan -> Green -> Yellow -> Red
+Maps funscript segment speeds to a gradient optimised for dark backgrounds:
+Steel-blue -> DodgerBlue -> Cyan -> Green -> Yellow -> Red
 
 Normalized at 400 units/second (the community-accepted device speed limit).
 """
 import numpy as np
 from typing import Tuple, List, Dict
 
-# OFS-standard gradient stops (normalized 0.0-1.0 positions mapped to RGBA)
+# Gradient stops (normalized 0.0-1.0 positions mapped to RGBA)
 # Position thresholds as fraction of max speed (400 u/s default)
-_OFS_GRADIENT = [
-    (0.00, (0.0, 0.0, 0.0, 1.0)),        # Black  — stationary
-    (0.05, (0.12, 0.39, 0.87, 1.0)),      # DodgerBlue — slow
-    (0.20, (0.0, 0.9, 0.9, 1.0)),         # Cyan — moderate
-    (0.40, (0.0, 0.8, 0.2, 1.0)),         # Green — medium
-    (0.65, (0.9, 0.9, 0.1, 1.0)),         # Yellow — fast
-    (1.00, (0.9, 0.1, 0.1, 1.0)),         # Red — device limit
+# Lowest stop uses a visible steel-blue instead of black so flat/slow
+# segments remain clearly visible on the dark canvas background.
+_SPEED_GRADIENT = [
+    (0.00, (0.30, 0.35, 0.50, 1.0)),     # Steel-blue — stationary / flat
+    (0.05, (0.20, 0.45, 0.90, 1.0)),     # DodgerBlue — slow
+    (0.20, (0.0, 0.9, 0.9, 1.0)),        # Cyan — moderate
+    (0.40, (0.0, 0.8, 0.2, 1.0)),        # Green — medium
+    (0.65, (0.9, 0.9, 0.1, 1.0)),        # Yellow — fast
+    (1.00, (0.9, 0.1, 0.1, 1.0)),        # Red — device limit
 ]
 
 
@@ -31,7 +33,7 @@ def _lerp_color(c1: Tuple, c2: Tuple, t: float) -> Tuple[float, float, float, fl
 
 
 class HeatmapColorMapper:
-    """Maps speeds to OFS-standard heatmap colors.
+    """Maps speeds to heatmap colors.
 
     Usage::
 
@@ -41,7 +43,7 @@ class HeatmapColorMapper:
 
     def __init__(self, max_speed: float = 400.0):
         self.max_speed = max(1.0, max_speed)
-        self._gradient = _OFS_GRADIENT
+        self._gradient = _SPEED_GRADIENT
 
     def speed_to_color_rgba(self, speed: float) -> Tuple[float, float, float, float]:
         """Convert a single speed value (units/sec) to an RGBA color tuple."""
@@ -76,17 +78,37 @@ class HeatmapColorMapper:
         # Handle values at exactly 1.0 (already covered by last segment)
         return result
 
+    def speeds_to_colors_u32(self, speeds: np.ndarray) -> np.ndarray:
+        """Vectorized: convert speeds to packed imgui u32 color values.
+
+        Avoids per-segment get_color_u32_rgba calls in the draw loop.
+        Packing: R | (G<<8) | (B<<16) | (A<<24)  (imgui's ABGR layout).
+        """
+        rgba = self.speeds_to_colors_rgba(speeds)
+        # Convert float [0,1] to uint8 [0,255] and pack
+        rgba_u8 = (rgba * 255.0 + 0.5).astype(np.uint32)
+        return rgba_u8[:, 0] | (rgba_u8[:, 1] << 8) | (rgba_u8[:, 2] << 16) | (rgba_u8[:, 3] << 24)
+
     @staticmethod
-    def compute_segment_speeds(actions: List[Dict]) -> np.ndarray:
+    def compute_segment_speeds(actions: List[Dict], ats_np=None, poss_np=None) -> np.ndarray:
         """Compute speed (units/sec) for each segment between consecutive actions.
+
+        Args:
+            actions: List of action dicts (used if ats_np/poss_np not provided).
+            ats_np: Optional pre-built float array of timestamps.
+            poss_np: Optional pre-built float array of positions.
 
         Returns array of length len(actions)-1 with speed for each segment.
         """
         if len(actions) < 2:
             return np.array([], dtype=np.float32)
 
-        ats = np.array([a['at'] for a in actions], dtype=np.float64)
-        poss = np.array([a['pos'] for a in actions], dtype=np.float64)
+        if ats_np is not None and poss_np is not None:
+            ats = ats_np.astype(np.float64)
+            poss = poss_np.astype(np.float64)
+        else:
+            ats = np.array([a['at'] for a in actions], dtype=np.float64)
+            poss = np.array([a['pos'] for a in actions], dtype=np.float64)
 
         dt = np.diff(ats)  # ms
         dp = np.abs(np.diff(poss))  # position units

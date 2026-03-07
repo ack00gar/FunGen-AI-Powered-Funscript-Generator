@@ -7,6 +7,7 @@ class GaugeWindow:
         self.app = app_instance
         self.timeline_num = timeline_num
         self.window_title = f"Gauge T{self.timeline_num}##GaugeWindowT{self.timeline_num}"
+        self._colors_cached = False
 
     def render(self):
         app_state = self.app.app_state_ui  # Cache for convenience
@@ -79,12 +80,17 @@ class GaugeWindow:
             imgui.end()
             return
 
-        # Colors
-        bg_color = imgui.get_color_u32_rgba(*GaugeColors.BACKGROUND)
-        border_color = imgui.get_color_u32_rgba(*GaugeColors.BORDER)
-        # Change bar color for the second timeline's gauge
-        bar_color_fill = imgui.get_color_u32_rgba(*GaugeColors.BAR_RED) if self.timeline_num == 2 else imgui.get_color_u32_rgba(*GaugeColors.BAR_GREEN)
-        text_color = imgui.get_color_u32_rgba(*GaugeColors.TEXT)
+        # Colors (cached after first frame — constant theme values)
+        if not self._colors_cached:
+            self._bg_color = imgui.get_color_u32_rgba(*GaugeColors.BACKGROUND)
+            self._border_color = imgui.get_color_u32_rgba(*GaugeColors.BORDER)
+            self._bar_color_fill = imgui.get_color_u32_rgba(*GaugeColors.BAR_RED) if self.timeline_num == 2 else imgui.get_color_u32_rgba(*GaugeColors.BAR_GREEN)
+            self._text_color = imgui.get_color_u32_rgba(*GaugeColors.TEXT)
+            self._colors_cached = True
+        bg_color = self._bg_color
+        border_color = self._border_color
+        bar_color_fill = self._bar_color_fill
+        text_color = self._text_color
 
         # Draw gauge background and border
         draw_list.add_rect_filled(gauge_area_x, gauge_area_y,

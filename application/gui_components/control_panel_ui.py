@@ -1,7 +1,7 @@
 import imgui
-import os
 import config
 from config.constants_colors import CurrentTheme
+from config.element_group_colors import SidebarColors as _SidebarColors
 from application.utils import get_icon_texture_manager, primary_button_style, destructive_button_style
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
@@ -14,6 +14,15 @@ try:
 except ImportError:
     DynamicTrackerUI = None
     TrackerCategory = None
+
+# Early access tracker gating (optional add-on)
+try:
+    from patreon_features.tracker_gating.experimental_gate import is_tracker_early_access as _is_tracker_early_access, get_early_access_message as _get_early_access_message
+    _HAS_EARLY_ACCESS_GATE = True
+except ImportError:
+    _HAS_EARLY_ACCESS_GATE = False
+    _is_tracker_early_access = None
+    _get_early_access_message = None
 
 # Import mixin sub-modules
 from .cp_simple_mode_ui import SimpleModeMixin
@@ -50,14 +59,6 @@ class ControlPanelUI(
         self.timeline_editor1 = None
         self.timeline_editor2 = None
         self.ControlPanelColors = config.ControlPanelColors
-        self.GeneralColors = config.GeneralColors
-
-        # PERFORMANCE OPTIMIZATIONS: Smart rendering and caching
-        self._last_tab_hash = None  # Track tab changes
-        self._cached_tab_content = {}  # Cache expensive tab rendering
-        self._widget_visibility_cache = {}  # Cache widget visibility states
-        self._update_throttle_counter = 0  # Throttle expensive updates
-        self._heavy_operation_frame_skip = 0  # Skip frames during heavy ops
         self.constants = config.constants
         self.AI_modelExtensionsFilter = self.constants.AI_MODEL_EXTENSIONS_FILTER
         self.AI_modelTooltipExtensions = self.constants.AI_MODEL_TOOLTIP_EXTENSIONS
@@ -75,7 +76,6 @@ class ControlPanelUI(
         self._first_frame_rendered = False
         self.video_playback_bridge = None  # Video playback bridge for live control
         self.live_tracker_bridge = None    # Live tracker bridge for real-time control
-        self.device_list = []  # List of discovered devices
         self._available_osr_ports = []
         self._osr_scan_performed = False
 
@@ -129,6 +129,16 @@ class ControlPanelUI(
         # Tracker filter row toggle (ephemeral, resets each session)
         self._tracker_filter_open = False
 
+        # Cached tracker lists (invalidated when filter settings change)
+        self._cached_tracker_hidden_folders = None
+        self._cached_tracker_lists = None       # (modes_display_full, modes_enum, discovered)
+        self._cached_tracker_tooltip = None
+        self._cached_tracker_gated = None
+        self._cached_tracker_supporter_flag = None
+
+        # Batch/Capture state (from BatchMixin)
+        self._init_batch_state()
+
     # ------- Helpers -------
 
     def _render_addon_version_label(self, module_name, display_name):
@@ -178,43 +188,24 @@ class ControlPanelUI(
         """Check if tracker is an offline tracker."""
         from config.tracker_discovery import TrackerCategory
         return self._is_tracker_category(tracker_name, TrackerCategory.OFFLINE)
-    def _is_stage2_tracker(self, tracker_name: str) -> bool:
-        """Check if tracker is a 2-stage offline tracker."""
+    def _check_tracker_ui(self, method_name: str, tracker_name: str) -> bool:
+        """Dispatch a tracker-query method on tracker_ui, with lazy init."""
         if not self.tracker_ui:
-            # Try to reinitialize if it failed during __init__
             self._try_reinitialize_tracker_ui()
-
         if self.tracker_ui:
-            return self.tracker_ui.is_stage2_tracker(tracker_name)
-
-        # If still failing, log error but don't crash
+            return getattr(self.tracker_ui, method_name)(tracker_name)
         if hasattr(self.app, 'logger'):
-            self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is stage2 tracker")
+            self.app.logger.warning(f"Dynamic tracker UI not available for {method_name}('{tracker_name}')")
         return False
+
+    def _is_stage2_tracker(self, tracker_name: str) -> bool:
+        return self._check_tracker_ui('is_stage2_tracker', tracker_name)
 
     def _is_stage3_tracker(self, tracker_name: str) -> bool:
-        """Check if tracker is a 3-stage offline tracker."""
-        if not self.tracker_ui:
-            self._try_reinitialize_tracker_ui()
-
-        if self.tracker_ui:
-            return self.tracker_ui.is_stage3_tracker(tracker_name)
-
-        if hasattr(self.app, 'logger'):
-            self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is stage3 tracker")
-        return False
+        return self._check_tracker_ui('is_stage3_tracker', tracker_name)
 
     def _is_mixed_stage3_tracker(self, tracker_name: str) -> bool:
-        """Check if tracker is a mixed 3-stage offline tracker."""
-        if not self.tracker_ui:
-            self._try_reinitialize_tracker_ui()
-
-        if self.tracker_ui:
-            return self.tracker_ui.is_mixed_stage3_tracker(tracker_name)
-
-        if hasattr(self.app, 'logger'):
-            self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is mixed stage3 tracker")
-        return False
+        return self._check_tracker_ui('is_mixed_stage3_tracker', tracker_name)
 
     def _get_tracker_lists_for_ui(self, simple_mode=False, hidden_folders=None):
         """Get tracker lists for UI combo boxes using dynamic discovery."""
@@ -329,7 +320,7 @@ class ControlPanelUI(
 
         Returns the active section key.
         """
-        from config.element_group_colors import SidebarColors
+        SidebarColors = _SidebarColors
 
         sidebar_w = self._SIDEBAR_WIDTH
         draw_list = imgui.get_window_draw_list()
@@ -373,10 +364,17 @@ class ControlPanelUI(
         imgui.end_child()
         return self._active_section
 
+    # Sidebar feature key → feature_detection name (for locked tooltip)
+    _SIDEBAR_FEATURE_MAP = {
+        "device_control": "device_control",
+        "native_sync": "streamer",
+        "supporter_batch": "patreon_features",
+    }
+
     def _render_sidebar_entry(self, draw_list, key, icon, tooltip, is_active,
                                available, btn_size, sidebar_w):
         """Render a single sidebar navigation entry."""
-        from config.element_group_colors import SidebarColors
+        SidebarColors = _SidebarColors
 
         cursor = imgui.get_cursor_screen_pos()
         pad_x = (sidebar_w - btn_size) * 0.5
@@ -408,7 +406,7 @@ class ControlPanelUI(
 
         # Invisible button for click detection
         imgui.set_cursor_screen_pos((cursor[0] + pad_x, cursor[1]))
-        if imgui.invisible_button(f"##SB_{key}", btn_size, btn_size):
+        if imgui.invisible_button(f"##SB_{key}", btn_size, btn_size) and available:
             self._active_section = key
 
         # Check hover state BEFORE drawing so bg goes behind text
@@ -418,12 +416,7 @@ class ControlPanelUI(
                 imgui.set_tooltip(tooltip)
             else:
                 # Show FeatureInfo description alongside locked message
-                _SIDEBAR_FEATURE_MAP = {
-                    "device_control": "device_control",
-                    "native_sync": "streamer",
-                    "supporter_batch": "patreon_features",
-                }
-                feat_name = _SIDEBAR_FEATURE_MAP.get(key)
+                feat_name = self._SIDEBAR_FEATURE_MAP.get(key)
                 desc = ""
                 if feat_name:
                     from application.utils.feature_detection import get_feature_detector
@@ -575,7 +568,7 @@ class ControlPanelUI(
                                f"{int(progress * 100)}%")
             with destructive_button_style():
                 if imgui.button("Stop Analysis##PinnedAction", width=-1, height=32):
-                    stage_proc.request_stop()
+                    events.handle_abort_process_click()
         elif is_live_active:
             # Live tracking active — show Pause/Resume and Stop
             is_paused = proc.pause_event.is_set() if hasattr(proc, 'pause_event') else False
@@ -938,37 +931,53 @@ class ControlPanelUI(
         if not _settings.get("tracker_show_community", True):
             _hidden_folders.add("community")
 
-        # Use dynamic tracker discovery for full mode
-        modes_display_full, modes_enum, discovered_trackers_full = self._get_tracker_lists_for_ui(
-            simple_mode=False, hidden_folders=_hidden_folders
-        )
-
-        # Early access tracker gating — annotate gated trackers
-        _early_access_set = set()
         _supporter_available = self._feat_supporter
-        try:
-            from patreon_features.tracker_gating.experimental_gate import is_tracker_early_access, get_early_access_message
-            _early_access_set = {name for name in modes_enum if is_tracker_early_access(name)}
-        except ImportError:
-            pass
 
-        # Build display list with early access annotations
-        modes_display_gated = []
-        for i, (display, internal) in enumerate(zip(modes_display_full, modes_enum)):
-            if internal in _early_access_set and not _supporter_available:
-                modes_display_gated.append(f"[Early Access] {display}")
-            else:
-                modes_display_gated.append(display)
+        # Use cached tracker lists — invalidate when filter settings or supporter status change
+        _hidden_key = frozenset(_hidden_folders)
+        if (self._cached_tracker_lists is None
+                or self._cached_tracker_hidden_folders != _hidden_key
+                or self._cached_tracker_supporter_flag != _supporter_available):
+            # Recompute tracker lists
+            modes_display_full, modes_enum, discovered_trackers_full = self._get_tracker_lists_for_ui(
+                simple_mode=False, hidden_folders=_hidden_folders
+            )
+
+            # Early access tracker gating — annotate gated trackers
+            _early_access_set = set()
+            if _HAS_EARLY_ACCESS_GATE:
+                _early_access_set = {name for name in modes_enum if _is_tracker_early_access(name)}
+
+            # Build display list with early access annotations
+            modes_display_gated = []
+            for i, (display, internal) in enumerate(zip(modes_display_full, modes_enum)):
+                if internal in _early_access_set and not _supporter_available:
+                    modes_display_gated.append(f"[Early Access] {display}")
+                else:
+                    modes_display_gated.append(display)
+
+            self._cached_tracker_lists = (modes_display_full, modes_enum, discovered_trackers_full)
+            self._cached_tracker_gated = modes_display_gated
+            self._cached_tracker_early_access = _early_access_set
+            self._cached_tracker_tooltip = self._generate_combined_tooltip(discovered_trackers_full)
+            self._cached_tracker_hidden_folders = _hidden_key
+            self._cached_tracker_supporter_flag = _supporter_available
+
+        modes_display_full, modes_enum, discovered_trackers_full = self._cached_tracker_lists
+        modes_display_gated = self._cached_tracker_gated
+        _early_access_set = getattr(self, '_cached_tracker_early_access', set())
 
         processor = app.processor
         disable_combo = (
             stage_proc.full_analysis_active
             or app.is_setting_user_roi_mode
-            or (processor and processor.is_processing and not processor.pause_event.is_set())
+            or (processor and processor.is_processing
+                and getattr(processor, 'enable_tracker_processing', False)
+                and not processor.pause_event.is_set())
         )
 
         with section_card("Analysis Method##RunControlAnalysisMethod",
-                          tier="secondary") as open_:
+                          tier="primary") as open_:
             if open_:
                 modes_display = modes_display_gated
 
@@ -987,7 +996,7 @@ class ControlPanelUI(
 
                     imgui.set_next_item_width(combo_width)
                     clicked, new_idx = imgui.combo("##TrackerModeCombo", cur_idx, modes_display)
-                    self._help_tooltip(self._generate_combined_tooltip(discovered_trackers_full))
+                    self._help_tooltip(self._cached_tracker_tooltip)
 
                 imgui.same_line()
                 icon_mgr = get_icon_texture_manager()
@@ -1055,60 +1064,59 @@ class ControlPanelUI(
 
         mode = app_state.selected_tracker_name
         if mode and (self._is_offline_tracker(mode) or self._is_live_tracker(mode)):
-            if app_state.show_advanced_options:
-                with section_card("Analysis Options##RunControlAnalysisOptions",
-                                  tier="secondary") as open_:
-                    if open_:
-                        imgui.text("Analysis Range")
-                        self._render_range_selection(stage_proc, fs_proc, events)
+            with section_card("Analysis Options##RunControlAnalysisOptions",
+                              tier="primary") as open_:
+                if open_:
+                    imgui.text("Analysis Range")
+                    self._render_range_selection(stage_proc, fs_proc, events)
 
-                        if self._is_offline_tracker(mode):
-                            imgui.text("Stage Reruns:")
-                            with _DisabledScope(disable_combo):
-                                _, stage_proc.force_rerun_stage1 = imgui.checkbox(
-                                    "Force Re-run Stage 1##ForceRerunS1",
-                                    stage_proc.force_rerun_stage1,
-                                )
-                                _tooltip_if_hovered(
-                                    "Re-run YOLO object detection even if cached results exist.\n"
-                                    "Use when the detection model has been updated."
-                                )
-                                imgui.same_line()
-                                _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
-                                    "Force Re-run Stage 2##ForceRerunS2",
-                                    stage_proc.force_rerun_stage2_segmentation,
-                                )
-                                _tooltip_if_hovered(
-                                    "Re-run contact analysis and segmentation even if cached results exist.\n"
-                                    "Use when you want to regenerate chapters and signals from scratch."
-                                )
-                                if not hasattr(stage_proc, "save_preprocessed_video"):
-                                    stage_proc.save_preprocessed_video = app.app_settings.get("save_preprocessed_video", False)
-                                changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
-                                if changed:
-                                    stage_proc.save_preprocessed_video = new_val
-                                    app.app_settings.set("save_preprocessed_video", new_val)
-                                    if new_val:
-                                        stage_proc.num_producers_stage1 = 1
-                                        app.app_settings.set("num_producers_stage1", 1)
-                                _tooltip_if_hovered(
-                                    "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
-                                    "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
-                                    "Forces the number of Producer threads to 1."
-                                )
+                    if self._is_offline_tracker(mode):
+                        imgui.text("Stage Reruns:")
+                        with _DisabledScope(disable_combo):
+                            _, stage_proc.force_rerun_stage1 = imgui.checkbox(
+                                "Force Re-run Stage 1##ForceRerunS1",
+                                stage_proc.force_rerun_stage1,
+                            )
+                            _tooltip_if_hovered(
+                                "Re-run YOLO object detection even if cached results exist.\n"
+                                "Use when the detection model has been updated."
+                            )
+                            imgui.same_line()
+                            _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
+                                "Force Re-run Stage 2##ForceRerunS2",
+                                stage_proc.force_rerun_stage2_segmentation,
+                            )
+                            _tooltip_if_hovered(
+                                "Re-run contact analysis and segmentation even if cached results exist.\n"
+                                "Use when you want to regenerate chapters and signals from scratch."
+                            )
+                            if not hasattr(stage_proc, "save_preprocessed_video"):
+                                stage_proc.save_preprocessed_video = app.app_settings.get("save_preprocessed_video", False)
+                            changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
+                            if changed:
+                                stage_proc.save_preprocessed_video = new_val
+                                app.app_settings.set("save_preprocessed_video", new_val)
+                                if new_val:
+                                    stage_proc.num_producers_stage1 = 1
+                                    app.app_settings.set("num_producers_stage1", 1)
+                            _tooltip_if_hovered(
+                                "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
+                                "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
+                                "Forces the number of Producer threads to 1."
+                            )
 
-                            # Database Retention Option
-                            with _DisabledScope(disable_combo):
-                                retain_database = self.app.app_settings.get("retain_stage2_database", True)
-                                changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
-                                if changed_db:
-                                    self.app.app_settings.set("retain_stage2_database", new_db_val)
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip(
-                                    "Keep the Stage 2 database file after processing completes.\n"
-                                    "Disable to save disk space (database is automatically deleted).\n"
-                                    "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
-                                )
+                        # Database Retention Option
+                        with _DisabledScope(disable_combo):
+                            retain_database = self.app.app_settings.get("retain_stage2_database", True)
+                            changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
+                            if changed_db:
+                                self.app.app_settings.set("retain_stage2_database", new_db_val)
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip(
+                                "Keep the Stage 2 database file after processing completes.\n"
+                                "Disable to save disk space (database is automatically deleted).\n"
+                                "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
+                            )
 
         proc = app.processor
         video_loaded = proc and proc.is_video_open()
@@ -1118,7 +1126,7 @@ class ControlPanelUI(
         self._render_start_stop_buttons(stage_proc, fs_proc, events)
 
         if stage_proc.stage2_overlay_data_map:
-            with section_card("Interactive Refinement##RunRefine", tier="secondary") as is_open:
+            with section_card("Interactive Refinement##RunRefine", tier="primary") as is_open:
                 if is_open:
                     self._render_interactive_refinement_controls()
         else:
@@ -1126,23 +1134,21 @@ class ControlPanelUI(
 
         chapters = getattr(app.funscript_processor, "video_chapters", [])
         if chapters:
-            with section_card("Chapters##RunChapters", tier="secondary") as is_open:
+            with section_card("Chapters##RunChapters", tier="primary") as is_open:
                 if is_open:
                     # Clear All Chapters button (DESTRUCTIVE - deletes all chapters)
                     with destructive_button_style():
                         if imgui.button("Clear All Chapters", width=-1):
-                            imgui.open_popup("ConfirmClearChapters")
-                    opened, _ = imgui.begin_popup_modal("ConfirmClearChapters")
+                            imgui.open_popup("Clear All Chapters?###ConfirmClearChapters")
+                    imgui.set_next_window_size(380, 0)
+                    opened, _ = imgui.begin_popup_modal("Clear All Chapters?###ConfirmClearChapters")
                     if opened:
-                        w = imgui.get_window_width()
-                        text = "Are you sure you want to clear all chapters? This cannot be undone."
-                        tw = imgui.calc_text_size(text)[0]
-                        imgui.set_cursor_pos_x((w - tw) * 0.5)
-                        imgui.text(text)
+                        imgui.text_wrapped("Are you sure you want to clear all chapters?\nThis cannot be undone.")
                         imgui.spacing()
+                        w = imgui.get_content_region_available()[0]
                         bw, cw = 150, 100
                         total = bw + cw + imgui.get_style().item_spacing[0]
-                        imgui.set_cursor_pos_x((w - total) * 0.5)
+                        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (w - total) * 0.5)
                         # Confirm button (DESTRUCTIVE - irreversible action)
                         with destructive_button_style():
                             if imgui.button("Yes, clear all", width=bw):
@@ -1165,8 +1171,6 @@ class ControlPanelUI(
         imgui.text("Configure settings for the selected mode.")
         imgui.spacing()
 
-        adv = app_state.show_advanced_options
-
         # Dynamic tracker settings (replaces hardcoded per-tracker dispatch)
         if self._is_live_tracker(tmode):
             with section_card("Live Tracker Settings##ConfigLiveTracker", tier="primary") as is_open:
@@ -1175,7 +1179,7 @@ class ControlPanelUI(
 
         # Class filtering — only for trackers that use YOLO class detection
         tracker_inst = self._get_current_tracker_instance()
-        if adv and tracker_inst and getattr(tracker_inst, 'uses_class_detection', False):
+        if tracker_inst and getattr(tracker_inst, 'uses_class_detection', False):
             with section_card("Class Filtering##ConfigClassFilterHeader", tier="primary",
                               open_by_default=False) as is_open:
                 if is_open:
@@ -1189,55 +1193,3 @@ class ControlPanelUI(
         if not has_config:
             imgui.text_disabled("No configuration available for this mode.")
 
-    def _render_settings_tab(self):
-        app = self.app
-        app_state = app.app_state_ui
-
-        imgui.text("Global application settings. Saved in settings.json.")
-        imgui.spacing()
-
-        with section_card("Interface & Performance##SettingsMenuPerfInterface", tier="primary",
-                          open_by_default=False) as is_open:
-            if is_open:
-                self._render_settings_interface_perf()
-
-        with section_card("File & Output##SettingsMenuOutput", tier="primary",
-                          open_by_default=False) as is_open:
-            if is_open:
-                self._render_settings_file_output()
-
-        if app_state.show_advanced_options:
-            with section_card("Logging & Autosave##SettingsMenuLogging", tier="primary",
-                              open_by_default=False) as is_open:
-                if is_open:
-                    self._render_settings_logging_autosave()
-        imgui.spacing()
-
-        # Reset All Settings button (DESTRUCTIVE - resets all settings)
-        with destructive_button_style():
-            if imgui.button("Reset All Settings to Default##ResetAllSettingsButton", width=-1):
-                imgui.open_popup("Confirm Reset##ResetSettingsPopup")
-
-        if imgui.begin_popup_modal(
-            "Confirm Reset##ResetSettingsPopup", True, imgui.WINDOW_ALWAYS_AUTO_RESIZE
-        )[0]:
-            imgui.text(
-                "This will reset all application settings to their defaults.\n"
-                "Your projects will not be affected.\n"
-                "This action cannot be undone."
-            )
-
-            avail_w = imgui.get_content_region_available_width()
-            pw = (avail_w - imgui.get_style().item_spacing[0]) / 2.0
-
-            # Confirm Reset button (DESTRUCTIVE - irreversible action)
-            with destructive_button_style():
-                if imgui.button("Confirm Reset", width=pw):
-                    app.app_settings.reset_to_defaults()
-                    app.logger.info("All settings have been reset to default.", extra={"status_message": True})
-                    imgui.close_current_popup()
-
-            imgui.same_line()
-            if imgui.button("Cancel", width=pw):
-                imgui.close_current_popup()
-            imgui.end_popup()

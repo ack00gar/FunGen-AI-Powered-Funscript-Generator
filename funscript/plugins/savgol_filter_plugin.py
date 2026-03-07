@@ -7,7 +7,6 @@ preserving features like peaks and valleys better than simple moving averages.
 
 import numpy as np
 from typing import Dict, Any, List, Optional
-import copy
 
 try:
     from .base_plugin import FunscriptTransformationPlugin

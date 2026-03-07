@@ -41,7 +41,7 @@ class AudioVideoSync:
         self._vp.register_playback_state_callback(self._on_playback_state_change)
         self._vp.register_seek_callback(self._on_video_seek)
         self._registered = True
-        logger.info("AudioVideoSync started")
+        logger.debug("AudioVideoSync started")
 
     def stop(self):
         """Unregister callbacks and stop audio."""

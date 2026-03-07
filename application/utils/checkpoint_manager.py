@@ -127,7 +127,7 @@ class CheckpointManager:
         # Throttling for verbose find logs: {video_path: (last_checkpoint_id, last_log_time)}
         self._last_find_log: Dict[str, Tuple[str, float]] = {}
 
-        logger.info(f"CheckpointManager initialized: dir={checkpoint_dir}, interval={checkpoint_interval}s")
+        logger.debug(f"CheckpointManager initialized: dir={checkpoint_dir}, interval={checkpoint_interval}s")
 
         # Auto-cleanup old checkpoints with missing videos on startup
         try:

@@ -18,7 +18,7 @@ from typing import Dict, Any, Optional, List, Tuple, Callable
 from multiprocessing import Event
 
 # Constants
-DEFAULT_LIVE_TRACKER = "oscillation"
+DEFAULT_LIVE_TRACKER = "LIVE_OSCILLATION"
 DEFAULT_CHUNK_OVERLAP_FRAMES = 30
 DEFAULT_MIN_SEGMENT_DURATION = 2.0
 DEFAULT_SEGMENT_PADDING_FRAMES = 15
@@ -108,8 +108,8 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
     def metadata(self) -> TrackerMetadata:
         """Return metadata describing this tracker."""
         return TrackerMetadata(
-            name="OFFLINE_3_STAGE", 
-            display_name="Offline - Standard (3-Stage)",
+            name="LEGACY_STAGE3_OPTICAL_FLOW",
+            display_name="Stage 3 Optical Flow",
             description="Offline optical flow tracking using live tracker algorithms on Stage 2 segments",
             category="offline",
             version="1.0.0",

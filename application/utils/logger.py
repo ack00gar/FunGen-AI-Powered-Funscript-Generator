@@ -1,7 +1,6 @@
 import logging
 import inspect
 import subprocess
-import os
 from logging.handlers import RotatingFileHandler
 from config import constants
 
@@ -11,18 +10,18 @@ def get_git_info():
     try:
         # Get current branch
         branch_result = subprocess.run(
-            ['git', 'branch', '--show-current'], 
+            ['git', 'branch', '--show-current'],
             capture_output=True, text=True, timeout=2
         )
         branch = branch_result.stdout.strip() if branch_result.returncode == 0 else 'unknown'
-        
+
         # Get current commit hash (short version)
         commit_result = subprocess.run(
-            ['git', 'rev-parse', '--short', 'HEAD'], 
+            ['git', 'rev-parse', '--short', 'HEAD'],
             capture_output=True, text=True, timeout=2
         )
         commit = commit_result.stdout.strip() if commit_result.returncode == 0 else 'unknown'
-        
+
         return f"{branch}@{commit}"
     except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
         return "nogit@unknown"
@@ -83,16 +82,17 @@ class StatusMessageHandler(logging.Handler):
 class ColoredFormatter(logging.Formatter):
     """
     A custom formatter to add colors to log messages based on log level.
+    Compact format for console readability.
     """
-    # Define ANSI escape codes for colors (using more standard codes)
-    GREY = "\x1b[90m"  # Bright Black (often renders as grey)
-    GREEN = "\x1b[32m"  # Green
-    YELLOW = "\x1b[33m"  # Yellow
-    RED = "\x1b[31m"  # Red
-    BOLD_RED = "\x1b[31;1m"  # Bold Red
-    RESET = "\x1b[0m"  # Reset all attributes
+    GREY = "\x1b[90m"
+    GREEN = "\x1b[32m"
+    YELLOW = "\x1b[33m"
+    RED = "\x1b[31m"
+    BOLD_RED = "\x1b[31;1m"
+    RESET = "\x1b[0m"
 
-    log_format_base = f"%(asctime)s - [{_GIT_INFO}] - %(name)s - %(levelname)-8s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s"
+    # Compact console format: time level [module:line] message
+    log_format_base = "%(asctime)s %(levelname)-5s [%(module)s:%(lineno)d] %(message)s"
 
     FORMATS = {
         logging.DEBUG: GREY + log_format_base + RESET,
@@ -104,7 +104,7 @@ class ColoredFormatter(logging.Formatter):
 
     def format(self, record):
         log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt, datefmt='%Y-%m-%d %H:%M:%S')
+        formatter = logging.Formatter(log_fmt, datefmt='%H:%M:%S')
         return formatter.format(record)
 
 
@@ -132,15 +132,14 @@ class AppLogger:
         if self.logger.hasHandlers():
             self.logger.handlers.clear()
 
-        # Console Handler with colors
+        # Console Handler with colors (compact format)
         ch = logging.StreamHandler()
         ch.setLevel(level)
         ch.setFormatter(ColoredFormatter())
         self.logger.addHandler(ch)
 
-        # File Handler (optional)
+        # File Handler (optional) — verbose format for bug reports
         if log_file:
-            # Use rotating file handler to keep log size manageable
             fh = RotatingFileHandler(
                 log_file,
                 mode='a',
@@ -162,6 +161,14 @@ class AppLogger:
                                        level_durations=status_level_durations)
             smh.setLevel(level)
             self.logger.addHandler(smh)
+
+    def set_level(self, level):
+        """Update logging level on root logger AND all handlers."""
+        self.logger.setLevel(level)
+        for handler in self.logger.handlers:
+            # Don't change StatusMessageHandler level — it uses its own filtering
+            if not isinstance(handler, StatusMessageHandler):
+                handler.setLevel(level)
 
     def get_logger(self):
         """
