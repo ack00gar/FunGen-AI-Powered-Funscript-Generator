@@ -145,7 +145,8 @@ class TrackerManager:
                 self.logger.error(f"Unknown tracker mode: {mode_name}")
                 return False
                 
-            tracker_class = tracker_registry.get_tracker(mode_name)
+            # Use internal name from tracker_info (resolves aliases like "oscillation" → "LIVE_OSCILLATION")
+            tracker_class = tracker_registry.get_tracker(tracker_info.internal_name)
             if not tracker_class:
                 self.logger.error(f"Could not load tracker class for: {mode_name}")
                 return False
