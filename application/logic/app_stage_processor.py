@@ -673,11 +673,30 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
                     return
 
                 frame_objects_list = s2_output_data.get("all_s2_frame_objects_list", [])
-                self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in frame_objects_list}
-                self.logger.info(f"Mixed Stage 3 data preparation: {len(frame_objects_list)} frame objects loaded from cached Stage 2 data")
 
                 # Store SQLite database path for Mixed Stage 3
                 self.app.s2_sqlite_db_path = s2_output_data.get("sqlite_db_path")
+
+                # If frame objects were cleared from memory (SQLite mode), reload from database
+                if not frame_objects_list and self.app.s2_sqlite_db_path:
+                    try:
+                        from detection.cd.stage_2_sqlite_storage import Stage2SQLiteStorage
+                        storage = Stage2SQLiteStorage(self.app.s2_sqlite_db_path, self.logger)
+                        frame_range = storage.get_frame_range()
+                        if frame_range and frame_range[0] is not None:
+                            frame_objects_map = storage.get_frame_objects_range(frame_range[0], frame_range[1])
+                            self.app.s2_frame_objects_map_for_s3 = frame_objects_map
+                            self.logger.info(f"Mixed Stage 3 data preparation: {len(frame_objects_map)} frame objects reloaded from SQLite database")
+                        else:
+                            self.app.s2_frame_objects_map_for_s3 = {}
+                            self.logger.warning("Mixed Stage 3 data preparation: SQLite database has no frame objects")
+                        storage.close()
+                    except Exception as e:
+                        self.logger.error(f"Failed to reload frame objects from SQLite: {e}", exc_info=True)
+                        self.app.s2_frame_objects_map_for_s3 = {}
+                else:
+                    self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in frame_objects_list}
+                    self.logger.info(f"Mixed Stage 3 data preparation: {len(frame_objects_list)} frame objects loaded from cached Stage 2 data")
 
                 self.logger.info(f"Starting Mixed Stage 3 with {preprocessed_path_for_s3}.")
 
@@ -730,11 +749,30 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
                     return
 
                 frame_objects_list = s2_output_data.get("all_s2_frame_objects_list", [])
-                self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in frame_objects_list}
-                self.logger.info(f"Stage 3 data preparation: {len(frame_objects_list)} frame objects loaded from cached Stage 2 data")
 
                 # Store SQLite database path for Stage 3
                 self.app.s2_sqlite_db_path = s2_output_data.get("sqlite_db_path")
+
+                # If frame objects were cleared from memory (SQLite mode), reload from database
+                if not frame_objects_list and self.app.s2_sqlite_db_path:
+                    try:
+                        from detection.cd.stage_2_sqlite_storage import Stage2SQLiteStorage
+                        storage = Stage2SQLiteStorage(self.app.s2_sqlite_db_path, self.logger)
+                        frame_range = storage.get_frame_range()
+                        if frame_range and frame_range[0] is not None:
+                            frame_objects_map = storage.get_frame_objects_range(frame_range[0], frame_range[1])
+                            self.app.s2_frame_objects_map_for_s3 = frame_objects_map
+                            self.logger.info(f"Stage 3 data preparation: {len(frame_objects_map)} frame objects reloaded from SQLite database")
+                        else:
+                            self.app.s2_frame_objects_map_for_s3 = {}
+                            self.logger.warning("Stage 3 data preparation: SQLite database has no frame objects")
+                        storage.close()
+                    except Exception as e:
+                        self.logger.error(f"Failed to reload frame objects from SQLite: {e}", exc_info=True)
+                        self.app.s2_frame_objects_map_for_s3 = {}
+                else:
+                    self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in frame_objects_list}
+                    self.logger.info(f"Stage 3 data preparation: {len(frame_objects_list)} frame objects loaded from cached Stage 2 data")
 
                 self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
 
