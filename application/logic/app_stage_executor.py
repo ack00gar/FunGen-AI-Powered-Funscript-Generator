@@ -811,6 +811,10 @@ class StageExecutorMixin:
         if s2_overlay_path and os.path.exists(s2_overlay_path):
             input_files['stage2'] = s2_overlay_path
             input_files['stage2_output'] = s2_overlay_path
+        # Pass SQLite path for trackers that can use it (e.g. Guided Flow)
+        s2_sqlite_path = getattr(self.app, 's2_sqlite_db_path', None)
+        if s2_sqlite_path and os.path.exists(s2_sqlite_path):
+            input_files['stage2_sqlite'] = s2_sqlite_path
         if preprocessed_video_path and os.path.exists(preprocessed_video_path):
             input_files['preprocessed_video'] = preprocessed_video_path
 
