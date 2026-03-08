@@ -128,16 +128,16 @@ class PluginUIRenderer:
                 context = self.plugin_manager.plugin_contexts.get(plugin_name)
                 if context:
                     context.apply_requested = True
-                    if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
-                        if self.timeline_reference.multi_selected_action_indices:
-                            context.apply_to_selection = True
+                    has_sel = (self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices')
+                              and self.timeline_reference.multi_selected_action_indices)
+                    context.apply_to_selection = bool(has_sel)
             else:
                 self.plugin_manager.set_plugin_state(plugin_name, PluginUIState.OPEN)
-                if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
-                    if self.timeline_reference.multi_selected_action_indices:
-                        context = self.plugin_manager.plugin_contexts.get(plugin_name)
-                        if context:
-                            context.apply_to_selection = True
+                context = self.plugin_manager.plugin_contexts.get(plugin_name)
+                if context:
+                    has_sel = (self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices')
+                              and self.timeline_reference.multi_selected_action_indices)
+                    context.apply_to_selection = bool(has_sel)
             return True
 
         if imgui.is_item_hovered() and ui_data.get('description'):
@@ -246,9 +246,12 @@ class PluginUIRenderer:
         any_changed = False
         
         for param_name, param_info in schema.items():
+            # Internal params injected programmatically — not user-editable
+            if param_info.get('type') is list:
+                continue
             control_id = f"{param_name}##Plugin{plugin_name}Param"
             current_value = parameters.get(param_name, param_info.get('default'))
-            
+
             # Render control based on parameter type
             changed, new_value = self._render_parameter_control(
                 control_id, param_name, param_info, current_value

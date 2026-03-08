@@ -316,7 +316,15 @@ class Stage2SQLiteStorage:
         # Create minimal frame object with only essential data
         frame_obj = FrameObject(frame_id=frame_id, yolo_input_size=640)  # Default yolo_input_size
         frame_obj.atr_assigned_position = atr_assigned_position
+        frame_obj.assigned_position = atr_assigned_position
+        if isinstance(atr_funscript_distance, bytes):
+            import struct
+            try:
+                atr_funscript_distance = struct.unpack('d', atr_funscript_distance)[0] if len(atr_funscript_distance) == 8 else 50.0
+            except struct.error:
+                atr_funscript_distance = 50.0
         frame_obj.atr_funscript_distance = atr_funscript_distance
+        frame_obj.funscript_distance = atr_funscript_distance
 
         # Reconstruct locked penis state from coordinates
         frame_obj.locked_penis_state = LockedPenisState()
