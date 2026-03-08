@@ -329,7 +329,7 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
         # BREAKTHROUGH 1: Pre-compute ALL violations using vectorized operations
         time_deltas = np.diff(timestamps)
         pos_deltas = np.diff(positions)
-        speeds = np.abs(pos_deltas) / np.maximum(time_deltas, 1) * 1000  # positions per second
+        speeds = np.abs(pos_deltas) / np.maximum(time_deltas, 1)
         violation_mask = speeds > speed_threshold
         
         if not np.any(violation_mask):
@@ -420,8 +420,8 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
                 continue
             
             pos_delta = abs(current['pos'] - previous['pos'])
-            current_speed = pos_delta / time_delta * 1000  # positions per second
-
+            current_speed = pos_delta / time_delta  # positions per millisecond
+            
             if current_speed > speed_threshold:
                 # Need to limit speed - insert intermediate points
                 intermediate_actions = self._create_intermediate_actions(
@@ -447,12 +447,11 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
             return [end_action]
         
         # Calculate how many intermediate points we need
-        # max_speed is in positions/second, time_delta is in ms
-        required_time_ms = abs(pos_delta) / max_speed * 1000
-        if required_time_ms <= time_delta:
+        required_time = abs(pos_delta) / max_speed
+        if required_time <= time_delta:
             return [end_action]
         
-        num_segments = int(np.ceil(required_time_ms / time_delta))
+        num_segments = int(np.ceil(required_time / time_delta))
         
         intermediate_actions = []
         for i in range(1, num_segments + 1):
@@ -514,7 +513,7 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
                 pos_delta = abs(current['pos'] - previous['pos'])
                 
                 if time_delta > 0:
-                    speed = pos_delta / time_delta * 1000  # positions per second
+                    speed = pos_delta / time_delta
                     speeds.append(speed)
                     
                     if pos_delta <= small_movement_threshold:
