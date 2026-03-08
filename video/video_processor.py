@@ -1280,11 +1280,12 @@ class VideoProcessor(
 
         # If the target frame is cached, update current_frame immediately
         # so the display shows the correct frame without waiting for the worker.
-        # Otherwise, clear current_frame to avoid showing the stale old frame.
+        # Otherwise, keep showing the previous frame to avoid flicker.
         with self.frame_cache_lock:
             cached = self.frame_cache.get(target_frame)
-        with self.frame_lock:
-            self.current_frame = cached  # None if not cached — display will skip
+        if cached is not None:
+            with self.frame_lock:
+                self.current_frame = cached
 
         # Invalidate arrow-nav state since the user jumped to a new position
         self._clear_nav_state()

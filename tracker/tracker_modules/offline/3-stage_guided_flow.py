@@ -82,6 +82,8 @@ GRIND_DX_DY_RATIO = 1.3
 # High-pass cutoff for drift removal (Hz). Strokes above this pass through.
 # 0.25 Hz preserves even very slow strokes while removing camera/ROI drift.
 HIGHPASS_CUTOFF_HZ = 0.25
+# Maximum duration (seconds) for a "Not Relevant" segment to be auto-merged with neighbors
+NR_MERGE_MAX_DURATION_S = 3.0
 
 
 # ---------------------------------------------------------------------------
@@ -728,14 +730,19 @@ class GuidedFlowTracker(BaseOfflineTracker):
         self.processing_active = True
 
         try:
-            # Load Stage 2 data
+            # Load Stage 2 data (msgpack primary, SQLite fallback)
             stage2_path = input_files.get('stage2') or input_files.get('stage2_output')
-            if not stage2_path or not os.path.exists(stage2_path):
-                return OfflineProcessingResult(success=False, error_message="Stage 2 output not found")
+            stage2_sqlite_path = input_files.get('stage2_sqlite')
+            stage2_data = None
 
-            stage2_data = self._load_stage2(stage2_path)
+            if stage2_path and os.path.exists(stage2_path):
+                stage2_data = self._load_stage2(stage2_path)
+
+            if not stage2_data and stage2_sqlite_path and os.path.exists(stage2_sqlite_path):
+                stage2_data = self._load_stage2_sqlite(stage2_sqlite_path)
+
             if not stage2_data:
-                return OfflineProcessingResult(success=False, error_message="Failed to load Stage 2 data")
+                return OfflineProcessingResult(success=False, error_message="Stage 2 output not found")
 
             segments = stage2_data['segments']
             frame_objects_map = stage2_data['frame_objects']
@@ -761,6 +768,9 @@ class GuidedFlowTracker(BaseOfflineTracker):
             all_primary = []
             all_secondary = []
             stop_event = self.stop_event or Event()
+
+            # Merge short false-NR segments before filtering
+            segments = self._merge_false_nr_segments(segments, fps, frame_objects_map)
 
             # Filter to relevant segments only
             relevant_segments = [
@@ -980,6 +990,118 @@ class GuidedFlowTracker(BaseOfflineTracker):
 
             result[fid] = fo
         return result
+
+    def _load_stage2_sqlite(self, db_path):
+        """Load Stage 2 data from SQLite database as fallback."""
+        try:
+            from detection.cd.stage_2_sqlite_storage import Stage2SQLiteStorage
+            storage = Stage2SQLiteStorage(db_path)
+            segments = storage.get_segments()
+            min_frame, max_frame = storage.get_frame_range()
+            frame_objects_map = storage.get_frame_objects_range(min_frame, max_frame) if max_frame > min_frame else {}
+            self.logger.info(f"Loaded {len(segments)} segments, {len(frame_objects_map)} frames from Stage 2 SQLite")
+            return {'segments': segments, 'frame_objects': frame_objects_map}
+        except Exception as e:
+            self.logger.error(f"Failed to load Stage 2 SQLite data: {e}", exc_info=True)
+            return None
+
+    def _merge_false_nr_segments(self, segments, fps, frame_objects_map):
+        """Merge short NR/Close-Up segments with neighbors when flanked by same chapter type.
+
+        Rule-based: NR segments shorter than NR_MERGE_MAX_DURATION_S are merged
+        with their neighbor(s) if the same chapter type appears on both sides.
+        If different types on each side, merge with the longer neighbor.
+
+        Learning-enhanced: when a trained NR recovery model exists, also merge
+        NR segments the classifier predicts as false.
+        """
+        NR_POSITIONS = {"Not Relevant", "NR", "C-Up", "Close Up"}
+        if len(segments) < 3:
+            return segments
+
+        max_frames = int(NR_MERGE_MAX_DURATION_S * fps)
+        merged = list(segments)
+        changed = True
+
+        while changed:
+            changed = False
+            new_list = []
+            i = 0
+            while i < len(merged):
+                seg = merged[i]
+                pos = self._get_position(seg)
+                seg_len = seg.end_frame_id - seg.start_frame_id
+
+                if pos in NR_POSITIONS and seg_len <= max_frames:
+                    left = new_list[-1] if new_list else None
+                    right = merged[i + 1] if i + 1 < len(merged) else None
+
+                    left_pos = self._get_position(left) if left else None
+                    right_pos = self._get_position(right) if right else None
+
+                    should_merge = False
+                    merge_target_pos = None
+
+                    if left_pos and right_pos and left_pos not in NR_POSITIONS and right_pos not in NR_POSITIONS:
+                        if left_pos == right_pos:
+                            # Same type on both sides — merge all three
+                            should_merge = True
+                            merge_target_pos = left_pos
+                        else:
+                            # Different types — merge with longer neighbor
+                            left_len = left.end_frame_id - left.start_frame_id
+                            right_len = right.end_frame_id - right.start_frame_id
+                            should_merge = True
+                            merge_target_pos = left_pos if left_len >= right_len else right_pos
+
+                    # Learning-enhanced merge check
+                    if not should_merge:
+                        try:
+                            from funscript.learning.correction_model import CorrectionModel
+                            model = CorrectionModel.load()
+                            if model.nr_model is not None:
+                                from funscript.learning.feature_extractor import extract_nr_segment_features
+                                neighbor_ct = (left_pos or right_pos or "unknown")
+                                neighbor_match = (left_pos == right_pos) if (left_pos and right_pos) else False
+                                nr_features = extract_nr_segment_features(
+                                    seg.start_frame_id, seg.end_frame_id, fps,
+                                    neighbor_ct, neighbor_match, frame_objects_map,
+                                ).reshape(1, -1)
+                                prob = model.predict_nr_recovery(nr_features)
+                                if prob[0] > 0.5:
+                                    should_merge = True
+                                    merge_target_pos = left_pos or right_pos or "unknown"
+                        except Exception:
+                            pass  # Learning not available yet — skip
+
+                    if should_merge and merge_target_pos:
+                        if left and merge_target_pos == self._get_position(left):
+                            # Extend left segment to cover NR
+                            left.end_frame_id = seg.end_frame_id
+                            # If right has same type, merge right into left too
+                            if right and self._get_position(right) == merge_target_pos:
+                                left.end_frame_id = right.end_frame_id
+                                i += 2  # Skip NR + right
+                                changed = True
+                                continue
+                            i += 1
+                            changed = True
+                            continue
+                        elif right and merge_target_pos == self._get_position(right):
+                            # Extend right segment to cover NR
+                            right.start_frame_id = seg.start_frame_id
+                            i += 1  # Skip NR, right will be added normally
+                            changed = True
+                            continue
+
+                new_list.append(seg)
+                i += 1
+            merged = new_list
+
+        nr_removed = len(segments) - len(merged)
+        if nr_removed > 0:
+            self.logger.info(f"Merged {nr_removed} false NR segment(s) with neighbors")
+        return merged
 
     def _detect_vr(self, cap):
         """Simple VR detection from aspect ratio."""

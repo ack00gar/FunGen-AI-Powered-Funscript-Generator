@@ -773,8 +773,11 @@ class InteractiveFunscriptTimeline:
         # Apply
         actions[idx]['at'] = new_t
         actions[idx]['pos'] = new_v
-        
+
         # Update state
+        fs, axis = self._get_target_funscript_details()
+        if fs:
+            fs._invalidate_cache(axis or 'both')
         self.invalidate_cache()
         self.app.project_manager.project_dirty = True
 
@@ -879,6 +882,9 @@ class InteractiveFunscriptTimeline:
         for idx in self.multi_selected_action_indices:
             if idx < len(actions):
                 actions[idx]['pos'] = max(0, min(100, actions[idx]['pos'] + actual_delta))
+        fs, axis = self._get_target_funscript_details()
+        if fs:
+            fs._invalidate_cache(axis or 'both')
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Value")
         self.invalidate_cache()
 
@@ -900,6 +906,9 @@ class InteractiveFunscriptTimeline:
                 new_at = actions[idx]['at'] + delta_ms
                 actions[idx]['at'] = int(max(prev_limit, min(next_limit, new_at)))
 
+        fs, axis = self._get_target_funscript_details()
+        if fs:
+            fs._invalidate_cache(axis or 'both')
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Time")
         self.invalidate_cache()
 
