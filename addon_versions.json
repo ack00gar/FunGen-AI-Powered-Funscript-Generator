@@ -1,9 +1,9 @@
 {
   "addons": {
     "device_control": {
-      "version": "5.7.2",
+      "version": "5.7.3",
       "display_name": "Device Control",
-      "changelog": "TCode continuous PCHIP interpolation, fix OSR disconnect cross-loop error"
+      "changelog": "Fix HDSP position range and dual command dispatch (courtesy of Discord @walton)"
     },
     "streamer": {
       "version": "3.6.2",
