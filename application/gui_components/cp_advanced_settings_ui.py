@@ -575,7 +575,8 @@ class AdvancedSettingsMixin:
         if ch:
             settings.set("autosave_final_funscript_to_video_location", v)
 
-        ch, v = imgui.checkbox("Generate .roll file (from Timeline 2)", settings.get("generate_roll_file", True))
+        sec_axis_label = settings.get("default_secondary_axis", "roll")
+        ch, v = imgui.checkbox(f"Generate .{sec_axis_label} file (from Timeline 2)", settings.get("generate_roll_file", True))
         if ch:
             settings.set("generate_roll_file", v)
 
