@@ -578,10 +578,16 @@ class TrackerManager:
                 self.logger.debug(f"Tracker cleaned up: {tracker_name}")
             except Exception as e:
                 self.logger.error(f"Error cleaning up tracker: {e}")
-        
+
         self._current_tracker = None
         self._current_mode = None
         self._tracker_info = None
+
+        # Clear User ROI state so it doesn't persist across tracker switches
+        self.user_roi_fixed = None
+        self.user_roi_tracked_point_relative = None
+        self.user_roi_initial_point_relative = None
+        self.user_roi_current_flow_vector = None
 
     def _setup_tracker_environment(self):
         """Set up tracker environment with app context."""
