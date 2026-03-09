@@ -1620,6 +1620,15 @@ class VideoProcessor(
                     else:
                         self.logger.info(
                             f"End of FFmpeg GUI stream or incomplete frame (read {raw_frame_len}/{self.frame_size_bytes}).")
+                        # Log FFmpeg stderr to help diagnose why it produced no output
+                        # (e.g., filter errors, codec issues, file access problems)
+                        if loop_ffmpeg_process.stderr:
+                            try:
+                                ffmpeg_stderr = loop_ffmpeg_process.stderr.read(8192).decode(errors='ignore').strip()
+                                if ffmpeg_stderr:
+                                    self.logger.warning(f"FFmpeg stderr: {ffmpeg_stderr}")
+                            except Exception:
+                                pass
                     self.is_processing = False
                     # Clear tracker processing flag when stream ends naturally
                     self.enable_tracker_processing = False
