@@ -74,14 +74,15 @@ class FFmpegBuildersMixin:
             return [f"scale={self.yolo_input_size}:{self.yolo_input_size}"]
         elif aspect_ratio > 1.05:
             # Wider than tall (landscape) - scale and pad top/bottom
+            # Use -2 (not -1) to ensure even dimensions, avoiding filter errors on some FFmpeg builds
             return [
-                f"scale={self.yolo_input_size}:-1:force_original_aspect_ratio=decrease",
+                f"scale={self.yolo_input_size}:-2:force_original_aspect_ratio=decrease",
                 f"pad={self.yolo_input_size}:{self.yolo_input_size}:0:(oh-ih)/2:black"
             ]
         else:
             # Taller than wide (portrait) - scale and pad left/right
             return [
-                f"scale=-1:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
+                f"scale=-2:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
                 f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:0:black"
             ]
 
