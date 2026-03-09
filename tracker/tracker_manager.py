@@ -156,11 +156,19 @@ class TrackerManager:
             self._current_mode = mode_name
             self._tracker_info = tracker_info
 
-            # Apply tracker's declared axis assignments to the funscript
+            # Apply tracker's declared axis assignments to the funscript.
+            # The secondary axis can be overridden by the user's setting
+            # (e.g. "twist" instead of "roll" for SSR2 users).
             if self.funscript and tracker_info:
                 self.funscript.assign_axis(1, tracker_info.primary_axis)
                 if tracker_info.supports_dual_axis:
-                    self.funscript.assign_axis(2, tracker_info.secondary_axis)
+                    secondary = tracker_info.secondary_axis
+                    if self.app and hasattr(self.app, 'app_settings'):
+                        user_secondary = self.app.app_settings.get("default_secondary_axis")
+                        if user_secondary and user_secondary != secondary:
+                            self.logger.info(f"Using user-configured secondary axis: {user_secondary} (tracker default: {secondary})")
+                            secondary = user_secondary
+                    self.funscript.assign_axis(2, secondary)
 
                 # Auto-assign additional axes (T3+) declared by the tracker
                 if tracker_info.additional_axes:

@@ -627,6 +627,31 @@ class AdvancedSettingsMixin:
             if cur != 1:
                 settings.set("batch_mode_overwrite_strategy", 1)
 
+        # --- Default Secondary Axis ---
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        imgui.text("Default Secondary Axis:")
+        _tooltip_if_hovered(
+            "Choose which axis Timeline 2 defaults to when a tracker is activated.\n"
+            "e.g. 'twist' for SSR2, 'roll' for OSR2.\n"
+            "This overrides the tracker's hardcoded default.")
+        secondary_axis_options = [fa.value for fa in FunscriptAxis if fa != FunscriptAxis.STROKE]
+        current_secondary = settings.get("default_secondary_axis", "roll")
+        try:
+            sec_idx = secondary_axis_options.index(current_secondary)
+        except ValueError:
+            sec_idx = 0
+        imgui.push_item_width(150)
+        changed, new_sec_idx = imgui.combo("##DefaultSecondaryAxis", sec_idx, secondary_axis_options)
+        imgui.pop_item_width()
+        if changed:
+            new_axis = secondary_axis_options[new_sec_idx]
+            settings.set("default_secondary_axis", new_axis)
+            # Apply immediately to current funscript if available
+            if self.app.tracker and hasattr(self.app.tracker, 'funscript') and self.app.tracker.funscript:
+                self.app.tracker.funscript.assign_axis(2, new_axis)
+
         # --- Axis Assignments Table ---
         imgui.spacing()
         imgui.separator()

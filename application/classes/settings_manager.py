@@ -154,6 +154,7 @@ class AppSettings:
             "num_workers_stage2_of": constants.DEFAULT_S2_OF_WORKERS,
             "adaptive_batch_tuning_enabled": True,  # Progressive pipeline thread optimization during batch processing
             "hardware_acceleration_method": "none",  # Default to CPU to avoid CUDA errors on non-NVIDIA systems
+            "default_secondary_axis": "roll",  # Default secondary axis for dual-axis trackers (roll, twist, pitch, etc.)
             "ffmpeg_path": "ffmpeg",
             # VR Unwarp method: 'auto', 'metal', 'opengl', 'v360'
             # macOS: v360 is 26% faster than GPU unwarp due to optimized FFmpeg filter
