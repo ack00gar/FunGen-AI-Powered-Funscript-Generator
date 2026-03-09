@@ -946,7 +946,11 @@ class FunGenUniversalInstaller:
             if not python_exe:
                 self.print_error("Could not find Python executable for environment")
                 return False
-            
+
+            # Log Python version and path for diagnostics
+            ret, py_ver, _ = self.run_command([str(python_exe), "--version"], capture=True, check=False)
+            print(f"  Using Python: {python_exe} ({py_ver.strip() if ret == 0 else 'version unknown'})")
+
             # Upgrade pip first
             print("  Upgrading pip...")
             self.run_command([str(python_exe), "-m", "pip", "install", "--upgrade", "pip"], check=False)
@@ -977,56 +981,30 @@ class FunGenUniversalInstaller:
                         self.print_error(f"Failed to install core packages: {stderr}")
                         return False
                     
-                    # Now try to install imgui separately with multiple fallback strategies
-                    print("  Attempting to install imgui...")
-                    
-                    # Strategy 1: Force precompiled wheels first (avoid compilation)
-                    print("  Trying imgui with precompiled wheels only...")
+                    # Install imgui separately — pin to 2.0.0 which has prebuilt wheels
+                    # for Python 3.7-3.11 on Windows/Linux/macOS x86_64.
+                    # --prefer-binary tells pip to use wheels when available, but allows
+                    # compilation as a fallback (e.g., Python 3.12+ or ARM64).
+                    print("  Installing imgui==2.0.0...")
                     ret_imgui, stdout_imgui, stderr_imgui = self.run_command([
-                        str(python_exe), "-m", "pip", "install", "imgui", 
-                        "--only-binary=all", "--prefer-binary"
+                        str(python_exe), "-m", "pip", "install", "imgui==2.0.0",
+                        "--prefer-binary"
                     ], check=False)
-                    
-                    if ret_imgui != 0:
-                        self.print_warning("Precompiled wheels not available. Trying alternative strategies...")
-                        
-                        # Strategy 2: Try with fresh cache (sometimes wheels are corrupted)
-                        print("  Trying imgui with fresh cache...")
-                        ret_imgui2, stdout_imgui2, stderr_imgui2 = self.run_command([
-                            str(python_exe), "-m", "pip", "install", "imgui", 
-                            "--no-cache-dir", "--only-binary=all"
-                        ], check=False)
-                        
-                        if ret_imgui2 != 0:
-                            # Strategy 3: Try imgui 2.0.0 specifically (most likely to have wheels)
-                            print("  Trying imgui 2.0.0 (most likely to have precompiled wheels)...")
-                            ret_imgui3, stdout_imgui3, stderr_imgui3 = self.run_command([
-                                str(python_exe), "-m", "pip", "install", "imgui==2.0.0",
-                                "--only-binary=all", "--prefer-binary"
-                            ], check=False)
-                            
-                            if ret_imgui3 == 0:
-                                print("  Core requirements installed successfully (imgui 2.0.0)")
-                                imgui_installed = True
-                            else:
-                                imgui_installed = False
-                            
-                            if not imgui_installed:
-                                # Strategy 4: Last resort - allow compilation but with better error handling
-                                print("  Last resort: attempting compilation...")
-                                ret_imgui4, stdout_imgui4, stderr_imgui4 = self.run_command([
-                                    str(python_exe), "-m", "pip", "install", "imgui", "--no-cache-dir"
-                                ], check=False)
-                                
-                                if ret_imgui4 == 0:
-                                    print("  Core requirements installed successfully (imgui compiled)")
-                                else:
-                                    # All strategies failed - provide guidance
-                                    self._handle_imgui_installation_failure()
-                        else:
-                            print("  Core requirements installed successfully (imgui retry)")
+
+                    if ret_imgui == 0:
+                        self.print_success("imgui installed successfully")
                     else:
-                        print("  Core requirements installed successfully (including imgui)")
+                        self.print_warning(f"imgui install failed: {stderr_imgui.strip()}")
+                        # Retry without version pin in case a newer version has wheels
+                        print("  Retrying with latest imgui version...")
+                        ret_imgui2, _, stderr_imgui2 = self.run_command([
+                            str(python_exe), "-m", "pip", "install", "imgui",
+                            "--no-cache-dir"
+                        ], check=False)
+                        if ret_imgui2 == 0:
+                            self.print_success("imgui installed successfully (latest version)")
+                        else:
+                            self._handle_imgui_installation_failure()
                         
                 else:
                     # Non-Windows: use regular requirements file installation
@@ -1272,26 +1250,41 @@ class FunGenUniversalInstaller:
     
     def _get_python_executable(self) -> Optional[Path]:
         """Get the Python executable for the current environment"""
-        candidate = None
+        candidates = []
         if self.conda_available:
+            # CONDA_PREFIX is the most reliable source — set by conda activate
+            conda_prefix = os.environ.get("CONDA_PREFIX")
+            if conda_prefix:
+                prefix = Path(conda_prefix)
+                if self.platform == "Windows":
+                    candidates.append(prefix / "python.exe")
+                else:
+                    candidates.append(prefix / "bin" / "python")
+
+            # Standard miniconda env path
             if self.platform == "Windows":
-                candidate = self.miniconda_path / "envs" / CONFIG["env_name"] / "python.exe"
+                candidates.append(self.miniconda_path / "envs" / CONFIG["env_name"] / "python.exe")
             else:
-                candidate = self.miniconda_path / "envs" / CONFIG["env_name"] / "bin" / "python"
+                candidates.append(self.miniconda_path / "envs" / CONFIG["env_name"] / "bin" / "python")
+
+            # Conda may store envs in ~/.conda/envs/ instead of miniconda3/envs/
+            alt_conda_envs = Path.home() / ".conda" / "envs" / CONFIG["env_name"]
+            if self.platform == "Windows":
+                candidates.append(alt_conda_envs / "python.exe")
+            else:
+                candidates.append(alt_conda_envs / "bin" / "python")
         elif self.venv_path:
             if self.platform == "Windows":
-                candidate = self.venv_path / "Scripts" / "python.exe"
+                candidates.append(self.venv_path / "Scripts" / "python.exe")
             else:
-                candidate = self.venv_path / "bin" / "python"
+                candidates.append(self.venv_path / "bin" / "python")
 
-        if candidate and candidate.exists():
-            return candidate
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
 
         # Fallback: install.bat/install.sh already activates the env before
         # running install.py, so sys.executable is the correct Python.
-        if candidate:
-            self.print_warning(f"Expected Python not found at: {candidate}")
-            self.print_warning(f"Falling back to current interpreter: {sys.executable}")
         return Path(sys.executable)
     
     def _detect_gpu(self) -> str:

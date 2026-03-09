@@ -1,5 +1,5 @@
 numpy
-imgui
+imgui==2.0.0
 ultralytics==8.3.78
 glfw~=2.8.0
 pyopengl~=3.1.7
