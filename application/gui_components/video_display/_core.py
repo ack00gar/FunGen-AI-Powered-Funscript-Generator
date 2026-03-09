@@ -541,7 +541,10 @@ class VideoDisplayCoreMixin:
 
                             # Visualization of active User ROI (outline + tracked point)
                             # Rule: If ROI toggle is ON => always show. If ROI toggle is OFF => show only when not actively tracking (paused/stopped).
-                            if self.app.tracker and getattr(self.app.tracker, 'user_roi_fixed', None) is not None and not self.app.is_setting_user_roi_mode:
+                            # Only show when the current tracker actually uses ROI (requires_intervention)
+                            _tracker_info = self.app.tracker.get_tracker_info() if self.app.tracker else None
+                            _is_roi_tracker = _tracker_info and getattr(_tracker_info, 'requires_intervention', False)
+                            if _is_roi_tracker and getattr(self.app.tracker, 'user_roi_fixed', None) is not None and not self.app.is_setting_user_roi_mode:
                                 tracker = self.app.tracker
                                 proc = getattr(self.app, 'processor', None)
                                 is_paused = bool(proc and hasattr(proc, 'pause_event') and proc.pause_event.is_set())
