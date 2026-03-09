@@ -147,6 +147,8 @@ class AppSettings:
             "generate_roll_file": True,
             "export_raw_as_funscript": False,
             "batch_mode_overwrite_strategy": 0,  # 0=Process All, 1=Skip Existing
+            "metadata_verbose": True,          # Include extended fields in funscript metadata
+            "metadata_creator_identity": "default-identity",  # Identity string embedded in funscript metadata
 
             # Performance & System
             "num_producers_stage1": constants.DEFAULT_S1_NUM_PRODUCERS,
