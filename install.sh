@@ -151,7 +151,7 @@ handle_interactive_install() {
     return 0
 }
 
-echo "[1/4] Checking Python installation..."
+echo "[1/6] Checking Python installation..."
 
 # Check if existing miniconda is the wrong architecture
 WRONG_ARCH=0
@@ -185,7 +185,7 @@ else
 fi
 
 echo ""
-echo "[2/4] Installing Miniconda..."
+echo "[2/6] Installing Miniconda..."
 if [ -d "$MINICONDA_PATH" ] && [ "$WRONG_ARCH" -eq 0 ]; then
     echo "    Miniconda already installed at $MINICONDA_PATH"
     echo "    Using existing installation..."

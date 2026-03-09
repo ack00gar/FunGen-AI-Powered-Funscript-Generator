@@ -512,6 +512,12 @@ class TensorRTCompiler:
         Returns:
             tuple: (stdout, stderr) - Combined output from the subprocess
         """
+        # Allow Ultralytics to download TensorRT dependencies during export.
+        # The launcher sets YOLO_OFFLINE=True to prevent network checks at startup,
+        # but the export needs to fetch packages like tensorrt, onnx, etc.
+        export_env = os.environ.copy()
+        export_env.pop("YOLO_OFFLINE", None)
+
         # Start subprocess with unbuffered output
         self._export_process = subprocess.Popen(
             [sys.executable, "-u", export_script, pt_model_path, output_dir],
@@ -519,7 +525,8 @@ class TensorRTCompiler:
             stderr=subprocess.STDOUT,  # Combine stderr into stdout
             text=True,
             bufsize=1,  # Line buffered
-            universal_newlines=True
+            universal_newlines=True,
+            env=export_env
         )
 
         # Monitor process and capture output in real-time

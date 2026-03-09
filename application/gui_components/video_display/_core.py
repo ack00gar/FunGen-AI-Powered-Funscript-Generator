@@ -32,7 +32,8 @@ class VideoDisplayCoreMixin:
         self._frame_skip_counter = 0  # Skip expensive operations during load
 
         # Video texture update optimization (dirty flag)
-        self._last_uploaded_frame_index = None  # Track which frame is currently in GPU texture
+        self._last_uploaded_frame_version = -1  # Track which frame version is in GPU texture
+        self._last_uploaded_frame_index = None  # Track which frame index is in GPU texture
         self._texture_update_count = 0  # Count actual texture updates
         self._texture_skip_count = 0  # Count skipped updates (cache hits)
         self._last_perf_log_time = 0  # For periodic performance logging
@@ -163,22 +164,31 @@ class VideoDisplayCoreMixin:
 
         Call this every frame so the texture stays fresh even when the
         normal video panel is not rendered (e.g. during fullscreen).
-        """
-        current_frame_index = getattr(self.app.processor, 'current_frame_index', None)
-        frame_changed = (current_frame_index != self._last_uploaded_frame_index)
 
-        if not frame_changed:
+        Uses _frame_version (incremented on every current_frame assignment)
+        instead of current_frame_index to detect changes.  This avoids a
+        race where seek_video() updates the index immediately but the
+        background worker hasn't delivered the new frame yet — the old
+        frame would be uploaded and the new one silently dropped.
+        """
+        if not self.app.processor:
             return
 
-        if self.app.processor and self.app.processor.current_frame is not None:
+        frame_version = getattr(self.app.processor, '_frame_version', 0)
+        if frame_version == self._last_uploaded_frame_version:
+            return
+
+        if self.app.processor.current_frame is not None:
             with self.app.processor.frame_lock:
                 if self.app.processor.current_frame is not None and hasattr(self.app.processor.current_frame, 'copy'):
                     current_frame_for_texture = self.app.processor.current_frame.copy()
                     self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame_for_texture)
-                    self._last_uploaded_frame_index = current_frame_index
+                    self._last_uploaded_frame_version = frame_version
+                    self._last_uploaded_frame_index = getattr(self.app.processor, 'current_frame_index', None)
                     self._texture_update_count += 1
         else:
             # No frame available — invalidate so next video's frame 0 uploads fresh
+            self._last_uploaded_frame_version = -1
             self._last_uploaded_frame_index = None
 
 
@@ -222,9 +232,10 @@ class VideoDisplayCoreMixin:
                 # --- Original logic when video feed is enabled ---
                 current_frame_for_texture = None
                 current_frame_index = getattr(self.app.processor, 'current_frame_index', None)
+                frame_version = getattr(self.app.processor, '_frame_version', 0)
 
-                # PERFORMANCE: Check if frame changed before copying/uploading to GPU
-                frame_changed = (current_frame_index != self._last_uploaded_frame_index)
+                # PERFORMANCE: Check if frame data changed before copying/uploading to GPU
+                frame_changed = (frame_version != self._last_uploaded_frame_version)
 
                 if self.app.processor and self.app.processor.current_frame is not None:
                     with self.app.processor.frame_lock:
@@ -241,6 +252,7 @@ class VideoDisplayCoreMixin:
                 else:
                     # No frame available (video closed/switching) — invalidate texture cache
                     # so the next video's frame 0 is always uploaded fresh
+                    self._last_uploaded_frame_version = -1
                     self._last_uploaded_frame_index = None
 
                 video_frame_available = current_frame_for_texture is not None or (not frame_changed and self._last_uploaded_frame_index is not None)
@@ -248,6 +260,7 @@ class VideoDisplayCoreMixin:
                 # Upload new frame to GPU if we copied one
                 if current_frame_for_texture is not None:
                     self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame_for_texture)
+                    self._last_uploaded_frame_version = frame_version
                     self._last_uploaded_frame_index = current_frame_index
                     self._texture_update_count += 1
 
