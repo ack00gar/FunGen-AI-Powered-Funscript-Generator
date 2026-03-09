@@ -148,7 +148,7 @@ class FunGenUniversalInstaller:
         
         # Progress tracking
         self.current_step = 0
-        self.total_steps = 8
+        self.total_steps = 9
         
         # Installation state
         self.conda_available = False
@@ -1378,10 +1378,21 @@ class FunGenUniversalInstaller:
                 self.print_warning("  https://mpv.io/installation/")
 
         elif self.platform == "Windows":
-            # winget can install mpv; we don't try silently on Windows to avoid UAC issues.
-            self.print_warning("mpv is not installed.  Install it with:")
-            self.print_warning("  winget install mpv")
-            self.print_warning("Then re-run this installer (or just launch FunGen — fullscreen will work once mpv is on PATH).")
+            if shutil.which("winget"):
+                print("  Installing mpv via winget...")
+                ret, _, stderr = self.run_command(
+                    ["winget", "install", "shinchiro.mpv", "--accept-package-agreements", "--accept-source-agreements"],
+                    check=False
+                )
+                if ret == 0:
+                    self.print_success("mpv installed via winget")
+                else:
+                    self.print_warning(f"winget install failed: {stderr.strip()}")
+                    self.print_warning("Install mpv manually:  winget install shinchiro.mpv")
+            else:
+                self.print_warning("mpv is not installed.  Install it with:")
+                self.print_warning("  winget install shinchiro.mpv")
+                self.print_warning("Then re-launch FunGen — fullscreen will work once mpv is on PATH.")
 
         else:
             self.print_warning("Unknown platform — install mpv manually from https://mpv.io/installation/")
@@ -1513,7 +1524,7 @@ set YOLO_TELEMETRY=False
 REM Isolate Ultralytics config to project directory (prevents cross-project corruption)
 set "YOLO_CONFIG_DIR={self.project_path}\\config\\ultralytics"
 
-REM Prevent Ultralytics from hanging on network checks at startup
+REM Prevent Ultralytics from phoning home during normal usage
 set YOLO_OFFLINE=True
 
 echo Activating FunGen environment...
@@ -1562,7 +1573,7 @@ export YOLO_TELEMETRY=False
 # Isolate Ultralytics config to project directory (prevents cross-project corruption)
 export YOLO_CONFIG_DIR="$(dirname "$0")/config/ultralytics"
 
-# Prevent Ultralytics from hanging on network checks at startup
+# Prevent Ultralytics from phoning home during normal usage
 export YOLO_OFFLINE=True
 
 # Activate environment (skip if already active to avoid double-activation)

@@ -11,7 +11,7 @@ export YOLO_TELEMETRY=False
 # Isolate Ultralytics config to project directory (prevents cross-project corruption)
 export YOLO_CONFIG_DIR="$(dirname "$0")/config/ultralytics"
 
-# Prevent Ultralytics from hanging on network checks at startup
+# Prevent Ultralytics from phoning home during normal usage
 export YOLO_OFFLINE=True
 
 # Activate environment (skip if already active to avoid double-activation)

@@ -430,7 +430,7 @@ class FirstRunWizard:
     def _open_folder_dialog(self):
         """Open native folder dialog via the app's ImGuiFileDialog."""
         try:
-            fd = self.app.gui.file_dialog if hasattr(self.app, "gui") else None
+            fd = self.app.gui_instance.file_dialog if self.app.gui_instance else None
             if fd is not None:
                 fd.show(
                     title="Select Output Folder",
