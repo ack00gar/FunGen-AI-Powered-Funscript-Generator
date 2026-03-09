@@ -202,9 +202,50 @@ fi
 
 # Add conda to PATH for this session
 export PATH="$MINICONDA_PATH/bin:$PATH"
+CONDA_EXE="$MINICONDA_PATH/bin/conda"
+ENV_NAME="FunGen"
 
 echo ""
-echo "[3/4] Downloading FunGen universal installer..."
+echo "[3/6] Creating FunGen conda environment..."
+
+if "$CONDA_EXE" env list 2>/dev/null | grep -q "$ENV_NAME"; then
+    echo "    Conda environment '$ENV_NAME' already exists, skipping..."
+else
+    echo "    Creating environment '$ENV_NAME' with Python 3.11..."
+    if ! "$CONDA_EXE" create -n "$ENV_NAME" python=3.11 -c conda-forge -y; then
+        echo "    conda-forge channel failed, trying default channels..."
+        if ! "$CONDA_EXE" create -n "$ENV_NAME" python=3.11 -y; then
+            echo "ERROR: Failed to create conda environment"
+            echo "  Try manually: conda create -n $ENV_NAME python=3.11 -y"
+            exit 1
+        fi
+    fi
+    echo "    Conda environment created successfully"
+fi
+
+echo ""
+echo "[4/6] Installing Git and FFmpeg via conda..."
+
+if command -v git >/dev/null 2>&1; then
+    echo "    Git already available, skipping..."
+else
+    echo "    Installing Git..."
+    "$CONDA_EXE" install -n "$ENV_NAME" git -c conda-forge -y >/dev/null 2>&1 \
+        && echo "    Git installed" \
+        || echo "    Git install skipped — universal installer will handle it"
+fi
+
+if command -v ffmpeg >/dev/null 2>&1; then
+    echo "    FFmpeg already available, skipping..."
+else
+    echo "    Installing FFmpeg..."
+    "$CONDA_EXE" install -n "$ENV_NAME" ffmpeg -c conda-forge -y >/dev/null 2>&1 \
+        && echo "    FFmpeg installed" \
+        || echo "    FFmpeg install skipped — universal installer will handle it"
+fi
+
+echo ""
+echo "[5/6] Downloading FunGen universal installer..."
 if ! download_file "$INSTALLER_URL" "$UNIVERSAL_INSTALLER" "FunGen universal installer"; then
     echo "ERROR: Failed to download universal installer"
     exit 1
@@ -212,17 +253,20 @@ fi
 echo "    Universal installer downloaded successfully"
 
 echo ""
-echo "[4/4] Running FunGen universal installer..."
-echo "    The universal installer will now handle the complete setup..."
+echo "[6/6] Running FunGen universal installer..."
+echo "    The universal installer will now handle the remaining setup..."
 echo ""
 
-# Pass through any command line arguments to the universal installer
-# Use the conda python explicitly to avoid system python issues
-CONDA_PYTHON="$MINICONDA_PATH/bin/python"
+# Use the conda env python (not base) to run the installer
+CONDA_PYTHON="$MINICONDA_PATH/envs/$ENV_NAME/bin/python"
 if [ ! -f "$CONDA_PYTHON" ]; then
-    echo "WARNING: Conda python not found at $CONDA_PYTHON"
-    echo "         Falling back to PATH python"
-    CONDA_PYTHON="python"
+    echo "WARNING: Conda env python not found at $CONDA_PYTHON"
+    echo "         Falling back to base conda python"
+    CONDA_PYTHON="$MINICONDA_PATH/bin/python"
+    if [ ! -f "$CONDA_PYTHON" ]; then
+        echo "WARNING: Base conda python not found either, using PATH python"
+        CONDA_PYTHON="python"
+    fi
 fi
 
 if [ $# -gt 0 ]; then
