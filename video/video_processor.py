@@ -87,6 +87,7 @@ class VideoProcessor(
         self.pause_event = threading.Event()
         self.processing_thread = None
         self.current_frame = None
+        self._frame_version = 0  # Incremented each time current_frame is replaced
         self.fps = 0.0
         self.target_fps = 30
         self.actual_fps = 0
@@ -449,6 +450,7 @@ class VideoProcessor(
         # OPTIMIZATION: Load first frame with thumbnail for instant startup
         try:
             self.current_frame = self._get_specific_frame(0, use_thumbnail=True)
+            self._frame_version += 1
         except Exception as e:
             self.logger.warning(f"Could not load initial frame: {e}")
             self.current_frame = None
@@ -512,6 +514,7 @@ class VideoProcessor(
         if new_frame is not None:
             with self.frame_lock:
                 self.current_frame = new_frame
+                self._frame_version += 1
             self.logger.info(f"Successfully fetched frame {self.current_frame_index} with new settings.")
         else:
             self.logger.warning(f"Failed to get frame {stored_frame_index} with new settings.")
@@ -653,6 +656,7 @@ class VideoProcessor(
                     with self.frame_lock:
                         self.current_frame = frame
                         self.current_frame_index = immediate_display_frame
+                        self._frame_version += 1
 
                 # Update frame buffer progress
                 if show_progress:
@@ -1287,6 +1291,7 @@ class VideoProcessor(
         if cached is not None:
             with self.frame_lock:
                 self.current_frame = cached
+                self._frame_version += 1
 
         # Invalidate arrow-nav state since the user jumped to a new position
         self._clear_nav_state()
@@ -1346,6 +1351,7 @@ class VideoProcessor(
 
                 with self.frame_lock:
                     self.current_frame = new_frame
+                    self._frame_version += 1
 
                 # Check if a newer seek target arrived while we were decoding
                 pending = self.seek_request_frame_index
@@ -1394,7 +1400,9 @@ class VideoProcessor(
             try:
                 if not self.is_processing:
                     processed_frame_tuple = self.tracker.process_frame(raw_frame_to_process.copy(), timestamp_ms, self.current_frame_index)
-                    with self.frame_lock: self.current_frame = processed_frame_tuple[0]
+                    with self.frame_lock:
+                        self.current_frame = processed_frame_tuple[0]
+                        self._frame_version += 1
             except Exception as e:
                 self.logger.error(f"Error processing frame with tracker in display_current_frame: {e}", exc_info=True)
 
@@ -1760,6 +1768,7 @@ class VideoProcessor(
 
                 with self.frame_lock:
                     self.current_frame = processed_frame_for_gui
+                    self._frame_version += 1
 
                 self.frames_for_fps_calc += 1
                 current_time_fps_calc = time.time()
@@ -1855,6 +1864,7 @@ class VideoProcessor(
         if self.video_path and self.video_info and not close_video:
             self.logger.info("Fetching frame 0 after reset (video still loaded).")
             self.current_frame = self._get_specific_frame(0, use_thumbnail=True)
+            self._frame_version += 1
         else:
             self.current_frame = None
         if self.app and hasattr(self.app, 'on_processing_stopped'):

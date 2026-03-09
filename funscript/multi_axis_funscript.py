@@ -81,26 +81,32 @@ class MultiAxisFunscript:
         if axis_name == 'primary':
             if not self._cache_dirty_primary:
                 self._primary_timestamps_cache.append(timestamp_ms)
+                self._primary_np_cache = None  # Invalidate numpy cache so heatmap rebuilds
         elif axis_name == 'secondary':
             if not self._cache_dirty_secondary:
                 self._secondary_timestamps_cache.append(timestamp_ms)
+                self._secondary_np_cache = None
         elif axis_name in self._additional_timestamps_cache:
             if not self._additional_cache_dirty.get(axis_name, True):
                 self._additional_timestamps_cache[axis_name].append(timestamp_ms)
+                self._additional_np_cache.pop(axis_name, None)
 
     def _pop_from_cache(self, axis_name: str, index: int):
         """Remove an entry from the timestamp cache at the given index."""
         if axis_name == 'primary' and not self._cache_dirty_primary:
             if self._primary_timestamps_cache:
                 self._primary_timestamps_cache.pop(index)
+                self._primary_np_cache = None
         elif axis_name == 'secondary' and not self._cache_dirty_secondary:
             if self._secondary_timestamps_cache:
                 self._secondary_timestamps_cache.pop(index)
+                self._secondary_np_cache = None
         elif axis_name in self._additional_timestamps_cache:
             if not self._additional_cache_dirty.get(axis_name, True):
                 cache = self._additional_timestamps_cache[axis_name]
                 if cache:
                     cache.pop(index)
+                    self._additional_np_cache.pop(axis_name, None)
 
     def _maybe_log_simplification_stats(self):
         """
