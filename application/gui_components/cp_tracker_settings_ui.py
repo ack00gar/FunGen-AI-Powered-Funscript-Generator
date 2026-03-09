@@ -195,12 +195,42 @@ class TrackerSettingsMixin:
 
     def _render_tracking_axes_mode(self, stage_proc):
         """Renders UI elements for tracking axis mode."""
-        axis_modes = ["Both Axes (Up/Down + Left/Right)", "Up/Down Only (Vertical)", "Left/Right Only (Horizontal)"]
+        # Get tracker info for axis-aware display
+        tracker_info = None
+        tr = getattr(self.app, 'tracker', None)
+        if tr and hasattr(tr, 'get_tracker_info'):
+            tracker_info = tr.get_tracker_info()
+
+        is_dual_axis = tracker_info.supports_dual_axis if tracker_info else True
+        primary_name = (tracker_info.primary_axis if tracker_info else "stroke").capitalize()
+        secondary_name = (tracker_info.secondary_axis if tracker_info else "roll").capitalize()
+
+        # Show which axes this tracker outputs
+        if tracker_info:
+            if is_dual_axis:
+                imgui.text_colored(f"T1: {primary_name}  |  T2: {secondary_name}", 0.6, 0.8, 1.0, 1.0)
+            else:
+                imgui.text_colored(f"T1: {primary_name}  (single axis)", 0.6, 0.8, 1.0, 1.0)
+            _tooltip_if_hovered(
+                "Axis assignments set by the tracker.\n"
+                "Override in Advanced Settings > Axis Assignments."
+            )
+
+        if is_dual_axis:
+            axis_modes = [
+                f"Both ({primary_name} + {secondary_name})",
+                f"{primary_name} Only",
+                f"{secondary_name} Only",
+            ]
+        else:
+            axis_modes = [f"{primary_name} Only"]
+
         current_axis_mode_idx = 0
-        if self.app.tracking_axis_mode == "vertical":
-            current_axis_mode_idx = 1
-        elif self.app.tracking_axis_mode == "horizontal":
-            current_axis_mode_idx = 2
+        if is_dual_axis:
+            if self.app.tracking_axis_mode == "vertical":
+                current_axis_mode_idx = 1
+            elif self.app.tracking_axis_mode == "horizontal":
+                current_axis_mode_idx = 2
 
         processor = self.app.processor
         disable_axis_controls = (
@@ -210,10 +240,10 @@ class TrackerSettingsMixin:
                 and getattr(processor, 'enable_tracker_processing', False)
                 and not processor.pause_event.is_set())
         )
-        with _DisabledScope(disable_axis_controls):
+        with _DisabledScope(disable_axis_controls or not is_dual_axis):
             imgui.set_next_item_width(-1)
             axis_mode_changed, new_axis_mode_idx = imgui.combo("##TrackingAxisModeComboGlobal", current_axis_mode_idx, axis_modes)
-            if axis_mode_changed:
+            if axis_mode_changed and is_dual_axis:
                 old_mode = self.app.tracking_axis_mode
                 if new_axis_mode_idx == 0:
                     self.app.tracking_axis_mode = "both"
@@ -224,10 +254,10 @@ class TrackerSettingsMixin:
                 if old_mode != self.app.tracking_axis_mode:
                     self.app.project_manager.project_dirty = True
                     self.app.logger.info(f"Tracking axis mode set to: {self.app.tracking_axis_mode}", extra={'status_message': True})
-                    self.app.app_settings.set("tracking_axis_mode", self.app.tracking_axis_mode) # Auto-save
+                    self.app.app_settings.set("tracking_axis_mode", self.app.tracking_axis_mode)
                     self.app.energy_saver.reset_activity_timer()
 
-            if self.app.tracking_axis_mode != "both":
+            if is_dual_axis and self.app.tracking_axis_mode != "both":
                 imgui.text("Output Single Axis To:")
                 output_targets = ["Timeline 1 (Primary)", "Timeline 2 (Secondary)"]
                 current_output_target_idx = 1 if self.app.single_axis_output_target == "secondary" else 0
@@ -240,7 +270,7 @@ class TrackerSettingsMixin:
                     if old_target != self.app.single_axis_output_target:
                         self.app.project_manager.project_dirty = True
                         self.app.logger.info(f"Single axis output target set to: {self.app.single_axis_output_target}", extra={'status_message': True})
-                        self.app.app_settings.set("single_axis_output_target", self.app.single_axis_output_target) # Auto-save
+                        self.app.app_settings.set("single_axis_output_target", self.app.single_axis_output_target)
                         self.app.energy_saver.reset_activity_timer()
 
     def _render_oscillation_detector_settings(self):

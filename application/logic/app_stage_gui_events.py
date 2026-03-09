@@ -356,7 +356,7 @@ class StageGuiEventsMixin:
             if primary_actions:
                 tl = 1 if target_timeline == "primary" else 2
                 self.app.logger.info(f"Writing to Timeline {tl}, other timeline untouched.")
-                fs_proc.clear_timeline_history_and_set_new_baseline(tl, primary_actions, f"{stage_label} (Vertical)")
+                fs_proc.clear_timeline_history_and_set_new_baseline(tl, primary_actions, f"{stage_label} (Primary Axis)")
             else:
                 tl = 1 if target_timeline == "primary" else 2
                 self.app.logger.warning(f"No vertical actions from {stage_label} - Timeline {tl} unchanged")
@@ -364,19 +364,8 @@ class StageGuiEventsMixin:
         elif axis_mode == "horizontal":
             if secondary_actions:
                 tl = 1 if target_timeline == "primary" else 2
-                self.app.logger.info(f"Writing horizontal data to Timeline {tl}, other timeline untouched.")
-                fs_proc.clear_timeline_history_and_set_new_baseline(tl, secondary_actions, f"{stage_label} (Horizontal)")
+                self.app.logger.info(f"Writing secondary axis data to Timeline {tl}, other timeline untouched.")
+                fs_proc.clear_timeline_history_and_set_new_baseline(tl, secondary_actions, f"{stage_label} (Secondary Axis)")
             else:
                 tl = 1 if target_timeline == "primary" else 2
-                self.app.logger.warning(f"No horizontal actions from {stage_label} - Timeline {tl} unchanged")
-
-        elif axis_mode in ["vertical", "horizontal"] and stage_label.startswith("Stage 3"):
-            # Stage 3 fallback: write primary actions to target
-            actions_to_use = primary_actions
-            if actions_to_use:
-                tl = 1 if target_timeline == "primary" else 2
-                fs_proc.clear_timeline_history_and_set_new_baseline(tl, actions_to_use, stage_label)
-                self.logger.info(f"Applied {len(actions_to_use)} actions to Timeline {tl}")
-            else:
-                tl = 1 if target_timeline == "primary" else 2
-                self.logger.warning(f"No actions from {stage_label} - Timeline {tl} unchanged")
+                self.app.logger.warning(f"No secondary axis actions from {stage_label} - Timeline {tl} unchanged")
