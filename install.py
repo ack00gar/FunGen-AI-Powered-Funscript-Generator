@@ -1272,18 +1272,27 @@ class FunGenUniversalInstaller:
     
     def _get_python_executable(self) -> Optional[Path]:
         """Get the Python executable for the current environment"""
+        candidate = None
         if self.conda_available:
             if self.platform == "Windows":
-                return self.miniconda_path / "envs" / CONFIG["env_name"] / "python.exe"
+                candidate = self.miniconda_path / "envs" / CONFIG["env_name"] / "python.exe"
             else:
-                return self.miniconda_path / "envs" / CONFIG["env_name"] / "bin" / "python"
+                candidate = self.miniconda_path / "envs" / CONFIG["env_name"] / "bin" / "python"
         elif self.venv_path:
             if self.platform == "Windows":
-                return self.venv_path / "Scripts" / "python.exe"
+                candidate = self.venv_path / "Scripts" / "python.exe"
             else:
-                return self.venv_path / "bin" / "python"
-        else:
-            return Path(sys.executable)
+                candidate = self.venv_path / "bin" / "python"
+
+        if candidate and candidate.exists():
+            return candidate
+
+        # Fallback: install.bat/install.sh already activates the env before
+        # running install.py, so sys.executable is the correct Python.
+        if candidate:
+            self.print_warning(f"Expected Python not found at: {candidate}")
+            self.print_warning(f"Falling back to current interpreter: {sys.executable}")
+        return Path(sys.executable)
     
     def _detect_gpu(self) -> str:
         """Detect GPU type"""
