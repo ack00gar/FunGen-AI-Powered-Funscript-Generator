@@ -152,7 +152,8 @@ class DialogRendererMixin:
 
             from application.utils.imgui_helpers import DisabledScope
             with DisabledScope(not has_3_stages):
-                _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if has_3_stages else False)
+                sec_axis_label = self.app.app_settings.get("default_secondary_axis", "roll") if hasattr(self.app, 'app_settings') else "roll"
+                _, self.batch_generate_roll_file_ui = imgui.checkbox(f"Generate .{sec_axis_label} file", self.batch_generate_roll_file_ui if has_3_stages else False)
 
             # Adaptive performance tuning checkbox
             _, self.batch_adaptive_tuning_ui = imgui.checkbox("Adaptive performance tuning", self.batch_adaptive_tuning_ui)
