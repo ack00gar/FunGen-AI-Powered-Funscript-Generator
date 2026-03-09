@@ -157,9 +157,14 @@ class FunGenUniversalInstaller:
     def setup_paths(self):
         """Setup platform-specific paths"""
         self.home = Path.home()
-        
+
         if self.platform == "Windows":
             self.miniconda_path = self.home / "miniconda3"
+            # install.bat may use C:\miniconda3 when user profile has spaces
+            if not (self.miniconda_path / "Scripts" / "conda.exe").exists():
+                alt = Path("C:/miniconda3")
+                if (alt / "Scripts" / "conda.exe").exists():
+                    self.miniconda_path = alt
             self.tools_dir = self.install_dir / "tools"
             self.git_path = self.tools_dir / "git"
             self.ffmpeg_path = self.tools_dir / "ffmpeg"
@@ -368,6 +373,23 @@ class FunGenUniversalInstaller:
                         return False
                     else:
                         print("  Invalid choice. Please enter 1, 2, or 3.")
+
+        # Detect active conda env (install.bat may have already activated it)
+        conda_prefix = os.environ.get("CONDA_PREFIX")
+        if conda_prefix and not self.conda_available:
+            prefix_path = Path(conda_prefix)
+            # CONDA_PREFIX points to the env dir (e.g. .../envs/FunGen) or base
+            # Derive miniconda root from it
+            if prefix_path.name == "miniconda3":
+                candidate = prefix_path
+            elif "envs" in prefix_path.parts:
+                candidate = prefix_path.parent.parent  # .../miniconda3/envs/FunGen -> .../miniconda3
+            else:
+                candidate = prefix_path
+            conda_bin = candidate / ("Scripts/conda.exe" if self.platform == "Windows" else "bin/conda")
+            if conda_bin.exists() and candidate != self.miniconda_path:
+                self.miniconda_path = candidate
+                self.print_success(f"Detected active conda at: {self.miniconda_path}")
 
         # Check if conda is available
         self.conda_available = (self.miniconda_path / "bin" / "conda").exists() or (self.miniconda_path / "Scripts" / "conda.exe").exists()

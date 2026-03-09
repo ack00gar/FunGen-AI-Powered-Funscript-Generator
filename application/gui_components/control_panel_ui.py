@@ -178,11 +178,12 @@ class ControlPanelUI(
         return tracker_info and tracker_info.category == category
 
     def _is_live_tracker(self, tracker_name: str) -> bool:
-        """Check if tracker is a live tracker (LIVE or LIVE_INTERVENTION)."""
+        """Check if tracker is a live tracker (LIVE, LIVE_INTERVENTION, or COMMUNITY)."""
         from config.tracker_discovery import get_tracker_discovery, TrackerCategory
         discovery = get_tracker_discovery()
         tracker_info = discovery.get_tracker_info(tracker_name)
-        return tracker_info and tracker_info.category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION]
+        return tracker_info and tracker_info.category in [
+            TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION, TrackerCategory.COMMUNITY]
 
     def _is_offline_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is an offline tracker."""
