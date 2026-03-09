@@ -203,7 +203,12 @@ class TrackerSettingsMixin:
 
         is_dual_axis = tracker_info.supports_dual_axis if tracker_info else True
         primary_name = (tracker_info.primary_axis if tracker_info else "stroke").capitalize()
-        secondary_name = (tracker_info.secondary_axis if tracker_info else "roll").capitalize()
+        # Use user's default secondary axis if set, otherwise tracker's declared axis
+        user_secondary = self.app.app_settings.get("default_secondary_axis") if hasattr(self.app, 'app_settings') else None
+        if user_secondary and tracker_info and tracker_info.supports_dual_axis:
+            secondary_name = user_secondary.capitalize()
+        else:
+            secondary_name = (tracker_info.secondary_axis if tracker_info else "roll").capitalize()
 
         # Show which axes this tracker outputs
         if tracker_info:
