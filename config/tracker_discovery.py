@@ -172,8 +172,12 @@ class DynamicTrackerDiscovery:
                 return TrackerCategory.LIVE_INTERVENTION
             else:
                 return TrackerCategory.LIVE
+        elif metadata.category == "live_intervention":
+            return TrackerCategory.LIVE_INTERVENTION
         elif metadata.category == "offline":
             return TrackerCategory.OFFLINE
+        elif metadata.category == "community":
+            return TrackerCategory.COMMUNITY
         else:
             # Default community for unknown categories
             return TrackerCategory.COMMUNITY
