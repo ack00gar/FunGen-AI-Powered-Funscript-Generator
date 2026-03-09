@@ -1128,6 +1128,7 @@ class VideoProcessor(
 
         self.logger.info(f"Starting processing from frame {effective_start_frame}.")
 
+        self._hwaccel_fallback_attempted = False
         self.processing_start_frame_limit = effective_start_frame
         self.processing_end_frame_limit = -1
         if end_frame is not None and end_frame >= 0:
@@ -1622,6 +1623,7 @@ class VideoProcessor(
                             f"End of FFmpeg GUI stream or incomplete frame (read {raw_frame_len}/{self.frame_size_bytes}).")
                         # Log FFmpeg stderr to help diagnose why it produced no output
                         # (e.g., filter errors, codec issues, file access problems)
+                        ffmpeg_stderr = ""
                         if loop_ffmpeg_process.stderr:
                             try:
                                 ffmpeg_stderr = loop_ffmpeg_process.stderr.read(8192).decode(errors='ignore').strip()
@@ -1629,6 +1631,34 @@ class VideoProcessor(
                                     self.logger.warning(f"FFmpeg stderr: {ffmpeg_stderr}")
                             except Exception:
                                 pass
+
+                        # Auto-fallback: if FFmpeg failed on the very first frame and hardware
+                        # acceleration is active, retry with CPU-only decoding. This handles
+                        # cases where ffmpeg reports a hwaccel as available (compiled-in) but
+                        # the actual GPU/driver doesn't support it at runtime.
+                        if (self.frames_read_from_current_stream == 0
+                                and self._get_ffmpeg_hwaccel_args()
+                                and not self.dual_output_enabled
+                                and not getattr(self, '_hwaccel_fallback_attempted', False)):
+                            self._hwaccel_fallback_attempted = True
+                            self.logger.warning(
+                                "Hardware-accelerated FFmpeg failed on first frame. "
+                                "Retrying with CPU-only decoding...",
+                                extra={'status_message': True, 'duration': 5.0})
+                            # Force CPU-only and persist the change (hwaccel doesn't work on this hardware)
+                            if self.app:
+                                self.app.hardware_acceleration_method = "none"
+                                if hasattr(self.app, 'app_settings'):
+                                    self.app.app_settings.set("hardware_acceleration_method", "none")
+                            self._terminate_process(loop_ffmpeg_process, "HWAccel-failed")
+                            self.ffmpeg_process = None
+                            if self._start_ffmpeg_process(
+                                    start_frame_abs_idx=self.current_stream_start_frame_abs):
+                                self.logger.info("CPU-only FFmpeg fallback started successfully.")
+                                continue  # Retry the loop with the new process
+                            else:
+                                self.logger.error("CPU-only FFmpeg fallback also failed.")
+
                     self.is_processing = False
                     # Clear tracker processing flag when stream ends naturally
                     self.enable_tracker_processing = False
