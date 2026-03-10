@@ -172,6 +172,7 @@ class AppFileManager:
             except (AttributeError, TypeError):
                 pass
 
+        if self.app_settings.get("performance_metadata", False):
             # Performance / pipeline settings
             meta["hardware_acceleration"] = getattr(self.app, "hardware_acceleration_method", "none")
             meta["vr_unwarp_method"] = self.app_settings.get("vr_unwarp_method", "auto")
@@ -1115,7 +1116,7 @@ class AppFileManager:
             potential_s2_overlay = self.get_output_path_for_file(self.video_path, "_stage2_overlay.msgpack")
             if os.path.exists(potential_s2_overlay):
                 self.load_stage2_overlay_data(potential_s2_overlay)
-            
+
             # Auto-load Stage 3 mixed debug data if it exists
             potential_s3_mixed_debug = self.get_output_path_for_file(self.video_path, "_stage3_mixed_debug.msgpack")
             if os.path.exists(potential_s3_mixed_debug):
@@ -1284,12 +1285,12 @@ class AppFileManager:
             with open(filepath, 'rb') as f:
                 packed_data = f.read()
             loaded_data = msgpack.unpackb(packed_data, raw=False)
-            
+
             if isinstance(loaded_data, dict) and 'frame_data' in loaded_data:
                 # Store the loaded debug data
                 self.app.stage3_mixed_debug_data = loaded_data
                 self.app.stage3_mixed_debug_frame_map = {}
-                
+
                 # Create frame map for quick lookup
                 for frame_id_str, frame_debug in loaded_data['frame_data'].items():
                     try:
@@ -1297,18 +1298,18 @@ class AppFileManager:
                         self.app.stage3_mixed_debug_frame_map[frame_id] = frame_debug
                     except (ValueError, TypeError):
                         continue
-                
+
                 frame_count = len(self.app.stage3_mixed_debug_frame_map)
                 self.logger.info(f"Loaded Stage 3 mixed debug data: {os.path.basename(filepath)} ({frame_count} frames)")
                 return True
             else:
                 self.logger.error("Stage 3 mixed debug data is not in expected format.")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"Error loading Stage 3 mixed debug msgpack '{filepath}': {e}")
             return False
-    
+
     def clear_stage3_mixed_debug_data(self):
         """Clear Stage 3 mixed debug data."""
         if hasattr(self.app, 'stage3_mixed_debug_data'):
