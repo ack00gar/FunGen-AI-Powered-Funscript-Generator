@@ -104,11 +104,23 @@ class HeatmapColorMapper:
             return np.array([], dtype=np.float32)
 
         if ats_np is not None and poss_np is not None:
-            ats = ats_np.astype(np.float64)
-            poss = poss_np.astype(np.float64)
+            # Guard against cached numpy arrays being out of sync length-wise
+            min_len = min(ats_np.shape[0], poss_np.shape[0])
+            if min_len == 0:
+                return np.array([], dtype=np.float32)
+            ats = ats_np[:min_len].astype(np.float64)
+            poss = poss_np[:min_len].astype(np.float64)
         else:
             ats = np.array([a['at'] for a in actions], dtype=np.float64)
             poss = np.array([a['pos'] for a in actions], dtype=np.float64)
+
+        if len(ats) != len(poss):
+            min_len = min(len(ats), len(poss))
+            ats = ats[:min_len]
+            poss = poss[:min_len]
+
+        if len(ats) < 2:
+            return np.array([], dtype=np.float32)
 
         dt = np.diff(ats)  # ms
         dp = np.abs(np.diff(poss))  # position units
