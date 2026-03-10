@@ -79,7 +79,7 @@ class AppSettings:
         self.is_first_run = False
         self.shortcuts_were_reset = False  # Set by migration; GUI shows one-time notice
         self.load_settings()
-        
+
         # Auto-detect and set hardware acceleration on first run
         if self.is_first_run:
             self.auto_detect_hardware_acceleration()
@@ -102,7 +102,7 @@ class AppSettings:
             "window_width": constants.DEFAULT_WINDOW_WIDTH,
             "window_height": constants.DEFAULT_WINDOW_HEIGHT,
             "ui_layout_mode": constants.DEFAULT_UI_LAYOUT,
-            
+
             # Movement Bar (L/R Dial) Window Settings
             "lr_dial_window_size_w": 180,  # Width of movement bar window
             "lr_dial_window_size_h": 220,  # Height of movement bar window
@@ -120,7 +120,7 @@ class AppSettings:
             "show_funscript_interactive_timeline": True,
             "show_funscript_interactive_timeline2": False,
             "show_funscript_timeline": True,
-            
+
             # Timeline Performance
             "show_timeline_optimization_indicator": False,  # Performance indicators hidden by default
             "timeline_performance_logging": False,  # Log timeline performance stats
@@ -147,6 +147,9 @@ class AppSettings:
             "generate_roll_file": True,
             "export_raw_as_funscript": False,
             "batch_mode_overwrite_strategy": 0,  # 0=Process All, 1=Skip Existing
+            "metadata_verbose": True,          # Include extended fields in funscript metadata
+            "performance_metadata": False,          # Include extended performance fields in funscript metadata
+            "metadata_creator_identity": "",  # Identity string embedded in funscript metadata
 
             # Performance & System
             "num_producers_stage1": constants.DEFAULT_S1_NUM_PRODUCERS,
@@ -194,13 +197,13 @@ class AppSettings:
             "oscillation_detector_grid_size": 20,
             "oscillation_detector_sensitivity": 2.5,
             "stage3_oscillation_detector_mode": "current",  # "current", "legacy", or "hybrid"
-            
+
             # Oscillation Detector Improvements
             "oscillation_enable_decay": True,  # Enable decay mechanism
             "oscillation_hold_duration_ms": 250,  # Hold duration before decay starts
             "oscillation_decay_factor": 0.95,  # Decay factor toward center
             "oscillation_use_simple_amplification": False,  # Use simple fixed multipliers
-            
+
             "live_oscillation_dynamic_amp_enabled": True,
             "live_oscillation_amp_window_ms": 4000,  # 4-second analysis window
 
@@ -216,7 +219,7 @@ class AppSettings:
 
             # Auto Post-Processing
             "enable_auto_post_processing": False,
-            
+
             # Database Management
             "retain_stage2_database": True,  # Keep SQLite database after processing (default: True for GUI, False for CLI)
             "auto_processing_use_chapter_profiles": True,
@@ -246,7 +249,7 @@ class AppSettings:
             "updater_check_on_startup": True,
             "updater_check_periodically": True,
             "updater_suppress_popup": False,
-            
+
             # Device Control Settings
             "device_control_enabled": True,
             "buttplug_server_address": "localhost",
@@ -334,7 +337,7 @@ class AppSettings:
     def set(self, key, value):
         self.data[key] = value
         self.save_settings()  # here for immediate saving
-    
+
     def set_batch(self, **kwargs):
         """Set multiple keys at once and save only once at the end."""
         for key, value in kwargs.items():
@@ -345,7 +348,7 @@ class AppSettings:
         self.data = self.get_default_settings()
         self.save_settings()
         self.logger.info("All application settings have been reset to their default values.")
-    
+
     def auto_detect_hardware_acceleration(self):
         """
         Auto-detect available GPU and set appropriate hardware acceleration.
@@ -353,7 +356,7 @@ class AppSettings:
         """
         system = platform.system()
         detected_method = "none"  # Default to CPU
-        
+
         try:
             # Check for NVIDIA GPU on Windows/Linux
             if system in ["Windows", "Linux"]:
@@ -367,7 +370,7 @@ class AppSettings:
                         self.logger.info(f"NVIDIA GPU detected: {result.stdout.strip()}")
                 except (subprocess.TimeoutExpired, FileNotFoundError):
                     pass
-                
+
                 # Check for Intel QSV (Quick Sync)
                 if detected_method == "none":
                     try:
@@ -381,17 +384,17 @@ class AppSettings:
                             self.logger.info("Intel Quick Sync Video detected")
                     except (subprocess.TimeoutExpired, FileNotFoundError):
                         pass
-            
+
             # macOS: VideoToolbox is SLOWER for sequential frame processing with filters
             # Benchmark shows CPU-only is 6x faster due to GPU→CPU transfer overhead
             # Keep "none" (CPU-only) as default for best performance
             elif system == "Darwin":
                 detected_method = "none"  # CPU-only is faster for this workload
                 self.logger.info("macOS detected, using CPU-only decoding (6x faster than VideoToolbox for filter chains)")
-            
+
         except Exception as e:
             self.logger.warning(f"Error during GPU detection: {e}")
-        
+
         # Update the setting
         if detected_method != self.data.get("hardware_acceleration_method"):
             self.logger.info(f"Setting hardware acceleration to: {detected_method}")

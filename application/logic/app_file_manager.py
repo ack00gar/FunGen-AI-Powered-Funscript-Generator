@@ -125,11 +125,11 @@ class AppFileManager:
 
     def _build_generation_metadata(self, multi_axis: bool = False) -> dict:
         """Return FunGen generation metadata for funscript exports."""
-        from datetime import datetime
+        from datetime import datetime, timezone
         meta = {
             "creator_software": APP_NAME,
             "creator_software_version": APP_VERSION,
-            "creation_date": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "creation_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "funscript_type": "multi-axis" if multi_axis else "single-axis",
         }
         tracker_name, tracker_version = self._resolve_tracker_info()
@@ -137,6 +137,74 @@ class AppFileManager:
             meta["tracker_name"] = tracker_name
         if tracker_version:
             meta["tracker_version"] = tracker_version
+
+        # Verbose metadata (git info, video info)
+        if self.app_settings.get("metadata_verbose", True):
+            from application.utils.logger import _GIT_INFO
+            if _GIT_INFO and "@" in _GIT_INFO:
+                branch, commit_hash = _GIT_INFO.split("@", 1)
+                if branch and branch != "unknown":
+                    meta["git_branch"] = branch
+                if commit_hash and commit_hash != "unknown":
+                    meta["git_commit_hash"] = commit_hash
+
+            # Video info
+            if self.video_path:
+                meta["original_video_filename"] = os.path.basename(self.video_path)
+                try:
+                    fsize = os.path.getsize(self.video_path)
+                    if fsize > 0:
+                        meta["original_video_file_size_bytes"] = fsize
+                except OSError:
+                    pass
+            try:
+                video_info = self.app.processor.video_info
+                if video_info:
+                    if video_info.get("duration"):
+                        meta["original_video_duration_seconds"] = video_info["duration"]
+                    if video_info.get("total_frames"):
+                        meta["original_video_total_frames"] = video_info["total_frames"]
+                    if video_info.get("fps"):
+                        meta["original_video_fps"] = video_info["fps"]
+                    w, h = video_info.get("width"), video_info.get("height")
+                    if w and h:
+                        meta["original_video_resolution"] = f"{w}x{h}"
+            except (AttributeError, TypeError):
+                pass
+
+        if self.app_settings.get("performance_metadata", False):
+            # Performance / pipeline settings
+            meta["hardware_acceleration"] = getattr(self.app, "hardware_acceleration_method", "none")
+            meta["vr_unwarp_method"] = self.app_settings.get("vr_unwarp_method", "auto")
+            meta["num_producers_stage1"] = self.app_settings.get("num_producers_stage1", 1)
+            meta["num_consumers_stage1"] = self.app_settings.get("num_consumers_stage1", 1)
+            meta["num_workers_stage2_of"] = self.app_settings.get("num_workers_stage2_of", 1)
+
+            # Per-stage and total processing time (clock wall-time)
+            try:
+                sp = self.app.stage_processor
+                stage_times = {}
+                total_seconds = 0
+                for key, attr in (("stage1", "stage1_final_elapsed_time_str"),
+                                  ("stage2", "stage2_final_elapsed_time_str"),
+                                  ("stage3", "stage3_final_elapsed_time_str")):
+                    val = getattr(sp, attr, "")
+                    if val:
+                        stage_times[key] = val
+                        parts = val.split(":")
+                        if len(parts) == 3:
+                            total_seconds += int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                if stage_times:
+                    meta["processing_time_per_stage"] = stage_times
+                    meta["processing_time_total_seconds"] = total_seconds
+            except (AttributeError, TypeError, ValueError):
+                pass
+
+        # Optional creator identity
+        creator_id = self.app_settings.get("metadata_creator_identity", "")
+        if creator_id:
+            meta["creator_identity"] = creator_id
+
         return meta
 
     def _get_funscript_path_for_axis(self, video_path: str, axis_name: str) -> str:
@@ -1048,7 +1116,7 @@ class AppFileManager:
             potential_s2_overlay = self.get_output_path_for_file(self.video_path, "_stage2_overlay.msgpack")
             if os.path.exists(potential_s2_overlay):
                 self.load_stage2_overlay_data(potential_s2_overlay)
-            
+
             # Auto-load Stage 3 mixed debug data if it exists
             potential_s3_mixed_debug = self.get_output_path_for_file(self.video_path, "_stage3_mixed_debug.msgpack")
             if os.path.exists(potential_s3_mixed_debug):
@@ -1217,12 +1285,12 @@ class AppFileManager:
             with open(filepath, 'rb') as f:
                 packed_data = f.read()
             loaded_data = msgpack.unpackb(packed_data, raw=False)
-            
+
             if isinstance(loaded_data, dict) and 'frame_data' in loaded_data:
                 # Store the loaded debug data
                 self.app.stage3_mixed_debug_data = loaded_data
                 self.app.stage3_mixed_debug_frame_map = {}
-                
+
                 # Create frame map for quick lookup
                 for frame_id_str, frame_debug in loaded_data['frame_data'].items():
                     try:
@@ -1230,18 +1298,18 @@ class AppFileManager:
                         self.app.stage3_mixed_debug_frame_map[frame_id] = frame_debug
                     except (ValueError, TypeError):
                         continue
-                
+
                 frame_count = len(self.app.stage3_mixed_debug_frame_map)
                 self.logger.info(f"Loaded Stage 3 mixed debug data: {os.path.basename(filepath)} ({frame_count} frames)")
                 return True
             else:
                 self.logger.error("Stage 3 mixed debug data is not in expected format.")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"Error loading Stage 3 mixed debug msgpack '{filepath}': {e}")
             return False
-    
+
     def clear_stage3_mixed_debug_data(self):
         """Clear Stage 3 mixed debug data."""
         if hasattr(self.app, 'stage3_mixed_debug_data'):
