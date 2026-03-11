@@ -932,6 +932,10 @@ class InteractiveFunscriptTimeline:
         for action in actions:
             action['at'] = max(0, action['at'] + delta_ms)
 
+        fs, axis = self._get_target_funscript_details()
+        if fs and axis:
+            fs._invalidate_cache(axis)
+
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge All Points")
         self.invalidate_cache()
 
@@ -986,6 +990,10 @@ class InteractiveFunscriptTimeline:
             if self.logger:
                 self.logger.info("No points found in selected chapter(s)", extra={'status_message': True})
             return
+
+        fs, axis = self._get_target_funscript_details()
+        if fs and axis:
+            fs._invalidate_cache(axis)
 
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Chapter Points")
         self.invalidate_cache()
