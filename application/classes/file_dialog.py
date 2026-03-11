@@ -95,6 +95,27 @@ class ImGuiFileDialog:
             logger.warning(f"Could not parse funscript '{os.path.basename(funscript_path)}': {e}")
             return 'other'
 
+    @staticmethod
+    def get_funscript_metadata(video_path: str, logger: logging.Logger) -> dict:
+        """Read metadata fields from an existing funscript for batch display."""
+        funscript_path = os.path.splitext(video_path)[0] + ".funscript"
+        result = {"creation_date": "", "tracker_name": "", "git_commit_hash": "", "fungen_version": ""}
+        if not os.path.exists(funscript_path):
+            return result
+
+        try:
+            with open(funscript_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            metadata = data.get('metadata', {})
+            if isinstance(metadata, dict):
+                result["creation_date"] = metadata.get("creation_date", "")
+                result["tracker_name"] = metadata.get("tracker_name", "")
+                result["git_commit_hash"] = metadata.get("git_commit_hash", "")
+                result["fungen_version"] = metadata.get("creator_software_version", "")
+        except Exception:
+            pass
+        return result
+
     def _get_funscript_status(self, video_path: str) -> Optional[str]:
         """Instance method wrapper for the static funscript status checker."""
         return ImGuiFileDialog.get_funscript_status(video_path, self.logger)

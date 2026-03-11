@@ -15,7 +15,7 @@ class DialogRendererMixin:
         colors = self.colors
         imgui.open_popup("Batch Processing Setup")
         mv = imgui.get_main_viewport()
-        imgui.set_next_window_size(mv.size[0] * 0.7, mv.size[1] * 0.8, condition=imgui.APPEARING)
+        imgui.set_next_window_size(mv.size[0] * 0.85, mv.size[1] * 0.8, condition=imgui.APPEARING)
         imgui.set_next_window_position(
             mv.pos[0] + mv.size[0] * 0.5,
             mv.pos[1] + mv.size[1] * 0.5,
@@ -44,17 +44,30 @@ class DialogRendererMixin:
 
             imgui.separator()
 
+            # Set all overrides dropdown + button
+            video_format_options = ["Auto (Heuristic)", "2D", "VR (he_sbs)", "VR (he_tb)", "VR (fisheye_sbs)", "VR (fisheye_tb)"]
+            imgui.text("Set all overrides:")
+            imgui.same_line()
+            imgui.set_next_item_width(160)
+            _, self.batch_set_all_format_idx = imgui.combo("##set_all_format", self.batch_set_all_format_idx, video_format_options)
+            imgui.same_line()
+            if imgui.button("Apply to All"):
+                for video_data in self.batch_videos_data:
+                    video_data["override_format_idx"] = self.batch_set_all_format_idx
+
             if imgui.begin_child("VideoList", height=-120):
                 table_flags = imgui.TABLE_BORDERS | imgui.TABLE_SIZING_STRETCH_PROP | imgui.TABLE_SCROLL_Y
-                if imgui.begin_table("BatchVideosTable", 4, flags=table_flags):
+                if imgui.begin_table("BatchVideosTable", 8, flags=table_flags):
                     imgui.table_setup_column("Process", init_width_or_weight=0.5)
-                    imgui.table_setup_column("Video File", init_width_or_weight=4.0)
-                    imgui.table_setup_column("Detected", init_width_or_weight=1.3)
+                    imgui.table_setup_column("Video File", init_width_or_weight=3.0)
+                    imgui.table_setup_column("Created", init_width_or_weight=1.0)
+                    imgui.table_setup_column("Tracker", init_width_or_weight=1.2)
+                    imgui.table_setup_column("Version", init_width_or_weight=0.7)
+                    imgui.table_setup_column("Git Hash", init_width_or_weight=0.8)
+                    imgui.table_setup_column("Detected", init_width_or_weight=0.8)
                     imgui.table_setup_column("Override", init_width_or_weight=1.5)
 
                     imgui.table_headers_row()
-
-                    video_format_options = ["Auto (Heuristic)", "2D", "VR (he_sbs)", "VR (he_tb)", "VR (fisheye_sbs)", "VR (fisheye_tb)"]
 
                     for i, video_data in enumerate(self.batch_videos_data):
                         imgui.table_next_row()
@@ -76,9 +89,48 @@ class DialogRendererMixin:
                             else:
                                 imgui.set_tooltip("No Funscript exists for this video")
 
-                        imgui.table_set_column_index(2); imgui.text(video_data["detected_format"])
+                        # Creation date column
+                        imgui.table_set_column_index(2)
+                        creation_date = video_data.get("creation_date", "")
+                        if creation_date:
+                            # Show date portion only (YYYY-MM-DD) for compactness
+                            display_date = creation_date[:10] if len(creation_date) >= 10 else creation_date
+                            imgui.text(display_date)
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip(creation_date)
+                        else:
+                            imgui.text_colored("-", 0.5, 0.5, 0.5, 1.0)
 
-                        imgui.table_set_column_index(3); imgui.push_id(f"ovr_{i}"); imgui.set_next_item_width(-1)
+                        # Tracker/model column
+                        imgui.table_set_column_index(3)
+                        tracker_name = video_data.get("tracker_name", "")
+                        if tracker_name:
+                            imgui.text(tracker_name)
+                        else:
+                            imgui.text_colored("-", 0.5, 0.5, 0.5, 1.0)
+
+                        # FunGen version column
+                        imgui.table_set_column_index(4)
+                        fungen_version = video_data.get("fungen_version", "")
+                        if fungen_version:
+                            imgui.text(fungen_version)
+                        else:
+                            imgui.text_colored("-", 0.5, 0.5, 0.5, 1.0)
+
+                        # Git hash column
+                        imgui.table_set_column_index(5)
+                        git_hash = video_data.get("git_commit_hash", "")
+                        if git_hash:
+                            short_hash = git_hash[:7] if len(git_hash) > 7 else git_hash
+                            imgui.text(short_hash)
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip(git_hash)
+                        else:
+                            imgui.text_colored("-", 0.5, 0.5, 0.5, 1.0)
+
+                        imgui.table_set_column_index(6); imgui.text(video_data["detected_format"])
+
+                        imgui.table_set_column_index(7); imgui.push_id(f"ovr_{i}"); imgui.set_next_item_width(-1)
                         _, video_data["override_format_idx"] = imgui.combo("##override", video_data["override_format_idx"], video_format_options)
                         imgui.pop_id()
 

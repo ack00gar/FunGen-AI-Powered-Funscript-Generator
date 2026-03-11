@@ -170,6 +170,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         self.batch_videos_data: List[Dict] = []
         self.batch_overwrite_mode_ui: int = 0  # 0: Skip own, 1: Skip any, 2: Overwrite all
+        self.batch_set_all_format_idx: int = 1  # Default to "2D" in the set-all dropdown
         self.batch_processing_method_idx_ui: int = 0
         self.batch_copy_funscript_to_video_location_ui: bool = True
         self.batch_generate_roll_file_ui: bool = True
