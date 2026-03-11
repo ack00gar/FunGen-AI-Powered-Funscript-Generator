@@ -352,7 +352,9 @@ class ShortcutHandlerMixin:
                 break
 
         if last_frame is not None:
-            proc.current_frame = last_frame
+            with proc.frame_lock:
+                proc.current_frame = last_frame
+                proc._frame_version += 1
 
         elapsed = time.perf_counter() - t0
         self.track_frame_seek_time(elapsed * 1000, path="arrow")
@@ -391,11 +393,15 @@ class ShortcutHandlerMixin:
             if delta_frames > 0:
                 frame = proc.arrow_nav_forward(new_frame)
                 if frame is not None:
-                    proc.current_frame = frame
+                    with proc.frame_lock:
+                        proc.current_frame = frame
+                        proc._frame_version += 1
             else:
                 frame = proc.arrow_nav_backward(new_frame)
                 if frame is not None:
-                    proc.current_frame = frame
+                    with proc.frame_lock:
+                        proc.current_frame = frame
+                        proc._frame_version += 1
         else:
             # During tracking/processing: use standard cache-based seek
             frame_from_cache = None
@@ -406,7 +412,9 @@ class ShortcutHandlerMixin:
 
             if frame_from_cache is not None:
                 proc.current_frame_index = new_frame
-                proc.current_frame = frame_from_cache
+                with proc.frame_lock:
+                    proc.current_frame = frame_from_cache
+                    proc._frame_version += 1
             else:
                 proc.current_frame_index = new_frame
                 proc.seek_video(new_frame)
