@@ -115,6 +115,8 @@ def run_gui():
 
 def run_cli(args):
     """Runs the application in command-line interface mode."""
+    import warnings
+    warnings.filterwarnings("ignore", message=".*GLFW.*not initialized.*")
     from application.logic.app_logic import ApplicationLogic
     logger = logging.getLogger(__name__)
     logger.info("--- FunGen CLI Mode ---")
