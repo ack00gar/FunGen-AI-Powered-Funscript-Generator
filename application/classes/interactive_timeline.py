@@ -115,6 +115,16 @@ class InteractiveFunscriptTimeline:
         self.is_previewing: bool = False
         self.ultimate_autotune_preview_actions: Optional[List[Dict]] = None
 
+        # Reference funscript comparison overlay
+        self.reference_overlay_actions: Optional[List[Dict]] = None
+        self.reference_overlay_name: str = ""
+        self._reference_metrics: Optional[Dict] = None
+        self._reference_metrics_dirty: bool = False
+        self._reference_peak_matches: Optional[list] = None  # Cached peak match data
+        self._reference_unmatched_main: Optional[list] = None
+        self._reference_unmatched_ref: Optional[list] = None
+        self._reference_problem_sections: Optional[list] = None
+
         # Settings
         self.shift_frames_amount = 1
         self.show_ultimate_autotune_preview = self.app.app_settings.get(
@@ -212,6 +222,9 @@ class InteractiveFunscriptTimeline:
         self._ultimate_preview_dirty = True
         self._heatmap_speeds_cache = None
         self._heatmap_colors_cache = None
+        if self.reference_overlay_actions:
+            self._reference_metrics_dirty = True
+            self._reference_metrics_dirty_time = time.monotonic()
 
     def invalidate_ultimate_preview(self):
         self._ultimate_preview_dirty = True
@@ -302,6 +315,14 @@ class InteractiveFunscriptTimeline:
         if self._bpm_config:
             self._draw_bpm_grid(draw_list, tf)
 
+        # 6-ref. Draw Reference Funscript Overlay (if loaded)
+        if self.reference_overlay_actions:
+            self._draw_curve(draw_list, tf, self.reference_overlay_actions,
+                             color_override=TimelineColors.REFERENCE_OVERLAY,
+                             force_lines_only=True, alpha=0.8)
+            self._draw_reference_peak_markers(draw_list, tf)
+            self._draw_reference_problem_bands(draw_list, tf)
+
         # 6a. Update & Draw Ultimate Preview (if enabled)
         self._update_ultimate_autotune_preview()
         if self.ultimate_autotune_preview_actions:
@@ -328,7 +349,9 @@ class InteractiveFunscriptTimeline:
 
         # 6e. UI Overlays (Selection Box, Playhead, Text)
         self._draw_ui_overlays(draw_list, tf)
-        
+
+        # 6f. Reference comparison metrics (rendered in info_graphs_ui, not on canvas)
+
         # 7. Render Plugin Windows (Popups)
         self.plugin_renderer.render_plugin_windows(self.timeline_num, f"TL{self.timeline_num}")
 
@@ -1527,6 +1550,214 @@ class InteractiveFunscriptTimeline:
                 x2 = float(xs[i + 1])
                 dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, violation_col)
 
+    def _load_reference_funscript(self):
+        """Open file dialog to load a reference funscript for comparison overlay."""
+        gi = getattr(self.app, "gui_instance", None)
+        if not gi:
+            return
+
+        def _on_reference_selected(path):
+            if not path or not os.path.isfile(path):
+                return
+            try:
+                import json
+                with open(path, 'rb') as f:
+                    raw = f.read()
+                # Try UTF-8 first, fall back to latin-1 (covers all single-byte values)
+                for enc in ('utf-8', 'utf-8-sig', 'latin-1'):
+                    try:
+                        text = raw.decode(enc)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    text = raw.decode('latin-1')
+                data = json.loads(text)
+                actions = sorted(data.get('actions', []), key=lambda a: a['at'])
+                if len(actions) < 2:
+                    self.app.logger.warning("Reference funscript has fewer than 2 actions")
+                    return
+                self.reference_overlay_actions = actions
+                self.reference_overlay_name = os.path.basename(path)
+                self._reference_metrics_dirty = True
+                self._recompute_reference_data()
+                self.app.logger.info(f"Loaded reference funscript: {self.reference_overlay_name} ({len(actions)} actions)")
+            except Exception as e:
+                self.app.logger.error(f"Failed to load reference funscript: {e}")
+
+        gi.file_dialog.show(
+            title="Load Reference Funscript",
+            is_save=False,
+            callback=_on_reference_selected,
+            extension_filter=".funscript",
+        )
+
+    def _clear_reference_overlay(self):
+        """Clear the reference funscript overlay and all cached data."""
+        self.reference_overlay_actions = None
+        self.reference_overlay_name = ""
+        self._reference_metrics = None
+        self._reference_metrics_dirty = False
+        self._reference_peak_matches = None
+        self._reference_unmatched_main = None
+        self._reference_unmatched_ref = None
+        self._reference_problem_sections = None
+
+    def _recompute_reference_data(self):
+        """Recompute peak matches and metrics for the reference overlay."""
+        from application.utils.funscript_comparison import (
+            detect_peaks, match_peaks, classify_match, compute_comparison_metrics,
+            detect_problem_sections
+        )
+        main_actions = self._get_actions()
+        ref_actions = self.reference_overlay_actions
+        if not main_actions or not ref_actions or len(main_actions) < 2 or len(ref_actions) < 2:
+            self._reference_metrics = None
+            self._reference_peak_matches = None
+            self._reference_unmatched_main = None
+            self._reference_unmatched_ref = None
+            self._reference_problem_sections = None
+            return
+
+        fps = 30.0
+        proc = self.app.processor
+        if proc and proc.fps and proc.fps > 0:
+            fps = proc.fps
+
+        # Peak matching
+        main_peaks = detect_peaks(main_actions)
+        ref_peaks = detect_peaks(ref_actions)
+        matched, unmatched_main, unmatched_ref = match_peaks(main_peaks, ref_peaks)
+
+        # Classify each match
+        self._reference_peak_matches = [
+            (mp, rp, offset, classify_match(offset, abs(mp['pos'] - rp['pos']), fps))
+            for mp, rp, offset in matched
+        ]
+        self._reference_unmatched_main = unmatched_main
+        self._reference_unmatched_ref = unmatched_ref
+
+        # Build chapters list for per-chapter stats
+        chapters_data = None
+        video_chapters = getattr(self.app.funscript_processor, 'video_chapters', None)
+        if video_chapters:
+            chapters_data = []
+            for ch in video_chapters:
+                s_frame = ch.start_frame_id
+                e_frame = ch.end_frame_id
+                s_ms = (s_frame / fps) * 1000.0 if fps > 0 else 0
+                e_ms = (e_frame / fps) * 1000.0 if fps > 0 else 0
+                chapters_data.append({
+                    'start_ms': s_ms,
+                    'end_ms': e_ms,
+                    'name': ch.position_short_name or ch.position_long_name or 'unknown',
+                })
+
+        # Aggregate metrics (with per-chapter if chapters exist)
+        # Pass pre-computed peak data to avoid redundant detect_peaks + match_peaks
+        self._reference_metrics = compute_comparison_metrics(
+            main_actions, ref_actions, fps, chapters=chapters_data,
+            peak_data=(matched, unmatched_main, unmatched_ref)
+        )
+
+        # Problem section detection
+        self._reference_problem_sections = detect_problem_sections(
+            main_actions, ref_actions, fps
+        )
+
+        self._reference_metrics_dirty = False
+
+    def _draw_reference_peak_markers(self, dl, tf: TimelineTransformer):
+        """Draw color-coded squares on matched peaks and hollow squares on unmatched peaks."""
+        if self._reference_metrics_dirty:
+            # Throttle: wait 0.3s after last edit before recomputing (avoids per-frame recompute during drag)
+            dirty_time = getattr(self, '_reference_metrics_dirty_time', 0)
+            if time.monotonic() - dirty_time >= 0.3:
+                self._recompute_reference_data()
+
+        color_map = {
+            'gold': TimelineColors.REFERENCE_MATCH_GOLD,
+            'green': TimelineColors.REFERENCE_MATCH_GREEN,
+            'yellow': TimelineColors.REFERENCE_MATCH_YELLOW,
+            'red': TimelineColors.REFERENCE_MATCH_RED,
+        }
+        unmatched_col = TimelineColors.REFERENCE_UNMATCHED
+        sq = 4  # Square half-size (pixels)
+
+        # Draw matched peaks — filled square at the main peak position
+        if self._reference_peak_matches:
+            for mp, rp, offset, classification in self._reference_peak_matches:
+                px = tf.time_to_x(mp['at'])
+                if px < tf.x_offset - 20 or px > tf.x_offset + tf.width + 20:
+                    continue
+                py = tf.val_to_y(mp['pos'])
+                col = color_map.get(classification, unmatched_col)
+                col_u32 = imgui.get_color_u32_rgba(*col)
+                dl.add_rect_filled(px - sq, py - sq, px + sq, py + sq, col_u32)
+
+        # Draw unmatched main peaks — hollow square
+        if self._reference_unmatched_main:
+            col_u32 = imgui.get_color_u32_rgba(*unmatched_col)
+            for p in self._reference_unmatched_main:
+                px = tf.time_to_x(p['at'])
+                if px < tf.x_offset - 20 or px > tf.x_offset + tf.width + 20:
+                    continue
+                py = tf.val_to_y(p['pos'])
+                dl.add_rect(px - sq, py - sq, px + sq, py + sq, col_u32, 0, 0, 1.5)
+
+        # Draw unmatched ref peaks — hollow square on the reference curve
+        if self._reference_unmatched_ref:
+            col_u32 = imgui.get_color_u32_rgba(*unmatched_col)
+            for p in self._reference_unmatched_ref:
+                px = tf.time_to_x(p['at'])
+                if px < tf.x_offset - 20 or px > tf.x_offset + tf.width + 20:
+                    continue
+                py = tf.val_to_y(p['pos'])
+                dl.add_rect(px - sq, py - sq, px + sq, py + sq, col_u32, 0, 0, 1.5)
+
+    def _draw_reference_problem_bands(self, dl, tf: TimelineTransformer):
+        """Draw semi-transparent red bands over detected problem sections."""
+        if not self._reference_problem_sections:
+            return
+        band_col = imgui.get_color_u32_rgba(0.9, 0.15, 0.15, 0.12)
+        border_col = imgui.get_color_u32_rgba(0.9, 0.15, 0.15, 0.35)
+        for sec in self._reference_problem_sections:
+            x1 = tf.time_to_x(sec['start_ms'])
+            x2 = tf.time_to_x(sec['end_ms'])
+            # Skip if entirely off-screen
+            if x2 < tf.x_offset or x1 > tf.x_offset + tf.width:
+                continue
+            dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, band_col)
+            dl.add_line(x1, tf.y_offset, x1, tf.y_offset + tf.height, border_col, 1.0)
+            dl.add_line(x2, tf.y_offset, x2, tf.y_offset + tf.height, border_col, 1.0)
+
+    def _create_chapters_from_problem_sections(self):
+        """Create chapters from detected problem sections for easy review."""
+        if not self._reference_problem_sections:
+            return
+
+        fps = 30.0
+        proc = self.app.processor
+        if proc and proc.fps and proc.fps > 0:
+            fps = proc.fps
+
+        created = 0
+        for i, sec in enumerate(self._reference_problem_sections):
+            start_frame = int(sec['start_ms'] / 1000.0 * fps)
+            end_frame = int(sec['end_ms'] / 1000.0 * fps)
+            self.app.funscript_processor.create_new_chapter_from_data(
+                data={
+                    'start_frame_str': str(start_frame),
+                    'end_frame_str': str(end_frame),
+                    'position_short_name_key': 'NR',
+                    'segment_type': 'default',
+                    'source': 'reference_comparison',
+                },
+            )
+            created += 1
+
+        self.app.logger.info(f"Created {created} chapters from problem sections (MAE > threshold)")
+
     def _draw_chapter_highlight_overlay(self, dl, tf: TimelineTransformer):
         """Draw gold highlight band for context-selected chapters."""
         nav_ui = None
@@ -2384,6 +2615,21 @@ class InteractiveFunscriptTimeline:
                         self._set_axis_assignment(fa.value)
                         imgui.close_current_popup()
                 imgui.end_menu()
+
+            # --- Reference Comparison ---
+            imgui.separator()
+            if imgui.menu_item("Load Reference Funscript...")[0]:
+                self._load_reference_funscript()
+                imgui.close_current_popup()
+            if self.reference_overlay_actions:
+                if imgui.menu_item("Clear Reference Overlay")[0]:
+                    self._clear_reference_overlay()
+                    imgui.close_current_popup()
+                if self._reference_problem_sections:
+                    n = len(self._reference_problem_sections)
+                    if imgui.menu_item(f"Create Chapters from {n} Problem Section{'s' if n != 1 else ''}")[0]:
+                        self._create_chapters_from_problem_sections()
+                        imgui.close_current_popup()
 
             # --- Bookmarks ---
             imgui.separator()
