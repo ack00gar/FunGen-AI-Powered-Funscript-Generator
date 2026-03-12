@@ -102,6 +102,12 @@ class DarkTheme:
     TIMELINE_POINT_SELECTED = (1.0, 0.0, 0.0, 1.0) # dark red
     TIMELINE_POINT_HOVER = (0.5, 1.0, 0.5, 1.0) # light green
     ULTIMATE_AUTOTUNE_PREVIEW = (0.2, 1.0, 0.5, 0.5)  # A semi-transparent green
+    REFERENCE_OVERLAY = (0.3, 0.65, 1.0, 0.9)  # Cyan/blue for reference comparison
+    REFERENCE_MATCH_GOLD = (1.0, 0.85, 0.0, 1.0)  # Exact peak match
+    REFERENCE_MATCH_GREEN = (0.2, 1.0, 0.3, 1.0)  # Close peak match (< 100ms)
+    REFERENCE_MATCH_YELLOW = (1.0, 0.9, 0.2, 1.0)  # Slightly off (100-200ms)
+    REFERENCE_MATCH_RED = (1.0, 0.2, 0.2, 1.0)  # Missed timing (> 200ms)
+    REFERENCE_UNMATCHED = (0.5, 0.5, 0.5, 0.5)  # Unmatched peak
 
     # Compiler Colors
     COMPILER_SUCCESS = GREEN
