@@ -1431,12 +1431,17 @@ class AppFileManager:
 
         gui.batch_videos_data.clear()
         for video_path in unique_videos:
+            fs_metadata = ImGuiFileDialog.get_funscript_metadata(video_path, self.app.logger)
             gui.batch_videos_data.append({
                 "path": video_path,
                 "selected": False,
                 "funscript_status": ImGuiFileDialog.get_funscript_status(video_path, self.app.logger),
                 "detected_format": VideoProcessor.get_video_type_heuristic(video_path),
                 "override_format_idx": 0, # Index for 'Auto'
+                "creation_date": fs_metadata.get("creation_date", ""),
+                "tracker_name": fs_metadata.get("tracker_name", ""),
+                "git_commit_hash": fs_metadata.get("git_commit_hash", ""),
+                "fungen_version": fs_metadata.get("fungen_version", ""),
             })
 
         gui.last_overwrite_mode_ui = -1
