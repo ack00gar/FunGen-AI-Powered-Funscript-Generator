@@ -1085,18 +1085,22 @@ class MultiAxisFunscript:
     def clear_points(self, axis: str = 'both',
                      start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
                      selected_indices: Optional[List[int]] = None):
-        if axis not in ['primary', 'secondary', 'both']:
-            self.logger.warning("Axis for clear_points must be 'primary', 'secondary', or 'both'.")
+        valid_axes = {'primary', 'secondary', 'both'} | set(self.additional_axes.keys())
+        if axis not in valid_axes:
+            self.logger.warning(f"Axis '{axis}' not recognized for clear_points.")
             return
 
         affected_axes_names: List[str] = []
-        if axis == 'primary' or axis == 'both': affected_axes_names.append('primary')
-        if axis == 'secondary' or axis == 'both': affected_axes_names.append('secondary')
+        if axis == 'both':
+            affected_axes_names.append('primary')
+            affected_axes_names.append('secondary')
+        else:
+            affected_axes_names.append(axis)
 
         total_cleared_count = 0
 
         for axis_name in affected_axes_names:
-            target_actions_list = self.primary_actions if axis_name == 'primary' else self.secondary_actions
+            target_actions_list = self.get_axis_actions(axis_name)
             initial_len = len(target_actions_list)
 
             if selected_indices is not None:
@@ -1130,15 +1134,17 @@ class MultiAxisFunscript:
 
     def clear_actions_in_time_range(self, start_time_ms: int, end_time_ms: int, axis: str = 'both'):
         """Clears actions within a specified millisecond time range for the given axis or both."""
-        if axis not in ['primary', 'secondary', 'both']:
-            self.logger.warning("Axis for clear_actions_in_time_range must be 'primary', 'secondary', or 'both'.")
+        valid_axes = {'primary', 'secondary', 'both'} | set(self.additional_axes.keys())
+        if axis not in valid_axes:
+            self.logger.warning(f"Axis '{axis}' not recognized for clear_actions_in_time_range.")
             return
 
         axes_to_process: List[Tuple[str, List[Dict]]] = []
-        if axis == 'primary' or axis == 'both':
+        if axis == 'both':
             axes_to_process.append(('primary', self.primary_actions))
-        if axis == 'secondary' or axis == 'both':
             axes_to_process.append(('secondary', self.secondary_actions))
+        else:
+            axes_to_process.append((axis, self.get_axis_actions(axis)))
 
         total_cleared_count = 0
         for axis_name, actions_list_ref in axes_to_process:

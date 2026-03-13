@@ -8,6 +8,8 @@ import time
 import numpy as np
 from typing import Optional, Iterator, Tuple
 
+from config import constants
+
 
 class SegmentStreamingMixin:
     """Mixin fragment for VideoProcessor."""
