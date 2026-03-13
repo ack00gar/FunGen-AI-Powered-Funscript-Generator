@@ -208,6 +208,9 @@ class ControlPanelUI(
     def _is_mixed_stage3_tracker(self, tracker_name: str) -> bool:
         return self._check_tracker_ui('is_mixed_stage3_tracker', tracker_name)
 
+    def _is_hybrid_tracker(self, tracker_name: str) -> bool:
+        return self._check_tracker_ui('is_hybrid_tracker', tracker_name)
+
     def _get_tracker_lists_for_ui(self, simple_mode=False, hidden_folders=None):
         """Get tracker lists for UI combo boxes using dynamic discovery."""
         try:
@@ -564,7 +567,11 @@ class ControlPanelUI(
                         app.file_manager.open_video_dialog()
         elif is_offline_active:
             # Offline analysis active — show progress and Stop
-            progress = getattr(stage_proc, 'overall_progress', 0.0)
+            selected_mode = app.app_state_ui.selected_tracker_name
+            if selected_mode and self._is_hybrid_tracker(selected_mode):
+                progress = getattr(stage_proc, 'stage2_main_progress_value', 0.0)
+            else:
+                progress = getattr(stage_proc, 'overall_progress', 0.0)
             imgui.progress_bar(progress, (-1, 18),
                                f"{int(progress * 100)}%")
             with destructive_button_style():
@@ -1071,7 +1078,7 @@ class ControlPanelUI(
                     imgui.text("Analysis Range")
                     self._render_range_selection(stage_proc, fs_proc, events)
 
-                    if self._is_offline_tracker(mode):
+                    if self._is_offline_tracker(mode) and not self._is_hybrid_tracker(mode):
                         imgui.text("Stage Reruns:")
                         with _DisabledScope(disable_combo):
                             _, stage_proc.force_rerun_stage1 = imgui.checkbox(
@@ -1091,20 +1098,6 @@ class ControlPanelUI(
                                 "Re-run contact analysis and segmentation even if cached results exist.\n"
                                 "Use when you want to regenerate chapters and signals from scratch."
                             )
-                            if not hasattr(stage_proc, "save_preprocessed_video"):
-                                stage_proc.save_preprocessed_video = app.app_settings.get("save_preprocessed_video", False)
-                            changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
-                            if changed:
-                                stage_proc.save_preprocessed_video = new_val
-                                app.app_settings.set("save_preprocessed_video", new_val)
-                                if new_val:
-                                    stage_proc.num_producers_stage1 = 1
-                                    app.app_settings.set("num_producers_stage1", 1)
-                            _tooltip_if_hovered(
-                                "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
-                                "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
-                                "Forces the number of Producer threads to 1."
-                            )
 
                         # Database Retention Option
                         with _DisabledScope(disable_combo):
@@ -1117,6 +1110,23 @@ class ControlPanelUI(
                                 "Keep the Stage 2 database file after processing completes.\n"
                                 "Disable to save disk space (database is automatically deleted).\n"
                                 "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
+                            )
+
+                    if self._is_offline_tracker(mode):
+                        with _DisabledScope(disable_combo):
+                            if not hasattr(stage_proc, "save_preprocessed_video"):
+                                stage_proc.save_preprocessed_video = app.app_settings.get("save_preprocessed_video", False)
+                            changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
+                            if changed:
+                                stage_proc.save_preprocessed_video = new_val
+                                app.app_settings.set("save_preprocessed_video", new_val)
+                                if new_val and not self._is_hybrid_tracker(mode):
+                                    stage_proc.num_producers_stage1 = 1
+                                    app.app_settings.set("num_producers_stage1", 1)
+                            _tooltip_if_hovered(
+                                "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
+                                "When enabled, re-running will reuse the existing preprocessed video.\n"
+                                "For standard trackers, forces Producer threads to 1."
                             )
 
         proc = app.processor

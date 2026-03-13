@@ -213,6 +213,20 @@ class DialogRendererMixin:
                 imgui.set_tooltip("Progressively optimizes pipeline thread settings during batch.\n"
                                   "Starts conservative, tests small improvements after each video.\n"
                                   "Best settings saved for future use.")
+
+            # Save preprocessed video (offline trackers only, off by default)
+            is_offline_tracker = False
+            if hasattr(self, 'selected_batch_tracker_name') and self.selected_batch_tracker_name:
+                t_info = discovery.get_tracker_info(self.selected_batch_tracker_name)
+                if t_info and t_info.category == TrackerCategory.OFFLINE:
+                    is_offline_tracker = True
+            if is_offline_tracker:
+                _, self.batch_save_preprocessed_video_ui = imgui.checkbox(
+                    "Save preprocessed video", self.batch_save_preprocessed_video_ui)
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Keep the preprocessed (resized/unwarped) video for each processed file.\n"
+                                      "WARNING: Uses significant disk space (~200-500MB per video).\n"
+                                      "Only enable if you plan to re-run analysis on the same videos.")
             cur_p = app.stage_processor.num_producers_stage1
             cur_c = app.stage_processor.num_consumers_stage1
             imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.5, 1.0)

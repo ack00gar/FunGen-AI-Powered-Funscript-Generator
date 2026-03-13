@@ -176,6 +176,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.batch_generate_roll_file_ui: bool = True
         self.batch_apply_ultimate_autotune_ui: bool = True
         self.batch_adaptive_tuning_ui: bool = True
+        self.batch_save_preprocessed_video_ui: bool = False
         self.last_overwrite_mode_ui: int = -1 # Used to trigger auto-selection logic
 
         # Go to Frame popup
