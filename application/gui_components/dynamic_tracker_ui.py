@@ -119,20 +119,32 @@ class DynamicTrackerUI:
             return False
         return "user" in tracker_name.lower()
     
+    def is_hybrid_tracker(self, tracker_name: str) -> bool:
+        """Check if tracker handles Stage 1 internally (e.g. hybrid chapter-aware)."""
+        if not tracker_name:
+            return False
+        info = self.discovery.get_tracker_info(tracker_name)
+        if info and info.properties:
+            return info.properties.get("is_hybrid_tracker", False)
+        return False
+
     def is_stage2_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is a 2-stage offline tracker."""
         if not tracker_name:
             return False
-        
+
         info = self.discovery.get_tracker_info(tracker_name)
         if info and info.properties:
+            # Hybrid trackers handle their own pipeline — not a standard stage2 tracker
+            if info.properties.get("is_hybrid_tracker"):
+                return False
             # Use property if available
             if "is_stage2_tracker" in info.properties:
                 return info.properties["is_stage2_tracker"]
             # Check if it produces funscript in stage 2 and has exactly 2 stages
             if info.properties.get("num_stages") == 2 and info.properties.get("produces_funscript_in_stage2"):
                 return True
-        
+
         return False
     
     def is_stage3_tracker(self, tracker_name: str) -> bool:
@@ -191,21 +203,18 @@ class DynamicTrackerUI:
 
         Returns (tracker_name, reason) tuple.
         """
-        duration = video_info.get('duration', 0)
         all_trackers = self.discovery.get_all_trackers()
 
-        # Very long videos (>90 min): prefer 2-stage for speed
-        if duration > 90 * 60:
-            if "OFFLINE_CONTACT_ANALYSIS" in all_trackers:
-                return "OFFLINE_CONTACT_ANALYSIS", "Fast processing for long videos"
+        # Hybrid chapter tracker is the best offline option
+        if "OFFLINE_HYBRID_CHAPTER" in all_trackers:
+            return "OFFLINE_HYBRID_CHAPTER", "Chapter-aware processing with optimized quality"
 
-        # Default: Guided Flow (3-stage) — best quality with chapter-aware strategies
+        # Fallback to legacy offline trackers
         if "OFFLINE_GUIDED_FLOW" in all_trackers:
-            return "OFFLINE_GUIDED_FLOW", "Best quality with chapter-aware strategies"
+            return "OFFLINE_GUIDED_FLOW", "Legacy 3-stage with chapter-aware strategies"
 
-        # Fallback to legacy 3-stage trackers
-        if "LEGACY_STAGE3_OPTICAL_FLOW" in all_trackers:
-            return "LEGACY_STAGE3_OPTICAL_FLOW", "Legacy 3-stage balanced"
+        if "OFFLINE_CONTACT_ANALYSIS" in all_trackers:
+            return "OFFLINE_CONTACT_ANALYSIS", "Legacy 2-stage contact analysis"
 
         # Fallback to whatever is available
         from config.constants import DEFAULT_TRACKER_NAME

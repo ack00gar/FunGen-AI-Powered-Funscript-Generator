@@ -116,13 +116,18 @@ class TrackerRegistry:
     def _load_tracker_module(self, file_path: str, filename: str, folder_name: str, is_community: bool):
         """Load and validate a single tracker module with security checks."""
         try:
-            # Use secure loading with validation and sandboxing
-            tracker_class = load_tracker_safely(file_path, filename)
+            if is_community:
+                # Community trackers get full security validation
+                tracker_class = load_tracker_safely(file_path, filename)
+            else:
+                # Official trackers are trusted -- load directly without sandbox
+                tracker_class = self._direct_import(file_path, filename)
+
             if tracker_class:
                 self._register_tracker(tracker_class, folder_name, is_community, file_path)
             else:
                 self.logger.debug(f"No valid tracker classes found in {filename}")
-                
+
         except TrackerSecurityError as e:
             # Security violations are critical - log as error
             error_msg = f"SECURITY VIOLATION in {filename}: {e}"
@@ -133,6 +138,26 @@ class TrackerRegistry:
             error_msg = f"Failed to load tracker module {filename}: {e}"
             self._discovery_errors.append(error_msg)
             self.logger.warning(error_msg)
+
+    def _direct_import(self, file_path: str, filename: str) -> Optional[Type]:
+        """Import an official tracker module without security sandbox."""
+        module_name = filename[:-3]
+        spec = importlib.util.spec_from_file_location(f"tracker_modules.{module_name}", file_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[f"tracker_modules.{module_name}"] = module
+        spec.loader.exec_module(module)
+
+        tracker_classes = []
+        for name, obj in inspect.getmembers(module):
+            if (inspect.isclass(obj) and
+                (issubclass(obj, BaseTracker) or issubclass(obj, BaseOfflineTracker)) and
+                obj not in [BaseTracker, BaseOfflineTracker] and
+                not inspect.isabstract(obj)):
+                tracker_classes.append(obj)
+
+        return tracker_classes[0] if tracker_classes else None
     
     
     def _register_tracker(self, tracker_class: Type, folder_name: str, is_community: bool, file_path: str):

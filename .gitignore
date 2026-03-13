@@ -218,3 +218,8 @@ skip_updates.json
 *.patch
 checkpoints/
 *.checkpoint
+
+# Backup archives and files
+*.zip
+*.bak*
+*_backup.py

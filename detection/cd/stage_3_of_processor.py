@@ -236,7 +236,8 @@ def stage3_worker_proc(
                 )
 
             # Initialize funscript for oscillation detector
-            roi_tracker_instance.funscript = MultiAxisFunscript(logger=worker_logger)
+            roi_tracker_instance.funscript = MultiAxisFunscript(logger=worker_logger,
+                                                                fps=common_app_config.get('video_fps', 30.0))
             roi_tracker_instance.start_tracking()
             roi_tracker_instance.main_interaction_class = getattr(segment_obj, 'position_short_name', None) or getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')
 
@@ -374,8 +375,8 @@ def perform_stage3_analysis(
     if not use_sqlite and not s2_frame_objects_map:
         logger.error("No data source available: neither SQLite nor in-memory frame objects map")
         # Create empty funscript with chapters for consistency
-        empty_funscript = MultiAxisFunscript()
         video_fps = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
+        empty_funscript = MultiAxisFunscript(fps=video_fps)
         empty_funscript.set_chapters_from_segments(atr_segments_list, video_fps)
         return {"success": False, "funscript": empty_funscript, "error": "No data source available", "video_segments": [seg.to_dict() if hasattr(seg, 'to_dict') else seg.__dict__ for seg in atr_segments_list]}
 
@@ -398,8 +399,8 @@ def perform_stage3_analysis(
     if not relevant_segments:
         logger.info("No relevant segments to process in Stage 3.")
         # Create empty funscript with chapters for consistency
-        empty_funscript = MultiAxisFunscript()
         video_fps = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
+        empty_funscript = MultiAxisFunscript(fps=video_fps)
         empty_funscript.set_chapters_from_segments(atr_segments_list, video_fps)
         return {"success": True, "funscript": empty_funscript, "total_frames_processed": 0, "processing_method": "optical_flow", "video_segments": [seg.to_dict() if hasattr(seg, 'to_dict') else seg.__dict__ for seg in atr_segments_list]}
 
@@ -579,8 +580,9 @@ def perform_stage3_analysis(
             logger.warning(f"Failed to clean up SQLite database: {e}")
 
     # Create funscript object
-    funscript_obj = MultiAxisFunscript(logger=logger)
-    
+    video_fps_for_snap = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
+    funscript_obj = MultiAxisFunscript(logger=logger, fps=video_fps_for_snap)
+
     # Add actions to funscript object
     for action in all_primary_actions:
         funscript_obj.add_action(action['at'], action['pos'], None)

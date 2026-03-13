@@ -30,7 +30,7 @@ class SignalAmplifier:
                  enable_live_amp: bool = True,
                  smoothing_alpha: float = 0.3,
                  amplitude_divisor: float = 4.0,
-                 base_scale_primary: float = -10.0,
+                 base_scale_primary: float = 10.0,
                  base_scale_secondary: float = 10.0,
                  max_deviation_multiplier: float = 49.0,
                  plateau_threshold: float = 15.0,

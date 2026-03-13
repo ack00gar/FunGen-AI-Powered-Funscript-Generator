@@ -281,12 +281,12 @@ class StageExecutorMixin:
         """Create funscript object from loaded segments for consistency."""
         try:
             from funscript.multi_axis_funscript import MultiAxisFunscript
-            funscript_obj = MultiAxisFunscript()
-
             fps = 30.0
             if self.app and hasattr(self.app, 'processor') and self.app.processor:
                 video_info = getattr(self.app.processor, 'video_info', {})
                 fps = video_info.get('fps', 30.0)
+
+            funscript_obj = MultiAxisFunscript(fps=fps)
 
             if loaded_data["video_segments"]:
                 funscript_obj.set_chapters_from_segments(loaded_data["video_segments"], fps)
@@ -835,6 +835,83 @@ class StageExecutorMixin:
         except Exception as e:
             self.logger.error(f"Stage 3 modular tracker execution failed: {e}", exc_info=True)
             return None
+
+    # ------------------------------------------------------------------
+    # Hybrid tracker — handles Stage 1 + 2 internally
+    # ------------------------------------------------------------------
+
+    def _execute_hybrid_tracker(self, tracker_name: str) -> Dict[str, Any]:
+        """Execute a hybrid tracker that handles both Stage 1 and Stage 2 internally."""
+        from tracker.tracker_modules import create_tracker
+        from tracker.tracker_modules.core.base_offline_tracker import OfflineProcessingStage
+
+        fm = self.app.file_manager
+        if not fm or not fm.video_path:
+            return {"success": False, "error": "Video path not available"}
+
+        tracker = create_tracker(tracker_name)
+        if tracker is None:
+            return {"success": False, "error": f"Could not create tracker '{tracker_name}'"}
+
+        if not tracker.initialize(self.app):
+            return {"success": False, "error": f"Tracker '{tracker_name}' initialization failed"}
+
+        # Set stop event
+        if hasattr(tracker, 'set_stop_event'):
+            tracker.set_stop_event(self.stop_stage_event)
+
+        output_directory = os.path.dirname(fm.get_output_path_for_file(fm.video_path, "_dummy.tmp"))
+
+        self.gui_event_queue.put(("stage2_status_update", "Running Hybrid...", "Initializing"))
+
+        def progress_wrapper(info):
+            """Route hybrid tracker progress to the Stage 2 UI."""
+            if isinstance(info, dict):
+                stage = info.get('stage', '')
+                task = info.get('task', '')
+                pct = info.get('percentage', 0)
+                self.stage2_progress_value = pct / 100.0
+                self.stage2_status_text = f"{stage}: {task}"
+                self.gui_event_queue.put(("stage2_status_update", f"{task}", f"{pct}%"))
+
+        try:
+            result = tracker.process_stage(
+                stage=OfflineProcessingStage.STAGE_2,
+                video_path=fm.video_path,
+                output_directory=output_directory,
+                progress_callback=progress_wrapper,
+            )
+
+            if self.stop_stage_event.is_set():
+                return {"success": False, "error": "Aborted by user"}
+
+            if result and result.success and result.output_data:
+                funscript = result.output_data.get('funscript', {})
+                chapters = result.output_data.get('chapters', [])
+
+                # Build Stage 2-compatible output data with funscript actions
+                output_data = {
+                    'funscript': funscript,
+                    'chapters': chapters,
+                    'video_segments': [
+                        {
+                            'label': ch.get('position', 'Unknown'),
+                            'start_frame': ch.get('start_frame', 0),
+                            'end_frame': ch.get('end_frame', 0),
+                        }
+                        for ch in chapters
+                    ],
+                }
+
+                self.gui_event_queue.put(("stage2_status_update", "Hybrid Complete", "Done"))
+                return {"success": True, "data": output_data}
+            else:
+                error_msg = getattr(result, 'error_message', 'Unknown error') if result else 'No result'
+                return {"success": False, "error": error_msg}
+
+        except Exception as e:
+            self.logger.error(f"Hybrid tracker execution failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
     def _has_modular_stage3(self, tracker_name: str) -> bool:
         """Check if the named tracker has its own process_stage method (new offline API)."""

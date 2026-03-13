@@ -398,9 +398,16 @@ class AppBatchProcessor:
                         self.app.logger.info("CLI Mode: Loading analysis results into funscript processor.")
                         results_package = self.app.stage_processor.last_analysis_result
                         if results_package and "results_dict" in results_package:
-                            if result_script := results_package["results_dict"].get("funscript"):
-                                self.app.funscript_processor.clear_timeline_history_and_set_new_baseline(1, result_script.primary_actions, "Stage 2 (CLI)")
-                                self.app.funscript_processor.clear_timeline_history_and_set_new_baseline(2, result_script.secondary_actions, "Stage 2 (CLI)")
+                            results_dict = results_package["results_dict"]
+                            result_script = results_dict.get("funscript")
+                            if result_script:
+                                primary = result_script.primary_actions
+                                secondary = result_script.secondary_actions
+                                self.app.logger.info(f"CLI Mode: Found funscript with {len(primary)} primary, {len(secondary)} secondary actions")
+                                self.app.funscript_processor.clear_timeline_history_and_set_new_baseline(1, primary, "Analysis (CLI)")
+                                self.app.funscript_processor.clear_timeline_history_and_set_new_baseline(2, secondary, "Analysis (CLI)")
+                            else:
+                                self.app.logger.warning(f"CLI Mode: results_dict has no 'funscript' key. Keys: {list(results_dict.keys())}")
                         else:
                             self.app.logger.error("CLI Mode: Analysis finished but no results were found to load.")
                     # --- END OF ADDED BLOCK ---
