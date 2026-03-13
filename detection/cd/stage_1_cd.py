@@ -665,7 +665,8 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
                 progress_callback_local, queue_monitor_local, stop_event_local,
                 s1_start_time_param, parent_logger: logging.Logger,
                 gui_event_queue_arg: Optional[StdLibQueue] = None,
-                max_fps_container: Optional[list] = None):
+                max_fps_container: Optional[list] = None,
+                start_frame_offset: int = 0):
     results_dict = {}
     written_count = 0
     last_progress_update_time = time.time()
@@ -764,12 +765,14 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
         parent_logger.warning(f"[S1 Logger] Abort signal received. Skipping save of partial file: {output_file_local}")
         return
 
-    # Save the results
-    ordered_results = [results_dict.get(i, {"detections": [], "poses": []}) for i in range(expected_frames)]
+    # Save the results — use start_frame_offset for correct frame ID lookup
+    # When frame_range_arg is used, frame IDs are absolute (e.g. 30000-33596)
+    # but we store them sequentially in the msgpack (indices 0..N-1)
+    frame_id_range = range(start_frame_offset, start_frame_offset + expected_frames)
 
     # --- POSE MEMORIZATION LOGIC ---
     parent_logger.info("[S1 Logger] Assembling final results and filling pose gaps...")
-    ordered_results = [results_dict.get(i) for i in range(expected_frames)]
+    ordered_results = [results_dict.get(i) for i in frame_id_range]
 
     last_known_poses = []
     for i in range(expected_frames):
@@ -1002,7 +1005,8 @@ def perform_yolo_analysis(
 
         logger_thread_args = (frame_processing_queue, yolo_result_queue, result_file_local, total_frames_to_process,
                               progress_callback, queue_monitor, stop_event_internal,
-                              s1_start_time, process_logger, gui_event_queue_arg, max_fps_container)
+                              s1_start_time, process_logger, gui_event_queue_arg, max_fps_container,
+                              processing_start_frame)
 
         logger_p_thread = PyThread(target=logger_proc, args=logger_thread_args, daemon=True)
 

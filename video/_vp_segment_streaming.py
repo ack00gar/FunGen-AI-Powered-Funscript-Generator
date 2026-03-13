@@ -92,6 +92,10 @@ class SegmentStreamingMixin:
             if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
                 ffmpeg_cmd.extend(['-frames:v', str(num_frames_to_stream_hint)])
 
+            # When using select filter, -vsync vfr is needed to actually drop non-selected frames
+            if getattr(self, '_ffmpeg_vsync_mode', None):
+                ffmpeg_cmd.extend(['-vsync', self._ffmpeg_vsync_mode])
+
             # Always BGR24 — GPU unwarp worker handles BGR→RGBA conversion internally
             ffmpeg_cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
             self.logger.info(f"Segment CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")

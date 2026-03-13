@@ -844,12 +844,12 @@ class GuidedFlowTracker(BaseOfflineTracker):
             all_primary.sort(key=lambda a: a['at'])
             all_secondary.sort(key=lambda a: a['at'])
 
-            # Build funscript object
+            # Build funscript object — use set_axis_actions to bypass live-tracker
+            # simplification filters (min_interval, collinear removal) that would
+            # aggressively reduce the dense per-frame optical flow output
             funscript = MultiAxisFunscript(logger=self.logger)
-            for action in all_primary:
-                funscript.add_action(action['at'], action['pos'], None)
-            for action in all_secondary:
-                funscript.add_action(action['at'], None, action['pos'])
+            funscript.set_axis_actions('primary', all_primary)
+            funscript.set_axis_actions('secondary', all_secondary)
 
             # Set chapters from segments
             funscript.set_chapters_from_segments(segments, fps)
