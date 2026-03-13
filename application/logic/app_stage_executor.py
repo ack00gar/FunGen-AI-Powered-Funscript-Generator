@@ -861,18 +861,35 @@ class StageExecutorMixin:
             tracker.set_stop_event(self.stop_stage_event)
 
         output_directory = os.path.dirname(fm.get_output_path_for_file(fm.video_path, "_dummy.tmp"))
+        preprocessed_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mp4")
+
+        save_preprocessed = getattr(self, 'save_preprocessed_video', False)
+        hwaccel = getattr(self.app, 'hardware_acceleration_method', 'auto')
 
         self.gui_event_queue.put(("stage2_status_update", "Running Hybrid...", "Initializing"))
 
+        is_headless = not getattr(self.app, 'gui_instance', None)
+
         def progress_wrapper(info):
-            """Route hybrid tracker progress to the Stage 2 UI."""
+            """Route hybrid tracker progress to the Stage 2 UI (or CLI stdout)."""
             if isinstance(info, dict):
                 stage = info.get('stage', '')
                 task = info.get('task', '')
                 pct = info.get('percentage', 0)
-                self.stage2_progress_value = pct / 100.0
+                self.stage2_main_progress_value = pct / 100.0
+                self.stage2_main_progress_label = f"{stage}: {task}" if stage else task
                 self.stage2_status_text = f"{stage}: {task}"
                 self.gui_event_queue.put(("stage2_status_update", f"{task}", f"{pct}%"))
+
+                if is_headless:
+                    import sys
+                    bar_w = 40
+                    filled = int(pct / 100.0 * bar_w)
+                    bar = '\u2588' * filled + '-' * (bar_w - filled)
+                    sys.stdout.write(f"\rHybrid: |{bar}| {pct:>3}% | {stage}: {task}   ")
+                    sys.stdout.flush()
+                    if pct >= 100:
+                        sys.stdout.write("\n")
 
         try:
             result = tracker.process_stage(
@@ -880,9 +897,18 @@ class StageExecutorMixin:
                 video_path=fm.video_path,
                 output_directory=output_directory,
                 progress_callback=progress_wrapper,
+                save_preprocessed_video=save_preprocessed,
+                preprocessed_video_path=preprocessed_path,
+                hwaccel_method=hwaccel,
             )
 
             if self.stop_stage_event.is_set():
+                # Clean up incomplete preprocessed file on abort
+                if os.path.exists(preprocessed_path) and not save_preprocessed:
+                    try:
+                        os.remove(preprocessed_path)
+                    except OSError:
+                        pass
                 return {"success": False, "error": "Aborted by user"}
 
             if result and result.success and result.output_data:
@@ -902,6 +928,17 @@ class StageExecutorMixin:
                         for ch in chapters
                     ],
                 }
+
+                # Manage preprocessed video file
+                if save_preprocessed and os.path.exists(preprocessed_path):
+                    fm.preprocessed_video_path = preprocessed_path
+                    self.logger.info(f"Preprocessed video saved: {os.path.basename(preprocessed_path)}")
+                elif not save_preprocessed and os.path.exists(preprocessed_path):
+                    try:
+                        os.remove(preprocessed_path)
+                        self.logger.info("Deleted preprocessed video (save_preprocessed_video=off)")
+                    except OSError as del_err:
+                        self.logger.warning(f"Could not delete preprocessed video: {del_err}")
 
                 self.gui_event_queue.put(("stage2_status_update", "Hybrid Complete", "Done"))
                 return {"success": True, "data": output_data}
