@@ -247,8 +247,10 @@ class MultiAxisFunscript:
         if time_range == 0:
             return  # Can't determine if timestamps are identical
 
-        # If normalized cross product is ≤ time_range (1 position-unit tolerance)
-        if abs(cross) <= time_range:
+        # If normalized cross product is ≤ 2*time_range (2 position-unit tolerance)
+        # Bumped from 1 to 2 because snap_to_frame regularizes timestamps,
+        # making the collinear test hyper-aggressive at 1 unit
+        if abs(cross) <= time_range * 2:
             actions_list.pop(-2)  # Remove redundant middle point
             self._pop_from_cache(axis, -2)
             stats['total_removed'] += 1
