@@ -215,7 +215,10 @@ class AppCLIRunner:
                 # Default behavior: enable for 3-stage modes or dual-axis trackers
                 self.app.batch_generate_roll_file = (args.mode in ['3-stage', '3-stage-mixed']) or (tracker_info and tracker_info.supports_dual_axis)
 
-            self.app.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}")
+            # Preprocessed video saving (off by default in batch/CLI to save disk)
+            self.app.batch_save_preprocessed_video = getattr(args, 'save_preprocessed', False)
+
+            self.app.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}, Save preprocessed: {self.app.batch_save_preprocessed_video}")
 
             # 3. Set up and run the batch processing
             self.app.batch_video_paths = [

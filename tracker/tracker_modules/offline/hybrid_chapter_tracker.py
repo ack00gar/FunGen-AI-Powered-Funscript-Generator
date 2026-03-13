@@ -229,6 +229,13 @@ class HybridChapterTracker(BaseOfflineTracker):
 
             video_basename = os.path.splitext(os.path.basename(video_path))[0]
 
+            # Extract preprocessed video settings from kwargs
+            self._save_preprocessed_video = kwargs.get('save_preprocessed_video', True)
+            self._hwaccel_method = kwargs.get('hwaccel_method', 'auto')
+            preprocessed_path = kwargs.get('preprocessed_video_path', None)
+            if preprocessed_path is None:
+                preprocessed_path = os.path.join(output_directory, f'{video_basename}_preprocessed.mp4')
+
             # Load settings from app
             self._load_settings()
 
@@ -237,7 +244,8 @@ class HybridChapterTracker(BaseOfflineTracker):
             if progress_callback:
                 progress_callback({'stage': 'pass1', 'task': 'Sparse chapter detection', 'percentage': 0})
 
-            chapters = self._sparse_chapter_detection(video_path, output_directory, progress_callback)
+            chapters = self._sparse_chapter_detection(video_path, output_directory, progress_callback,
+                                                      preprocessed_path=preprocessed_path)
 
             if self.stop_event.is_set():
                 return OfflineProcessingResult(success=False, error_message="Processing stopped")
@@ -313,7 +321,8 @@ class HybridChapterTracker(BaseOfflineTracker):
     # -------------------------------------------------------------------------
 
     def _sparse_chapter_detection(self, video_path: str, output_dir: str,
-                                   progress_callback: Optional[Callable]) -> List[Dict]:
+                                   progress_callback: Optional[Callable],
+                                   preprocessed_path: Optional[str] = None) -> List[Dict]:
         """
         Stream ALL frames through v360→640p, creating a full preprocessed video
         with exact frame count. Run YOLO only every Nth frame for chapter detection.
@@ -321,12 +330,15 @@ class HybridChapterTracker(BaseOfflineTracker):
         This single-pass approach avoids per-chapter re-decode/dewarp and ensures
         the preprocessed video has every frame for accurate optical flow later.
 
+        If a preprocessed video already exists at preprocessed_path, encoding is
+        skipped and frames are streamed from the existing file instead.
+
         Also saves per-frame YOLO detections (sparse) to a msgpack file.
 
         Returns list of chapter dicts:
           {'start_frame': int, 'end_frame': int, 'position': str, 'dense': bool}
         """
-        import subprocess
+        from detection.cd.stage_1_cd import FFmpegEncoder
         from video.video_processor import VideoProcessor
 
         # Load YOLO model
@@ -366,24 +378,39 @@ class HybridChapterTracker(BaseOfflineTracker):
         self.logger.info(f"Full decode + sparse YOLO: {total_frames} frames @ {fps:.1f}fps, "
                         f"YOLO every {frame_skip}th frame")
 
-        # Set up FFmpeg encoder for preprocessed video (all frames)
-        preprocessed_path = os.path.join(output_dir, 'preprocessed_full.mp4')
+        # Check if we can reuse an existing preprocessed video
+        if preprocessed_path is None:
+            preprocessed_path = os.path.join(output_dir, os.path.splitext(os.path.basename(video_path))[0] + '_preprocessed.mp4')
         self._preprocessed_video_path = preprocessed_path
         self._preprocessed_fps = fps
 
-        enc_cmd = [
-            'ffmpeg', '-y', '-hide_banner',
-            '-f', 'rawvideo', '-pix_fmt', 'bgr24',
-            '-s', f'{self.yolo_input_size}x{self.yolo_input_size}',
-            '-r', str(fps),
-            '-i', 'pipe:0',
-            '-c:v', 'libx265', '-preset', 'ultrafast', '-crf', '26',
-            '-pix_fmt', 'yuv420p',
-            preprocessed_path,
-            '-loglevel', 'error'
-        ]
+        reuse_preprocessed = (preprocessed_path and os.path.exists(preprocessed_path)
+                              and os.path.getsize(preprocessed_path) > 0)
 
-        encoder = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        encoder = None
+        reuse_cap = None
+        if reuse_preprocessed:
+            # Validate the existing file can be opened
+            test_cap = cv2.VideoCapture(preprocessed_path)
+            if test_cap.isOpened() and test_cap.get(cv2.CAP_PROP_FRAME_COUNT) > 0:
+                self.logger.info(f"Reusing existing preprocessed video: {preprocessed_path}")
+                reuse_cap = test_cap
+            else:
+                test_cap.release()
+                self.logger.warning("Existing preprocessed video is invalid, re-encoding")
+                reuse_preprocessed = False
+
+        if not reuse_preprocessed:
+            hwaccel = getattr(self, '_hwaccel_method', 'auto')
+            encoder = FFmpegEncoder(
+                output_file=preprocessed_path,
+                width=self.yolo_input_size,
+                height=self.yolo_input_size,
+                fps=fps,
+                ffmpeg_path='ffmpeg',
+                hwaccel_method=hwaccel,
+            )
+            encoder.start()
 
         frame_positions = {}
         sparse_detections = {}  # frame_id → list of detections
@@ -393,20 +420,19 @@ class HybridChapterTracker(BaseOfflineTracker):
         frames_written = 0
         yolo_processed = 0
 
+        # Choose frame source: reuse preprocessed file or VP pipeline
+        if reuse_preprocessed and reuse_cap is not None:
+            frame_source = self._frames_from_capture(reuse_cap, total_frames)
+        else:
+            frame_source = self._frames_from_vp(vp, total_frames, encoder)
+
         try:
-            for frame_idx, frame, timing in vp.stream_frames_for_segment(
-                    0, total_frames, stop_event=self.stop_event):
+            for frame_idx, frame in frame_source:
 
                 if self.stop_event and self.stop_event.is_set():
                     break
 
-                # Write EVERY frame to preprocessed video
-                try:
-                    encoder.stdin.write(frame.tobytes())
-                    frames_written += 1
-                except BrokenPipeError:
-                    self.logger.error("Encoder pipe broken")
-                    break
+                frames_written += 1
 
                 # Run YOLO only every Nth frame
                 if frame_idx % frame_skip != 0:
@@ -483,13 +509,21 @@ class HybridChapterTracker(BaseOfflineTracker):
 
         except Exception as e:
             self.logger.error(f"Pass 1 error: {e}", exc_info=True)
+        finally:
+            if reuse_cap is not None:
+                reuse_cap.release()
 
         # Close encoder
-        try:
-            encoder.stdin.close()
-            encoder.wait(timeout=30)
-        except Exception:
-            pass
+        if encoder is not None:
+            encoder.stop()
+            if self.stop_event and self.stop_event.is_set():
+                # Abort — delete incomplete file
+                try:
+                    if os.path.exists(preprocessed_path):
+                        os.remove(preprocessed_path)
+                        self.logger.info("Deleted incomplete preprocessed video (aborted)")
+                except OSError:
+                    pass
 
         self.logger.info(f"Pass 1 complete: {frames_written} frames written to preprocessed video, "
                         f"{yolo_processed} YOLO detections, "
@@ -513,6 +547,24 @@ class HybridChapterTracker(BaseOfflineTracker):
                                         frame_contact_info=frame_contact_info)
 
         return chapters
+
+    def _frames_from_vp(self, vp, total_frames, encoder):
+        """Yield (frame_idx, frame) from VideoProcessor, encoding each frame."""
+        for frame_idx, frame, timing in vp.stream_frames_for_segment(
+                0, total_frames, stop_event=self.stop_event):
+            if encoder is not None:
+                encoder.encode_frame(frame.tobytes())
+            yield frame_idx, frame
+
+    def _frames_from_capture(self, cap, total_frames):
+        """Yield (frame_idx, frame) from an existing preprocessed video file."""
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            yield frame_idx, frame
+            frame_idx += 1
 
     def _classify_no_penis(self, other_boxes: List[Dict], frame_h: int) -> str:
         """Classify position when penis is not visible but contact boxes are.
@@ -967,15 +1019,32 @@ class HybridChapterTracker(BaseOfflineTracker):
                                   'task': f"Chapter {idx+1}/{len(dense_chapters)}: {ch['position']}",
                                   'percentage': pct})
 
+            # Build a sub-progress callback for per-frame updates within each chapter
+            def make_chapter_progress(ch_idx, ch_total, base, rng, cb):
+                def _sub(frame_frac):
+                    ch_base = base + int(rng * ch_idx / max(1, ch_total))
+                    ch_range = rng / max(1, ch_total)
+                    pct = ch_base + int(ch_range * frame_frac)
+                    cb({'stage': 'pass2',
+                        'task': f"Chapter {ch_idx+1}/{ch_total}: {ch['position']} ({int(frame_frac*100)}%)",
+                        'percentage': pct})
+                return _sub
+
+            chapter_progress = None
+            if progress_callback:
+                chapter_progress = make_chapter_progress(idx, len(dense_chapters), 30, 60, progress_callback)
+
             chapter_result = self._process_single_chapter(
-                video_path, ch, chapter_idx, output_dir
+                video_path, ch, chapter_idx, output_dir,
+                chapter_progress_callback=chapter_progress,
             )
             results[chapter_idx] = chapter_result
 
         return results
 
     def _process_single_chapter(self, video_path: str, chapter: Dict,
-                                 chapter_idx: int, output_dir: str) -> Dict:
+                                 chapter_idx: int, output_dir: str,
+                                 chapter_progress_callback: Optional[Callable] = None) -> Dict:
         """Run ROI optical flow on a single chapter using the full preprocessed video."""
 
         start_frame = chapter['start_frame']
@@ -997,6 +1066,7 @@ class HybridChapterTracker(BaseOfflineTracker):
                 video_path, chapter, chapter_idx, output_dir,
                 preprocessed_video=preprocessed_path,
                 sparse_det_path=sparse_det_path,
+                frame_progress_callback=chapter_progress_callback,
             )
 
             if not flow_result or not flow_result.get('raw_positions'):
@@ -1038,7 +1108,8 @@ class HybridChapterTracker(BaseOfflineTracker):
     def _process_chapter_roi_flow(self, video_path: str, chapter: Dict,
                                    chapter_idx: int, output_dir: str,
                                    preprocessed_video: str,
-                                   sparse_det_path: Optional[str] = None) -> Optional[Dict]:
+                                   sparse_det_path: Optional[str] = None,
+                                   frame_progress_callback: Optional[Callable] = None) -> Optional[Dict]:
         """
         Compute DIS optical flow in penis ROI for a chapter's frame range.
 
@@ -1128,6 +1199,9 @@ class HybridChapterTracker(BaseOfflineTracker):
             if self.stop_event and self.stop_event.is_set():
                 cap.release()
                 return None
+
+            if frame_progress_callback and i % 100 == 0 and chapter_frames > 0:
+                frame_progress_callback(float(i) / chapter_frames)
 
             abs_frame = start_frame + i
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -1515,8 +1589,10 @@ class HybridChapterTracker(BaseOfflineTracker):
             end_ms = int(ch['end_frame'] / fps * 1000)
             funscript_chapters.append({
                 'name': ch['position'],
-                'startTimestamp': start_ms,
-                'endTimestamp': end_ms,
+                'start': start_ms,
+                'end': end_ms,
+                'startTime': start_ms,
+                'endTime': end_ms,
             })
         funscript.chapters = funscript_chapters
 
