@@ -8,6 +8,9 @@ export PYTHONNOUSERSITE=1
 # Disable Ultralytics telemetry for privacy
 export YOLO_TELEMETRY=False
 
+# Prevent OMP duplicate libomp crash (conda + torch both ship libomp)
+export KMP_DUPLICATE_LIB_OK=TRUE
+
 # Activate environment (skip if already active to avoid double-activation)
 if [ "$CONDA_DEFAULT_ENV" != "FunGen" ]; then
     echo "Activating FunGen environment..."

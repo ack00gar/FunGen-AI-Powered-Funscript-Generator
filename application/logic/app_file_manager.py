@@ -1174,6 +1174,14 @@ class AppFileManager:
             except TypeError:
                 self.app.processor.reset(close_video=True)
 
+        # Clear User ROI and tracking state for new video
+        if self.app.tracker:
+            self.app.tracker.user_roi_fixed = None
+            self.app.tracker.user_roi_initial_point_relative = None
+            self.app.tracker.user_roi_tracked_point_relative = None
+            self.app.tracker.user_roi_current_flow_vector = None
+            self.app.tracker.cleanup()
+
         self.video_path = ""
         self.preprocessed_video_path = None
         self.app.stage_processor.reset_stage_status(stages=("stage1", "stage2", "stage3"))
