@@ -20,11 +20,12 @@ except ImportError:
 
 
 class MultiAxisFunscript:
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None, fps: Optional[float] = None):
         self.primary_actions: List[Dict] = []
         self.secondary_actions: List[Dict] = []
         self.chapters: List[Dict] = []  # Funscript chapters/segments
         self.min_interval_ms: int = 10
+        self._fps: Optional[float] = fps if fps and fps > 0 else None
         self.last_timestamp_primary: int = 0
         self.last_timestamp_secondary: int = 0
 
@@ -63,6 +64,22 @@ class MultiAxisFunscript:
             self.logger = logging.getLogger('MultiAxisFunscript_fallback')
             if not self.logger.handlers:
                 self.logger.addHandler(logging.NullHandler())
+
+    @property
+    def fps(self) -> Optional[float]:
+        return self._fps
+
+    @fps.setter
+    def fps(self, value: Optional[float]):
+        self._fps = value if value and value > 0 else None
+
+    def snap_to_frame(self, timestamp_ms: int) -> int:
+        """Snap a timestamp to the nearest frame boundary.
+        Ensures max 1 action per frame. When fps is not set, returns as-is."""
+        if self._fps is None:
+            return timestamp_ms
+        frame_idx = round(timestamp_ms * self._fps / 1000.0)
+        return round(frame_idx * 1000.0 / self._fps)
 
     def _invalidate_cache(self, axis: str = 'both'):
         """Marks the timestamp cache(s) as dirty."""
@@ -230,9 +247,10 @@ class MultiAxisFunscript:
         if time_range == 0:
             return  # Can't determine if timestamps are identical
 
-        # If normalized cross product is ≤ time_range (equivalent to 1 pos unit tolerance)
-        # then points are collinear within tolerance
-        if abs(cross) <= time_range:
+        # If normalized cross product is ≤ 2*time_range (2 position-unit tolerance)
+        # Bumped from 1 to 2 because snap_to_frame regularizes timestamps,
+        # making the collinear test hyper-aggressive at 1 unit
+        if abs(cross) <= time_range * 2:
             actions_list.pop(-2)  # Remove redundant middle point
             self._pop_from_cache(axis, -2)
             stats['total_removed'] += 1
@@ -314,6 +332,7 @@ class MultiAxisFunscript:
         and falls back to bisect for out-of-order insertions (manual editing).
         Returns the timestamp of the last action in the list.
         """
+        timestamp_ms = self.snap_to_frame(timestamp_ms)
         clamped_pos = max(0, min(100, pos))
         new_action = {"at": timestamp_ms, "pos": clamped_pos}
 
@@ -1195,10 +1214,11 @@ class MultiAxisFunscript:
         primary_to_add = []
         secondary_to_add = []
         for action in actions_data:
+            ts = self.snap_to_frame(action['timestamp_ms'])
             if action.get('primary_pos') is not None:
-                primary_to_add.append({'at': action['timestamp_ms'], 'pos': int(action['primary_pos'])})
+                primary_to_add.append({'at': ts, 'pos': int(action['primary_pos'])})
             if action.get('secondary_pos') is not None:
-                secondary_to_add.append({'at': action['timestamp_ms'], 'pos': int(action['secondary_pos'])})
+                secondary_to_add.append({'at': ts, 'pos': int(action['secondary_pos'])})
 
         # Process Primary Axis
         if primary_to_add:

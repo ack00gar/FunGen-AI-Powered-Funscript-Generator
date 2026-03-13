@@ -566,9 +566,9 @@ def _apply_signal_enhancement(app, frame_objects: List[FrameObject], logger: Opt
         
         # Missing stroke detection: motion but small signal change
         elif motion_detected and signal_change < 5:
-            # Add small boost based on motion
-            boost = 8  # Small boost
-            direction = 1 if i % 2 == 0 else -1  # Alternate direction for oscillation
+            # Add small boost in the direction of motion (use penis vertical displacement)
+            boost = 8
+            direction = 1 if (curr_cy is not None and prev_cy is not None and curr_cy > prev_cy) else -1
             enhanced_signal = curr_distance + (direction * boost)
             enhanced_count += 1
         
@@ -1653,7 +1653,7 @@ def pass_6_determine_distance(app, frames: List, segments: List, video_info: Dic
                 if box and box.track_id:
                     last_known_box_positions[box.track_id] = (box.cx, box.cy)
 
-def pass_7_smooth_and_normalize_distances(app, frames: List, funscript_frames: List, funscript_distances: List, logger: Optional[logging.Logger]):
+def pass_7_smooth_and_normalize_distances(app, frames: List, funscript_frames: List, funscript_distances: List, logger: Optional[logging.Logger], segments: Optional[List] = None):
     """ Stage 2 Pass 7 (denoising with SG) and Pass 9 (amplifying/normalizing per segment) combined """
     if logger:
         logger.debug("Starting Stage 2 Pass 7: Smooth and Normalize Distances")
@@ -1680,7 +1680,7 @@ def pass_7_smooth_and_normalize_distances(app, frames: List, funscript_frames: L
     _apply_signal_enhancement(app, frames, logger)
 
     # Now apply Stage 2 per-segment normalization (_normalize_funscript_sparse equivalent)
-    _normalize_funscript_sparse_per_segment(app, frames, [], logger)
+    _normalize_funscript_sparse_per_segment(app, frames, segments if segments is not None else [], logger)
     if logger:
         logger.debug("Applied per-segment normalization to distances.")
 
@@ -2209,7 +2209,12 @@ def perform_contact_analysis(
         return {"error": "Failed to load YOLO data or process stopped (Stage 2)"}
 
     num_video_frames = video_info_dict.get('total_frames', 0)
-    if num_video_frames > 0 and len(all_raw_detections) != num_video_frames:
+    if is_ranged_data_source:
+        # Ranged data source (e.g. hybrid chapter tracker): msgpack contains only
+        # chapter frames, NOT the full video. Do NOT pad/truncate to full video length.
+        logger.info(f"Ranged data source: {len(all_raw_detections)} detections "
+                    f"(video total: {num_video_frames}, range: {scripting_range_start_frame_arg}-{scripting_range_end_frame_arg})")
+    elif num_video_frames > 0 and len(all_raw_detections) != num_video_frames:
         logger.warning(
             f"Mismatch msgpack frames {len(all_raw_detections)} vs video frames {num_video_frames}.")
         if len(all_raw_detections) < num_video_frames:
@@ -2373,7 +2378,7 @@ def perform_contact_analysis(
         elif step_func == pass_6_determine_distance:
             step_func(app, frame_objects, segments, video_info_dict, yolo_input_size_arg, logger)
         elif step_func == pass_7_smooth_and_normalize_distances:
-            step_func(app, frame_objects, funscript_frames, funscript_distances, logger)
+            step_func(app, frame_objects, funscript_frames, funscript_distances, logger, segments=segments)
         elif step_func == pass_8_simplify_signal:
             step_func(app, frame_objects, funscript_frames, funscript_distances, funscript_distances_lr, video_info_dict, logger)
 
@@ -2490,7 +2495,7 @@ def perform_contact_analysis(
         current_video_fps = video_info_dict.get('fps', 0)
         if current_video_fps > 0 and final_funscript_frames:
             # Create MultiAxisFunscript object
-            funscript_obj = MultiAxisFunscript(logger=logger)
+            funscript_obj = MultiAxisFunscript(logger=logger, fps=current_video_fps)
             
             # Add actions to the funscript object
             for fid, pos_primary, pos_secondary in zip(final_funscript_frames, final_funscript_distances,

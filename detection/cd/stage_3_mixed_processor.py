@@ -996,8 +996,8 @@ def perform_mixed_stage_analysis(
         # Create funscript object - start with Stage 2 funscript if available
         if stage2_funscript and hasattr(stage2_funscript, 'primary_actions'):
             # Start with the Stage 2 funscript and replace BJ/HJ chapters
-            funscript = MultiAxisFunscript()
-            
+            funscript = MultiAxisFunscript(fps=video_fps)
+
             # First, identify time ranges for BJ/HJ chapters to remove
             bj_hj_time_ranges = []
             for segment in atr_segments_list:
@@ -1053,7 +1053,7 @@ def perform_mixed_stage_analysis(
             
         else:
             # Fallback: Create new funscript from scratch
-            funscript = MultiAxisFunscript()
+            funscript = MultiAxisFunscript(fps=video_fps)
             for action in primary_actions:
                 funscript.add_action(action['at'], action['pos'])
             

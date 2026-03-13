@@ -375,12 +375,20 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
         if self.full_analysis_active or (self.app.processor and self.app.processor.is_processing):
             self.logger.info("A process is already running.", extra={'status_message': True})
             return
-        if not stage1_module or not stage2_module or not stage3_module:
-            self.logger.error("Stage 1, Stage 2, or Stage 3 processing module not available.", extra={'status_message': True})
-            return
-        if not self.app.yolo_det_model_path or not os.path.exists(self.app.yolo_det_model_path):
-            self.logger.error(f"Stage 1 Model not found: {self.app.yolo_det_model_path}", extra={'status_message': True})
-            return
+        is_hybrid = self._is_hybrid_tracker(processing_mode)
+
+        if not is_hybrid:
+            if not stage1_module or not stage2_module or not stage3_module:
+                self.logger.error("Stage 1, Stage 2, or Stage 3 processing module not available.", extra={'status_message': True})
+                return
+            if not self.app.yolo_det_model_path or not os.path.exists(self.app.yolo_det_model_path):
+                self.logger.error(f"Stage 1 Model not found: {self.app.yolo_det_model_path}", extra={'status_message': True})
+                return
+        else:
+            # Hybrid trackers still need YOLO model for sparse detection
+            if not self.app.yolo_det_model_path or not os.path.exists(self.app.yolo_det_model_path):
+                self.logger.error(f"YOLO Model not found: {self.app.yolo_det_model_path}", extra={'status_message': True})
+                return
 
         self.full_analysis_active = True
         self.current_analysis_stage = 0
@@ -400,6 +408,19 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
 
         selected_mode = self.app.app_state_ui.selected_tracker_name
         range_is_active, range_start_frame, range_end_frame = fs_proc.get_effective_scripting_range()
+
+        # Hybrid trackers handle everything internally — skip Stage 1 artifact checks
+        if is_hybrid:
+            should_run_s1 = False
+            self.reset_stage_status(stages=("stage1", "stage2", "stage3"))
+            self.stage1_status_text = "N/A (Hybrid)"
+            self.stage1_progress_value = 1.0
+            self.stage2_status_text = "Queued..."
+            self.logger.info("Starting Hybrid analysis sequence...", extra={'status_message': True})
+            self.stage_thread = threading.Thread(target=self._run_full_analysis_thread_target, daemon=True, name="StagePipelineThread")
+            self.stage_thread.start()
+            self.app.energy_saver.reset_activity_timer()
+            return
 
         # --- MODIFIED LOGIC TO CHECK FOR BOTH FILES ---
         full_msgpack_path = fm.get_output_path_for_file(fm.video_path, ".msgpack")
@@ -471,6 +492,51 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
         self.logger.info(f"[Thread] Using processing mode: {mode_name}")
 
         try:
+            # --- Hybrid Tracker: bypass standard Stage 1 + Stage 2 pipeline ---
+            if self._is_hybrid_tracker(selected_mode):
+                self.current_analysis_stage = 2  # Show as Stage 2 in UI (it does its own internal stages)
+                self.logger.info(f"[Thread] Running hybrid tracker: {mode_name}")
+
+                s2_start_time = time.time()
+                hybrid_results = self._execute_hybrid_tracker(selected_mode)
+                s2_end_time = time.time()
+
+                hybrid_success = hybrid_results.get("success", False)
+                stage1_success = hybrid_success  # For finally block cleanup
+                stage2_success = hybrid_success
+
+                if hybrid_success:
+                    s2_elapsed_s = s2_end_time - s2_start_time
+                    s2_elapsed_str = f"{int(s2_elapsed_s // 3600):02d}:{int((s2_elapsed_s % 3600) // 60):02d}:{int(s2_elapsed_s % 60):02d}"
+                    self.gui_event_queue.put(("stage2_completed", s2_elapsed_str, None))
+
+                    # Package results in the same format as standard Stage 2
+                    output_data = hybrid_results.get("data", {})
+                    packaged_data = {
+                        "results_dict": output_data,
+                        "was_ranged": False,
+                        "range_frames": (0, -1)
+                    }
+                    self.last_analysis_result = packaged_data
+                    self.gui_event_queue.put(("stage2_results_success", packaged_data, None))
+
+                    completion_payload = {
+                        "message": "Hybrid Chapter-Aware analysis completed successfully.",
+                        "status": "Completed",
+                        "video_path": fm.video_path
+                    }
+                    self.gui_event_queue.put(("analysis_message", completion_payload, None))
+                else:
+                    error_msg = hybrid_results.get("error", "Unknown hybrid tracker failure")
+                    self.gui_event_queue.put(("stage2_status_update", f"Failed: {error_msg}", "Failed"))
+                    self.gui_event_queue.put(("analysis_message", {
+                        "message": f"Hybrid analysis failed: {error_msg}",
+                        "status": "Failed",
+                        "video_path": fm.video_path
+                    }, None))
+
+                return  # Skip the standard Stage 1/2/3 pipeline
+
             # --- Stage 1 ---
             self.current_analysis_stage = 1
             range_is_active, range_start_frame, range_end_frame = fs_proc.get_effective_scripting_range()
@@ -793,7 +859,14 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
                         "range_frames": (effective_start_frame, effective_end_frame)
                     }
                     self.last_analysis_result = packaged_data
-                    
+
+                    # Debug: log what's in the results
+                    _fs = s3_results_dict.get("funscript")
+                    if _fs:
+                        self.logger.info(f"[DEBUG] Stage 3 last_analysis_result set. funscript primary={len(_fs.primary_actions)}, secondary={len(_fs.secondary_actions)}")
+                    else:
+                        self.logger.info(f"[DEBUG] Stage 3 last_analysis_result set. Keys: {list(s3_results_dict.keys())}")
+
                     # Process Stage 3 results immediately
                     self.gui_event_queue.put(("stage3_results_success", packaged_data, None))
 
@@ -860,7 +933,7 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
                 self.app.processor.enable_tracker_processing = False
 
             # Clean up checkpoints on successful completion
-            if stage1_success and stage2_success and (self._is_stage2_tracker(selected_mode) or stage3_success):
+            if stage1_success and stage2_success and (self._is_stage2_tracker(selected_mode) or self._is_hybrid_tracker(selected_mode) or stage3_success):
                 self._cleanup_checkpoints_on_completion()
 
             # Clear the large data map and SQLite path from memory (if not already cleared)
@@ -969,6 +1042,11 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
         tracker_ui = get_dynamic_tracker_ui()
         return tracker_ui.is_stage2_tracker(tracker_name)
     
+    def _is_hybrid_tracker(self, tracker_name):
+        """Check if tracker handles Stage 1 internally (e.g. hybrid chapter-aware)."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.is_hybrid_tracker(tracker_name)
+
     def _is_offline_tracker(self, tracker_name):
         """Check if tracker is any offline tracker."""
         tracker_ui = get_dynamic_tracker_ui()
