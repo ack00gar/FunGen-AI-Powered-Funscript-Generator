@@ -347,8 +347,9 @@ class TrackerManager:
     def cleanup(self):
         """Clean up current tracker and manager state."""
         self._cleanup_current_tracker()
+        video_fps = getattr(getattr(self.app, 'processor', None), 'fps', 0) if self.app else 0
         self.funscript = MultiAxisFunscript(logger=self.logger,
-                                            fps=self.current_fps if self.current_fps > 0 else None)
+                                            fps=video_fps if video_fps > 0 else None)
 
         # Reapply point simplification setting
         if self.app and hasattr(self.app, 'app_settings'):
@@ -1013,11 +1014,14 @@ class TrackerManager:
         if hasattr(self._current_tracker, 'roi'):
             self.roi = getattr(self._current_tracker, 'roi', None)
         
-        # Update FPS if available — also propagate to funscript for frame-snapping
+        # Update FPS if available
         if hasattr(self._current_tracker, 'current_fps'):
             self.current_fps = getattr(self._current_tracker, 'current_fps', 0.0)
-            if self.current_fps > 0 and self.funscript and self.funscript.fps is None:
-                self.funscript.fps = self.current_fps
+            # Propagate VIDEO fps (not wall-clock processing fps) to funscript for snap_to_frame
+            if self.funscript and self.funscript.fps is None and self.app:
+                video_fps = getattr(getattr(self.app, 'processor', None), 'fps', 0)
+                if video_fps > 0:
+                    self.funscript.fps = video_fps
         
         # Update show_roi toggle and tracked point from current tracker
         if hasattr(self._current_tracker, 'show_roi'):

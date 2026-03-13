@@ -338,9 +338,16 @@ class ApplicationLogic:
 
         # --- Initialize tracker mode from persisted setting; default handled by AppStateUI ---
         if not self.is_cli_mode and self.tracker:
-            # Use dynamic tracker discovery - selected_tracker_name is already the internal name
             tracker_name = self.app_state_ui.selected_tracker_name
-            self.tracker.set_tracking_mode(tracker_name)
+            if not self.tracker.set_tracking_mode(tracker_name):
+                from config.tracker_discovery import get_tracker_discovery, TrackerCategory
+                discovery = get_tracker_discovery()
+                live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
+                if live_trackers:
+                    fallback = live_trackers[0].internal_name
+                    self.logger.info(f"Tracker '{tracker_name}' unavailable, falling back to '{fallback}'")
+                    self.app_state_ui.selected_tracker_name = fallback
+                    self.tracker.set_tracking_mode(fallback)
 
     def get_timeline(self, timeline_num: int) -> Optional['InteractiveFunscriptTimeline']:
         """

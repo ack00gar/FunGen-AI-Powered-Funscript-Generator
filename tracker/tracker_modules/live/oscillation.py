@@ -98,7 +98,7 @@ class OscillationExperimental2Tracker(BaseTracker):
             self.oscillation_last_known_pos = 50.0
             self.oscillation_last_known_secondary_pos = 50.0
             self.oscillation_last_active_time = 0
-            self.oscillation_ema_alpha = 0.5
+            self.oscillation_ema_alpha = 0.3
             self.oscillation_funscript_pos = 50
             self.oscillation_funscript_secondary_pos = 50
             
@@ -332,9 +332,9 @@ class OscillationExperimental2Tracker(BaseTracker):
                     if len(smoothed_dys) >= 2:
                         freq = (len(np.where(np.diff(np.sign(smoothed_dys)))[0]) / 2) / self.oscillation_history_seconds
                         
-                        # Gaussian frequency weighting centered at 1.8Hz (matches typical stroke frequencies 0.8-2.2Hz)
-                        if 0.3 <= freq <= 7.0:
-                            freq_weight = np.exp(-((freq - 1.8) ** 2) / (2 * (1.2 ** 2)))
+                        # Gaussian frequency weighting centered at 2.5Hz
+                        if 0.5 <= freq <= 7.0:
+                            freq_weight = np.exp(-((freq - 2.5) ** 2) / (2 * (1.5 ** 2)))
                             
                             # HYBRID SCORING: Combine experimental and legacy approaches
                             experimental_score = mean_mag * (1 + frequency_score) * (1 + variance_score)
