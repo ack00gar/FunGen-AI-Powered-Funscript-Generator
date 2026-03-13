@@ -8,9 +8,6 @@ export PYTHONNOUSERSITE=1
 # Disable Ultralytics telemetry for privacy
 export YOLO_TELEMETRY=False
 
-# Prevent OMP duplicate libomp crash (conda + torch both ship libomp)
-export KMP_DUPLICATE_LIB_OK=TRUE
-
 # Isolate Ultralytics config to project directory (prevents cross-project corruption)
 export YOLO_CONFIG_DIR="$(dirname "$0")/config/ultralytics"
 
