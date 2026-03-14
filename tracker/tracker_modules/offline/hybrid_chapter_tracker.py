@@ -28,6 +28,7 @@ from multiprocessing import Event
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from scipy.signal import savgol_filter, find_peaks
 from scipy.ndimage import median_filter
+from config import constants as config_constants
 
 try:
     from ..core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingResult, OfflineProcessingStage
@@ -1310,8 +1311,8 @@ class HybridChapterTracker(BaseOfflineTracker):
                           h: int, w: int) -> Optional[Tuple[int, int, int, int]]:
         """Run YOLO on a single frame and return padded ROI from penis + nearest contact."""
         try:
-            results = yolo_model(frame, verbose=False, conf=DEFAULT_CONFIDENCE,
-                                 imgsz=self.yolo_input_size)
+            results = yolo_model(frame, device=config_constants.DEVICE, verbose=False,
+                                 conf=DEFAULT_CONFIDENCE, imgsz=self.yolo_input_size)
         except Exception:
             return None
 
