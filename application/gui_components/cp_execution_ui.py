@@ -121,7 +121,12 @@ class ExecutionMixin:
         if is_any_process_active:
             # Status text for active processes
             if is_analysis_running:
-                status_text = "Aborting..." if stage_proc.current_analysis_stage == -1 else f"Stage {stage_proc.current_analysis_stage} Running..."
+                if stage_proc.current_analysis_stage == -1:
+                    status_text = "Aborting..."
+                elif self._is_hybrid_tracker(selected_mode):
+                    status_text = "Hybrid Analysis Running..."
+                else:
+                    status_text = f"Stage {stage_proc.current_analysis_stage} Running..."
                 imgui.text(status_text)
             elif is_live_tracking_running:
                 is_paused_live = self.app.processor.pause_event.is_set() if hasattr(self.app.processor, 'pause_event') else False

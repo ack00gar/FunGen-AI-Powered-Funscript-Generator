@@ -107,6 +107,7 @@ class AppBatchProcessor:
         self.app.batch_overwrite_mode = gui.batch_overwrite_mode_ui
         self.app.batch_generate_roll_file = gui.batch_generate_roll_file_ui
         self.app.batch_adaptive_tuning_enabled = getattr(gui, 'batch_adaptive_tuning_ui', False)
+        self.app.batch_save_preprocessed_video = getattr(gui, 'batch_save_preprocessed_video_ui', False)
 
         # Apply same mutual exclusion logic for GUI batch processing
         if gui.batch_apply_ultimate_autotune_ui:
@@ -360,6 +361,11 @@ class AppBatchProcessor:
                     self.app.app_state_ui.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
                     self.app.logger.info("Set processing speed to MAX_SPEED for batch offline processing")
 
+                    # Override preprocessed video setting for batch (default off to save disk)
+                    original_save_preprocessed = getattr(self.app.stage_processor, 'save_preprocessed_video', False)
+                    self.app.stage_processor.save_preprocessed_video = getattr(
+                        self.app, 'batch_save_preprocessed_video', False)
+
                     # Apply adaptive tuning P/C if active and not converged
                     if self.app.adaptive_tuning_state and not self.app.adaptive_tuning_state.is_converged:
                         self.app.stage_processor.num_producers_stage1 = self.app.adaptive_tuning_state.current_producers
@@ -420,9 +426,9 @@ class AppBatchProcessor:
                     self.app.save_and_reset_complete_event.wait(timeout=120)
                     self.app.logger.debug("Batch loop: Save/reset signal received. Proceeding.")
 
-                    # Restore original processing speed mode
+                    # Restore original settings
                     self.app.app_state_ui.selected_processing_speed_mode = original_speed_mode
-                    self.app.logger.info("Restored original processing speed mode")
+                    self.app.stage_processor.save_preprocessed_video = original_save_preprocessed
 
                 # --- LIVE MODES (Real-time tracking) ---
                 elif selected_tracker.category == TrackerCategory.LIVE:
