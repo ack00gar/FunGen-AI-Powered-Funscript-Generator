@@ -208,9 +208,11 @@ class AppCLIRunner:
                     self.app.logger.info("Ultimate Autotune disabled - auto post-processing enabled from settings")
                 else:
                     self.app.logger.info("Both Ultimate Autotune and auto post-processing disabled")
-            # Determine roll file generation based on CLI argument or tracker capabilities
-            if hasattr(args, 'generate_roll') and args.generate_roll:
+            # Roll file generation: --generate-roll forces on, --no-generate-roll forces off, default (None) = auto
+            if args.generate_roll is True:
                 self.app.batch_generate_roll_file = True
+            elif args.generate_roll is False:
+                self.app.batch_generate_roll_file = False
             else:
                 # Default behavior: enable for 3-stage modes or dual-axis trackers
                 self.app.batch_generate_roll_file = (args.mode in ['3-stage', '3-stage-mixed']) or (tracker_info and tracker_info.supports_dual_axis)

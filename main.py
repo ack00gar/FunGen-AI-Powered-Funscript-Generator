@@ -253,7 +253,11 @@ def main():
     parser.add_argument('--overwrite', action='store_true', help='Force processing and overwrite existing funscripts. Default is to skip videos with existing funscripts.')
     parser.add_argument('--no-autotune', action='store_false', dest='autotune', help='Disable applying the default Ultimate Autotune settings after generation.')
     parser.add_argument('--no-copy', action='store_false', dest='copy', help='Do not save a copy of the final funscript next to the video file (will save to output folder only).')
-    parser.add_argument('--generate-roll', action='store_true', help='Generate secondary axis (.roll.funscript) file for supported multi-axis devices.')
+    
+    roll_group = parser.add_mutually_exclusive_group()
+    roll_group.add_argument('--generate-roll', action='store_true', help='Generate secondary axis (.roll.funscript) file for supported multi-axis devices.')
+    roll_group.add_argument('--no-generate-roll', action='store_false', dest='generate_roll', help='Disable secondary axis (.roll.funscript) generation even when tracker supports it.')
+    
     parser.add_argument('--save-preprocessed', action='store_true', help='Keep preprocessed (resized/unwarped) video per file. Uses significant disk space.')
     parser.add_argument('--recursive', '-r', action='store_true', help='If input_path is a folder, process it recursively.')
     parser.add_argument('--watch', metavar='FOLDER', help='Watch folder for new videos (requires patreon_features add-on).')
