@@ -440,8 +440,8 @@ class HybridChapterTracker(BaseOfflineTracker):
                     continue
 
                 try:
-                    results = model(frame, verbose=False, conf=DEFAULT_CONFIDENCE,
-                                  imgsz=self.yolo_input_size)
+                    results = model(frame, device=config_constants.DEVICE, verbose=False,
+                                  conf=DEFAULT_CONFIDENCE, imgsz=self.yolo_input_size)
                 except Exception as e:
                     self.logger.debug(f"YOLO error on frame {frame_idx}: {e}")
                     continue
