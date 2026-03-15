@@ -211,6 +211,9 @@ class ControlPanelUI(
     def _is_hybrid_tracker(self, tracker_name: str) -> bool:
         return self._check_tracker_ui('is_hybrid_tracker', tracker_name)
 
+    def _get_tracker_display_name(self, tracker_name: str) -> str:
+        return self.tracker_ui.get_tracker_display_name(tracker_name)
+
     def _get_tracker_lists_for_ui(self, simple_mode=False, hidden_folders=None):
         """Get tracker lists for UI combo boxes using dynamic discovery."""
         try:

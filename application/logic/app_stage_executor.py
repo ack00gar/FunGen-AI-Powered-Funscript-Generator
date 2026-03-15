@@ -844,10 +844,15 @@ class StageExecutorMixin:
         """Execute a hybrid tracker that handles both Stage 1 and Stage 2 internally."""
         from tracker.tracker_modules import create_tracker
         from tracker.tracker_modules.core.base_offline_tracker import OfflineProcessingStage
+        from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
 
         fm = self.app.file_manager
         if not fm or not fm.video_path:
             return {"success": False, "error": "Video path not available"}
+
+        # Get display name from discovery for UI/log messages
+        tracker_ui = get_dynamic_tracker_ui()
+        display_name = tracker_ui.get_tracker_display_name(tracker_name)
 
         tracker = create_tracker(tracker_name)
         if tracker is None:
@@ -866,7 +871,7 @@ class StageExecutorMixin:
         save_preprocessed = getattr(self, 'save_preprocessed_video', False)
         hwaccel = getattr(self.app, 'hardware_acceleration_method', 'auto')
 
-        self.gui_event_queue.put(("stage2_status_update", "Running Hybrid...", "Initializing"))
+        self.gui_event_queue.put(("stage2_status_update", f"Running {display_name}...", "Initializing"))
 
         is_headless = not getattr(self.app, 'gui_instance', None)
 
@@ -886,7 +891,7 @@ class StageExecutorMixin:
                     bar_w = 40
                     filled = int(pct / 100.0 * bar_w)
                     bar = '\u2588' * filled + '-' * (bar_w - filled)
-                    sys.stdout.write(f"\rHybrid: |{bar}| {pct:>3}% | {stage}: {task}   ")
+                    sys.stdout.write(f"\r{display_name}: |{bar}| {pct:>3}% | {stage}: {task}   ")
                     sys.stdout.flush()
                     if pct >= 100:
                         sys.stdout.write("\n")
@@ -940,14 +945,14 @@ class StageExecutorMixin:
                     except OSError as del_err:
                         self.logger.warning(f"Could not delete preprocessed video: {del_err}")
 
-                self.gui_event_queue.put(("stage2_status_update", "Hybrid Complete", "Done"))
+                self.gui_event_queue.put(("stage2_status_update", f"{display_name} Complete", "Done"))
                 return {"success": True, "data": output_data}
             else:
                 error_msg = getattr(result, 'error_message', 'Unknown error') if result else 'No result'
                 return {"success": False, "error": error_msg}
 
         except Exception as e:
-            self.logger.error(f"Hybrid tracker execution failed: {e}", exc_info=True)
+            self.logger.error(f"{display_name} execution failed: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
     def _has_modular_stage3(self, tracker_name: str) -> bool:

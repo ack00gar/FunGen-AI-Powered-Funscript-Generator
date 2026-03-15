@@ -246,7 +246,7 @@ class TrackerVisualizationHelper:
     @classmethod
     def convert_semantic_regions_to_boxes(cls, semantic_regions: List[Any]) -> List[BoundingBox]:
         """
-        Convert semantic regions from hybrid tracker to standard bounding boxes.
+        Convert semantic regions from VR VR hybrid tracker to standard bounding boxes.
         
         Args:
             semantic_regions: List of semantic region objects (can be dict or dataclass)
@@ -311,10 +311,10 @@ class TrackerVisualizationHelper:
         """
         keypoints_list = []
         
-        # Handle hybrid tracker's data format
+        # Handle VR hybrid tracker's data format
         persons = pose_data.get('persons', {})
         if not persons:
-            # Try hybrid tracker format
+            # Try VR hybrid tracker format
             all_persons = pose_data.get('all_persons', [])
             primary_person = pose_data.get('primary_person')
             
@@ -333,7 +333,7 @@ class TrackerVisualizationHelper:
         primary_id = pose_data.get('primary_person_id', 'primary')
         
         for person_id, person_data in persons.items():
-            # Extract keypoints - handle hybrid tracker's named keypoint format
+            # Extract keypoints - handle VR hybrid tracker's named keypoint format
             keypoints = person_data.get('keypoints', [])
             
             # Convert to list of (x, y, confidence) tuples in COCO order
@@ -347,7 +347,7 @@ class TrackerVisualizationHelper:
                 'left_knee', 'right_knee', 'left_ankle', 'right_ankle'
             ]
             
-            # If keypoints is a dict (hybrid tracker named format)
+            # If keypoints is a dict (VR hybrid tracker named format)
             if isinstance(keypoints, dict):
                 # Extract in COCO order
                 for kp_name in coco_keypoint_names:

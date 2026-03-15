@@ -411,12 +411,13 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
 
         # Hybrid trackers handle everything internally — skip Stage 1 artifact checks
         if is_hybrid:
+            tracker_display = self._get_tracker_display_name(processing_mode)
             should_run_s1 = False
             self.reset_stage_status(stages=("stage1", "stage2", "stage3"))
-            self.stage1_status_text = "N/A (Hybrid)"
+            self.stage1_status_text = f"N/A ({tracker_display})"
             self.stage1_progress_value = 1.0
             self.stage2_status_text = "Queued..."
-            self.logger.info("Starting Hybrid analysis sequence...", extra={'status_message': True})
+            self.logger.info(f"Starting {tracker_display} analysis sequence...", extra={'status_message': True})
             self.stage_thread = threading.Thread(target=self._run_full_analysis_thread_target, daemon=True, name="StagePipelineThread")
             self.stage_thread.start()
             self.app.energy_saver.reset_activity_timer()
@@ -494,8 +495,9 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
         try:
             # --- Hybrid Tracker: bypass standard Stage 1 + Stage 2 pipeline ---
             if self._is_hybrid_tracker(selected_mode):
+                tracker_display = self._get_tracker_display_name(selected_mode)
                 self.current_analysis_stage = 2  # Show as Stage 2 in UI (it does its own internal stages)
-                self.logger.info(f"[Thread] Running hybrid tracker: {mode_name}")
+                self.logger.info(f"[Thread] Running {tracker_display}: {mode_name}")
 
                 s2_start_time = time.time()
                 hybrid_results = self._execute_hybrid_tracker(selected_mode)
@@ -521,16 +523,16 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
                     self.gui_event_queue.put(("stage2_results_success", packaged_data, None))
 
                     completion_payload = {
-                        "message": "Hybrid Chapter-Aware analysis completed successfully.",
+                        "message": f"{tracker_display} analysis completed successfully.",
                         "status": "Completed",
                         "video_path": fm.video_path
                     }
                     self.gui_event_queue.put(("analysis_message", completion_payload, None))
                 else:
-                    error_msg = hybrid_results.get("error", "Unknown hybrid tracker failure")
+                    error_msg = hybrid_results.get("error", "Unknown tracker failure")
                     self.gui_event_queue.put(("stage2_status_update", f"Failed: {error_msg}", "Failed"))
                     self.gui_event_queue.put(("analysis_message", {
-                        "message": f"Hybrid analysis failed: {error_msg}",
+                        "message": f"{tracker_display} analysis failed: {error_msg}",
                         "status": "Failed",
                         "video_path": fm.video_path
                     }, None))
@@ -1043,7 +1045,7 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
         return tracker_ui.is_stage2_tracker(tracker_name)
     
     def _is_hybrid_tracker(self, tracker_name):
-        """Check if tracker handles Stage 1 internally (e.g. hybrid chapter-aware)."""
+        """Check if tracker handles Stage 1 internally (uses is_hybrid_tracker property)."""
         tracker_ui = get_dynamic_tracker_ui()
         return tracker_ui.is_hybrid_tracker(tracker_name)
 
@@ -1051,6 +1053,11 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
         """Check if tracker is any offline tracker."""
         tracker_ui = get_dynamic_tracker_ui()
         return tracker_ui.is_offline_tracker(tracker_name)
+
+    def _get_tracker_display_name(self, tracker_name):
+        """Get human-readable display name for a tracker."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.get_tracker_display_name(tracker_name)
 
     def update_settings_from_app(self):
         prod_usr = self.app_settings.get("num_producers_stage1")
