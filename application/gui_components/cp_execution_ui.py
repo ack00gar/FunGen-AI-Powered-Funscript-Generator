@@ -163,6 +163,22 @@ class ExecutionMixin:
                     if imgui.button("Clear Resume", width=button_width_third):
                         stage_proc.delete_checkpoint_for_video(self.app.file_manager.video_path)
                 _tooltip_if_hovered("Delete the saved checkpoint without starting a new analysis.")
+            else:
+                # No checkpoint — show Run button
+                video_loaded = self.app.processor and self.app.processor.is_video_open()
+                with _DisabledScope(not video_loaded):
+                    fs_proc_local = self.app.funscript_processor
+                    range_active = fs_proc_local.scripting_range_active if fs_proc_local else False
+                    if self._is_live_tracker(selected_mode):
+                        label = "Start Live Tracking (Range)" if range_active else "Start Live Tracking"
+                        with primary_button_style():
+                            if imgui.button(label, width=-1):
+                                self._start_live_tracking()
+                    elif self._is_offline_tracker(selected_mode):
+                        label = "Start Analysis (Range)" if range_active else "Start Analysis"
+                        with primary_button_style():
+                            if imgui.button(label, width=-1):
+                                event_handlers.handle_start_ai_cv_analysis()
 
             # Chapter overwrite setting (only for offline analysis)
             if self._is_offline_tracker(selected_mode):
