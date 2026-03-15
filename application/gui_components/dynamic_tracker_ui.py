@@ -120,7 +120,7 @@ class DynamicTrackerUI:
         return "user" in tracker_name.lower()
     
     def is_hybrid_tracker(self, tracker_name: str) -> bool:
-        """Check if tracker handles Stage 1 internally (e.g. hybrid chapter-aware)."""
+        """Check if tracker handles Stage 1 internally (uses is_hybrid_tracker property)."""
         if not tracker_name:
             return False
         info = self.discovery.get_tracker_info(tracker_name)
@@ -201,20 +201,28 @@ class DynamicTrackerUI:
     def recommend_tracker(self, video_info: dict) -> Tuple[str, str]:
         """Recommend a tracker based on video properties.
 
+        Uses tracker properties to find the best option dynamically,
+        without hardcoding tracker names.
+
         Returns (tracker_name, reason) tuple.
         """
-        all_trackers = self.discovery.get_all_trackers()
+        from config.tracker_discovery import TrackerCategory
 
-        # Hybrid chapter tracker is the best offline option
-        if "OFFLINE_HYBRID_CHAPTER" in all_trackers:
-            return "OFFLINE_HYBRID_CHAPTER", "Chapter-aware processing with optimized quality"
+        # Prefer offline trackers with hybrid (chapter-aware) capability
+        offline_trackers = self.discovery.get_trackers_by_category(TrackerCategory.OFFLINE)
+        for t in offline_trackers:
+            if t.properties.get("is_hybrid_tracker"):
+                return t.internal_name, "Chapter-aware processing with optimized quality"
 
-        # Fallback to legacy offline trackers
-        if "OFFLINE_GUIDED_FLOW" in all_trackers:
-            return "OFFLINE_GUIDED_FLOW", "Legacy 3-stage with chapter-aware strategies"
+        # Fallback: any offline tracker with 3 stages (guided flow style)
+        for t in offline_trackers:
+            if t.properties.get("num_stages") == 3:
+                return t.internal_name, "3-stage offline processing"
 
-        if "OFFLINE_CONTACT_ANALYSIS" in all_trackers:
-            return "OFFLINE_CONTACT_ANALYSIS", "Legacy 2-stage contact analysis"
+        # Fallback: any offline tracker with 2 stages (contact analysis style)
+        for t in offline_trackers:
+            if t.properties.get("num_stages") == 2:
+                return t.internal_name, "2-stage offline processing"
 
         # Fallback to whatever is available
         from config.constants import DEFAULT_TRACKER_NAME

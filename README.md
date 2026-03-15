@@ -14,10 +14,10 @@ This project is still at the early stages of development. It is not intended for
 
 ## v0.7.5 Highlights
 
-- **Hybrid Chapter-Aware Tracker** — New offline tracker combining sparse YOLO chapter detection with per-chapter ROI optical flow. Single-pass video decode, hardware-accelerated encoding via FFmpegEncoder, and automatic reuse of preprocessed video on re-run
-- **Preprocessed Video Infrastructure** — Hybrid tracker uses the same FFmpegEncoder (hw accel priority chain) as standard Stage 1. Standard preprocessed path (`_preprocessed.mp4`), automatic reuse, and cleanup via the `Save/Reuse Preprocessed Video` setting
+- **VR Hybrid Chapter-Aware Tracker** — New offline tracker combining sparse YOLO chapter detection with per-chapter ROI optical flow. Single-pass video decode, hardware-accelerated encoding via FFmpegEncoder, and automatic reuse of preprocessed video on re-run
+- **Preprocessed Video Infrastructure** — VR Hybrid tracker uses the same FFmpegEncoder (hw accel priority chain) as standard Stage 1. Standard preprocessed path (`_preprocessed.mp4`), automatic reuse, and cleanup via the `Save/Reuse Preprocessed Video` setting
 - **Batch Mode: Save Preprocessed Video Option** — New opt-in setting (default off) in both GUI batch dialog and CLI (`--save-preprocessed`). Prevents accidental disk bloat across batch runs while allowing users who want faster re-runs to keep the files
-- **Finer Hybrid Progress Reporting** — Per-frame progress during chapter analysis (Pass 2), CLI stdout progress bar for headless/batch runs
+- **Finer VR Hybrid Progress Reporting** — Per-frame progress during chapter analysis (Pass 2), CLI stdout progress bar for headless/batch runs
 
 ## v0.6.0 Highlights
 
@@ -336,7 +336,7 @@ These trackers process the video in real-time.
 
 These trackers process the video in stages for higher accuracy.
 
-- **Hybrid Chapter-Aware (ROI Flow):** Single-pass sparse YOLO chapter detection followed by per-chapter dense ROI optical flow. Automatically creates and optionally reuses a preprocessed video with hardware-accelerated encoding. No separate Stage 1/2/3 pipeline — handles everything internally.
+- **VR Hybrid Chapter-Aware (ROI Flow):** Single-pass sparse YOLO chapter detection followed by per-chapter dense ROI optical flow. Automatically creates and optionally reuses a preprocessed video with hardware-accelerated encoding. No separate Stage 1/2/3 pipeline — handles everything internally.
 - **Contact Analysis (2-Stage):** Offline contact detection and analysis using YOLO detection results.
 - **Guided Flow (3-Stage):** YOLO-guided dense optical flow with chapter-aware analysis strategies. Uses Stage 2 detection data to create targeted ROIs per chapter type (penetration, oral, manual, riding, etc.) for precise motion tracking. The recommended 3-stage tracker.
 

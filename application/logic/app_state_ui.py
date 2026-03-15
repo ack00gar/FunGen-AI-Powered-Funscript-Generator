@@ -60,6 +60,16 @@ class AppStateUI:
         if saved_tracker in _TRACKER_MIGRATION:
             saved_tracker = _TRACKER_MIGRATION[saved_tracker]
             self.app_settings.set("selected_tracker_name", saved_tracker)
+        # Validate saved tracker still exists — fall back to default if not
+        try:
+            from config.tracker_discovery import TrackerDiscovery
+            discovery = TrackerDiscovery()
+            if saved_tracker not in discovery.get_all_trackers():
+                self.logger.warning(f"Saved tracker '{saved_tracker}' not found, falling back to default")
+                saved_tracker = DEFAULT_TRACKER_NAME
+                self.app_settings.set("selected_tracker_name", saved_tracker)
+        except Exception:
+            pass  # Discovery not ready yet, trust the saved value
         self.selected_tracker_name: str = saved_tracker
         # Load saved processing speed mode, default to REALTIME
         saved_speed_mode = self.app_settings.get("selected_processing_speed_mode", "REALTIME")

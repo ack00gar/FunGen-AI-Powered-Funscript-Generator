@@ -124,7 +124,7 @@ class ExecutionMixin:
                 if stage_proc.current_analysis_stage == -1:
                     status_text = "Aborting..."
                 elif self._is_hybrid_tracker(selected_mode):
-                    status_text = "Hybrid Analysis Running..."
+                    status_text = f"{self._get_tracker_display_name(selected_mode)} Running..."
                 else:
                     status_text = f"Stage {stage_proc.current_analysis_stage} Running..."
                 imgui.text(status_text)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hybrid Chapter-Aware Tracker — Offline pipeline with per-chapter optimization.
+VR Hybrid Chapter-Aware Tracker — Offline pipeline with per-chapter optimization.
 
 Architecture:
   Pass 1: Sparse YOLO detection (2-4 fps) → lightweight chapter map
@@ -105,9 +105,9 @@ DENSE_PROCESSING_POSITIONS = {
 }
 
 
-class HybridChapterTracker(BaseOfflineTracker):
+class VRHybridChapterTracker(BaseOfflineTracker):
     """
-    Hybrid chapter-aware offline tracker.
+    VR Hybrid chapter-aware offline tracker.
 
     Pass 1: Sparse YOLO at ~2fps to detect chapters (position types)
     Pass 2: Stage 1 YOLO per chapter (preprocessed video + detections),
@@ -129,8 +129,8 @@ class HybridChapterTracker(BaseOfflineTracker):
     @property
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
-            name="OFFLINE_HYBRID_CHAPTER",
-            display_name="Hybrid Chapter-Aware (ROI Flow)",
+            name="OFFLINE_VR_HYBRID_CHAPTER",
+            display_name="VR Hybrid Chapter-Aware (ROI Flow)",
             description="Chapter detection at 2fps, then YOLO + ROI optical flow per chapter",
             category="offline",
             version="2.0.0",
@@ -186,7 +186,7 @@ class HybridChapterTracker(BaseOfflineTracker):
                 self.logger.error("YOLO not available for sparse detection")
                 return False
             self._initialized = True
-            self.logger.info("Hybrid Chapter Tracker initialized")
+            self.logger.info("VR Hybrid Chapter Tracker initialized")
             return True
         except Exception as e:
             self.logger.error(f"Initialization failed: {e}", exc_info=True)
@@ -303,7 +303,7 @@ class HybridChapterTracker(BaseOfflineTracker):
             )
 
         except Exception as e:
-            self.logger.error(f"Hybrid tracker error: {e}", exc_info=True)
+            self.logger.error(f"VR Hybrid tracker error: {e}", exc_info=True)
             self.processing_active = False
             return OfflineProcessingResult(success=False, error_message=str(e))
 

@@ -2210,7 +2210,7 @@ def perform_contact_analysis(
 
     num_video_frames = video_info_dict.get('total_frames', 0)
     if is_ranged_data_source:
-        # Ranged data source (e.g. hybrid chapter tracker): msgpack contains only
+        # Ranged data source (e.g. VR hybrid chapter tracker): msgpack contains only
         # chapter frames, NOT the full video. Do NOT pad/truncate to full video length.
         logger.info(f"Ranged data source: {len(all_raw_detections)} detections "
                     f"(video total: {num_video_frames}, range: {scripting_range_start_frame_arg}-{scripting_range_end_frame_arg})")
