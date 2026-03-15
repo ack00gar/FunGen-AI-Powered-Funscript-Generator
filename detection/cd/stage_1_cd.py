@@ -233,7 +233,11 @@ class FFmpegEncoder:
         if self.encoder_process and self.encoder_process.stderr:
             for line in iter(self.encoder_process.stderr.readline, b""):
                 decoded = line.decode("utf-8", errors="replace").strip()
-                if decoded: log_vid.error(f"FFmpeg: {decoded}")
+                if decoded:
+                    if 'WARNING' in decoded or 'GLib' in decoded:
+                        log_vid.debug(f"FFmpeg: {decoded}")
+                    else:
+                        log_vid.error(f"FFmpeg: {decoded}")
 
     def encode_frame(self, frame_bytes):
         if self.encoder_process and self.encoder_process.stdin:
