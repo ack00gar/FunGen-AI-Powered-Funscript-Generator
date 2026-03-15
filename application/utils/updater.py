@@ -528,11 +528,9 @@ class AutoUpdater:
         self.update_changelog, self.local_commit_date = self._get_commit_diff(self.local_commit_hash, self.remote_commit_hash)
         
         if self.update_changelog is None:
-            # Failed to fetch changelog - show error popup with specific error message
-            self.update_error_message = f"Could not compare commits {self.local_commit_hash[:7]} and {self.remote_commit_hash[:7]} - they may be from different branches"
-            self.show_update_error_dialog = True
-            self.update_check_complete = True
-            return
+            # Compare failed (e.g. after history rewrite) — still offer the update
+            self.update_changelog = [f"Changelog unavailable (local commit {self.local_commit_hash[:7]} not found on remote)."]
+            self.logger.info("Changelog unavailable, offering update anyway.")
 
         if self._is_remote_commit_newer():
             self.logger.info("Update available.")
