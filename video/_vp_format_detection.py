@@ -156,8 +156,8 @@ class FormatDetectionMixin:
         if height < 1080 and width < 1920:
             return '2D'
 
-        # Exactly 1920x1080p or 3840x2160p -> 2D
-        if (width == 1920 and height == 1080) or (width == 3840 and height == 2160):
+        # Exactly 1920x1080p or 3840x2160p (and portrait 2160x3840) -> 2D
+        if (width == 1920 and height == 1080) or (width == 3840 and height == 2160) or (width == 2160 and height == 3840):
             return '2D'
 
         # Check if width = 2x height or height = 2x width (VR aspect ratios)
