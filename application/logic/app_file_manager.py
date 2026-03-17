@@ -1586,6 +1586,11 @@ class AppFileManager:
                         preprocessed_info = self.app.processor._get_video_info(preprocessed_path)
                         if preprocessed_info:
                             status["frame_count"] = preprocessed_info.get("total_frames", 0)
+            else:
+                # Video info not available yet (e.g. during project load) —
+                # trust the file if it exists and has reasonable size
+                if status["file_size"] > 1024:
+                    status["valid"] = True
 
         except Exception as e:
             self.logger.error(f"Error getting preprocessed file status: {e}")
