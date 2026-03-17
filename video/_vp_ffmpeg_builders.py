@@ -334,6 +334,13 @@ class FFmpegBuildersMixin:
                 self.logger.info("Hardware acceleration forced to 'none' for preprocessed video (compatibility)")
             return []  # Return empty args = no hardware acceleration
 
+        # NVDEC/CUDA cannot decode H.264 videos wider than 4096 pixels
+        video_width = self.video_info.get('width', 0)
+        video_codec = self.video_info.get('codec_name', '').lower()
+        if video_width > 4096 and video_codec in ('h264', 'avc1', 'avc'):
+            self.logger.info(f"Hardware acceleration forced to 'none': H.264 width {video_width} exceeds NVDEC limit of 4096")
+            return []
+
         system = platform.system().lower()
         self.logger.debug(
             f"Determining HWAccel. Selected: '{selected_hwaccel}', OS: {system}, App Available: {available_on_app}")
