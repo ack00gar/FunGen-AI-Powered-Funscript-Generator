@@ -1238,11 +1238,14 @@ class VRHybridChapterTracker(BaseOfflineTracker):
                 curr_patch = gray[ry1:ry2, rx1:rx2]
 
                 if prev_patch.shape[0] > 4 and prev_patch.shape[1] > 4 and prev_patch.shape == curr_patch.shape:
-                    flow = dis.calc(
-                        np.ascontiguousarray(prev_patch),
-                        np.ascontiguousarray(curr_patch),
-                        None
-                    )
+                    try:
+                        flow = dis.calc(
+                            np.ascontiguousarray(prev_patch),
+                            np.ascontiguousarray(curr_patch),
+                            None
+                        )
+                    except cv2.error:
+                        flow = None
 
                     if flow is not None:
                         dy, dx = self._magnitude_weighted_flow(flow)
