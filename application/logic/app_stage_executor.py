@@ -886,6 +886,14 @@ class StageExecutorMixin:
                 self.stage2_status_text = f"{stage}: {task}"
                 self.gui_event_queue.put(("stage2_status_update", f"{task}", f"{pct}%"))
 
+                # Forward timing data for info graph / execution UI display
+                timing = info.get('timing')
+                if timing:
+                    self.stage1_decode_ms = timing.get('decode_ms', 0.0)
+                    self.stage1_yolo_det_ms = timing.get('yolo_det_ms', 0.0)
+                    self.stage1_yolo_pose_ms = 0.0
+                    self.stage2_flow_ms = timing.get('flow_ms', 0.0)
+
                 if is_headless:
                     import sys
                     bar_w = 40
@@ -944,6 +952,11 @@ class StageExecutorMixin:
                         self.logger.info("Deleted preprocessed video (save_preprocessed_video=off)")
                     except OSError as del_err:
                         self.logger.warning(f"Could not delete preprocessed video: {del_err}")
+
+                # Load overlay data for debug replay
+                overlay_path = result.output_data.get('overlay_path')
+                if overlay_path and os.path.exists(overlay_path):
+                    self.gui_event_queue.put(("load_s2_overlay", overlay_path, None))
 
                 self.gui_event_queue.put(("stage2_status_update", f"{display_name} Complete", "Done"))
                 return {"success": True, "data": output_data}

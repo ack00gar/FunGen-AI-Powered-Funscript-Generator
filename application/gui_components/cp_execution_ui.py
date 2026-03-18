@@ -268,6 +268,20 @@ class ExecutionMixin:
         if is_analysis_running and stage_proc.current_analysis_stage == 2:
             imgui.text_wrapped(f"Main: {stage_proc.stage2_main_progress_label}")
 
+            # Per-component timing (populated by any tracker that reports it)
+            timing_parts = []
+            decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
+            yolo_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
+            flow_ms = getattr(stage_proc, 'stage2_flow_ms', 0.0)
+            if decode_ms > 0:
+                timing_parts.append(f"Decode: {decode_ms:.1f}ms")
+            if yolo_ms > 0:
+                timing_parts.append(f"YOLO: {yolo_ms:.1f}ms")
+            if flow_ms > 0:
+                timing_parts.append(f"Flow: {flow_ms:.1f}ms")
+            if timing_parts:
+                imgui.text(" | ".join(timing_parts))
+
             # Apply active color
             imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
             imgui.progress_bar(stage_proc.stage2_main_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage2_main_progress_value * 100:.0f}%" if stage_proc.stage2_main_progress_value >= 0 else "")

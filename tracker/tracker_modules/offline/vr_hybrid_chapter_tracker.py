@@ -125,6 +125,7 @@ class VRHybridChapterTracker(BaseOfflineTracker):
         self.vr_pitch = 0
         self.sparse_fps = SPARSE_FPS
         self.max_parallel = MAX_PARALLEL_CHAPTERS
+        self._overlay_frames = []
 
     @property
     def metadata(self) -> TrackerMetadata:
@@ -279,8 +280,30 @@ class VRHybridChapterTracker(BaseOfflineTracker):
 
             funscript = self._merge_chapter_results(chapters, chapter_results, video_path)
 
+            # Save overlay data for debug replay
+            overlay_path = None
+            if self._overlay_frames:
+                overlay_path = os.path.join(output_directory, f'{video_basename}_stage2_overlay.msgpack')
+                overlay_data = {
+                    'frames': sorted(self._overlay_frames, key=lambda f: f['frame_id']),
+                    'segments': [
+                        {'start_frame': ch['start_frame'], 'end_frame': ch['end_frame'],
+                         'major_position': ch.get('position', 'Unknown'),
+                         'position_short_name': ch.get('position', 'Unknown')}
+                        for ch in chapters
+                    ],
+                    'metadata': {'schema': 'v1.1', 'source': 'vr_hybrid_chapter_tracker'},
+                }
+                try:
+                    with open(overlay_path, 'wb') as f:
+                        f.write(msgpack.packb(overlay_data, use_bin_type=True))
+                    self.logger.info(f"Saved overlay data: {len(self._overlay_frames)} frames")
+                except Exception as e:
+                    self.logger.warning(f"Failed to save overlay data: {e}")
+                    overlay_path = None
+
             processing_time = time.time() - start_time
-            self.logger.info(f"Hybrid processing complete in {processing_time:.1f}s")
+            self.logger.info(f"VR Hybrid processing complete in {processing_time:.1f}s")
 
             if progress_callback:
                 progress_callback({'stage': 'complete', 'task': 'Done', 'percentage': 100})
@@ -293,6 +316,7 @@ class VRHybridChapterTracker(BaseOfflineTracker):
                     'funscript': funscript,
                     'chapters': chapters,
                     'chapter_results': {i: r.get('metrics', {}) for i, r in chapter_results.items()},
+                    'overlay_path': overlay_path,
                 },
                 performance_metrics={
                     'processing_time_seconds': processing_time,
@@ -420,6 +444,10 @@ class VRHybridChapterTracker(BaseOfflineTracker):
         penis_class_name = 'penis'
         frames_written = 0
         yolo_processed = 0
+        pass1_start = time.time()
+        yolo_time_accum = 0.0
+        decode_time_accum = 0.0
+        timing_samples = 0
 
         # Choose frame source: reuse preprocessed file or VP pipeline
         if reuse_preprocessed and reuse_cap is not None:
@@ -428,23 +456,33 @@ class VRHybridChapterTracker(BaseOfflineTracker):
             frame_source = self._frames_from_vp(vp, total_frames, encoder)
 
         try:
+            t_frame_start = time.perf_counter()
             for frame_idx, frame in frame_source:
 
                 if self.stop_event and self.stop_event.is_set():
                     break
 
+                t_frame_end = time.perf_counter()
+                decode_ms = (t_frame_end - t_frame_start) * 1000.0
                 frames_written += 1
 
                 # Run YOLO only every Nth frame
                 if frame_idx % frame_skip != 0:
+                    t_frame_start = time.perf_counter()
                     continue
 
+                t_yolo_start = time.perf_counter()
                 try:
                     results = model(frame, device=config_constants.DEVICE, verbose=False,
                                   conf=DEFAULT_CONFIDENCE, imgsz=self.yolo_input_size)
                 except Exception as e:
                     self.logger.debug(f"YOLO error on frame {frame_idx}: {e}")
+                    t_frame_start = time.perf_counter()
                     continue
+                yolo_ms = (time.perf_counter() - t_yolo_start) * 1000.0
+                decode_time_accum += decode_ms
+                yolo_time_accum += yolo_ms
+                timing_samples += 1
 
                 # Parse detections
                 penis_box = None
@@ -503,10 +541,35 @@ class VRHybridChapterTracker(BaseOfflineTracker):
                 frame_positions[frame_idx] = position
                 yolo_processed += 1
 
+                # Collect overlay frame for debug replay
+                if frame_dets:
+                    self._overlay_frames.append({
+                        'frame_id': frame_idx,
+                        'yolo_boxes': [
+                            {'bbox': d['bbox'], 'class_name': d['class_name'],
+                             'confidence': d.get('confidence', 0.0), 'track_id': None, 'status': None}
+                            for d in frame_dets
+                        ],
+                        'poses': [],
+                        'dominant_pose_id': None,
+                        'active_interaction_track_id': None,
+                        'is_occluded': False,
+                        'atr_assigned_position': position,
+                    })
+
                 if progress_callback and yolo_processed % 50 == 0:
                     pct = min(30, int(30 * frame_idx / max(1, total_frames)))
-                    progress_callback({'stage': 'pass1', 'task': f'Decode + sparse YOLO ({yolo_processed} det, {frames_written} frames)',
-                                      'percentage': pct})
+                    elapsed = time.time() - pass1_start
+                    avg_decode = decode_time_accum / max(1, timing_samples)
+                    avg_yolo = yolo_time_accum / max(1, timing_samples)
+                    progress_callback({'stage': 'pass1',
+                                      'task': f'Decode + sparse YOLO ({yolo_processed} det, {frames_written} frames)',
+                                      'percentage': pct,
+                                      'timing': {'decode_ms': avg_decode, 'yolo_det_ms': avg_yolo},
+                                      'time_elapsed': elapsed,
+                                      'avg_fps': yolo_processed / max(0.001, elapsed)})
+
+                t_frame_start = time.perf_counter()
 
         except Exception as e:
             self.logger.error(f"Pass 1 error: {e}", exc_info=True)
@@ -1022,13 +1085,16 @@ class VRHybridChapterTracker(BaseOfflineTracker):
 
             # Build a sub-progress callback for per-frame updates within each chapter
             def make_chapter_progress(ch_idx, ch_total, base, rng, cb):
-                def _sub(frame_frac):
+                def _sub(frame_frac, extra=None):
                     ch_base = base + int(rng * ch_idx / max(1, ch_total))
                     ch_range = rng / max(1, ch_total)
                     pct = ch_base + int(ch_range * frame_frac)
-                    cb({'stage': 'pass2',
-                        'task': f"Chapter {ch_idx+1}/{ch_total}: {ch['position']} ({int(frame_frac*100)}%)",
-                        'percentage': pct})
+                    info = {'stage': 'pass2',
+                            'task': f"Chapter {ch_idx+1}/{ch_total}: {ch['position']} ({int(frame_frac*100)}%)",
+                            'percentage': pct}
+                    if extra and isinstance(extra, dict):
+                        info.update(extra)
+                    cb(info)
                 return _sub
 
             chapter_progress = None
@@ -1191,9 +1257,15 @@ class VRHybridChapterTracker(BaseOfflineTracker):
         prev_gray = None
         last_roi = None
         yolo_det_count = 0
+        p2_decode_accum = 0.0
+        p2_yolo_accum = 0.0
+        p2_flow_accum = 0.0
+        p2_timing_n = 0
 
         for i in range(chapter_frames):
+            t_decode = time.perf_counter()
             ret, frame = cap.read()
+            decode_ms = (time.perf_counter() - t_decode) * 1000.0
             if not ret:
                 break
 
@@ -1202,21 +1274,44 @@ class VRHybridChapterTracker(BaseOfflineTracker):
                 return None
 
             if frame_progress_callback and i % 100 == 0 and chapter_frames > 0:
-                frame_progress_callback(float(i) / chapter_frames)
+                avg_d = p2_decode_accum / max(1, p2_timing_n)
+                avg_y = p2_yolo_accum / max(1, p2_timing_n)
+                avg_f = p2_flow_accum / max(1, p2_timing_n)
+                frame_progress_callback(float(i) / chapter_frames,
+                                        {'timing': {'decode_ms': avg_d, 'yolo_det_ms': avg_y, 'flow_ms': avg_f}})
 
             abs_frame = start_frame + i
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             h, w = gray.shape[:2]
 
-            # Get ROI — dense YOLO on every frame, or sparse fallback
+            p2_decode_accum += decode_ms
+            p2_timing_n += 1
+
+            # Get ROI -- dense YOLO on every frame, or sparse fallback
             roi_box = None
+            frame_overlay_dets = []
             if use_dense_yolo:
-                roi_box = self._detect_roi_yolo(frame, yolo_model, h, w)
+                t_yolo = time.perf_counter()
+                roi_box, frame_overlay_dets = self._detect_roi_yolo(frame, yolo_model, h, w)
+                p2_yolo_accum += (time.perf_counter() - t_yolo) * 1000.0
                 if roi_box is not None:
                     yolo_det_count += 1
                     last_roi = roi_box
                 elif last_roi is not None:
                     roi_box = last_roi  # Hold last known ROI
+
+                # Collect overlay for dense frames
+                if frame_overlay_dets:
+                    has_active = any(d.get('track_id') == 1 for d in frame_overlay_dets)
+                    self._overlay_frames.append({
+                        'frame_id': abs_frame,
+                        'yolo_boxes': frame_overlay_dets,
+                        'poses': [],
+                        'dominant_pose_id': None,
+                        'active_interaction_track_id': 1 if has_active else None,
+                        'is_occluded': False,
+                        'atr_assigned_position': chapter.get('position'),
+                    })
             else:
                 roi_box = self._get_roi_for_frame(abs_frame, frame_boxes, last_roi, h, w)
                 if roi_box is not None:
@@ -1238,6 +1333,7 @@ class VRHybridChapterTracker(BaseOfflineTracker):
                 curr_patch = gray[ry1:ry2, rx1:rx2]
 
                 if prev_patch.shape[0] > 4 and prev_patch.shape[1] > 4 and prev_patch.shape == curr_patch.shape:
+                    t_flow = time.perf_counter()
                     try:
                         flow = dis.calc(
                             np.ascontiguousarray(prev_patch),
@@ -1246,6 +1342,7 @@ class VRHybridChapterTracker(BaseOfflineTracker):
                         )
                     except cv2.error:
                         flow = None
+                    p2_flow_accum += (time.perf_counter() - t_flow) * 1000.0
 
                     if flow is not None:
                         dy, dx = self._magnitude_weighted_flow(flow)
@@ -1311,26 +1408,32 @@ class VRHybridChapterTracker(BaseOfflineTracker):
         return last_roi
 
     def _detect_roi_yolo(self, frame: np.ndarray, yolo_model,
-                          h: int, w: int) -> Optional[Tuple[int, int, int, int]]:
-        """Run YOLO on a single frame and return padded ROI from penis + nearest contact."""
+                          h: int, w: int) -> Tuple[Optional[Tuple[int, int, int, int]], List[Dict]]:
+        """Run YOLO on a single frame. Returns (padded_roi_or_None, overlay_dets_list)."""
         try:
             results = yolo_model(frame, device=config_constants.DEVICE, verbose=False,
                                  conf=DEFAULT_CONFIDENCE, imgsz=self.yolo_input_size)
         except Exception:
-            return None
+            return None, []
 
         if not results or len(results) == 0:
-            return None
+            return None, []
 
         penis_box = None
         best_conf = 0.0
         contact_boxes = []
+        overlay_dets = []
 
         for box in results[0].boxes:
             cls_id = int(box.cls[0])
             cls_name = yolo_model.names.get(cls_id, f"class_{cls_id}")
             conf = float(box.conf[0])
             x1, y1, x2, y2 = box.xyxy[0].tolist()
+
+            overlay_dets.append({
+                'bbox': [x1, y1, x2, y2], 'class_name': cls_name,
+                'confidence': conf, 'track_id': None, 'status': None,
+            })
 
             if cls_name == 'penis' and conf > best_conf:
                 penis_box = (x1, y1, x2, y2)
@@ -1339,9 +1442,36 @@ class VRHybridChapterTracker(BaseOfflineTracker):
                 contact_boxes.append((x1, y1, x2, y2))
 
         if penis_box is None:
-            return None
+            return None, overlay_dets
 
-        return self._compute_padded_roi(penis_box, contact_boxes, h, w)
+        # Mark the selected penis as locked_penis for overlay highlighting
+        px1, py1, px2, py2 = penis_box
+        for det in overlay_dets:
+            b = det['bbox']
+            if det['class_name'] == 'penis' and b[0] == px1 and b[1] == py1:
+                det['class_name'] = 'locked_penis'
+                break
+
+        # Find and mark the nearest contact as active interactor
+        if contact_boxes:
+            pcx, pcy = (px1 + px2) / 2, (py1 + py2) / 2
+            best_dist = float('inf')
+            best_contact_bbox = None
+            for cb in contact_boxes:
+                cx, cy = (cb[0] + cb[2]) / 2, (cb[1] + cb[3]) / 2
+                dist = (pcx - cx) ** 2 + (pcy - cy) ** 2
+                if dist < best_dist:
+                    best_dist = dist
+                    best_contact_bbox = cb
+            if best_contact_bbox:
+                bx1, by1 = best_contact_bbox[0], best_contact_bbox[1]
+                for det in overlay_dets:
+                    b = det['bbox']
+                    if b[0] == bx1 and b[1] == by1 and det['class_name'] != 'locked_penis':
+                        det['track_id'] = 1
+                        break
+
+        return self._compute_padded_roi(penis_box, contact_boxes, h, w), overlay_dets
 
     def _compute_padded_roi(self, penis_box: Tuple, contact_boxes: List[Tuple],
                              h: int, w: int) -> Tuple[int, int, int, int]:
