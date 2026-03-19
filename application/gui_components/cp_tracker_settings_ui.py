@@ -195,11 +195,11 @@ class TrackerSettingsMixin:
 
     def _render_tracking_axes_mode(self, stage_proc):
         """Renders UI elements for tracking axis mode."""
-        # Get tracker info for axis-aware display
+        # Get tracker info from discovery (works for both live and offline trackers)
         tracker_info = None
-        tr = getattr(self.app, 'tracker', None)
-        if tr and hasattr(tr, 'get_tracker_info'):
-            tracker_info = tr.get_tracker_info()
+        selected_name = getattr(self.app.app_state_ui, 'selected_tracker_name', None)
+        if selected_name and self.tracker_ui:
+            tracker_info = self.tracker_ui.discovery.get_tracker_info(selected_name)
 
         is_dual_axis = tracker_info.supports_dual_axis if tracker_info else True
         primary_name = (tracker_info.primary_axis if tracker_info else "stroke").capitalize()
