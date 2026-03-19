@@ -162,6 +162,7 @@ class VRHybridChapterTracker(BaseOfflineTracker):
             properties={
                 "produces_funscript_in_stage2": True,
                 "supports_batch": True,
+                "supports_range": False,
                 "is_hybrid_tracker": True,
                 "num_stages": 2
             }

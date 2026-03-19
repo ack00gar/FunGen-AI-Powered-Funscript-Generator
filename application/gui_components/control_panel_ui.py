@@ -214,6 +214,13 @@ class ControlPanelUI(
     def _get_tracker_display_name(self, tracker_name: str) -> str:
         return self.tracker_ui.get_tracker_display_name(tracker_name)
 
+    def _get_tracker_property(self, tracker_name: str, prop: str, default=None):
+        """Get a property value from a tracker's metadata."""
+        info = self.tracker_ui.discovery.get_tracker_info(tracker_name) if self.tracker_ui else None
+        if info and info.properties:
+            return info.properties.get(prop, default)
+        return default
+
     def _get_tracker_lists_for_ui(self, simple_mode=False, hidden_folders=None):
         """Get tracker lists for UI combo boxes using dynamic discovery."""
         try:
@@ -1074,12 +1081,14 @@ class ControlPanelUI(
                     self._render_execution_progress_display()
 
         mode = app_state.selected_tracker_name
+        tracker_supports_range = self._get_tracker_property(mode, "supports_range", True)
         if mode and (self._is_offline_tracker(mode) or self._is_live_tracker(mode)):
             with section_card("Analysis Options##RunControlAnalysisOptions",
                               tier="primary") as open_:
                 if open_:
-                    imgui.text("Analysis Range")
-                    self._render_range_selection(stage_proc, fs_proc, events)
+                    if tracker_supports_range:
+                        imgui.text("Analysis Range")
+                        self._render_range_selection(stage_proc, fs_proc, events)
 
                     if self._is_offline_tracker(mode) and not self._is_hybrid_tracker(mode):
                         imgui.text("Stage Reruns:")
