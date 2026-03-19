@@ -1636,13 +1636,23 @@ class VRHybridChapterTracker(BaseOfflineTracker):
 
         keyframe_indices = sorted(keyframe_indices)
 
+        # Compute automatic group delay compensation (same approach as User ROI tracker)
+        # Each filter in the pipeline introduces a delay of (window-1)/2 frames
+        flow_delay = 1.0  # flow between frame N-1 and N is attributed to N
+        median_delay = (FLOW_MEDIAN_WINDOW - 1) / 2.0
+        savgol_delay = (win - 1) / 2.0 if win >= 3 else 0.0
+        total_delay_frames = flow_delay + median_delay + savgol_delay
+        delay_ms = total_delay_frames * (1000.0 / fps)
+        self.logger.info(f"  Auto timing compensation: {total_delay_frames:.1f} frames ({delay_ms:.0f}ms) at {fps:.0f}fps")
+
         # Build funscript actions
         frame_ms = 1000.0 / fps
         primary_actions = []
         for ki in keyframe_indices:
             if ki < len(time_ms_arr):
-                # Snap to frame boundary
-                t = int(round(time_ms_arr[ki] / frame_ms) * frame_ms)
+                # Snap to frame boundary with delay compensation
+                t = int(round((time_ms_arr[ki] - delay_ms) / frame_ms) * frame_ms)
+                t = max(0, t)
                 pos = int(round(normalized[ki]))
                 pos = max(0, min(100, pos))
                 primary_actions.append({'at': t, 'pos': pos})
