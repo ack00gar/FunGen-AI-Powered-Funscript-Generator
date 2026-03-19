@@ -1066,6 +1066,17 @@ class ControlPanelUI(
                         if tr:
                             tr.set_tracking_mode(new_mode)
 
+                # Tracker version
+                tracker_version = self._get_tracker_property(app_state.selected_tracker_name, "version", None)
+                if not tracker_version:
+                    info = self.tracker_ui.discovery.get_tracker_info(app_state.selected_tracker_name) if self.tracker_ui else None
+                    if info:
+                        tracker_version = info.version
+                if tracker_version:
+                    imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.6, 1.0)
+                    imgui.text(f"v{tracker_version}")
+                    imgui.pop_style_color()
+
                 # Axis mode combo
                 imgui.spacing()
                 imgui.separator()
