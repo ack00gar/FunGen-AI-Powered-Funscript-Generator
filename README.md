@@ -279,6 +279,13 @@ python main.py "/path/to/your/video.mp4"
 python main.py "/path/to/your/folder" --mode <your_mode> --overwrite --recursive
 ```
 
+**To run multiple instances on different GPUs (e.g. 10-bit on QSV, rest on CUDA):**
+
+```bash
+python main.py "/path/to/10bit_videos" --hwaccel qsv &
+python main.py "/path/to/other_videos" --hwaccel cuda &
+```
+
 ### Command-Line Arguments
 
 | Argument | Short | Description |
@@ -291,6 +298,7 @@ python main.py "/path/to/your/folder" --mode <your_mode> --overwrite --recursive
 | `--no-copy` | | Prevents saving a copy of the final funscript next to the video file. It will only be saved in the application's output folder. |
 | `--generate-roll` | | Generates a secondary axis funscript file (e.g. `.roll.funscript`) for supported multi-axis devices. |
 | `--save-preprocessed` | | Keeps the preprocessed (resized/unwarped) video for each processed file. Off by default in batch/CLI to save disk space. |
+| `--hwaccel` | | Override hardware acceleration method for this run (e.g. `cuda`, `qsv`, `auto`, `none`). Useful for running multiple instances on different GPUs. |
 | `--recursive`| `-r` | If the input path is a folder, this flag enables scanning for videos in all its subdirectories. |
 
 ---
