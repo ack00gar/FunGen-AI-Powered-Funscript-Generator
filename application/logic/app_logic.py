@@ -127,8 +127,10 @@ class ApplicationLogic:
         self._autotuner_lock = threading.Lock()  # Protects autotuner_results, _best_combination, _best_fps, _status_message
 
         # --- Hardware Acceleration ---
-        # Start with sensible defaults; real query runs in background
-        self.available_ffmpeg_hwaccels = ["auto", "none"]
+        # Load cached hwaccel list from settings so validation works immediately;
+        # background thread refreshes the cache from ffmpeg
+        cached_hwaccels = self.app_settings.get("available_ffmpeg_hwaccels", None)
+        self.available_ffmpeg_hwaccels = cached_hwaccels if cached_hwaccels else ["auto", "none"]
         self.hardware_acceleration_method = self.app_settings.get("hardware_acceleration_method", "auto")
         self._hwaccel_query_done = threading.Event()
         threading.Thread(
@@ -921,6 +923,8 @@ class ApplicationLogic:
         """Background thread: query ffmpeg, then validate the configured method."""
         queried = self._get_available_ffmpeg_hwaccels()
         self.available_ffmpeg_hwaccels = queried
+        # Cache for next startup so _apply_loaded_settings can validate immediately
+        self.app_settings.set("available_ffmpeg_hwaccels", queried)
 
         default_hw = "auto"
         if "auto" not in queried:
@@ -991,7 +995,8 @@ class ApplicationLogic:
         if self.logging_level_setting != new_logging_level:
             self.set_application_logging_level(new_logging_level)
 
-        # Hardware Acceleration
+        # Hardware Acceleration — uses cached list from last run (or background
+        # thread result if it finished first), so no blocking wait needed
         default_hw_accel_in_apply = "auto"
         if "auto" not in self.available_ffmpeg_hwaccels:
             default_hw_accel_in_apply = "none" if "none" in self.available_ffmpeg_hwaccels else \

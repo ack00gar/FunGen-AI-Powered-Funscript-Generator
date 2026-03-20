@@ -285,7 +285,8 @@ class FFmpegEncoder:
         for encoder_codec, encoder_name in encoder_configs:
             try:
                 subprocess.check_output([
-                    self.ffmpeg_path, "-hide_banner", "-f", "lavfi", "-i", "testsrc", 
+                    self.ffmpeg_path, "-hide_banner", "-f", "lavfi", "-i", "testsrc",
+                    "-frames:v", "1",
                     "-c:v", encoder_codec, "-f", "null", "-"
                 ], stderr=subprocess.PIPE, text=True, timeout=5)
                 # If we get here, encoder is available
