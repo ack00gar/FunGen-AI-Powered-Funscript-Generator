@@ -669,9 +669,11 @@ class AppFileManager:
                 f.write(orjson.dumps(funscript_data))
             self.logger.info(f"Funscript saved to {os.path.basename(filepath)}",
                              extra={'status_message': True})
+            self.app.notify(f"Saved {os.path.basename(filepath)}", "success")
         except Exception as e:
             self.logger.error(f"Error saving funscript to '{filepath}': {e}",
                               extra={'status_message': True})
+            self.app.notify(f"Save failed: {e}", "error")
 
     def _save_funscript_file_unified(self, filepath: str, funscript_obj, chapters: Optional[List] = None):
         """Save all axes into a single .funscript file with embedded axes array.

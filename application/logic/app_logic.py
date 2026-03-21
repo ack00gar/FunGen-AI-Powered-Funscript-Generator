@@ -582,6 +582,12 @@ class ApplicationLogic:
         """The actual logic for the autotuning process."""
         self.autotuner._run_autotuner_thread()
 
+    def notify(self, message: str, type: str = "info", duration: float = 4.0):
+        """Send a toast notification to the GUI. type: 'success', 'error', 'warning', 'info'."""
+        gui = getattr(self, 'gui_instance', None)
+        if gui and hasattr(gui, 'notification_manager'):
+            gui.notification_manager.add(message, type, duration)
+
     def get_waveform_data(self):
         """Thread-safe access to audio waveform data."""
         with self._waveform_lock:

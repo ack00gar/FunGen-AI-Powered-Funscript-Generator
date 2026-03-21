@@ -23,6 +23,7 @@ from application.utils.timeline_modes import TimelineMode
 from application.gui_components.gui_preview_manager import PreviewManagerMixin
 from application.gui_components.gui_shortcut_handler import ShortcutHandlerMixin
 from application.gui_components.gui_dialog_renderer import DialogRendererMixin
+from application.utils.notifications import NotificationManager
 from application.gui_components.first_run_wizard import FirstRunWizard
 
 _STATUS_STRIP_HEIGHT = 22
@@ -96,6 +97,9 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.last_gpu_check = 0
         self.disk_io_times = deque(maxlen=50)  # Track file operations
         self.network_operation_times = deque(maxlen=30)  # Track network calls
+
+        # Notification system
+        self.notification_manager = NotificationManager()
 
         # Standard Components (owned by GUI)
         self.file_dialog = ImGuiFileDialog(app_logic_instance=app)
@@ -404,8 +408,13 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         imgui.create_context()
         self.impl = GlfwRenderer(self.window)
         style = imgui.get_style()
-        style.window_rounding = 5.0
-        style.frame_rounding = 3.0
+        style.window_rounding = 6.0
+        style.frame_rounding = 4.0
+        style.child_rounding = 6.0
+        style.popup_rounding = 6.0
+        style.tab_rounding = 4.0
+        style.scrollbar_rounding = 6.0
+        style.grab_rounding = 4.0
 
         self.frame_texture_id = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.frame_texture_id)
@@ -1607,6 +1616,9 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         # Render status strip at bottom of window
         self._render_status_strip(status_strip_h)
+
+        # Render toast notifications (foreground, on top of everything)
+        self.notification_manager.render()
 
         self.perf_frame_count += 1
         if time.time() - self.last_perf_log_time > self.perf_log_interval:
