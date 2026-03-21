@@ -708,14 +708,14 @@ class MainMenu:
             # Preview options
             enhanced_preview = settings.get("enable_enhanced_funscript_preview", True)
             clicked, new_val = imgui.menu_item(
-                "Enhanced Preview (Zoom + Frame)", selected=enhanced_preview
+                "Hover Zoom Preview", selected=enhanced_preview
             )
             if clicked and new_val != enhanced_preview:
                 settings.set("enable_enhanced_funscript_preview", new_val)
 
             use_simplified = settings.get("use_simplified_funscript_preview", False)
             clicked, new_val = imgui.menu_item(
-                "Use Simplified Preview", selected=use_simplified
+                "Low-Detail Preview (faster)", selected=use_simplified
             )
             if clicked and new_val != use_simplified:
                 settings.set("use_simplified_funscript_preview", new_val)
@@ -993,23 +993,26 @@ class MainMenu:
 
             imgui.separator()
 
-            # Overlay modes (render windows on video)
+            # Overlay modes (render widgets on video instead of separate windows)
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
+            imgui.text("Show on Video:")
+            imgui.pop_style_color()
             clicked, val = imgui.menu_item(
-                "Gauges as Overlay",
+                "Gauges",
                 selected=app.app_settings.get('gauge_overlay_mode', False)
             )
             if clicked:
                 app.app_settings.set('gauge_overlay_mode', val)
 
             clicked, val = imgui.menu_item(
-                "Movement Bar as Overlay",
+                "Movement Bar",
                 selected=app.app_settings.get('movement_bar_overlay_mode', False)
             )
             if clicked:
                 app.app_settings.set('movement_bar_overlay_mode', val)
 
             clicked, val = imgui.menu_item(
-                "3D Simulator as Overlay",
+                "3D Simulator",
                 selected=app.app_settings.get('simulator_3d_overlay_mode', False)
             )
             if clicked:
