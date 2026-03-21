@@ -2,7 +2,6 @@
 GUI Components package initialization.
 """
 
-from .autotuner_window import AutotunerWindow
 from .chapter_type_manager_ui import ChapterTypeManagerUI
 from .control_panel_ui import ControlPanelUI
 from .generated_file_manager_window import GeneratedFileManagerWindow

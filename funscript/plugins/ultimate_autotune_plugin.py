@@ -56,8 +56,8 @@ class UltimateAutotunePlugin(FunscriptTransformationPlugin):
     
     @property
     def ui_preference(self) -> str:
-        """Apply directly with default parameters - no popup needed."""
-        return 'direct'
+        """Open popup so users can tweak parameters and see live preview."""
+        return 'popup'
     
     @property
     def parameters_schema(self) -> Dict[str, Dict[str, Any]]:

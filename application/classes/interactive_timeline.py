@@ -2990,6 +2990,14 @@ class InteractiveFunscriptTimeline:
             self.ultimate_autotune_preview_actions = None
             return
 
+        # Suppress the default-params green preview while UA popup is open
+        # (the plugin preview system renders the live orange overlay instead)
+        ua_ctx = self.plugin_manager.plugin_contexts.get('Ultimate Autotune')
+        if ua_ctx and ua_ctx.state != PluginUIState.CLOSED:
+            self.ultimate_autotune_preview_actions = None
+            self._ultimate_preview_dirty = True  # re-dirty so it regenerates when popup closes
+            return
+
         if not self._ultimate_preview_dirty: return
 
         # Generate preview via plugin system
@@ -3003,14 +3011,13 @@ class InteractiveFunscriptTimeline:
                 from funscript.multi_axis_funscript import MultiAxisFunscript
                 temp = MultiAxisFunscript()
                 # Manually copy only the necessary data lists
-                import copy
                 temp.primary_actions = copy.deepcopy(fs.primary_actions)
                 temp.secondary_actions = copy.deepcopy(fs.secondary_actions)
 
                 res = plugin.transform(temp, axis)
                 if res:
                     self.ultimate_autotune_preview_actions = res.primary_actions if axis == 'primary' else res.secondary_actions
-        
+
         self._ultimate_preview_dirty = False
 
     def _check_and_apply_pending_plugins(self):

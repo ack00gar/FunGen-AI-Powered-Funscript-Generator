@@ -1035,47 +1035,22 @@ class MainMenu:
 
             imgui.separator()
 
-            # Calibration & Analysis submenu
-            if imgui.begin_menu("Calibration & Analysis"):
-                can_calibrate = file_mgr.video_path is not None
-                if _menu_item_simple("Start Latency Calibration...", enabled=can_calibrate):
-                    calibration = getattr(app, "calibration", None)
-                    if calibration:
-                        calibration.start_latency_calibration()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "Calibrate latency. Requires a video to be loaded and points "
-                        "on Timeline 1."
-                        if can_calibrate
-                        else "Please load a video to enable calibration."
-                    )
-
-                fs_proc = getattr(app, "funscript_processor", None)
-                can_compare = (
-                    fs_proc is not None
-                    and fs_proc.get_actions("primary")
-                    and fs_proc.get_actions("secondary")
+            # Compare Timelines
+            fs_proc = getattr(app, "funscript_processor", None)
+            can_compare = (
+                fs_proc is not None
+                and fs_proc.get_actions("primary")
+                and fs_proc.get_actions("secondary")
+            )
+            if _menu_item_simple("Compare Timelines...", enabled=can_compare):
+                trigger = getattr(app, "trigger_timeline_comparison", None)
+                if trigger:
+                    trigger()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Compares the signals on Timeline 1 and Timeline 2 to "
+                    "calculate the optimal time offset."
                 )
-                if _menu_item_simple("Compare Timelines...", enabled=can_compare):
-                    trigger = getattr(app, "trigger_timeline_comparison", None)
-                    if trigger:
-                        trigger()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "Compares the signals on Timeline 1 and Timeline 2 to "
-                        "calculate the optimal time offset."
-                    )
-
-                if not hasattr(app_state, "show_autotuner_window"):
-                    app_state.show_autotuner_window = False
-                clicked, _ = imgui.menu_item(
-                    "Performance Autotuner...",
-                    selected=app_state.show_autotuner_window,
-                )
-                if clicked:
-                    app_state.show_autotuner_window = not app_state.show_autotuner_window
-
-                imgui.end_menu()
 
             imgui.separator()
 

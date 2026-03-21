@@ -357,16 +357,27 @@ class PluginUIRenderer:
     
     def _render_action_buttons(self, plugin_name: str, ui_data: Dict[str, Any],
                              timeline_num: int, window_id_suffix: str):
-        """Render apply and cancel buttons for a plugin."""
+        """Render apply, reset, and cancel buttons for a plugin."""
         button_width = 100
-        
+
         # Apply button
         apply_id = f"Apply##Plugin{plugin_name}Apply{window_id_suffix}"
         if imgui.button(apply_id, width=button_width):
             self._apply_plugin(plugin_name, timeline_num)
-        
+
         imgui.same_line()
-        
+
+        # Reset to Defaults button
+        reset_id = f"Reset##Plugin{plugin_name}Reset{window_id_suffix}"
+        if imgui.button(reset_id, width=button_width):
+            context = self.plugin_manager.plugin_contexts.get(plugin_name)
+            if context and context.plugin_instance:
+                context.parameters = self.plugin_manager._get_default_parameters(context.plugin_instance)
+                # Refresh preview with default parameters
+                self._start_plugin_preview(plugin_name, timeline_num)
+
+        imgui.same_line()
+
         # Cancel button
         cancel_id = f"Cancel##Plugin{plugin_name}Cancel{window_id_suffix}"
         if imgui.button(cancel_id, width=button_width):

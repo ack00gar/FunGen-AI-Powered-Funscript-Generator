@@ -14,7 +14,7 @@ from collections import deque
 
 from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
-from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
+from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
 from application.gui_components.bookmark_list_window import BookmarkListWindow
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority, get_icon_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
@@ -121,7 +121,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.chapter_type_manager_ui = ChapterTypeManagerUI(app)
         self.bookmark_list_window_ui = BookmarkListWindow(app, gui=self)
         self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
-        self.autotuner_window_ui = AutotunerWindow(app)
         self.keyboard_shortcuts_dialog = KeyboardShortcutsDialog(app)
 
         # First-run wizard (full-window overlay, replaces old popup)
@@ -1135,8 +1134,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         if self.app.app_state_ui.show_generated_file_manager:
             self._time_render("GeneratedFileManager", self.generated_file_manager_ui.render)
-
-        self._time_render("AutotunerWindow", self.autotuner_window_ui.render)
 
         if hasattr(app_state, 'show_ai_models_dialog') and app_state.show_ai_models_dialog:
             self._time_render("AIModelsDialog", self._render_ai_models_dialog)
