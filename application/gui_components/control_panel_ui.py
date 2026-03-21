@@ -655,16 +655,10 @@ class ControlPanelUI(
     def render(self, control_panel_w=None, available_height=None):
         app = self.app
         app_state = app.app_state_ui
-        calibration_mgr = app.calibration
-
         # Cache feature detection flags for this frame
         self._feat_supporter = _is_feature_available("patreon_features")
         self._feat_device = _is_feature_available("device_control")
         self._feat_streamer = _is_feature_available("streamer")
-
-        if calibration_mgr.is_calibration_mode_active:
-            self._render_calibration_window(calibration_mgr, app_state)
-            return
 
         is_simple_mode = (getattr(app_state, "ui_view_mode", "expert") == "simple")
         if is_simple_mode:
@@ -1151,6 +1145,41 @@ class ControlPanelUI(
                                 "When enabled, re-running will reuse the existing preprocessed video.\n"
                                 "For standard trackers, forces Producer threads to 1."
                             )
+
+        # Output delay offset — always visible, prominent warning when non-zero
+        calibration = app.calibration
+        delay_frames = calibration.funscript_output_delay_frames
+        if delay_frames != 0:
+            # Non-zero: show warning-colored card so the user can't miss it
+            imgui.push_style_color(imgui.COLOR_HEADER, 0.8, 0.3, 0.1, 0.9)
+            imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, 0.9, 0.4, 0.15, 0.9)
+        with section_card("Output Delay##RunControlOutputDelay", tier="primary",
+                          open_by_default=(delay_frames != 0)) as od_open:
+            if od_open:
+                if delay_frames != 0:
+                    imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.85, 0.3, 1.0)
+                    imgui.text(f"WARNING: Output delayed by {delay_frames} frames")
+                    imgui.pop_style_color()
+                    imgui.text_wrapped(
+                        "Your funscript output is shifted in time. "
+                        "Set to 0 if your script seems out of sync."
+                    )
+                imgui.push_item_width(120)
+                changed, new_delay = imgui.slider_int(
+                    "Delay (frames)##OutputDelaySlider", delay_frames, 0, 20)
+                imgui.pop_item_width()
+                if changed:
+                    calibration.funscript_output_delay_frames = new_delay
+                    app.app_settings.set("funscript_output_delay_frames", new_delay)
+                    calibration.update_tracker_delay_params()
+                    app.project_manager.project_dirty = True
+                _tooltip_if_hovered(
+                    "Number of frames to delay funscript output.\n"
+                    "Compensates latency between video and tracker output.\n"
+                    "0 = no delay (default)."
+                )
+        if delay_frames != 0:
+            imgui.pop_style_color(2)
 
         proc = app.processor
         video_loaded = proc and proc.is_video_open()

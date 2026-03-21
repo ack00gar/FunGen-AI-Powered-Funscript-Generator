@@ -257,8 +257,11 @@ class PluginUIManager:
             
             else:
                 # Fallback to old preview method (creating a copy and transforming)
-                # Create a copy for preview
-                temp_funscript = copy.deepcopy(funscript_obj)
+                # Create a lightweight copy — deepcopy fails on RLock in full Funscript
+                from funscript.multi_axis_funscript import MultiAxisFunscript
+                temp_funscript = MultiAxisFunscript()
+                temp_funscript.primary_actions = copy.deepcopy(funscript_obj.primary_actions)
+                temp_funscript.secondary_actions = copy.deepcopy(funscript_obj.secondary_actions)
                 
                 # Store original actions for comparison
                 if axis == 'primary':

@@ -126,7 +126,7 @@ class AppStateUI:
         self.show_general_tracking_settings_section = False
         self.show_tracking_control_section = True
         self.show_range_selection_section = True
-        self.show_funscript_processing_tools_section = False
+
         self.show_funscript_window_controls_section = True
 
         # FPS Slider Range (for UI elements)

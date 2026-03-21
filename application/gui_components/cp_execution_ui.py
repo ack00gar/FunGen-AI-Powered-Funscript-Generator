@@ -28,20 +28,6 @@ class ExecutionMixin:
                 self._render_user_roi_controls_for_run_tab()
             return
 
-    def _render_calibration_window(self, calibration_mgr, app_state):
-        """Renders the dedicated latency calibration window."""
-        window_title = "Latency Calibration"
-        flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE
-        # In fixed mode, embed it in the main panel area without a title bar
-        if app_state.ui_layout_mode == 'fixed':
-            imgui.begin("Modular Control Panel##LeftControlsModular", flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE)
-            self._render_latency_calibration(calibration_mgr)
-            imgui.end()
-        else: # Floating mode
-            if imgui.begin(window_title, closable=False, flags=flags):
-                self._render_latency_calibration(calibration_mgr)
-                imgui.end()
-
     def _render_start_stop_buttons(self, stage_proc, fs_proc, event_handlers):
         is_batch_mode = self.app.is_batch_processing_active
         is_analysis_running = stage_proc.full_analysis_active
