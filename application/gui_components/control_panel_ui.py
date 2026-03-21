@@ -491,7 +491,7 @@ class ControlPanelUI(
         from config.element_group_colors import WorkflowColors
 
         current_stage = self._get_workflow_stage()
-        stages = ["Load", "Configure", "Track", "Edit", "Export"]
+        stages = ["Video", "Setup", "Analyze", "Refine", "Export"]
         draw_list = imgui.get_window_draw_list()
         cursor = imgui.get_cursor_screen_pos()
         avail_w = imgui.get_content_region_available_width()

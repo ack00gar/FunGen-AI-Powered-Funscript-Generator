@@ -3079,6 +3079,7 @@ class InteractiveFunscriptTimeline:
                 # Plugins may return the modified funscript or None (for in-place modifications)
                 # Both are valid - what matters is that the transformation was applied
                 self.logger.info(f"Successfully applied {plugin_name} to timeline {self.timeline_num}")
+                self.app.notify(f"Applied {plugin_name}", "success")
 
                 # Finalize and update UI
                 self.app.funscript_processor._finalize_action_and_update_ui(
