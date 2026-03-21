@@ -616,22 +616,6 @@ class OscillationExperimental2Tracker(BaseTracker):
                 self.oscillation_block_size = constants.YOLO_INPUT_SIZE // 20
         imgui.pop_item_width()
 
-        # --- Sensitivity ---
-        imgui.text("Detection Sensitivity")
-        _tip("Adjusts how sensitive the oscillation detector is to motion.\nLower = less sensitive, Higher = more sensitive")
-        cur_sens = settings.get("oscillation_detector_sensitivity", 2.5)
-        imgui.push_item_width(200)
-        ch, nv = imgui.slider_float("##Sensitivity", cur_sens, 0.1, 3.0, "%.2f")
-        if ch and nv != cur_sens:
-            settings.set("oscillation_detector_sensitivity", nv)
-            self.oscillation_sensitivity = nv
-        imgui.same_line()
-        if imgui.button("Reset##ResetSensitivity"):
-            if cur_sens != 2.5:
-                settings.set("oscillation_detector_sensitivity", 2.5)
-                self.oscillation_sensitivity = 2.5
-        imgui.pop_item_width()
-
         # --- Oscillation Area ---
         imgui.text("Oscillation Area Selection")
         _tip("Select a specific area for oscillation detection instead of the full frame.")
@@ -672,47 +656,8 @@ class OscillationExperimental2Tracker(BaseTracker):
                         v.oscillation_area_draw_current_screen_pos = (0, 0)
                     self.app.logger.info("Oscillation area cleared.", extra={"status_message": True})
 
-        # --- Overlays ---
-        imgui.text("Overlays")
-        _tip("Visualization layers for the Oscillation Detector.")
-        cur_overlay = settings.get("oscillation_show_overlay", getattr(self, "show_masks", False))
-        ch, nv_overlay = imgui.checkbox("Show Oscillation Overlay##OscShowOverlay", cur_overlay)
-        if ch and nv_overlay != cur_overlay:
-            settings.set("oscillation_show_overlay", nv_overlay)
-            self.show_masks = nv_overlay
-
-        cur_roi_overlay = settings.get("oscillation_show_roi_overlay", True)
-        has_osc_area = self.oscillation_area_fixed is not None
-        with DisabledScope(not has_osc_area):
-            ch, nv_roi_overlay = imgui.checkbox("Show ROI Rectangle##OscShowROIOverlay", cur_roi_overlay)
-        if has_osc_area and ch and nv_roi_overlay != cur_roi_overlay:
-            settings.set("oscillation_show_roi_overlay", nv_roi_overlay)
-            self.show_roi = nv_roi_overlay
-
-        cur_grid_blocks = settings.get("oscillation_show_grid_blocks", False)
-        ch, nv_grid_blocks = imgui.checkbox("Show Static Grid Blocks##OscShowGridBlocks", cur_grid_blocks)
-        if ch and nv_grid_blocks != cur_grid_blocks:
-            settings.set("oscillation_show_grid_blocks", nv_grid_blocks)
-            self.show_grid_blocks = nv_grid_blocks
-
-        # --- Dynamic Amplification ---
-        imgui.text("Live Signal Amplification")
-        _tip("Stretches the live signal to use the full 0-100 range based on recent motion.")
-        en = settings.get("live_oscillation_dynamic_amp_enabled", True)
-        ch, nv = imgui.checkbox("Enable Dynamic Amplification##EnableLiveAmp", en)
-        if ch and nv != en:
-            settings.set("live_oscillation_dynamic_amp_enabled", nv)
-
-        # --- Signal Processing Improvements ---
+        # --- Decay Behavior ---
         imgui.separator()
-        imgui.text("Signal Processing Improvements")
-
-        cur_simple_amp = settings.get("oscillation_use_simple_amplification", False)
-        ch, nv_simple = imgui.checkbox("Use Simple Amplification##UseSimpleAmp", cur_simple_amp)
-        if ch and nv_simple != cur_simple_amp:
-            settings.set("oscillation_use_simple_amplification", nv_simple)
-        _tip("Use legacy-style fixed multipliers (dy*-10, dx*10) instead of dynamic scaling")
-
         cur_decay = settings.get("oscillation_enable_decay", True)
         ch, nv_decay = imgui.checkbox("Enable Decay Mechanism##EnableDecay", cur_decay)
         if ch and nv_decay != cur_decay:
@@ -737,22 +682,6 @@ class OscillationExperimental2Tracker(BaseTracker):
                 settings.set("oscillation_decay_factor", nv_decay_factor)
             imgui.pop_item_width()
             _tip("How quickly to decay towards center (0.95 = slow, 0.85 = fast)")
-
-        imgui.new_line()
-        imgui.text_ansi_colored("Note: Detection Sensitivity and Dynamic\nAmplification are currently not yet working.", 0.25, 0.88, 0.82)
-
-        if settings.get("live_oscillation_dynamic_amp_enabled", True):
-            imgui.text("Analysis Window (ms)")
-            cur_ms = settings.get("live_oscillation_amp_window_ms", 4000)
-            imgui.push_item_width(200)
-            ch, nv = imgui.slider_int("##LiveAmpWindow", cur_ms, 1000, 10000)
-            if ch and nv != cur_ms:
-                settings.set("live_oscillation_amp_window_ms", nv)
-            imgui.same_line()
-            if imgui.button("Reset##ResetAmpWindow"):
-                if cur_ms != 4000:
-                    settings.set("live_oscillation_amp_window_ms", 4000)
-            imgui.pop_item_width()
 
         return True
 

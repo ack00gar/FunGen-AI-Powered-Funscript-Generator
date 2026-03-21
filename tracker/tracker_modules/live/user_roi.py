@@ -482,30 +482,6 @@ class UserRoiTracker(BaseTracker):
         imgui.pop_item_width()
         _tip("Manual position offset added to the output signal")
 
-        # Show ROI
-        cur_show = settings.get("show_roi", True)
-        ch, nv = imgui.checkbox("Show ROI Overlay##UserROIShow", cur_show)
-        if ch:
-            settings.set("show_roi", nv)
-            self.show_roi = nv
-
-        # Sparse flow
-        cur_sparse = settings.get("use_sparse_flow", False)
-        ch, nv = imgui.checkbox("Use Sparse Optical Flow##UserROISparse", cur_sparse)
-        _tip("Use sparse (feature-based) instead of dense optical flow")
-        if ch:
-            settings.set("use_sparse_flow", nv)
-            self.use_sparse_flow = nv
-
-        # Output delay
-        imgui.text("Output Delay (frames)")
-        cur_delay = settings.get("output_delay_frames", 0)
-        ch, nd = imgui.slider_int("##UserROIDelay", cur_delay, 0, 20)
-        _tip("Delay output by N frames to compensate for processing latency")
-        if ch and nd != cur_delay:
-            settings.set("output_delay_frames", nd)
-            self.output_delay_frames = nd
-
         return True
 
     def get_status_info(self) -> Dict[str, Any]:

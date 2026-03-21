@@ -47,6 +47,18 @@ class MainMenu:
         axis = self._axis_label_for(t_num)
         return f"T{t_num} ({axis})" if axis else f"Timeline {t_num}"
 
+    def _get_focused_timeline_editor(self):
+        """Get the timeline editor that was last edited."""
+        if not self.gui:
+            return None
+        fs_proc = getattr(self.app, 'funscript_processor', None)
+        focused = fs_proc._last_edited_timeline if fs_proc else 1
+        if focused == 1:
+            return getattr(self.gui, 'timeline_editor1', None)
+        elif focused == 2:
+            return getattr(self.gui, 'timeline_editor2', None)
+        return getattr(self.gui, 'timeline_editor1', None)
+
     def _get_active_bookmark_manager(self):
         """Get bookmark manager from the active timeline editor."""
         gui = self.gui
@@ -417,7 +429,7 @@ class MainMenu:
             if imgui.menu_item("Open Project...", self._get_shortcut_display("open_project"))[0]:
                 pm.open_project_dialog()
 
-            if _menu_item_simple("Video..."):
+            if _menu_item_simple("Open Video..."):
                 fm.open_video_dialog()
 
             if _menu_item_simple("Close Project"):
@@ -496,8 +508,10 @@ class MainMenu:
         fs_proc = app.funscript_processor
 
         if imgui.begin_menu("Edit", True):
-            # Focused undo/redo (last-edited timeline)
+            # Focused undo/redo (last-edited timeline, clamped to visible)
             focused_tl = fs_proc._last_edited_timeline
+            if focused_tl == 2 and not app_state.show_funscript_interactive_timeline2:
+                focused_tl = 1
             focused_mgr = fs_proc._get_undo_manager(focused_tl)
             can_undo_f = focused_mgr.can_undo() if focused_mgr else False
             can_redo_f = focused_mgr.can_redo() if focused_mgr else False
@@ -532,6 +546,31 @@ class MainMenu:
                 imgui.end_menu()
 
             imgui.separator()
+
+            # Point editing (dispatched to focused timeline)
+            tl = self._get_focused_timeline_editor()
+            has_sel = tl and tl.multi_selected_action_indices
+            has_actions = tl and tl._get_actions()
+
+            if imgui.menu_item("Select All", self._get_shortcut_display("select_all_points"),
+                               selected=False, enabled=bool(has_actions))[0]:
+                if tl:
+                    tl.multi_selected_action_indices = set(range(len(tl._get_actions())))
+            if imgui.menu_item("Delete Selected", self._get_shortcut_display("delete_selected_point"),
+                               selected=False, enabled=bool(has_sel))[0]:
+                if tl:
+                    tl._delete_selected_points()
+            if imgui.menu_item("Copy", self._get_shortcut_display("copy_selection"),
+                               selected=False, enabled=bool(has_sel))[0]:
+                if tl:
+                    tl._copy_selection()
+            if imgui.menu_item("Paste", self._get_shortcut_display("paste_selection"),
+                               selected=False, enabled=bool(tl))[0]:
+                if tl:
+                    tl._paste_selection()
+
+            imgui.separator()
+
             video_loaded = self.app.processor and self.app.processor.video_info
             if imgui.menu_item("Go to Frame...", self._get_shortcut_display("go_to_frame"),
                                selected=False, enabled=video_loaded)[0]:
@@ -554,9 +593,6 @@ class MainMenu:
 
     def _render_view_menu(self, app_state, stage_proc):
         if imgui.begin_menu("View", True):
-            # UI Mode submenu
-            self._render_ui_mode_submenu(app_state)
-
             # Layout submenu
             self._render_layout_submenu(app_state)
 
@@ -588,7 +624,7 @@ class MainMenu:
             is_fs_active = mpv is not None and mpv.is_active
             from application.utils.feature_detection import is_feature_available as _is_feature_available
             fs_available = _is_feature_available("patreon_features") and mpv is not None
-            fs_label = "Exit Fullscreen" if is_fs_active else "Enter Fullscreen (Patreon Exclusive)"
+            fs_label = "Exit Fullscreen" if is_fs_active else "Enter Fullscreen (Patreon)"
             clicked, _ = imgui.menu_item(fs_label, "F11", selected=is_fs_active, enabled=fs_available)
             if clicked and fs_available:
                 if is_fs_active:
@@ -619,30 +655,38 @@ class MainMenu:
 
             imgui.separator()
 
-            # Show Advanced Options (last item in View menu)
+            # GUI Scale
+            _settings = self.app.app_settings
+            if imgui.begin_menu("GUI Scale"):
+                import config.constants as _cfg
+                cur_scale = _settings.get("global_font_scale", _cfg.DEFAULT_FONT_SCALE)
+                for label, val in zip(_cfg.FONT_SCALE_LABELS, _cfg.FONT_SCALE_VALUES):
+                    is_selected = abs(val - cur_scale) < 0.01
+                    if imgui.menu_item(label, selected=is_selected)[0] and not is_selected:
+                        _settings.set("global_font_scale", val)
+                        _settings.set("auto_system_scaling_enabled", False)
+                imgui.end_menu()
+
+            imgui.separator()
+
+            # Toast notifications toggle
+            toast_on = _settings.get("show_toast_notifications", True)
+            clicked, val = imgui.menu_item(
+                "Toast Notifications", selected=toast_on
+            )
+            if clicked:
+                _settings.set("show_toast_notifications", val)
+
+            # Show Advanced Options
             clicked, val = imgui.menu_item(
                 "Show Advanced Options",
                 selected=app_state.show_advanced_options
             )
             if clicked:
                 app_state.show_advanced_options = val
-                self.app.app_settings.set("show_advanced_options", val)
+                _settings.set("show_advanced_options", val)
                 self.app.project_manager.project_dirty = True
 
-            imgui.end_menu()
-
-    def _render_ui_mode_submenu(self, app_state):
-        settings = self.app.app_settings
-        if imgui.begin_menu("UI Mode"):
-            current = app_state.ui_view_mode
-            if _radio_line("Simple Mode", current == "simple"):
-                if current != "simple":
-                    app_state.ui_view_mode = "simple"
-                    settings.set("ui_view_mode", "simple")
-            if _radio_line("Expert Mode", current == "expert"):
-                if current != "expert":
-                    app_state.ui_view_mode = "expert"
-                    settings.set("ui_view_mode", "expert")
             imgui.end_menu()
 
     def _render_layout_submenu(self, app_state):
@@ -783,18 +827,6 @@ class MainMenu:
                 self.app.toggle_waveform_visibility()
                 pm.project_dirty = True
 
-            imgui.separator()
-
-            # Timeline editor buttons
-            clicked, val = imgui.menu_item(
-                "Show Timeline Editor Buttons",
-                selected=app_state.show_timeline_editor_buttons
-            )
-            if clicked:
-                app_state.show_timeline_editor_buttons = val
-                settings.set("show_timeline_editor_buttons", val)
-                pm.project_dirty = True
-
             imgui.end_menu()
 
     def _render_gauges_submenu(self, app_state):
@@ -884,6 +916,29 @@ class MainMenu:
             if clicked:
                 app_state.show_chapter_type_manager = val
                 pm.project_dirty = True
+
+            # Go to Chapter submenu
+            if imgui.begin_menu("Go to Chapter", enabled=bool(fs_proc.video_chapters)):
+                if fs_proc.video_chapters:
+                    for ch in fs_proc.video_chapters:
+                        label = f"{ch.position_short_name} ({ch.start_frame_id}-{ch.end_frame_id})##{ch.unique_id}"
+                        if imgui.menu_item(label)[0]:
+                            if self.app.processor:
+                                self.app.processor.seek_video(ch.start_frame_id)
+                else:
+                    imgui.menu_item("(no chapters)", enabled=False)
+                imgui.end_menu()
+
+            # Chapter editing shortcuts
+            video_loaded = self.app.processor and self.app.processor.video_info
+            if imgui.menu_item("Set Chapter Start", self._get_shortcut_display("set_chapter_start"),
+                               enabled=video_loaded)[0]:
+                if self.gui and hasattr(self.gui, '_handle_set_chapter_start_shortcut'):
+                    self.gui._handle_set_chapter_start_shortcut()
+            if imgui.menu_item("Set Chapter End", self._get_shortcut_display("set_chapter_end"),
+                               enabled=video_loaded)[0]:
+                if self.gui and hasattr(self.gui, '_handle_set_chapter_end_shortcut'):
+                    self.gui._handle_set_chapter_end_shortcut()
 
             imgui.separator()
 
@@ -1057,29 +1112,25 @@ class MainMenu:
 
             imgui.separator()
 
-            # Compilation submenu
-            if imgui.begin_menu("Compilation"):
-                if not hasattr(app, "tensorrt_compiler_window"):
+            # TensorRT compilation (CUDA only)
+            if not hasattr(app, "tensorrt_compiler_window"):
+                app.tensorrt_compiler_window = None
+            if _menu_item_simple("Compile CUDA .engine..."):
+                from application.gui_components.engine_compiler.tensorrt_compiler_window import (  # noqa: E501
+                    TensorRTCompilerWindow,
+                )
+
+                def on_close():
                     app.tensorrt_compiler_window = None
 
-                if _menu_item_simple("Compile YOLO to TensorRT (.engine)..."):
-                    from application.gui_components.engine_compiler.tensorrt_compiler_window import (  # noqa: E501
-                        TensorRTCompilerWindow,
+                tw = app.tensorrt_compiler_window
+                if tw is None:
+                    app.tensorrt_compiler_window = TensorRTCompilerWindow(
+                        app, on_close_callback=on_close
                     )
-
-                    def on_close():
-                        app.tensorrt_compiler_window = None
-
-                    tw = app.tensorrt_compiler_window
-                    if tw is None:
-                        app.tensorrt_compiler_window = TensorRTCompilerWindow(
-                            app, on_close_callback=on_close
-                        )
-                    else:
-                        tw._reset_state()
-                        tw.is_open = True
-
-                imgui.end_menu()
+                else:
+                    tw._reset_state()
+                    tw.is_open = True
 
             imgui.separator()
 
@@ -1187,7 +1238,7 @@ class MainMenu:
         """Render top-level Support FunGen menu."""
         app = self.app
         if imgui.begin_menu("Support FunGen"):
-            if _menu_item_simple("Become a Supporter"):
+            if _menu_item_simple("Get Add-ons (Ko-fi)"):
                 try:
                     webbrowser.open("https://ko-fi.com/k00gar")
                 except Exception as e:
@@ -1195,13 +1246,11 @@ class MainMenu:
                         app.logger.warning(f"Could not open Ko-fi link: {e}")
             if imgui.is_item_hovered():
                 imgui.set_tooltip(
-                    "Unlock device control features and support development!\n"
-                    "Supporters get access to:\n"
-                    "\u2022 Hardware device integration (Handy, OSR2, etc.)\n"
-                    "\u2022 Live tracking with device control\n"
-                    "\u2022 Video + funscript synchronized playback\n"
-                    "\u2022 Advanced device parameterization\n\n"
-                    "After supporting, use !device_control command in Discord to get your folder!"
+                    "Add-ons available at ko-fi.com/k00gar:\n"
+                    "- Device Control (Handy, OSR2, etc.)\n"
+                    "- Video Streamer (XBVR, Stash)\n"
+                    "- Patreon (batch processing, early access)\n\n"
+                    "After purchase, use Discord bot commands to receive your files."
                 )
 
             if _menu_item_simple("Join Discord Community"):
@@ -1254,25 +1303,25 @@ class MainMenu:
             imgui.same_line(spacing=8)
 
     def _render_supporter_badge(self):
-        """Render Patreon badge in menu bar. Gold when active, muted when not."""
+        """Render Patreon status indicator in menu bar, consistent with Device/Streamer."""
         if self._feat_supporter:
-            # Gold-colored "Patreon" text
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.75, 0.6, 0.15, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.7, 0.25, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.65, 0.5, 0.1, 1.0)
-            imgui.small_button("Patreon")
+            # Green for active (same pattern as Device: ON / Streamer: ON)
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.7, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.5, 0.15, 1.0)
+            imgui.small_button("Patreon: ON")
             imgui.pop_style_color(3)
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Thank you for being a Patreon supporter!")
+                imgui.set_tooltip("Patreon features active\nBatch processing, early access trackers")
         else:
-            # Gray muted badge when not a Patreon subscriber
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.3, 0.3, 0.3, 0.6)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.4, 0.4, 0.4, 0.7)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.3, 0.3, 0.3, 0.6)
-            imgui.small_button("Patreon")
+            # Red for inactive (same pattern as Device: OFF / Streamer: OFF)
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.3, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.8, 0.4, 0.4, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.2, 0.2, 1.0)
+            imgui.small_button("Patreon: OFF")
             imgui.pop_style_color(3)
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Patreon features not activated\nCheck the Support menu for details")
+                imgui.set_tooltip("Patreon features not activated\nMonthly subscription at ko-fi.com/k00gar")
 
     def _render_device_control_indicator(self):
         """Render simple device control status indicator button."""
@@ -1347,7 +1396,7 @@ class MainMenu:
                     if self._feat_device:
                         imgui.set_tooltip("Device control not initialized\nCheck Device Control tab in Control Panel")
                     else:
-                        imgui.set_tooltip("Supporter only feature\nCheck the Support menu for details")
+                        imgui.set_tooltip("Add-on available at ko-fi.com/k00gar")
 
     def _render_native_sync_indicator(self):
         """Render Streamer status indicator button."""
@@ -1414,7 +1463,7 @@ class MainMenu:
                     if self._feat_streamer:
                         imgui.set_tooltip("Streamer not initialized\nCheck Streamer tab in Control Panel")
                     else:
-                        imgui.set_tooltip("Supporter only feature\nCheck the Support menu for details")
+                        imgui.set_tooltip("Add-on available at ko-fi.com/k00gar")
 
     # ==================== CHAPTER FILE OPERATION CALLBACKS ====================
 

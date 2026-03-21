@@ -240,19 +240,9 @@ class InfoGraphsUI:
                 | imgui.WINDOW_NO_COLLAPSE,
             )
 
-        if app_state.ui_view_mode == "simple":
-            self._render_simple_view_content()
-        else:
-            self._render_tabbed_content()
+        self._render_tabbed_content()
 
         imgui.end()
-
-    def _render_simple_view_content(self):
-        """Renders only the video information for Simple Mode."""
-        imgui.begin_child("SimpleInfoChild", border=False)
-        imgui.spacing()
-        self._render_content_video_info()
-        imgui.end_child()
 
     def _render_tabbed_content(self):
         tab_selected = None
@@ -260,13 +250,19 @@ class InfoGraphsUI:
             if imgui.begin_tab_item("Info")[0]:
                 tab_selected = "info"
                 imgui.end_tab_item()
-            if imgui.begin_tab_item("Advanced")[0]:
-                tab_selected = "advanced"
+            if imgui.begin_tab_item("Settings")[0]:
+                tab_selected = "settings"
+                imgui.end_tab_item()
+            if imgui.begin_tab_item("Undo")[0]:
+                tab_selected = "undo"
+                imgui.end_tab_item()
+            if imgui.begin_tab_item("Performance")[0]:
+                tab_selected = "performance"
                 imgui.end_tab_item()
             imgui.end_tab_bar()
 
         # Update performance tab visibility tracking
-        performance_tab_now_active = tab_selected == "advanced"
+        performance_tab_now_active = tab_selected == "performance"
         if performance_tab_now_active != self._last_performance_tab_active:
             self._last_performance_tab_active = performance_tab_now_active
             if hasattr(self, "system_monitor"):
@@ -296,14 +292,9 @@ class InfoGraphsUI:
             # Funscript (expanded by default)
             with _section_card("Funscript##FunscriptParentSection", tier="primary") as fs_open:
                 if fs_open:
-                    # T1 always
                     self._render_funscript_info_section(1)
-
-                    # T2 if visible
                     if self.app.app_state_ui.show_funscript_interactive_timeline2:
                         self._render_funscript_info_section(2)
-
-                    # T3+ if visible
                     for tl_num in EXTRA_TIMELINE_RANGE:
                         vis_attr = f"show_funscript_interactive_timeline{tl_num}"
                         if getattr(self.app.app_state_ui, vis_attr, False):
@@ -315,53 +306,48 @@ class InfoGraphsUI:
                     if ref_open:
                         self._render_reference_comparison_standalone()
 
-            # Segment Statistics (expanded by default)
+            # Segment Statistics
             with _section_card("Segment Statistics##SegStatSection", tier="primary") as seg_open:
                 if seg_open:
                     self._render_segment_statistics()
 
-        elif tab_selected == "advanced":
+        elif tab_selected == "settings":
             imgui.spacing()
-            # Undo-Redo History section (collapsed by default)
-            with _section_card("Undo-Redo History##UndoRedoSection", tier="primary",
-                               open_by_default=False) as undo_open:
-                if undo_open:
-                    self._render_content_undo_redo_history()
+            # Delegate to Advanced Settings tab (rendered by control panel mixin)
+            gui = self.app.gui_instance
+            if gui and hasattr(gui, 'control_panel_ui'):
+                gui.control_panel_ui._render_advanced_tab()
 
-            # Performance Monitoring section (collapsed by default)
-            with _section_card("Performance Monitoring##PerformanceSection", tier="primary",
-                               open_by_default=False) as perf_open:
-                if perf_open:
-                    # OPTIMIZATION: Only render performance data if section is expanded
-                    if performance_tab_now_active:
-                        self.perf_monitor.render_info(show_detailed=True)
-                    imgui.separator()
+        elif tab_selected == "undo":
+            imgui.spacing()
+            self._render_content_undo_redo_history()
 
-                    # Video Pipeline Performance subsection
-                    with _section_card("Video Pipeline Performance##PipelineTimingSection",
-                                       tier="secondary") as pipe_open:
-                        if pipe_open:
-                            self._render_content_pipeline_timing()
+        elif tab_selected == "performance":
+            imgui.spacing()
+            if performance_tab_now_active:
+                self.perf_monitor.render_info(show_detailed=True)
+            imgui.separator()
 
-                    # System Monitor subsection
-                    with _section_card("System Monitor##SystemMonitorSection",
-                                       tier="secondary") as sys_open:
-                        if sys_open:
-                            self._render_content_performance()
+            with _section_card("Video Pipeline##PipelineTimingSection",
+                               tier="primary") as pipe_open:
+                if pipe_open:
+                    self._render_content_pipeline_timing()
 
-                    # Disk I/O subsection
-                    with _section_card("Disk I/O##DiskIOSection", tier="secondary",
-                                       open_by_default=False) as disk_open:
-                        if disk_open:
-                            self._render_disk_io_section()
+            with _section_card("System Monitor##SystemMonitorSection",
+                               tier="primary") as sys_open:
+                if sys_open:
+                    self._render_content_performance()
 
-                    # UI Performance subsection
-                    with _section_card("UI Performance##UIPerformanceSection", tier="secondary",
-                                       open_by_default=False) as ui_open:
-                        if ui_open:
-                            self._render_content_ui_performance()
+            with _section_card("Disk I/O##DiskIOSection", tier="primary",
+                               open_by_default=False) as disk_open:
+                if disk_open:
+                    self._render_disk_io_section()
 
-            # System Report section (collapsed by default)
+            with _section_card("UI Performance##UIPerformanceSection", tier="primary",
+                               open_by_default=False) as ui_open:
+                if ui_open:
+                    self._render_content_ui_performance()
+
             with _section_card("System Report##SystemReportSection", tier="primary",
                                open_by_default=False) as report_open:
                 if report_open:
@@ -1335,7 +1321,7 @@ class InfoGraphsUI:
 
     def _render_content_undo_redo_history(self):
         fs_proc = self.app.funscript_processor
-        imgui.begin_child("UndoRedoChild", height=150, border=True)
+        imgui.begin_child("UndoRedoChild", height=-1, border=True)
 
         def render_history_for_timeline(num):
             manager = fs_proc._get_undo_manager(num)

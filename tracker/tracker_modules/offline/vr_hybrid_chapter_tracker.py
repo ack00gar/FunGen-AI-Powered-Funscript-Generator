@@ -138,9 +138,8 @@ class VRHybridChapterTracker(BaseOfflineTracker):
             author="FunGen",
             tags=["offline", "hybrid", "chapter-aware", "optimized", "batch"],
             requires_roi=False,
-            supports_dual_axis=True,
+            supports_dual_axis=False,
             primary_axis="stroke",
-            secondary_axis="roll",
             stages=[
                 StageDefinition(
                     stage_number=1,

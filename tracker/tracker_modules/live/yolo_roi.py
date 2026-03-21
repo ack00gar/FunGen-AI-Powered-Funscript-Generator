@@ -667,93 +667,24 @@ class YoloRoiTracker(BaseTracker):
                     settings.set("live_tracker_roi_persistence_frames", v)
                     self.max_frames_for_roi_persistence = v
 
-        if imgui.collapsing_header("Optical Flow##ROIFlowTrackerMenu")[0]:
-            cur_sparse = settings.get("live_tracker_use_sparse_flow")
-            ch, new_sparse = imgui.checkbox("Use Sparse Optical Flow##ROISparseFlowTrackerMenu", cur_sparse)
+        if imgui.collapsing_header("Output Signal##ROISignalTrackerMenu")[0]:
+            cur_sens = settings.get("live_tracker_sensitivity")
+            ch, ns = imgui.slider_float("Sensitivity##ROISensTrackerMenu", cur_sens, 0.0, 100.0, "%.1f")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("How responsive the output is to motion changes (higher = more sensitive to small movements)")
+            if ch and ns != cur_sens:
+                settings.set("live_tracker_sensitivity", ns)
+                self.sensitivity = ns
+
+            cur_amp = settings.get("live_tracker_base_amplification")
+            ch, na = imgui.slider_float("Amplification##ROIBaseAmpTrackerMenu", cur_amp, 0.1, 5.0, "%.2f")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Multiplier for output range (higher = more movement, lower = gentler motion)")
             if ch:
-                settings.set("live_tracker_use_sparse_flow", new_sparse)
-                self.use_sparse_flow = new_sparse
-
-            imgui.text("DIS Dense Flow Settings:")
-            with DisabledScope(cur_sparse):
-                presets = ["ULTRAFAST", "FAST", "MEDIUM"]
-                cur_p = settings.get("live_tracker_dis_flow_preset").upper()
-                try:
-                    p_idx = presets.index(cur_p)
-                except ValueError:
-                    p_idx = 0
-                ch, nidx = imgui.combo("DIS Preset##ROIDISPresetTrackerMenu", p_idx, presets)
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Optical flow quality preset (ULTRAFAST=best performance, MEDIUM=best quality)")
-                if ch:
-                    nv = presets[nidx]
-                    if nv != cur_p:
-                        settings.set("live_tracker_dis_flow_preset", nv)
-                        self.update_dis_flow_config(preset=nv)
-
-                cur_scale = settings.get("live_tracker_dis_finest_scale")
-                ch, new_scale = imgui.input_int("DIS Finest Scale (0-10, 0=auto)##ROIDISFineScaleTrackerMenu", cur_scale)
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Optical flow scale detail level (0=auto, lower=more detail but slower)")
-                if ch and new_scale != cur_scale:
-                    settings.set("live_tracker_dis_finest_scale", new_scale)
-                    self.update_dis_flow_config(finest_scale=new_scale)
-
-            if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu")[0]:
-                cur_sens = settings.get("live_tracker_sensitivity")
-                ch, ns = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu", cur_sens, 0.0, 100.0, "%.1f")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("How responsive the output is to motion changes (higher = more sensitive to small movements)")
-                if ch and ns != cur_sens:
-                    settings.set("live_tracker_sensitivity", ns)
-                    self.sensitivity = ns
-
-                cur_amp = settings.get("live_tracker_base_amplification")
-                ch, na = imgui.slider_float("Base Amplification##ROIBaseAmpTrackerMenu", cur_amp, 0.1, 5.0, "%.2f")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Multiplier for output range (higher = more movement, lower = gentler motion)")
-                if ch:
-                    v = max(0.1, na)
-                    if v != cur_amp:
-                        settings.set("live_tracker_base_amplification", v)
-                        self.base_amplification_factor = v
-
-                imgui.text("Class-Specific Amplification Multipliers:")
-                cur = settings.get("live_tracker_class_amp_multipliers", {})
-                changed = False
-
-                face = cur.get("face", 1.0)
-                ch, nv = imgui.slider_float("Face Amp. Mult.##ROIFaceAmpTrackerMenu", face, 0.1, 5.0, "%.2f")
-                if ch:
-                    cur["face"] = max(0.1, nv)
-                    changed = True
-
-                hand = cur.get("hand", 1.0)
-                ch, nv = imgui.slider_float("Hand Amp. Mult.##ROIHandAmpTrackerMenu", hand, 0.1, 5.0, "%.2f")
-                if ch:
-                    cur["hand"] = max(0.1, nv)
-                    changed = True
-
-                if changed:
-                    settings.set("live_tracker_class_amp_multipliers", cur)
-                    self.class_specific_amplification_multipliers = cur
-
-            cur_smooth = settings.get("live_tracker_flow_smoothing_window")
-            ch, nv = imgui.input_int("Flow Smoothing Window##ROIFlowSmoothWinTrackerMenu", cur_smooth)
-            if ch:
-                v = max(1, nv)
-                if v != cur_smooth:
-                    settings.set("live_tracker_flow_smoothing_window", v)
-                    self.flow_history_window_smooth = v
-
-            imgui.text("Output Delay (frames):")
-            cur_delay = settings.get("funscript_output_delay_frames")
-            ch, nd = imgui.slider_int("##OutputDelayFrames", cur_delay, 0, 20)
-            if ch and nd != cur_delay:
-                settings.set("funscript_output_delay_frames", nd)
-                if hasattr(self.app, 'calibration'):
-                    self.app.calibration.funscript_output_delay_frames = nd
-                    self.app.calibration.update_tracker_delay_params()
+                v = max(0.1, na)
+                if v != cur_amp:
+                    settings.set("live_tracker_base_amplification", v)
+                    self.base_amplification_factor = v
 
         return True
 

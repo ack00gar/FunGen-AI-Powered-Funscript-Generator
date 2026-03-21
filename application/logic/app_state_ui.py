@@ -433,7 +433,7 @@ class AppStateUI:
 
         self.show_audio_waveform = False
 
-        self.ui_view_mode = self.app_settings.get("ui_view_mode", defaults.get("ui_view_mode", "simple"))
+        self.ui_view_mode = self.app_settings.get("ui_view_mode", defaults.get("ui_view_mode", "expert"))
         self.full_width_nav = self.app_settings.get("full_width_nav", defaults.get("full_width_nav", True))
 
         self.ui_layout_mode = self.app_settings.get("ui_layout_mode", defaults.get("ui_layout_mode", self.ui_layout_mode))

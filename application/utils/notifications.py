@@ -11,6 +11,7 @@ Usage:
 """
 
 import time
+import threading
 import imgui
 from dataclasses import dataclass, field
 from typing import List
@@ -40,7 +41,7 @@ _DEFAULT_DURATION = 4.0
 _TOAST_WIDTH = 320
 _TOAST_PADDING = 10
 _ACCENT_WIDTH = 4
-_MARGIN_TOP = 8
+_MARGIN_TOP = 4  # Small gap below the y_offset passed by caller
 _MARGIN_RIGHT = 12
 _GAP = 6
 
@@ -76,11 +77,17 @@ class _Toast:
 class NotificationManager:
     """Manages and renders toast notifications."""
 
-    def __init__(self):
+    def __init__(self, app=None):
         self._toasts: List[_Toast] = []
+        self._lock = threading.Lock()
+        self._app = app
 
     def add(self, message: str, type_str: str = "info", duration: float = _DEFAULT_DURATION):
         """Add a notification. type_str: 'success', 'error', 'warning', 'info'."""
+        # Check if toasts are disabled in settings
+        if self._app and hasattr(self._app, 'app_settings'):
+            if not self._app.app_settings.get("show_toast_notifications", True):
+                return
         try:
             ntype = NotificationType(type_str)
         except ValueError:
@@ -90,16 +97,15 @@ class NotificationManager:
         if ntype == NotificationType.ERROR and duration == _DEFAULT_DURATION:
             duration = 6.0
 
-        self._toasts.append(_Toast(message=message, type=ntype, duration=duration))
+        with self._lock:
+            self._toasts.append(_Toast(message=message, type=ntype, duration=duration))
+            while len(self._toasts) > _MAX_VISIBLE * 2:
+                self._toasts.pop(0)
 
-        # Trim old toasts beyond max
-        while len(self._toasts) > _MAX_VISIBLE * 2:
-            self._toasts.pop(0)
-
-    def render(self):
-        """Render all active toasts. Call once per frame after all other rendering."""
-        # Remove expired
-        self._toasts = [t for t in self._toasts if not t.expired]
+    def render(self, top_y_offset: float = 0):
+        """Render all active toasts. top_y_offset is the Y position below toolbar."""
+        with self._lock:
+            self._toasts = [t for t in self._toasts if not t.expired]
 
         if not self._toasts:
             return
@@ -113,7 +119,7 @@ class NotificationManager:
         vp_w = viewport.size[0]
 
         draw_list = imgui.get_foreground_draw_list()
-        y_offset = vp_y + _MARGIN_TOP
+        y_offset = vp_y + top_y_offset + _MARGIN_TOP
 
         # Render newest at top (reversed order, take last N)
         visible = self._toasts[-_MAX_VISIBLE:]

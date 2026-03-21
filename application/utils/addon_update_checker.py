@@ -107,8 +107,8 @@ class AddonUpdateChecker:
 
         addon = self.unowned_addons[self._ad_index % len(self.unowned_addons)]
         msg = (
-            f"\u2605 {addon['display_name']} v{addon['remote_version']}"
-            f" available — ko-fi.com/k00gar"
+            f"* {addon['display_name']} v{addon['remote_version']}"
+            f" available - ko-fi.com/k00gar"
         )
         self.app.set_status_message(msg, duration=self._AD_DISPLAY_DURATION)
 

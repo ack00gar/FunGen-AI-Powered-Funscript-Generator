@@ -99,7 +99,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.network_operation_times = deque(maxlen=30)  # Track network calls
 
         # Notification system
-        self.notification_manager = NotificationManager()
+        self.notification_manager = NotificationManager(app=app)
 
         # Standard Components (owned by GUI)
         self.file_dialog = ImGuiFileDialog(app_logic_instance=app)
@@ -737,7 +737,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         if self.app.file_manager.video_path and self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0:
             total_frames = self.app.processor.video_info.get('total_frames', 0)
             if total_frames > 0:
-                # Use time-based calculation for consistency with timeline and seeking
+                # Time-based normalization for accurate end-of-video positioning
                 fps = self.app.processor.fps if self.app.processor.fps > 0 else 30.0
                 current_time_s = self.app.processor.current_frame_index / fps
                 normalized_pos = current_time_s / total_duration_s if total_duration_s > 0 else 0
@@ -1617,8 +1617,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Render status strip at bottom of window
         self._render_status_strip(status_strip_h)
 
-        # Render toast notifications (foreground, on top of everything)
-        self.notification_manager.render()
+        # Render toast notifications (foreground, aligned to top of content area)
+        self.notification_manager.render(top_y_offset=self.main_menu_bar_height + toolbar_height)
 
         self.perf_frame_count += 1
         if time.time() - self.last_perf_log_time > self.perf_log_interval:
