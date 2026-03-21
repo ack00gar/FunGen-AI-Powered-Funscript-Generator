@@ -25,7 +25,6 @@ except ImportError:
     _get_early_access_message = None
 
 # Import mixin sub-modules
-from .cp_simple_mode_ui import SimpleModeMixin
 from .cp_post_processing_ui import PostProcessingMixin
 from .cp_advanced_settings_ui import AdvancedSettingsMixin
 from .cp_execution_ui import ExecutionMixin
@@ -44,7 +43,6 @@ def _readonly_input(label_id, value, width=-1):
 
 
 class ControlPanelUI(
-    SimpleModeMixin,
     PostProcessingMixin,
     AdvancedSettingsMixin,
     ExecutionMixin,
@@ -67,7 +65,7 @@ class ControlPanelUI(
         self.tracker_ui = None
         self._try_reinitialize_tracker_ui()
 
-        # Initialize device control attributes (supporter feature)
+        # Initialize device control attributes (add-on feature)
         self.device_manager = None
         self.param_manager = None
         self._device_control_initialized = False
@@ -95,7 +93,7 @@ class ControlPanelUI(
         # Unified axis configuration panel state
         self._axis_details_expanded = {}  # keyed by "{device_id}_{channel}"
 
-        # Streamer attributes (supporter feature)
+        # Streamer attributes (add-on feature)
         self._native_sync_manager = None
         self._prev_client_count = 0
         self._native_sync_status_cache = None
@@ -107,24 +105,11 @@ class ControlPanelUI(
         # Advanced tab search
         self._advanced_search_query = ""
 
-        # Post-Processing tab state
-        self._pp_timeline_choice = 0
-        self._pp_scope_choice = 0
-
-        # Tier 2/3 Simple Mode state
-        self._auto_recommended_tracker = None
-        self._auto_recommendation_reason = None
-        self._simple_mode_post_processing_applied = False
-        self._user_manually_picked_tracker = False
-
         # Settings profiles state
         self._profile_name_input = ""
         self._profile_list_cache = None
         self._profile_list_cache_time = 0
         self._selected_profile_idx = 0
-
-        # Progressive disclosure toggle for Advanced tab (default True in expert mode)
-        self._show_all_advanced_settings = True
 
         # Tracker filter row toggle (ephemeral, resets each session)
         self._tracker_filter_open = False
@@ -221,13 +206,10 @@ class ControlPanelUI(
             return info.properties.get(prop, default)
         return default
 
-    def _get_tracker_lists_for_ui(self, simple_mode=False, hidden_folders=None):
+    def _get_tracker_lists_for_ui(self, hidden_folders=None):
         """Get tracker lists for UI combo boxes using dynamic discovery."""
         try:
-            if simple_mode:
-                # Simple mode: only live trackers
-                display_names, internal_names = self.tracker_ui.get_simple_mode_trackers()
-            elif hidden_folders:
+            if hidden_folders:
                 # Full mode with category filtering
                 display_names, internal_names = self.tracker_ui.get_gui_display_list_filtered(hidden_folders)
             else:
@@ -307,22 +289,16 @@ class ControlPanelUI(
     _SIDEBAR_WIDTH = 40
     _SIDEBAR_CORE_SECTIONS = [
         ("run", "R", "Run"),
-        ("configure", "C", "Settings"),
-        ("post_processing", "P", "Polish"),
-        ("advanced", "A", "Advanced"),
         ("metadata", "M", "Metadata"),
     ]
-    _SIDEBAR_SUPPORTER_SECTIONS = [
+    _SIDEBAR_ADDON_SECTIONS = [
         ("device_control", "D", "Device Control", "_feat_device"),
         ("native_sync", "S", "Streamer", "_feat_streamer"),
-        ("supporter_batch", "B", "Patreon Exclusive", "_feat_supporter"),
+        ("supporter_batch", "B", "Batch Processing", "_feat_supporter"),
     ]
     # Map section keys to icon asset filenames for sidebar PNG icons
     _SIDEBAR_ICON_MAP = {
-        "run": "sidebar-run.png",
-        "configure": "sidebar-configure.png",
-        "post_processing": "sidebar-postproc.png",
-        "advanced": "sidebar-advanced.png",
+        "run": "robot.png",
         "device_control": "sidebar-device.png",
         "native_sync": "sidebar-stream.png",
         "supporter_batch": "sidebar-batch.png",
@@ -368,8 +344,8 @@ class ControlPanelUI(
                            sep_pos[0] + sidebar_w - 6, sep_pos[1], sep_color)
         imgui.spacing()
 
-        # Supporter sections
-        for key, icon, tooltip, feat_attr in self._SIDEBAR_SUPPORTER_SECTIONS:
+        # Add-on sections
+        for key, icon, tooltip, feat_attr in self._SIDEBAR_ADDON_SECTIONS:
             available = getattr(self, feat_attr, False)
             is_active = (active_section == key)
             self._render_sidebar_entry(draw_list, key, icon, tooltip, is_active,
@@ -437,7 +413,7 @@ class ControlPanelUI(
                     info = get_feature_detector().get_feature_info(feat_name)
                     if info:
                         desc = f"\n{info.description}"
-                imgui.set_tooltip(f"{tooltip}{desc}\n(Available for supporters)")
+                imgui.set_tooltip(f"{tooltip}{desc}\n(Add-on available at ko-fi.com/k00gar)")
             # Hover bg (drawn before text so text stays on top)
             hover_bg = imgui.get_color_u32_rgba(*SidebarColors.HOVER_BG)
             draw_list.add_rect_filled(
@@ -467,81 +443,6 @@ class ControlPanelUI(
 
         if alpha < 1.0:
             imgui.pop_style_var()
-
-    # ------- Workflow Breadcrumb -------
-
-    def _get_workflow_stage(self):
-        """Derive current workflow stage from app state (1-5)."""
-        app = self.app
-        proc = app.processor
-        stage_proc = app.stage_processor
-
-        if not proc or not proc.is_video_open():
-            return 1  # Load
-        if stage_proc.full_analysis_active:
-            return 3  # Track
-        if app.funscript_processor and hasattr(app, 'multi_axis_funscript'):
-            fs = app.multi_axis_funscript
-            if fs and fs.get_axis_actions("primary"):
-                return 4  # Edit (has results)
-        return 2  # Configure (video loaded, no results)
-
-    def _render_workflow_breadcrumb(self):
-        """Render 5-stage horizontal workflow indicator at top of control panel."""
-        from config.element_group_colors import WorkflowColors
-
-        current_stage = self._get_workflow_stage()
-        stages = ["Video", "Setup", "Analyze", "Refine", "Export"]
-        draw_list = imgui.get_window_draw_list()
-        cursor = imgui.get_cursor_screen_pos()
-        avail_w = imgui.get_content_region_available_width()
-
-        bar_h = 24
-        stage_w = avail_w / len(stages)
-
-        for i, name in enumerate(stages):
-            stage_num = i + 1
-            x = cursor[0] + i * stage_w
-            y = cursor[1]
-
-            # Determine color
-            if stage_num < current_stage:
-                color = WorkflowColors.DONE
-            elif stage_num == current_stage:
-                color = WorkflowColors.ACTIVE
-            else:
-                color = WorkflowColors.FUTURE
-
-            color_u32 = imgui.get_color_u32_rgba(*color)
-
-            # Draw pill background for active stage
-            if stage_num == current_stage:
-                bg_u32 = imgui.get_color_u32_rgba(color[0], color[1], color[2], 0.15)
-                draw_list.add_rect_filled(x + 2, y + 2, x + stage_w - 2, y + bar_h - 2,
-                                          bg_u32, 4.0)
-
-            # Draw text centered in stage area
-            text_size = imgui.calc_text_size(name)
-            text_x = x + (stage_w - text_size[0]) * 0.5
-            text_y = y + (bar_h - text_size[1]) * 0.5
-            draw_list.add_text(text_x, text_y, color_u32, name)
-
-            # Draw connector triangle between stages
-            if i < len(stages) - 1:
-                conn_x = x + stage_w - 3
-                conn_y = y + bar_h * 0.5
-                tri_size = 4
-                conn_color = imgui.get_color_u32_rgba(*WorkflowColors.CONNECTOR)
-                draw_list.add_triangle_filled(
-                    conn_x, conn_y - tri_size,
-                    conn_x + tri_size, conn_y,
-                    conn_x, conn_y + tri_size,
-                    conn_color
-                )
-
-        # Advance cursor past the breadcrumb bar
-        imgui.dummy(avail_w, bar_h)
-        imgui.spacing()
 
     # ------- Pinned Action Bar -------
 
@@ -660,11 +561,6 @@ class ControlPanelUI(
         self._feat_device = _is_feature_available("device_control")
         self._feat_streamer = _is_feature_available("streamer")
 
-        is_simple_mode = (getattr(app_state, "ui_view_mode", "expert") == "simple")
-        if is_simple_mode:
-            self._render_simple_mode_ui()
-            return
-
         floating = (app_state.ui_layout_mode == "floating")
         if floating:
             if not getattr(app_state, "show_control_panel_window", True):
@@ -693,9 +589,6 @@ class ControlPanelUI(
         # Right: Breadcrumb + Content + Action bar
         imgui.begin_child("##RightPanel", width=content_w, height=total_h, border=False)
 
-        # Workflow breadcrumb bar
-        self._render_workflow_breadcrumb()
-
         # Split: scrollable content + pinned action bar
         action_bar_h = 56
         right_avail = imgui.get_content_region_available()
@@ -705,12 +598,6 @@ class ControlPanelUI(
         imgui.begin_child("TabContentRegion", width=0, height=content_h, border=False)
         if tab_selected == "run":
             self._render_run_control_tab()
-        elif tab_selected == "configure":
-            self._render_configuration_tab()
-        elif tab_selected == "post_processing":
-            self._render_post_processing_tab()
-        elif tab_selected == "advanced":
-            self._render_advanced_tab()
         elif tab_selected == "device_control":
             if self._feat_device:
                 self._render_device_control_tab()
@@ -734,7 +621,7 @@ class ControlPanelUI(
         imgui.end()
 
     def _render_locked_feature_placeholder(self, feature_name, description):
-        """Render a placeholder card for locked supporter features."""
+        """Render a placeholder card for locked add-on features."""
         with section_card(f"{feature_name}##Locked", tier="secondary", open_by_default=True) as _:
             imgui.spacing()
             imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
@@ -742,12 +629,12 @@ class ControlPanelUI(
             imgui.pop_style_color()
             imgui.spacing()
             imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.3, 1.0)
-            imgui.text("Available for supporters")
+            imgui.text("Add-on available at ko-fi.com/k00gar")
             imgui.pop_style_color()
             imgui.spacing()
 
     def _render_addon_promo_banner(self, feature_name, description):
-        """Gold 'Available for Supporters' banner with feature description."""
+        """Gold add-on banner with feature description and ko-fi link."""
         imgui.spacing()
         # Gold accent bar
         draw_list = imgui.get_window_draw_list()
@@ -758,7 +645,7 @@ class ControlPanelUI(
         imgui.dummy(0, 6)
 
         imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.3, 1.0)
-        imgui.text(f"{feature_name} — Available for Supporters")
+        imgui.text(f"{feature_name} — Add-on at ko-fi.com/k00gar")
         imgui.pop_style_color()
         imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
         imgui.text_wrapped(description)
@@ -768,7 +655,7 @@ class ControlPanelUI(
         imgui.spacing()
 
     def _render_device_control_preview(self):
-        """Render a grayed-out preview of the Device Control tab for non-supporters."""
+        """Render a preview of the Device Control add-on."""
         self._render_addon_promo_banner(
             "Device Control",
             "Control hardware devices in real-time during playback. "
@@ -833,7 +720,7 @@ class ControlPanelUI(
                     imgui.text_colored("Play funscripts on connected devices", 0.5, 0.5, 0.5, 1.0)
 
     def _render_streamer_preview(self):
-        """Render a grayed-out preview of the Streamer tab for non-supporters."""
+        """Render a preview of the Streamer add-on."""
         self._render_addon_promo_banner(
             "Video Streamer",
             "Stream video to browsers and VR headsets with frame-perfect synchronization. "
@@ -952,7 +839,7 @@ class ControlPanelUI(
                 or self._cached_tracker_supporter_flag != _supporter_available):
             # Recompute tracker lists
             modes_display_full, modes_enum, discovered_trackers_full = self._get_tracker_lists_for_ui(
-                simple_mode=False, hidden_folders=_hidden_folders
+                hidden_folders=_hidden_folders
             )
 
             # Early access tracker gating — annotate gated trackers
@@ -1080,122 +967,17 @@ class ControlPanelUI(
                 proc = app.processor
                 video_loaded = proc and proc.is_video_open()
                 processing_active = stage_proc.full_analysis_active
-                disable_after = (not video_loaded) or processing_active
-
-                with _DisabledScope(disable_after):
-                    self._render_execution_progress_display()
+                self._render_execution_progress_display()
 
         mode = app_state.selected_tracker_name
+
+        # Analysis range (only option kept in Run tab)
         tracker_supports_range = self._get_tracker_property(mode, "supports_range", True)
-        if mode and (self._is_offline_tracker(mode) or self._is_live_tracker(mode)):
-            with section_card("Analysis Options##RunControlAnalysisOptions",
-                              tier="primary") as open_:
+        if mode and tracker_supports_range and not stage_proc.full_analysis_active:
+            with section_card("Analysis Range##RunControlAnalysisRange",
+                              tier="primary", open_by_default=False) as open_:
                 if open_:
-                    if tracker_supports_range:
-                        imgui.text("Analysis Range")
-                        self._render_range_selection(stage_proc, fs_proc, events)
-
-                    # Developer controls -- hidden unless View > Show Advanced Options
-                    if app_state.show_advanced_options:
-                        if self._is_offline_tracker(mode) and not self._is_hybrid_tracker(mode):
-                            imgui.text("Stage Reruns:")
-                            with _DisabledScope(disable_combo):
-                                _, stage_proc.force_rerun_stage1 = imgui.checkbox(
-                                    "Force Re-run Stage 1##ForceRerunS1",
-                                    stage_proc.force_rerun_stage1,
-                                )
-                                _tooltip_if_hovered(
-                                    "Re-run YOLO object detection even if cached results exist.\n"
-                                    "Use when the detection model has been updated."
-                                )
-                                imgui.same_line()
-                                _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
-                                    "Force Re-run Stage 2##ForceRerunS2",
-                                    stage_proc.force_rerun_stage2_segmentation,
-                                )
-                                _tooltip_if_hovered(
-                                    "Re-run contact analysis and segmentation even if cached results exist.\n"
-                                    "Use when you want to regenerate chapters and signals from scratch."
-                                )
-
-                            # Database Retention Option
-                            with _DisabledScope(disable_combo):
-                                retain_database = self.app.app_settings.get("retain_stage2_database", True)
-                                changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
-                                if changed_db:
-                                    self.app.app_settings.set("retain_stage2_database", new_db_val)
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip(
-                                    "Keep the Stage 2 database file after processing completes.\n"
-                                    "Disable to save disk space (database is automatically deleted).\n"
-                                    "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
-                                )
-
-                        if self._is_offline_tracker(mode):
-                            with _DisabledScope(disable_combo):
-                                if not hasattr(stage_proc, "save_preprocessed_video"):
-                                    stage_proc.save_preprocessed_video = app.app_settings.get("save_preprocessed_video", False)
-                                changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
-                                if changed:
-                                    stage_proc.save_preprocessed_video = new_val
-                                    app.app_settings.set("save_preprocessed_video", new_val)
-                                    if new_val and not self._is_hybrid_tracker(mode):
-                                        stage_proc.num_producers_stage1 = 1
-                                        app.app_settings.set("num_producers_stage1", 1)
-                                _tooltip_if_hovered(
-                                    "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
-                                    "When enabled, re-running will reuse the existing preprocessed video.\n"
-                                    "For standard trackers, forces Producer threads to 1."
-                                )
-
-        # Output delay offset — always visible, prominent warning when non-zero
-        calibration = app.calibration
-        delay_frames = calibration.funscript_output_delay_frames
-        if delay_frames != 0:
-            # Non-zero: show warning-colored card so the user can't miss it
-            imgui.push_style_color(imgui.COLOR_HEADER, 0.8, 0.3, 0.1, 0.9)
-            imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, 0.9, 0.4, 0.15, 0.9)
-        with section_card("Output Delay##RunControlOutputDelay", tier="primary",
-                          open_by_default=(delay_frames != 0)) as od_open:
-            if od_open:
-                if delay_frames != 0:
-                    imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.85, 0.3, 1.0)
-                    imgui.text(f"WARNING: Output delayed by {delay_frames} frames")
-                    imgui.pop_style_color()
-                    imgui.text_wrapped(
-                        "Your funscript output is shifted in time. "
-                        "Set to 0 if your script seems out of sync."
-                    )
-                imgui.push_item_width(120)
-                changed, new_delay = imgui.slider_int(
-                    "Delay (frames)##OutputDelaySlider", delay_frames, 0, 20)
-                imgui.pop_item_width()
-                if changed:
-                    calibration.funscript_output_delay_frames = new_delay
-                    app.app_settings.set("funscript_output_delay_frames", new_delay)
-                    calibration.update_tracker_delay_params()
-                    app.project_manager.project_dirty = True
-                _tooltip_if_hovered(
-                    "Number of frames to delay funscript output.\n"
-                    "Compensates latency between video and tracker output.\n"
-                    "0 = no delay (default)."
-                )
-        if delay_frames != 0:
-            imgui.pop_style_color(2)
-
-        proc = app.processor
-        video_loaded = proc and proc.is_video_open()
-        processing_active = stage_proc.full_analysis_active
-        disable_after = (not video_loaded) or processing_active
-
-        self._render_start_stop_buttons(stage_proc, fs_proc, events)
-
-        if stage_proc.stage2_overlay_data_map:
-            with section_card("Interactive Refinement##RunRefine", tier="primary") as is_open:
-                if is_open:
-                    self._render_interactive_refinement_controls()
-        else:
-            self._render_interactive_refinement_controls()
+                    self._render_range_selection(stage_proc, fs_proc, events)
 
         chapters = getattr(app.funscript_processor, "video_chapters", [])
         if chapters:
@@ -1225,36 +1007,5 @@ class ControlPanelUI(
                             imgui.close_current_popup()
                         imgui.end_popup()
 
-        if disable_after and imgui.is_item_hovered():
-            imgui.set_tooltip("Requires a video to be loaded and no other process to be active.")
 
-    def _render_configuration_tab(self):
-        app = self.app
-        app_state = app.app_state_ui
-        tmode = app_state.selected_tracker_name
-
-        imgui.text("Configure settings for the selected mode.")
-        imgui.spacing()
-
-        # Dynamic tracker settings (replaces hardcoded per-tracker dispatch)
-        if self._is_live_tracker(tmode):
-            with section_card("Live Tracker Settings##ConfigLiveTracker", tier="primary") as is_open:
-                if is_open:
-                    self._render_tracker_dynamic_settings()
-
-        # Class filtering — only for trackers that use YOLO class detection
-        tracker_inst = self._get_current_tracker_instance()
-        if tracker_inst and getattr(tracker_inst, 'uses_class_detection', False):
-            with section_card("Class Filtering##ConfigClassFilterHeader", tier="primary",
-                              open_by_default=False) as is_open:
-                if is_open:
-                    self._render_class_filtering_content()
-
-        # Debug panel (only if tracker actually renders content)
-        self._render_tracker_debug_panel()
-
-        # Check if configuration is available for this tracker
-        has_config = self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)
-        if not has_config:
-            imgui.text_disabled("No configuration available for this mode.")
 

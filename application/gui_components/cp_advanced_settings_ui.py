@@ -158,23 +158,6 @@ class AdvancedSettingsMixin:
         app_state = app.app_state_ui
         tmode = app_state.selected_tracker_name
 
-        imgui.text("Advanced settings for AI models, tracking, and performance.")
-        imgui.spacing()
-
-        # Show All Settings toggle (at top for visibility)
-        _, self._show_all_advanced_settings = imgui.checkbox(
-            "Show All Settings##AdvancedTier2Toggle",
-            self._show_all_advanced_settings
-        )
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Show rarely changed settings like Interface, Logging, and Tracker configuration")
-
-        imgui.spacing()
-
-        # Settings Profiles section (Tier 1)
-        self._render_settings_profiles_section()
-        imgui.spacing()
-
         # Search box for filtering settings
         imgui.push_item_width(-1)
         _, self._advanced_search_query = imgui.input_text_with_hint(
@@ -184,13 +167,13 @@ class AdvancedSettingsMixin:
             256
         )
         imgui.pop_item_width()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Filter settings by keyword")
         imgui.spacing()
 
         search_query = self._advanced_search_query.lower()
-        # If user is searching, show all sections regardless of toggle
-        show_all = self._show_all_advanced_settings or bool(search_query)
+
+        # Settings Profiles
+        self._render_settings_profiles_section()
+        imgui.spacing()
 
         # Define searchable keywords for each section (including sub-options)
         section_keywords = {
@@ -199,7 +182,8 @@ class AdvancedSettingsMixin:
             "oscillation": "oscillation detector frequency amplitude threshold smoothing window peak valley timing",
             "interface": "interface performance theme font scale dark light color vsync fps timeline rendering",
             "file_output": "file output save export path format funscript metadata json axis assignment tcode ofs naming",
-            "logging": "logging autosave log debug verbose checkpoint interval backup"
+            "logging": "logging autosave log debug verbose checkpoint interval backup",
+            "analysis": "analysis stage rerun force preprocessed video database cache output delay offset frames latency"
         }
 
         # Helper to check if search matches section
@@ -221,26 +205,26 @@ class AdvancedSettingsMixin:
                 if _open:
                     render_fn()
 
-        # ---- Tier 1: Always visible settings ----
         _filtered_section("File & Output##AdvancedFileOutput",
                           ["file_output"], self._render_settings_file_output)
 
-        # ---- Tier 2: Behind "Show All Settings" toggle ----
-        if show_all:
-            _filtered_section("Interface & Performance##AdvancedInterfacePerf",
-                              ["interface"], self._render_settings_interface_perf)
+        _filtered_section("Interface & Performance##AdvancedInterfacePerf",
+                          ["interface"], self._render_settings_interface_perf)
 
-            _filtered_section("Logging & Autosave##AdvancedLogging",
-                              ["logging"], self._render_settings_logging_autosave)
+        _filtered_section("Logging & Autosave##AdvancedLogging",
+                          ["logging"], self._render_settings_logging_autosave)
 
-            _filtered_section("Live Tracker Settings##AdvancedLiveTracker",
-                              ["live_tracker", "oscillation"], self._render_tracker_dynamic_settings,
-                              extra_guard=self._is_live_tracker(tmode))
+        _filtered_section("Analysis##AdvancedAnalysis",
+                          ["analysis"], self._render_analysis_developer_settings)
 
-            tracker_inst = self._get_current_tracker_instance()
-            _filtered_section("Class Filtering##AdvancedClassFilter",
-                              ["class_filter"], self._render_class_filtering_content,
-                              extra_guard=bool(tracker_inst and getattr(tracker_inst, 'uses_class_detection', False)))
+        _filtered_section("Live Tracker Settings##AdvancedLiveTracker",
+                          ["live_tracker", "oscillation"], self._render_tracker_dynamic_settings,
+                          extra_guard=self._is_live_tracker(tmode))
+
+        tracker_inst = self._get_current_tracker_instance()
+        _filtered_section("Class Filtering##AdvancedClassFilter",
+                          ["class_filter"], self._render_class_filtering_content,
+                          extra_guard=bool(tracker_inst and getattr(tracker_inst, 'uses_class_detection', False)))
 
         imgui.spacing()
 
@@ -751,3 +735,75 @@ class AdvancedSettingsMixin:
                 if nv != interval:
                     settings.set("autosave_interval_seconds", nv)
             imgui.pop_item_width()
+
+    def _render_analysis_developer_settings(self):
+        """Render stage reruns, database retention, preprocessed video, and output delay."""
+        app = self.app
+        settings = app.app_settings
+        stage_proc = app.stage_processor
+        tmode = app.app_state_ui.selected_tracker_name
+        processing_active = stage_proc.full_analysis_active
+
+        from application.utils.imgui_helpers import DisabledScope as _DS
+
+        # Stage Reruns (offline non-hybrid only)
+        if self._is_offline_tracker(tmode) and not self._is_hybrid_tracker(tmode):
+            with _DS(processing_active):
+                _, stage_proc.force_rerun_stage1 = imgui.checkbox(
+                    "Force Re-run Stage 1##AdvForceRerunS1", stage_proc.force_rerun_stage1)
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Re-run YOLO object detection even if cached results exist.")
+                imgui.same_line()
+                _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
+                    "Force Re-run Stage 2##AdvForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Re-run contact analysis and segmentation even if cached results exist.")
+
+            # Database retention
+            with _DS(processing_active):
+                retain_db = settings.get("retain_stage2_database", True)
+                ch, nv = imgui.checkbox("Keep Stage 2 Database##AdvRetainDB", retain_db)
+                if ch:
+                    settings.set("retain_stage2_database", nv)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Keep the Stage 2 database file after processing completes.\n"
+                    "Disable to save disk space.")
+
+        # Preprocessed video (offline only)
+        if self._is_offline_tracker(tmode):
+            with _DS(processing_active):
+                if not hasattr(stage_proc, "save_preprocessed_video"):
+                    stage_proc.save_preprocessed_video = settings.get("save_preprocessed_video", False)
+                ch, nv = imgui.checkbox("Save/Reuse Preprocessed Video##AdvSavePreproc", stage_proc.save_preprocessed_video)
+                if ch:
+                    stage_proc.save_preprocessed_video = nv
+                    settings.set("save_preprocessed_video", nv)
+                    if nv and not self._is_hybrid_tracker(tmode):
+                        stage_proc.num_producers_stage1 = 1
+                        settings.set("num_producers_stage1", 1)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Saves a preprocessed video for faster re-runs.\n"
+                    "For standard trackers, forces Producer threads to 1.")
+
+        # Output delay
+        imgui.spacing()
+        calibration = app.calibration
+        delay_frames = calibration.funscript_output_delay_frames
+        if delay_frames != 0:
+            imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.85, 0.3, 1.0)
+            imgui.text(f"Output delayed by {delay_frames} frames")
+            imgui.pop_style_color()
+        imgui.push_item_width(120)
+        ch, new_delay = imgui.slider_int("Output Delay (frames)##AdvOutputDelay", delay_frames, 0, 20)
+        imgui.pop_item_width()
+        if ch:
+            calibration.funscript_output_delay_frames = new_delay
+            settings.set("funscript_output_delay_frames", new_delay)
+            calibration.update_tracker_delay_params()
+            app.project_manager.project_dirty = True
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Compensates latency between video and tracker output.\n"
+                "0 = no delay (default).")

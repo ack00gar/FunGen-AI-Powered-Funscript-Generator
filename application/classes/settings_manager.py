@@ -97,7 +97,7 @@ class AppSettings:
             "logging_level": "INFO",
 
             # UI & Layout
-            "ui_view_mode": "simple",  # can be 'expert' or 'simple'
+            "ui_view_mode": "expert",
             "full_width_nav": True,
             "window_width": constants.DEFAULT_WINDOW_WIDTH,
             "window_height": constants.DEFAULT_WINDOW_HEIGHT,
@@ -140,6 +140,7 @@ class AppSettings:
             "show_chapter_list_window": False,
             "show_timeline_editor_buttons": False,
             "show_advanced_options": False,
+            "show_toast_notifications": True,
             "show_video_feed": True,
 
             # File Handling & Output

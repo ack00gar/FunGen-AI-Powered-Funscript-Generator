@@ -20,20 +20,18 @@ _SCALE_OPTIONS = [
 
 
 class FirstRunWizard:
-    """Full-window 6-step first-run wizard overlay."""
+    """Full-window 5-step first-run wizard overlay."""
 
     STEP_WELCOME = 0
     STEP_SCALE = 1
-    STEP_MODE = 2
-    STEP_OUTPUT = 3
-    STEP_MODELS = 4
-    STEP_SUPPORT = 5
-    NUM_STEPS = 6
+    STEP_OUTPUT = 2
+    STEP_MODELS = 3
+    STEP_SUPPORT = 4
+    NUM_STEPS = 5
 
     _STEP_TITLES = [
         "Welcome",
         "Display Scale",
-        "Interface Mode",
         "Output Folder",
         "AI Models",
         "Support & Finish",
@@ -56,10 +54,7 @@ class FirstRunWizard:
                 best_dist = d
                 self._selected_scale_idx = i
 
-        # Step 3 — mode
-        self._selected_mode = app.app_settings.get("ui_view_mode", "simple")
-
-        # Step 4 — output folder
+        # Step 3 — output folder
         self._output_folder = app.app_settings.get("output_folder_path", "output")
 
         # Step 5 — model download
@@ -106,8 +101,6 @@ class FirstRunWizard:
             self._render_step_welcome()
         elif self._step == self.STEP_SCALE:
             self._render_step_scale()
-        elif self._step == self.STEP_MODE:
-            self._render_step_mode()
         elif self._step == self.STEP_OUTPUT:
             self._render_step_output()
         elif self._step == self.STEP_MODELS:
@@ -226,54 +219,6 @@ class FirstRunWizard:
                 imgui.get_io().font_global_scale = scale_val
                 self.app.app_settings.set("global_font_scale", scale_val)
 
-    def _render_step_mode(self):
-        imgui.dummy(0, 20)
-        self._center_text("Interface Mode", large=True)
-        imgui.dummy(0, 15)
-
-        avail_w = imgui.get_content_region_available_width()
-        card_w = (avail_w - 15) / 2
-
-        modes = [
-            ("Simple", "simple",
-             "Streamlined interface, automatic settings.\nBest for getting started."),
-            ("Expert", "expert",
-             "Full control over all parameters.\nMulti-axis, advanced tracking, plugins."),
-        ]
-
-        for i, (title, key, desc) in enumerate(modes):
-            if i > 0:
-                imgui.same_line(spacing=15)
-
-            selected = (self._selected_mode == key)
-            if selected:
-                imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.2, 0.4, 0.7, 0.8)
-                imgui.push_style_color(imgui.COLOR_BORDER, 0.4, 0.7, 1.0, 1.0)
-            else:
-                imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.15, 0.15, 0.15, 0.8)
-                imgui.push_style_color(imgui.COLOR_BORDER, 0.3, 0.3, 0.3, 0.5)
-
-            imgui.push_style_var(imgui.STYLE_CHILD_ROUNDING, 6.0)
-            imgui.begin_child(f"##mode_{key}", width=card_w, height=120, border=True)
-
-            imgui.dummy(0, 12)
-            text_w = imgui.calc_text_size(title)[0]
-            imgui.set_cursor_pos_x((card_w - text_w) * 0.5)
-            imgui.text(title)
-            imgui.dummy(0, 6)
-            imgui.set_cursor_pos_x(12)
-            imgui.push_text_wrap_pos(card_w - 12)
-            imgui.text_wrapped(desc)
-            imgui.pop_text_wrap_pos()
-
-            imgui.end_child()
-            imgui.pop_style_var()
-            imgui.pop_style_color(2)
-
-            if imgui.is_item_clicked():
-                self._selected_mode = key
-                self.app.app_settings.set("ui_view_mode", key)
-
     def _render_step_output(self):
         imgui.dummy(0, 20)
         self._center_text("Output Folder", large=True)
@@ -352,7 +297,7 @@ class FirstRunWizard:
         imgui.dummy(0, 4)
         imgui.bullet_text("Device Control (real-time hardware sync)")
         imgui.bullet_text("Streaming (stream video to browser with funscript support)")
-        imgui.bullet_text("Patreon Features (monthly Ko-fi subscription)")
+        imgui.bullet_text("Batch Processing + Early Access (monthly Ko-fi subscription)")
         imgui.dummy(0, 10)
         imgui.text("ko-fi.com/k00gar")
 

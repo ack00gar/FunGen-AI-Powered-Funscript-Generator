@@ -29,23 +29,6 @@ class DynamicTrackerUI:
         """Get display names and internal names, excluding hidden folder categories."""
         return self.discovery.get_gui_display_list_filtered(hidden_folders)
 
-    def get_simple_mode_trackers(self) -> Tuple[List[str], List[str]]:
-        """Get live and offline trackers for simple mode GUI."""
-        all_trackers = self.discovery.get_all_trackers()
-
-        display_names = []
-        internal_names = []
-
-        # Get live and offline trackers for simple mode, excluding examples
-        for name, info in all_trackers.items():
-            if (info.category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION, TrackerCategory.OFFLINE] and
-                "example" not in info.internal_name.lower() and
-                "example" not in info.display_name.lower()):
-                display_names.append(info.display_name)
-                internal_names.append(info.internal_name)
-
-        return display_names, internal_names
-    
     def get_batch_gui_compatible_trackers(self) -> Tuple[List[str], List[str]]:
         """Get trackers compatible with batch GUI (Live + Offline, no Live Intervention)."""
         all_trackers = self.discovery.get_all_trackers()

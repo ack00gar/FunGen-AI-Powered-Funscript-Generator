@@ -828,7 +828,7 @@ class DeviceControlUI:
             asyncio.create_task(self.live_tracker.process_tracking_result(tracking_result))
     
     def _render_supporter_only_message(self):
-        """Render supporter-only message when device control is not available."""
+        """Render add-on purchase message when device control is not installed."""
         # Set window properties
         imgui.set_next_window_position(150, 150, imgui.FIRST_USE_EVER)
         imgui.set_next_window_size(500, 300, imgui.FIRST_USE_EVER)
@@ -859,12 +859,12 @@ class DeviceControlUI:
             imgui.dummy(0, 10)
             
             # Main message
-            imgui.text_colored("Supporter Feature Only", 1.0, 0.6, 0.0)
+            imgui.text_colored("Add-on Feature", 1.0, 0.6, 0.0)
             imgui.dummy(0, 10)
-            
+
             imgui.text_wrapped(
-                "Device control features are available to supporters only. "
-                "These features include:"
+                "Device control is available as an add-on. "
+                "Features include:"
             )
             
             imgui.dummy(0, 5)
@@ -877,29 +877,16 @@ class DeviceControlUI:
             imgui.dummy(0, 15)
             
             # Support button
-            if imgui.button("Become a Supporter", width=200, height=30):
-                # This would open the support/patreon page
+            if imgui.button("Get Device Control", width=200, height=30):
                 self._open_support_page()
-            
-            imgui.same_line()
-            imgui.text_colored("Support the project!", 0.7, 0.7, 0.7)
-            
+
             imgui.dummy(0, 10)
-            imgui.text_colored("Bot Command Available!", 0.0, 0.8, 1.0)
+            imgui.text_colored("How to activate:", 0.0, 0.8, 1.0)
             imgui.text_wrapped(
-                "Discord bot now supports: !device_control\n"
-                "Available to Supporters, Moderators, and Admins"
-            )
-            
-            imgui.dummy(0, 10)
-            imgui.separator()
-            imgui.dummy(0, 5)
-            
-            imgui.text_colored("Want to unlock Supporter-only features?", 0.0, 1.0, 0.0)
-            imgui.text_wrapped(
-                "Support on ko-fi then use the !device_control command in Discord "
-                "to receive your device_control folder. Simply copy it to your "
-                "FunGen directory and restart to activate all features!"
+                "Purchase from ko-fi.com/k00gar, then use the !device_control "
+                "command in Discord to receive the add-on files. "
+                "Copy the device_control folder to your FunGen directory "
+                "and restart to activate."
             )
         
         imgui.end()
@@ -909,9 +896,8 @@ class DeviceControlUI:
         try:
             import webbrowser
             # This would be the actual support URL
-            support_url = "https://patreon.com/your_project"  # Replace with actual URL
-            webbrowser.open(support_url)
-            self.logger.info("Opened supporter page in browser")
+            webbrowser.open("https://ko-fi.com/k00gar")
+            self.logger.info("Opened ko-fi page in browser")
         except Exception as e:
             self.logger.error(f"Failed to open support page: {e}")
 

@@ -169,7 +169,7 @@ class BatchMixin:
             )
 
     def _render_supporter_batch_tab(self):
-        """Render the Patreon Exclusive tab (supporter feature).
+        """Render the Batch Processing tab (monthly ko-fi donors).
 
         When addon is available -> full interactive UI.
         When addon is missing -> grayed-out preview with promo banner.
@@ -179,7 +179,7 @@ class BatchMixin:
             return
 
         # Version info
-        self._render_addon_version_label("patreon_features", "Patreon Exclusive")
+        self._render_addon_version_label("patreon_features", "Batch Processing")
 
         watcher, queue, worker = self._get_batch_components()
         if watcher is None:
@@ -573,7 +573,7 @@ class BatchMixin:
     def _render_batch_preview(self):
         """Render grayed-out preview of batch tab when addon is missing."""
         self._render_addon_promo_banner(
-            "Patreon Exclusive",
+            "Batch Processing",
             "Process multiple videos in sequence with a batch queue. "
             "Set up watched folders for automatic processing. "
             "Live capture from screen, window, or stream."

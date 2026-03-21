@@ -752,28 +752,12 @@ class ApplicationLogic:
             self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
             chapters_for_save = self.funscript_processor.video_chapters
 
-        # 3. Handle simple mode BEFORE saving final funscripts
-        is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
-        # Check if current tracker is offline mode for simple mode auto-enhancements
-        from config.tracker_discovery import TrackerCategory
-        discovery = get_tracker_discovery()
-        tracker_info = discovery.get_tracker_info(self.app_state_ui.selected_tracker_name)
-        is_offline_analysis = tracker_info and tracker_info.category == TrackerCategory.OFFLINE
-
-        simple_mode_autotune_applied = False
-        if is_simple_mode and is_offline_analysis and not autotune_enabled_for_batch:
-            self.logger.info("Simple Mode: Automatically applying Ultimate Autotune with defaults...")
-            self.set_status_message("Analysis complete! Applying auto-enhancements...")
-            self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
-            chapters_for_save = self.funscript_processor.video_chapters
-            simple_mode_autotune_applied = True
-
         # Notify user of completion
         action_count = len(self.funscript_processor.get_actions('primary') or [])
         self.notify(f"Analysis complete - {action_count} points generated", "success")
 
         # 4. SAVE THE FINAL FUNSCRIPT
-        any_processing_applied = post_processing_enabled or autotune_enabled_for_batch or simple_mode_autotune_applied
+        any_processing_applied = post_processing_enabled or autotune_enabled_for_batch
         
         if any_processing_applied:
             self.logger.info("Saving final (post-processed) funscripts...")
@@ -866,28 +850,12 @@ class ApplicationLogic:
                 else:
                     self.logger.info("Auto post-processing disabled or superseded by Ultimate Autotune, skipping.")
 
-                # Handle Simple Mode auto ultimate autotune for live sessions BEFORE saving
-                is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
-                # Check if current tracker is live mode for simple mode auto-enhancements  
-                from config.tracker_discovery import TrackerCategory
-                discovery = get_tracker_discovery()
-                tracker_info = discovery.get_tracker_info(self.app_state_ui.selected_tracker_name)
-                is_live_mode = tracker_info and tracker_info.category == TrackerCategory.LIVE
-                has_actions = bool(self.funscript_processor.get_actions('primary'))
-                
-                simple_mode_autotune_applied = False
-                if is_simple_mode and is_live_mode and has_actions and not autotune_enabled:
-                    self.logger.info("Simple Mode: Automatically applying Ultimate Autotune to live session...")
-                    self.set_status_message("Live tracking complete! Applying auto-enhancements...")
-                    self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
-                    simple_mode_autotune_applied = True
-                
                 if autotune_enabled:
                     self.logger.info("Triggering Ultimate Autotune for completed live session.")
                     self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
 
                 # 3. SAVE THE FINAL FUNSCRIPT
-                any_processing_applied = post_processing_enabled or autotune_enabled or simple_mode_autotune_applied
+                any_processing_applied = post_processing_enabled or autotune_enabled
 
                 if any_processing_applied:
                     self.logger.info("Saving final (post-processed) funscript.")

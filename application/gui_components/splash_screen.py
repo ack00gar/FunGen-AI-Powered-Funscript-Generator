@@ -876,6 +876,22 @@ class StandaloneSplashWindow:
                         "Detecting points of interest...",
                         "Tracking the action...",
                         "Calculating optimal stroke...",
+                        # R2D2 & robot vibes
+                        "Beep boop beep...",
+                        "* excited droid noises *",
+                        "Bleep blorp bzzzt...",
+                        "Wrrrr... click click... wrrrr...",
+                        "01001000 01101001...",
+                        "Doot doot doooooot...",
+                        "Bzzt bzzt... processing feels...",
+                        "Whirr clank beep boop!",
+                        "* happy robot sounds *",
+                        "Bweee-ooo bwip bwip...",
+                        "Loading fun subroutines...",
+                        "Engaging pleasure protocols...",
+                        "Neural nets are tingling...",
+                        "Revving up the servo motors...",
+                        "Consulting the funscript oracle...",
                     ]
                     self._loading_quip = random.choice(_LOADING_QUIPS)
                 loading_text = self._loading_quip

@@ -4,14 +4,11 @@ Toolbar UI Component
 Provides a horizontal toolbar with common actions organized into labeled sections:
 
 Sections (each with a label above the icons):
-- MODE: Expert/Simple mode toggle (🤓 nerd face)
 - PROJECT: New, Open, Save, Export operations
-- PLAYBACK: Play/Pause, Previous/Next Frame, Speed modes (🚶🐢🐇)
+- PLAYBACK: Play/Pause, Previous/Next Frame, Speed modes
 - TIMELINE EDIT: Axis dropdown + contextual Undo/Redo/Autotune
-- VIEW: Chapter List (📚), 3D Simulator (📈)
-- TRACKING: Start/Stop Tracking (🤖 robot - red when active)
-- TOOLS: Auto-Simplify (🔧), Auto Post-Processing (✨), Ultimate Autotune (🚀),
-         Streamer (📡 satellite - buyers only), Device Control (🎮 gamepad - buyers only)
+- VIEW: Chapter List, 3D Simulator
+- TOOLS: Streamer, Device Control, Batch Processing (add-ons)
 
 Toggle visibility via View menu > Show Toolbar.
 
@@ -154,27 +151,9 @@ class ToolbarUI:
         icon_mgr = get_icon_texture_manager()
         btn_size = self._icon_size
 
-        # --- MODE TOGGLE SECTION ---
-        self._begin_toolbar_section("Mode")
-        self._render_mode_toggle_section(icon_mgr, btn_size)
-        self._end_toolbar_section()
-
-        imgui.same_line(spacing=12)
-        self._render_separator()
-        imgui.same_line(spacing=12)
-
         # --- FILE OPERATIONS SECTION ---
         self._begin_toolbar_section("Project")
         self._render_file_section(icon_mgr, btn_size)
-        self._end_toolbar_section()
-
-        imgui.same_line(spacing=12)
-        self._render_separator()
-        imgui.same_line(spacing=12)
-
-        # --- TRACKING CONTROLS SECTION (before Playback for visibility) ---
-        self._begin_toolbar_section("AI Tracking")
-        self._render_tracking_section(icon_mgr, btn_size)
         self._end_toolbar_section()
 
         imgui.same_line(spacing=12)
@@ -294,35 +273,6 @@ class ToolbarUI:
 
             # Clear the pending label
             self._pending_section_label = None
-
-    def _render_mode_toggle_section(self, icon_mgr, btn_size):
-        """Render Expert/Simple mode toggle button."""
-        app_state = self.app.app_state_ui
-
-        # Get current mode
-        current_mode = getattr(app_state, 'ui_view_mode', 'simple')
-        is_expert = (current_mode == 'expert')
-
-        # Tooltip text
-        if is_expert:
-            tooltip = "Expert Mode (Click to switch to Simple Mode)"
-        else:
-            tooltip = "Simple Mode (Click to switch to Expert Mode)"
-
-        # Apply blue background when Expert mode is active
-        if is_expert:
-            self._apply_button_active()
-
-        # Nerd face emoji button
-        if self._toolbar_button(icon_mgr, 'nerd-face.png', btn_size, tooltip):
-            # Toggle mode
-            new_mode = 'simple' if is_expert else 'expert'
-            app_state.ui_view_mode = new_mode
-            self.app.app_settings.set('ui_view_mode', new_mode)
-
-        # Restore default colors if we changed them
-        if is_expert:
-            self._apply_button_default()
 
     def _render_file_section(self, icon_mgr, btn_size):
         """Render file operation buttons."""
@@ -735,10 +685,10 @@ class ToolbarUI:
             app.logger.info(f"Automatic post-processing {'enabled' if new_value else 'disabled'}", extra={"status_message": True})
 
     def _render_features_section(self, icon_mgr, btn_size):
-        """Render supporter feature toggles (streamer, device control, patreon).
+        """Render add-on feature toggles (streamer, device control, batch).
 
         Always renders all 3 tool buttons. Unavailable features show as grayed-out
-        with support tooltips for feature discovery.
+        with ko-fi tooltips for feature discovery.
         """
         has_streamer = self._feat_streamer
         has_device_control = self._feat_device
@@ -752,7 +702,7 @@ class ToolbarUI:
         else:
             self._toolbar_button_disabled(
                 icon_mgr, 'satellite.png', btn_size,
-                "Streamer - Stream from XBVR & Stash.\nSupport on Ko-fi to unlock."
+                "Streamer - Stream from XBVR & Stash.\nAdd-on available at ko-fi.com/k00gar"
             )
             rendered_any = True
 
@@ -763,21 +713,20 @@ class ToolbarUI:
         else:
             self._toolbar_button_disabled(
                 icon_mgr, 'flashlight.png', btn_size,
-                "Device Control - Control OSR2, Handy & more.\nSupport on Ko-fi to unlock."
+                "Device Control - Control OSR2, Handy & more.\nAdd-on available at ko-fi.com/k00gar"
             )
 
-        # --- Patreon Exclusive button ---
+        # --- Batch Processing button ---
         imgui.same_line()
         if has_supporter:
-            # Patreon features available — show as active (blue tint)
             self._apply_button_active()
             self._toolbar_button(icon_mgr, 'sidebar-batch.png', btn_size,
-                                 "Patreon Exclusive - Early access trackers, batch processing.")
+                                 "Batch Processing - Early access trackers, batch queue.")
             self._apply_button_default()
         else:
             self._toolbar_button_disabled(
                 icon_mgr, 'sidebar-batch.png', btn_size,
-                "Patreon Exclusive - Early access trackers, batch processing.\nMonthly Ko-fi subscription."
+                "Batch Processing - Early access trackers, batch queue.\nMonthly ko-fi.com/k00gar subscription."
             )
 
     def _render_streamer_button_active(self, icon_mgr, btn_size, is_first=False):

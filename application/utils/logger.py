@@ -43,10 +43,18 @@ class StatusMessageHandler(logging.Handler):
         logging.CRITICAL: 10.0,
     }
 
-    def __init__(self, set_status_message_func, level_durations=None):
+    # Log levels that trigger toast notifications (in addition to status bar)
+    _TOAST_LEVEL_MAP = {
+        logging.WARNING: "warning",
+        logging.ERROR: "error",
+        logging.CRITICAL: "error",
+    }
+
+    def __init__(self, set_status_message_func, level_durations=None, notify_func=None):
         super().__init__()
         self.set_status_message_func = set_status_message_func
         self.level_durations = level_durations if level_durations is not None else self.DEFAULT_LEVEL_DURATIONS
+        self.notify_func = notify_func
 
     def emit(self, record):
         try:
@@ -73,10 +81,16 @@ class StatusMessageHandler(logging.Handler):
                     final_duration = record.duration
 
             if show_in_status and final_duration is not None:
-                message_to_display = record.getMessage()  # Get the raw message
+                message_to_display = record.getMessage()
                 self.set_status_message_func(message_to_display, final_duration)
+
+                # Also fire toast notification for warnings and errors
+                if self.notify_func:
+                    toast_type = self._TOAST_LEVEL_MAP.get(record.levelno)
+                    if toast_type:
+                        self.notify_func(message_to_display, toast_type)
         except Exception:
-            self.handleError(record)  # Delegate to superclass's error handling
+            self.handleError(record)
 
 
 class ColoredFormatter(logging.Formatter):
@@ -157,8 +171,10 @@ class AppLogger:
 
         # Status Message Handler (optional)
         if app_logic_instance and hasattr(app_logic_instance, 'set_status_message'):
+            notify_func = getattr(app_logic_instance, 'notify', None)
             smh = StatusMessageHandler(app_logic_instance.set_status_message,
-                                       level_durations=status_level_durations)
+                                       level_durations=status_level_durations,
+                                       notify_func=notify_func)
             smh.setLevel(level)
             self.logger.addHandler(smh)
 

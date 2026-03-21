@@ -376,9 +376,9 @@ class ChapterBarMixin:
                         action_on_segment_this_frame = True
 
         if self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0 and total_video_frames > 0:
+            # Frame-based normalization matching segment rendering (no padding offset)
             current_norm_pos = self.app.processor.current_frame_index / total_video_frames
-            # marker_x = bar_start_x + current_norm_pos * bar_width
-            marker_x = effective_marker_area_start_x + current_norm_pos * effective_marker_area_width
+            marker_x = bar_start_x + current_norm_pos * bar_width
             marker_col = imgui.get_color_u32_rgba(*VideoNavigationColors.MARKER)
             draw_list.add_line(marker_x, bar_start_y, marker_x, bar_start_y + bar_height, marker_col, thickness=2.0)
 

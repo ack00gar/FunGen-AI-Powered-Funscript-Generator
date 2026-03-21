@@ -673,7 +673,6 @@ class AppFileManager:
         except Exception as e:
             self.logger.error(f"Error saving funscript to '{filepath}': {e}",
                               extra={'status_message': True})
-            self.app.notify(f"Save failed: {e}", "error")
 
     def _save_funscript_file_unified(self, filepath: str, funscript_obj, chapters: Optional[List] = None):
         """Save all axes into a single .funscript file with embedded axes array.
@@ -845,13 +844,8 @@ class AppFileManager:
             self.logger.warning("No actions on this timeline.", extra={"status_message": True})
             return
 
-        # Duration
+        # Duration — use last action timestamp to avoid gray tail after script ends
         duration_ms = actions[-1]['at'] if actions else 0
-        if self.app.processor and self.app.processor.video_info:
-            fps = self.app.processor.fps
-            total_frames = self.app.processor.video_info.get('total_frames', 0)
-            if fps > 0 and total_frames > 0:
-                duration_ms = max(duration_ms, (total_frames / fps) * 1000.0)
 
         output_folder = self.app.app_settings.get("output_folder_path", "output")
         initial_filename = "heatmap.png"

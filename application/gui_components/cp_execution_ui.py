@@ -415,3 +415,28 @@ class ExecutionMixin:
 
         if disabled and imgui.is_item_hovered():
             imgui.set_tooltip("Refinement is disabled while another process is active.")
+
+    def _render_simple_progress_display(self):
+        """Render compact progress display (used during batch processing)."""
+        stage_proc = self.app.stage_processor
+        current_stage = stage_proc.current_analysis_stage
+
+        _stage_metrics = {
+            1: (stage_proc.stage1_progress_value, stage_proc.stage1_processing_fps_str, stage_proc.stage1_eta_str),
+            2: (stage_proc.stage2_main_progress_value, stage_proc.stage2_sub_processing_fps_str or "", stage_proc.stage2_sub_eta_str or "N/A"),
+            3: (stage_proc.stage3_overall_progress_value, stage_proc.stage3_processing_fps_str, stage_proc.stage3_eta_str),
+        }
+        stage_progress, fps_str, eta_str = _stage_metrics.get(current_stage, (0.0, "", "N/A"))
+        overall = max(0.0, min(1.0, stage_progress))
+
+        imgui.progress_bar(overall, (-1, 0), "%.0f%%" % (overall * 100))
+
+        status_parts = []
+        if fps_str and fps_str != "0 FPS":
+            status_parts.append(fps_str)
+        if overall > 0.01 and eta_str and eta_str != "N/A":
+            status_parts.append("ETA: %s" % eta_str)
+        if status_parts:
+            imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.LABEL_TEXT)
+            imgui.text(" | ".join(status_parts))
+            imgui.pop_style_color()

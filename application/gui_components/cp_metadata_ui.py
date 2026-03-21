@@ -38,6 +38,12 @@ class MetadataEditorMixin:
             )
             imgui.spacing()
 
+            # Auto-populate creator with FunGen if empty
+            if not metadata.get("creator"):
+                from config.constants import APP_NAME, APP_VERSION
+                metadata["creator"] = f"{APP_NAME} v{APP_VERSION}"
+                self._set_project_metadata(metadata)
+
             changed = False
             for key, label, tooltip, is_multiline in _METADATA_FIELDS:
                 current_value = metadata.get(key, "")
