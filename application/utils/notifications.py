@@ -138,6 +138,13 @@ class NotificationManager:
                 rounding=6.0
             )
 
+            # Subtle border
+            draw_list.add_rect(
+                x, y, x + _TOAST_WIDTH, y + toast_h,
+                imgui.get_color_u32_rgba(0.3, 0.3, 0.35, 0.5 * alpha),
+                rounding=6.0
+            )
+
             # Left accent bar
             accent = _TYPE_COLORS.get(toast.type, _TYPE_COLORS[NotificationType.INFO])
             draw_list.add_rect_filled(
@@ -147,13 +154,15 @@ class NotificationManager:
                 flags=imgui.DRAW_ROUND_CORNERS_LEFT
             )
 
-            # Text
+            # Text (truncate to fit width)
             text_x = x + _ACCENT_WIDTH + _TOAST_PADDING
-            text_y = y + _TOAST_PADDING
+            text_y = y + (toast_h - text_size[1]) * 0.5
+            max_chars = int((_TOAST_WIDTH - _ACCENT_WIDTH - _TOAST_PADDING * 2) / 7)  # ~7px per char
+            display_msg = toast.message if len(toast.message) <= max_chars else toast.message[:max_chars - 3] + "..."
             draw_list.add_text(
                 text_x, text_y,
                 imgui.get_color_u32_rgba(_TEXT_COLOR[0], _TEXT_COLOR[1], _TEXT_COLOR[2], _TEXT_COLOR[3] * alpha),
-                toast.message
+                display_msg
             )
 
             y_offset += toast_h + _GAP
