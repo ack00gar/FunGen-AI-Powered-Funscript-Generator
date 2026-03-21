@@ -307,8 +307,8 @@ class ControlPanelUI(
     _SIDEBAR_WIDTH = 40
     _SIDEBAR_CORE_SECTIONS = [
         ("run", "R", "Run"),
-        ("configure", "C", "Configure"),
-        ("post_processing", "P", "Post-Processing"),
+        ("configure", "C", "Settings"),
+        ("post_processing", "P", "Polish"),
         ("advanced", "A", "Advanced"),
         ("metadata", "M", "Metadata"),
     ]
@@ -1095,56 +1095,58 @@ class ControlPanelUI(
                         imgui.text("Analysis Range")
                         self._render_range_selection(stage_proc, fs_proc, events)
 
-                    if self._is_offline_tracker(mode) and not self._is_hybrid_tracker(mode):
-                        imgui.text("Stage Reruns:")
-                        with _DisabledScope(disable_combo):
-                            _, stage_proc.force_rerun_stage1 = imgui.checkbox(
-                                "Force Re-run Stage 1##ForceRerunS1",
-                                stage_proc.force_rerun_stage1,
-                            )
-                            _tooltip_if_hovered(
-                                "Re-run YOLO object detection even if cached results exist.\n"
-                                "Use when the detection model has been updated."
-                            )
-                            imgui.same_line()
-                            _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
-                                "Force Re-run Stage 2##ForceRerunS2",
-                                stage_proc.force_rerun_stage2_segmentation,
-                            )
-                            _tooltip_if_hovered(
-                                "Re-run contact analysis and segmentation even if cached results exist.\n"
-                                "Use when you want to regenerate chapters and signals from scratch."
-                            )
+                    # Developer controls -- hidden unless View > Show Advanced Options
+                    if app_state.show_advanced_options:
+                        if self._is_offline_tracker(mode) and not self._is_hybrid_tracker(mode):
+                            imgui.text("Stage Reruns:")
+                            with _DisabledScope(disable_combo):
+                                _, stage_proc.force_rerun_stage1 = imgui.checkbox(
+                                    "Force Re-run Stage 1##ForceRerunS1",
+                                    stage_proc.force_rerun_stage1,
+                                )
+                                _tooltip_if_hovered(
+                                    "Re-run YOLO object detection even if cached results exist.\n"
+                                    "Use when the detection model has been updated."
+                                )
+                                imgui.same_line()
+                                _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
+                                    "Force Re-run Stage 2##ForceRerunS2",
+                                    stage_proc.force_rerun_stage2_segmentation,
+                                )
+                                _tooltip_if_hovered(
+                                    "Re-run contact analysis and segmentation even if cached results exist.\n"
+                                    "Use when you want to regenerate chapters and signals from scratch."
+                                )
 
-                        # Database Retention Option
-                        with _DisabledScope(disable_combo):
-                            retain_database = self.app.app_settings.get("retain_stage2_database", True)
-                            changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
-                            if changed_db:
-                                self.app.app_settings.set("retain_stage2_database", new_db_val)
-                        if imgui.is_item_hovered():
-                            imgui.set_tooltip(
-                                "Keep the Stage 2 database file after processing completes.\n"
-                                "Disable to save disk space (database is automatically deleted).\n"
-                                "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
-                            )
+                            # Database Retention Option
+                            with _DisabledScope(disable_combo):
+                                retain_database = self.app.app_settings.get("retain_stage2_database", True)
+                                changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
+                                if changed_db:
+                                    self.app.app_settings.set("retain_stage2_database", new_db_val)
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip(
+                                    "Keep the Stage 2 database file after processing completes.\n"
+                                    "Disable to save disk space (database is automatically deleted).\n"
+                                    "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
+                                )
 
-                    if self._is_offline_tracker(mode):
-                        with _DisabledScope(disable_combo):
-                            if not hasattr(stage_proc, "save_preprocessed_video"):
-                                stage_proc.save_preprocessed_video = app.app_settings.get("save_preprocessed_video", False)
-                            changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
-                            if changed:
-                                stage_proc.save_preprocessed_video = new_val
-                                app.app_settings.set("save_preprocessed_video", new_val)
-                                if new_val and not self._is_hybrid_tracker(mode):
-                                    stage_proc.num_producers_stage1 = 1
-                                    app.app_settings.set("num_producers_stage1", 1)
-                            _tooltip_if_hovered(
-                                "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
-                                "When enabled, re-running will reuse the existing preprocessed video.\n"
-                                "For standard trackers, forces Producer threads to 1."
-                            )
+                        if self._is_offline_tracker(mode):
+                            with _DisabledScope(disable_combo):
+                                if not hasattr(stage_proc, "save_preprocessed_video"):
+                                    stage_proc.save_preprocessed_video = app.app_settings.get("save_preprocessed_video", False)
+                                changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
+                                if changed:
+                                    stage_proc.save_preprocessed_video = new_val
+                                    app.app_settings.set("save_preprocessed_video", new_val)
+                                    if new_val and not self._is_hybrid_tracker(mode):
+                                        stage_proc.num_producers_stage1 = 1
+                                        app.app_settings.set("num_producers_stage1", 1)
+                                _tooltip_if_hovered(
+                                    "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
+                                    "When enabled, re-running will reuse the existing preprocessed video.\n"
+                                    "For standard trackers, forces Producer threads to 1."
+                                )
 
         # Output delay offset — always visible, prominent warning when non-zero
         calibration = app.calibration

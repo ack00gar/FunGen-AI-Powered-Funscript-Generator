@@ -193,53 +193,50 @@ class ExecutionMixin:
             imgui.progress_bar(stage_proc.stage1_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage1_progress_value * 100:.0f}% | {stage_proc.stage1_instant_fps_str}" if stage_proc.stage1_progress_value >= 0 else "")
             imgui.pop_style_color()
 
-            # Per-stage timing breakdown
-            decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
-            unwarp_ms = getattr(stage_proc, 'stage1_unwarp_ms', 0.0)
-            yolo_det_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
-            yolo_pose_ms = getattr(stage_proc, 'stage1_yolo_pose_ms', 0.0)
-            if decode_ms > 0 or yolo_det_ms > 0:
-                timing_parts = [f"Decode: {decode_ms:.1f}ms"]
-                if unwarp_ms > 0:
-                    timing_parts.append(f"Unwarp: {unwarp_ms:.1f}ms")
-                timing_parts.append(f"YOLO Det: {yolo_det_ms:.1f}ms")
-                if yolo_pose_ms > 0:
-                    timing_parts.append(f"Pose: {yolo_pose_ms:.1f}ms")
-                imgui.text(" | ".join(timing_parts))
+            # Developer details -- hidden unless View > Show Advanced Options
+            if self.app.app_state_ui.show_advanced_options:
+                # Per-stage timing breakdown
+                decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
+                unwarp_ms = getattr(stage_proc, 'stage1_unwarp_ms', 0.0)
+                yolo_det_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
+                yolo_pose_ms = getattr(stage_proc, 'stage1_yolo_pose_ms', 0.0)
+                if decode_ms > 0 or yolo_det_ms > 0:
+                    timing_parts = [f"Decode: {decode_ms:.1f}ms"]
+                    if unwarp_ms > 0:
+                        timing_parts.append(f"Unwarp: {unwarp_ms:.1f}ms")
+                    timing_parts.append(f"YOLO Det: {yolo_det_ms:.1f}ms")
+                    if yolo_pose_ms > 0:
+                        timing_parts.append(f"Pose: {yolo_pose_ms:.1f}ms")
+                    imgui.text(" | ".join(timing_parts))
 
-            frame_q_size = stage_proc.stage1_frame_queue_size
-            frame_q_max = self.constants.STAGE1_FRAME_QUEUE_MAXSIZE
-            frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
-            suggestion_message, bar_color = "", CurrentTheme.GREEN[:3]
-            if frame_q_fraction > 0.9:
-                bar_color, suggestion_message = CurrentTheme.RED_LIGHT[:3], "Suggestion: Add consumer if resources allow"
-            elif frame_q_fraction > 0.2:
-                bar_color, suggestion_message = CurrentTheme.ORANGE[:3], "Balanced"
-            else:
-                bar_color, suggestion_message = CurrentTheme.GREEN[:3], "Suggestion: Lessen consumers or add producer"
-            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *bar_color)
-            imgui.progress_bar(frame_q_fraction, size=(-1, 0), overlay=f"Frame Queue: {frame_q_size}/{frame_q_max}")
-            imgui.pop_style_color()
-            if suggestion_message: imgui.text(suggestion_message)
-
-            if getattr(stage_proc, 'save_preprocessed_video', False):
-                # The encoding queue (OS pipe buffer) isn't directly measurable.
-                # However, its fill rate is entirely dependent on the producer, which is
-                # throttled by the main frame queue. Therefore, the main frame queue's
-                # size is an excellent proxy for the encoding backpressure.
-                encoding_q_fraction = frame_q_fraction # Use the same fraction
-                encoding_bar_color = bar_color # Use the same color logic
-
-                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *encoding_bar_color)
-                imgui.progress_bar(encoding_q_fraction, size=(-1, 0), overlay=f"Encoding Queue: ~{frame_q_size}/{frame_q_max}")
+                frame_q_size = stage_proc.stage1_frame_queue_size
+                frame_q_max = self.constants.STAGE1_FRAME_QUEUE_MAXSIZE
+                frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
+                suggestion_message, bar_color = "", CurrentTheme.GREEN[:3]
+                if frame_q_fraction > 0.9:
+                    bar_color, suggestion_message = CurrentTheme.RED_LIGHT[:3], "Suggestion: Add consumer if resources allow"
+                elif frame_q_fraction > 0.2:
+                    bar_color, suggestion_message = CurrentTheme.ORANGE[:3], "Balanced"
+                else:
+                    bar_color, suggestion_message = CurrentTheme.GREEN[:3], "Suggestion: Lessen consumers or add producer"
+                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *bar_color)
+                imgui.progress_bar(frame_q_fraction, size=(-1, 0), overlay=f"Frame Queue: {frame_q_size}/{frame_q_max}")
                 imgui.pop_style_color()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "This is an estimate of the video encoding buffer.\n"
-                        "It is based on the main analysis frame queue, which acts as a throttle for the encoder."
-                    )
+                if suggestion_message: imgui.text(suggestion_message)
 
-            imgui.text(f"Result Queue Size: ~{stage_proc.stage1_result_queue_size}")
+                if getattr(stage_proc, 'save_preprocessed_video', False):
+                    encoding_q_fraction = frame_q_fraction
+                    encoding_bar_color = bar_color
+                    imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *encoding_bar_color)
+                    imgui.progress_bar(encoding_q_fraction, size=(-1, 0), overlay=f"Encoding Queue: ~{frame_q_size}/{frame_q_max}")
+                    imgui.pop_style_color()
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip(
+                            "This is an estimate of the video encoding buffer.\n"
+                            "It is based on the main analysis frame queue, which acts as a throttle for the encoder."
+                        )
+
+                imgui.text(f"Result Queue Size: ~{stage_proc.stage1_result_queue_size}")
         elif stage_proc.stage1_final_elapsed_time_str:
             imgui.text_wrapped(f"Last Run: {stage_proc.stage1_final_elapsed_time_str} | Avg Speed: {stage_proc.stage1_final_fps_str or 'N/A'}")
             imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
@@ -254,19 +251,20 @@ class ExecutionMixin:
         if is_analysis_running and stage_proc.current_analysis_stage == 2:
             imgui.text_wrapped(f"Main: {stage_proc.stage2_main_progress_label}")
 
-            # Per-component timing (populated by any tracker that reports it)
-            timing_parts = []
-            decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
-            yolo_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
-            flow_ms = getattr(stage_proc, 'stage2_flow_ms', 0.0)
-            if decode_ms > 0:
-                timing_parts.append(f"Decode: {decode_ms:.1f}ms")
-            if yolo_ms > 0:
-                timing_parts.append(f"YOLO: {yolo_ms:.1f}ms")
-            if flow_ms > 0:
-                timing_parts.append(f"Flow: {flow_ms:.1f}ms")
-            if timing_parts:
-                imgui.text(" | ".join(timing_parts))
+            # Per-component timing -- hidden unless View > Show Advanced Options
+            if self.app.app_state_ui.show_advanced_options:
+                timing_parts = []
+                decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
+                yolo_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
+                flow_ms = getattr(stage_proc, 'stage2_flow_ms', 0.0)
+                if decode_ms > 0:
+                    timing_parts.append(f"Decode: {decode_ms:.1f}ms")
+                if yolo_ms > 0:
+                    timing_parts.append(f"YOLO: {yolo_ms:.1f}ms")
+                if flow_ms > 0:
+                    timing_parts.append(f"Flow: {flow_ms:.1f}ms")
+                if timing_parts:
+                    imgui.text(" | ".join(timing_parts))
 
             # Apply active color
             imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)

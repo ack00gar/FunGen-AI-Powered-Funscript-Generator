@@ -85,7 +85,7 @@ class AppStateUI:
         self.show_simulator_3d = self.app_settings.get("show_simulator_3d", defaults.get("show_simulator_3d", True))
         self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", True))  # Legacy preview
         self.show_gauge = self.app_settings.get("show_gauge_window", defaults.get("show_gauge_window", True))
-        self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", False))
+        self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", True))
         self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline", defaults.get("show_funscript_interactive_timeline", True))
         self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2", defaults.get("show_funscript_interactive_timeline2", False))
         # Extra timeline visibility (supporter feature, default False)
