@@ -3107,6 +3107,7 @@ class InteractiveFunscriptTimeline:
                         self.plugin_preview_renderer.clear_preview(plugin_name)
             except Exception as e:
                 self.logger.error(f"Error applying plugin {plugin_name}: {e}", exc_info=True)
+                self.app.notify(f"Plugin failed: {e}", "error")
 
     def _handle_sync_logic(self, app_state, tf):
         """Auto-scrolls timeline during playback."""

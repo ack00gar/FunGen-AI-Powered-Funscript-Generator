@@ -768,6 +768,10 @@ class ApplicationLogic:
             chapters_for_save = self.funscript_processor.video_chapters
             simple_mode_autotune_applied = True
 
+        # Notify user of completion
+        action_count = len(self.funscript_processor.get_actions('primary') or [])
+        self.notify(f"Analysis complete - {action_count} points generated", "success")
+
         # 4. SAVE THE FINAL FUNSCRIPT
         any_processing_applied = post_processing_enabled or autotune_enabled_for_batch or simple_mode_autotune_applied
         
