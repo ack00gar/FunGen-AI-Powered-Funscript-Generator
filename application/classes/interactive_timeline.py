@@ -113,8 +113,6 @@ class InteractiveFunscriptTimeline:
         # --- Visualization State ---
         self.preview_actions: Optional[List[Dict]] = None
         self.is_previewing: bool = False
-        self.ultimate_autotune_preview_actions: Optional[List[Dict]] = None
-
         # Reference funscript comparison overlay
         self.reference_overlay_actions: Optional[List[Dict]] = None
         self.reference_overlay_name: str = ""
@@ -127,9 +125,6 @@ class InteractiveFunscriptTimeline:
 
         # Settings
         self.shift_frames_amount = 1
-        self.show_ultimate_autotune_preview = self.app.app_settings.get(
-            f"timeline{self.timeline_num}_show_ultimate_preview", True)
-        self._ultimate_preview_dirty = True
         self.nudge_chapter_only = False  # When True, << >> only affect points in selected chapter
         self._container_mode = False  # Set by render() when inside scrollable container
 
@@ -219,15 +214,11 @@ class InteractiveFunscriptTimeline:
 
     def invalidate_cache(self):
         """Forces updates on next frame"""
-        self._ultimate_preview_dirty = True
         self._heatmap_speeds_cache = None
         self._heatmap_colors_cache = None
         if self.reference_overlay_actions:
             self._reference_metrics_dirty = True
             self._reference_metrics_dirty_time = time.monotonic()
-
-    def invalidate_ultimate_preview(self):
-        self._ultimate_preview_dirty = True
 
     # ==================================================================================
     # MAIN RENDER LOOP
@@ -323,12 +314,6 @@ class InteractiveFunscriptTimeline:
             self._draw_reference_peak_markers(draw_list, tf)
             self._draw_reference_problem_bands(draw_list, tf)
 
-        # 6a. Update & Draw Ultimate Preview (if enabled)
-        self._update_ultimate_autotune_preview()
-        if self.ultimate_autotune_preview_actions:
-             self._draw_curve(draw_list, tf, self.ultimate_autotune_preview_actions,
-                              color_override=TimelineColors.ULTIMATE_AUTOTUNE_PREVIEW,
-                              force_lines_only=True, alpha=0.7)
 
         # 6b. Draw Active Plugin Preview (if any)
         if self.is_previewing and self.preview_actions:
@@ -2322,12 +2307,6 @@ class InteractiveFunscriptTimeline:
         if imgui.button(f"-##ZOut{self.timeline_num}"):
              self.app.app_state_ui.timeline_zoom_factor_ms_per_px *= 1.2
 
-        imgui.same_line()
-        changed, self.show_ultimate_autotune_preview = imgui.checkbox("Ult. Preview", self.show_ultimate_autotune_preview)
-        if changed:
-            self.app.app_settings.set(f"timeline{self.timeline_num}_show_ultimate_preview", self.show_ultimate_autotune_preview)
-            self.invalidate_ultimate_preview()
-
         # --- Visualization Toggles ---
         imgui.same_line()
         imgui.text("|")
@@ -2906,7 +2885,6 @@ class InteractiveFunscriptTimeline:
         # Finalize
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Clear All Points")
         self.invalidate_cache()
-        self.invalidate_ultimate_preview()
 
     def _set_axis_assignment(self, axis_name: str):
         """Assign a semantic axis name to this timeline."""
@@ -2985,41 +2963,6 @@ class InteractiveFunscriptTimeline:
     # MISC / UTILS
     # ==================================================================================
     
-    def _update_ultimate_autotune_preview(self):
-        if not self.show_ultimate_autotune_preview:
-            self.ultimate_autotune_preview_actions = None
-            return
-
-        # Suppress the default-params green preview while UA popup is open
-        # (the plugin preview system renders the live orange overlay instead)
-        ua_ctx = self.plugin_manager.plugin_contexts.get('Ultimate Autotune')
-        if ua_ctx and ua_ctx.state != PluginUIState.CLOSED:
-            self.ultimate_autotune_preview_actions = None
-            self._ultimate_preview_dirty = True  # re-dirty so it regenerates when popup closes
-            return
-
-        if not self._ultimate_preview_dirty: return
-
-        # Generate preview via plugin system
-        from funscript.plugins.base_plugin import plugin_registry
-        plugin = plugin_registry.get_plugin('Ultimate Autotune')
-        if plugin:
-            fs, axis = self._get_target_funscript_details()
-            if fs:
-                # Create temp lightweight object for non-destructive preview
-                # copy.deepcopy fails on RLock objects in the full Funscript instance
-                from funscript.multi_axis_funscript import MultiAxisFunscript
-                temp = MultiAxisFunscript()
-                # Manually copy only the necessary data lists
-                temp.primary_actions = copy.deepcopy(fs.primary_actions)
-                temp.secondary_actions = copy.deepcopy(fs.secondary_actions)
-
-                res = plugin.transform(temp, axis)
-                if res:
-                    self.ultimate_autotune_preview_actions = res.primary_actions if axis == 'primary' else res.secondary_actions
-
-        self._ultimate_preview_dirty = False
-
     def _check_and_apply_pending_plugins(self):
         """Check for plugins with apply_requested flag and execute them."""
         # Get list of plugins that have been requested to apply
@@ -3089,8 +3032,7 @@ class InteractiveFunscriptTimeline:
 
                 # Invalidate caches
                 self.invalidate_cache()
-                self.invalidate_ultimate_preview()
-
+        
                 # Close the plugin window and clear its preview
                 self.plugin_renderer.plugin_manager.set_plugin_state(
                     plugin_name,

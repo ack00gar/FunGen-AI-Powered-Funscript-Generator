@@ -734,9 +734,7 @@ class AppFunscriptProcessor:
                 timeline_instance = self.app.gui_instance._extra_timeline_editors.get(timeline_num)
 
         if timeline_instance:
-            timeline_instance.invalidate_ultimate_preview()
-
-            # Also invalidate editor caches to reflect changes immediately (per 9337108)
+            # Invalidate editor caches to reflect changes immediately
             if hasattr(timeline_instance, 'invalidate_cache'):
                 try:
                     timeline_instance.invalidate_cache()

@@ -14,7 +14,7 @@ from tracker.tracker_manager import create_tracker_manager
 from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
 from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
 from application.utils.addon_update_checker import AddonUpdateChecker
-from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION, PROJECT_FILE_EXTENSION, MODEL_DOWNLOAD_URLS
+from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION, PROJECT_FILE_EXTENSION, MODEL_DOWNLOAD_URLS, YOLO_INPUT_SIZE
 from config.tracker_discovery import get_tracker_discovery
 from pathlib import Path
 
@@ -146,11 +146,9 @@ class ApplicationLogic:
         # --- Models ---
         self.yolo_detection_model_path_setting = self.app_settings.get("yolo_det_model_path")
         self.yolo_pose_model_path_setting = self.app_settings.get("yolo_pose_model_path")
-        self.pose_model_artifacts_dir = self.app_settings.get("pose_model_artifacts_dir")
-        self.pose_model_artifacts_dir = self.app_settings.get("pose_model_artifacts_dir")
         self.yolo_det_model_path = self.yolo_detection_model_path_setting
         self.yolo_pose_model_path = self.yolo_pose_model_path_setting
-        self.yolo_input_size = 640
+        self.yolo_input_size = YOLO_INPUT_SIZE
 
         # --- Undo/Redo Managers ---
         self.undo_manager_t1: Optional[UndoRedoManager] = None

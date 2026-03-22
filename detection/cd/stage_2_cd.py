@@ -2131,7 +2131,6 @@ def perform_contact_analysis(
         preprocessed_video_path_arg: Optional[str],
         progress_callback: callable, stop_event: threading.Event,
         app=None,  # App (AppLogic) instance for state access
-        ml_model_dir_path_arg: Optional[str] = None,
         parent_logger_arg: Optional[logging.Logger] = None,
         output_overlay_msgpack_path: Optional[str] = None,
         yolo_input_size_arg: int = 640,
