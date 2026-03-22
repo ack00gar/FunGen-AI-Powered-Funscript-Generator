@@ -33,6 +33,7 @@ class PluginPipelineUI:
         self.pipeline = PluginPipeline(app_instance, logger=self.logger)
         self._save_name_buf = ""
         self._last_errors: list = []
+        self._previewing = False
 
     # ------------------------------------------------------------------
     # Public
@@ -67,17 +68,17 @@ class PluginPipelineUI:
         return None
 
     def _render_content(self):
-        # Top bar: add plugin + preset controls
+        # Top bar: add plugin | save/load presets
         self._render_top_bar()
 
         imgui.separator()
 
-        # Step list
+        # Step list (scrollable middle area)
         self._render_step_list()
 
         imgui.separator()
 
-        # Bottom: apply / preview
+        # Bottom: preview / apply / clear
         self._render_bottom_bar()
 
         # Error display
@@ -114,8 +115,25 @@ class PluginPipelineUI:
             imgui.end_popup()
 
         imgui.same_line()
+        imgui.text("|")
+        imgui.same_line()
 
-        # Preset load
+        # Save preset
+        if imgui.button("Save Preset"):
+            imgui.open_popup("##PipelineSavePreset")
+
+        if imgui.begin_popup("##PipelineSavePreset"):
+            imgui.text("Preset name:")
+            changed, self._save_name_buf = imgui.input_text("##PresetName", self._save_name_buf, 128)
+            if imgui.button("Save##Confirm") and self._save_name_buf.strip():
+                self.pipeline.save_preset(self._save_name_buf.strip())
+                self._save_name_buf = ""
+                imgui.close_current_popup()
+            imgui.end_popup()
+
+        imgui.same_line()
+
+        # Load preset
         presets = self.pipeline.get_available_presets()
         if imgui.button("Load Preset"):
             imgui.open_popup("##PipelineLoadPreset")
@@ -128,27 +146,14 @@ class PluginPipelineUI:
                     self.pipeline.load_preset(name)
             imgui.end_popup()
 
-        imgui.same_line()
-
-        # Save preset
-        if imgui.button("Save"):
-            imgui.open_popup("##PipelineSavePreset")
-
-        if imgui.begin_popup("##PipelineSavePreset"):
-            imgui.text("Preset name:")
-            changed, self._save_name_buf = imgui.input_text("##PresetName", self._save_name_buf, 128)
-            if imgui.button("Save##Confirm") and self._save_name_buf.strip():
-                self.pipeline.save_preset(self._save_name_buf.strip())
-                self._save_name_buf = ""
-                imgui.close_current_popup()
-            imgui.end_popup()
-
     # ---- Step list ----
 
     def _render_step_list(self):
         steps = self.pipeline.steps
         if not steps:
-            imgui.text_colored("No steps — add a plugin above.", 0.5, 0.5, 0.5, 1.0)
+            imgui.spacing()
+            imgui.text_colored("No steps. Add a plugin above.", 0.5, 0.5, 0.5, 1.0)
+            imgui.spacing()
             return
 
         plugin_mgr = self._get_plugin_manager()
@@ -243,14 +248,93 @@ class PluginPipelineUI:
     # ---- Bottom bar ----
 
     def _render_bottom_bar(self):
-        if imgui.button("Apply Pipeline", width=140):
-            self._apply_pipeline()
+        btn_w = 100
+
+        if imgui.button("Preview", width=btn_w):
+            self._preview_pipeline()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Preview the pipeline result on the timeline")
 
         imgui.same_line()
 
-        if imgui.button("Clear All", width=100):
-            self.pipeline.clear()
-            self._last_errors.clear()
+        if imgui.button("Apply", width=btn_w):
+            self._clear_preview()
+            self._apply_pipeline()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Apply the pipeline to the funscript (Ctrl+Z to undo)")
+
+        imgui.same_line()
+
+        if self._previewing:
+            if imgui.button("Cancel", width=btn_w):
+                self._clear_preview()
+        else:
+            if imgui.button("Clear All", width=btn_w):
+                self.pipeline.clear()
+                self._last_errors.clear()
+
+    def _get_timeline_editor(self):
+        """Get the active timeline editor (T1)."""
+        gui = getattr(self.app, 'gui_instance', None)
+        if gui and hasattr(gui, 'timeline_editor1'):
+            return gui.timeline_editor1
+        return None
+
+    def _preview_pipeline(self):
+        """Run pipeline on a copy and show preview overlay on the timeline."""
+        import copy as _copy
+        self._last_errors.clear()
+        processor = getattr(self.app, 'processor', None)
+        if not processor or not processor.tracker or not processor.tracker.funscript:
+            self._last_errors.append("No funscript loaded")
+            return
+
+        funscript_obj = processor.tracker.funscript
+        original_actions = list(funscript_obj.get_axis_actions('primary') or [])
+        if not original_actions:
+            self._last_errors.append("No actions on primary axis")
+            return
+
+        # Run pipeline on a deep copy
+        preview_funscript = _copy.deepcopy(funscript_obj)
+        success, errors = self.pipeline.run(preview_funscript, axis='primary')
+        if errors:
+            self._last_errors = errors
+            return
+
+        transformed_actions = list(preview_funscript.get_axis_actions('primary') or [])
+
+        # Build preview data for the timeline renderer
+        preview_points = []
+        for action in transformed_actions:
+            preview_points.append({
+                'at': action['at'],
+                'pos': action['pos'],
+                'is_modified': True,
+                'is_selected': True,
+            })
+
+        preview_data = {
+            'preview_points': preview_points,
+            'style': 'default',
+            'plugin_name': 'Pipeline',
+        }
+
+        # Send to the timeline's preview renderer
+        editor = self._get_timeline_editor()
+        if editor and editor.plugin_preview_renderer:
+            editor.plugin_preview_renderer.set_preview_data('Pipeline', preview_data)
+            self._previewing = True
+        else:
+            self._last_errors.append("Timeline preview not available")
+
+    def _clear_preview(self):
+        """Clear the preview overlay from the timeline."""
+        if self._previewing:
+            editor = self._get_timeline_editor()
+            if editor and editor.plugin_preview_renderer:
+                editor.plugin_preview_renderer.clear_preview('Pipeline')
+            self._previewing = False
 
     def _apply_pipeline(self):
         """Apply the pipeline to the active timeline's funscript."""
