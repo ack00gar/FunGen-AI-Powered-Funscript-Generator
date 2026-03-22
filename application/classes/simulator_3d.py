@@ -472,11 +472,11 @@ class Simulator3DWindow:
             return
 
         # Get funscript positions
-        primary_pos = getattr(app_state, 'gauge_value_t1', 50)  # 0-100 (up/down)
-        secondary_pos = getattr(app_state, 'gauge_value_t2', 50)  # 0-100 (roll)
+        primary_pos = getattr(app_state, 'script_position_t1', 50)  # 0-100 (up/down)
+        secondary_pos = getattr(app_state, 'script_position_t2', 50)  # 0-100 (roll)
 
         # Check for third axis (when available in future)
-        tertiary_pos = getattr(app_state, 'gauge_value_t3', None)  # Third axis (pitch)
+        tertiary_pos = getattr(app_state, 'script_position_t3', None)  # Third axis (pitch)
         if tertiary_pos is None:
             tertiary_pos = 50  # No pitch movement when third axis not available
 
@@ -661,9 +661,9 @@ class Simulator3DWindow:
         glUseProgram(self.shader)
 
         # Get funscript positions
-        primary_pos = getattr(app_state, 'gauge_value_t1', 50)
-        secondary_pos = getattr(app_state, 'gauge_value_t2', 50)
-        tertiary_pos = getattr(app_state, 'gauge_value_t3', None)
+        primary_pos = getattr(app_state, 'script_position_t1', 50)
+        secondary_pos = getattr(app_state, 'script_position_t2', 50)
+        tertiary_pos = getattr(app_state, 'script_position_t3', None)
         if tertiary_pos is None:
             tertiary_pos = 50
 

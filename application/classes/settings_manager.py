@@ -102,11 +102,6 @@ class AppSettings:
             "window_height": constants.DEFAULT_WINDOW_HEIGHT,
             "ui_layout_mode": constants.DEFAULT_UI_LAYOUT,
 
-            # Movement Bar (L/R Dial) Window Settings
-            "lr_dial_window_size_w": 180,  # Width of movement bar window
-            "lr_dial_window_size_h": 220,  # Height of movement bar window
-            "lr_dial_window_pos_x": -1,    # X position (-1 = auto-calculate)
-            "lr_dial_window_pos_y": -1,    # Y position (-1 = auto-calculate)
             "global_font_scale": 1.0,
             "auto_system_scaling_enabled": True,  # Automatically detect and apply system scaling
             "timeline_pan_speed_multiplier": 20,
@@ -126,16 +121,8 @@ class AppSettings:
             "show_heatmap": True,
             "use_simplified_funscript_preview": False,
             "show_stage2_overlay": True,
-            "show_gauge_window_timeline1": False,
-            "show_gauge_window_timeline2": False,
-            "show_lr_dial_graph": False,  # Movement Bar (rotating bar with up/down fill and roll angle)
-            "show_simulator_3d": True, # 3D Simulator
-            "show_3d_simulator_logo": True,  # Display logo texture on 3D simulator cylinder
-
-            # Overlay mode settings (render as overlay on video display)
-            "gauge_overlay_mode": False,  # Render gauges as video overlay
-            "movement_bar_overlay_mode": False,  # Render movement bar as video overlay
-            "simulator_3d_overlay_mode": True,  # Render 3D simulator as video overlay
+            "show_simulator_3d": True,
+            "simulator_3d_overlay_mode": True,
             "show_chapter_list_window": False,
             "show_timeline_editor_buttons": False,
             "show_advanced_options": False,
@@ -278,9 +265,6 @@ class AppSettings:
                     loaded_settings = json.load(f)
 
                 # Migration for old setting name
-                if "show_gauge_window" in loaded_settings:
-                    loaded_settings["show_gauge_window_timeline1"] = loaded_settings.pop("show_gauge_window")
-
                 # Merge defaults with loaded settings, ensuring all keys from defaults are present
                 self.data = defaults.copy()  # Start with defaults
                 self.data.update(loaded_settings)  # Override with loaded values
