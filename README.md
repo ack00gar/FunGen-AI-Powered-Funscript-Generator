@@ -369,15 +369,6 @@ a top of the line card like the 4090 is not required to get similar results. Hav
 
 ---
 
-# Miscellaneous
-
-- For VR only sbs (side by side) **Fisheye** and **Equirectangular** 180° videos are supported at the moment
-- 2D POV videos are supported but work best when they are centered properly
-- 2D / VR is automatically detected as is fisheye / equirectangular and FOV (make sure you keep the file format information in the filename _FISHEYE190, _MKX200, _LR_180, etc.)
-- Detection settings can also be overwritten in the UI if the app doesn't detect it properly
-
----
-
 # Output Files
 
 FunGen generates the following files in a dedicated subfolder within your output directory:
@@ -488,6 +479,6 @@ If you encounter any issues or have questions, please open an issue on GitHub.
 Join the **Discord community** for discussions and support:
 [Discord Community](https://discord.gg/WYkjMbtCZA)
 
-Support the project on **Ko-fi** (one-time add-on purchases) or **Patreon** (monthly supporter features).
+Support the project on **Ko-fi** (one-time add-on purchases or monthly subscription).
 
 ---

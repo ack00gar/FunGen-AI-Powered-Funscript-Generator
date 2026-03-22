@@ -81,11 +81,11 @@ class AppStateUI:
         self.slow_motion_fps: float = self.app_settings.get("slow_motion_fps", 10.0)
 
         # UI visibility states
-        self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", False))
+        self.show_toolbar = True
         self.show_simulator_3d = self.app_settings.get("show_simulator_3d", defaults.get("show_simulator_3d", True))
-        self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", True))  # Legacy preview
-        self.show_gauge = self.app_settings.get("show_gauge_window", defaults.get("show_gauge_window", True))
+        self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", True))
         self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", True))
+        self.show_audio_waveform = self.app_settings.get("show_audio_waveform", False)
         self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline", defaults.get("show_funscript_interactive_timeline", True))
         self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2", defaults.get("show_funscript_interactive_timeline2", False))
         # Extra timeline visibility (supporter feature, default False)
@@ -114,6 +114,8 @@ class AppStateUI:
         # or directly if UI controls them.
         self.ui_show_masks = False
         self.ui_show_flow = False
+        self.ui_show_stats_on_video = False
+        self.ui_show_funscript_preview_on_video = False
 
         # InfoGraphsUI sections visibility
         self.show_video_info_section = True
@@ -163,60 +165,6 @@ class AppStateUI:
         self.last_funscript_preview_duration_s = 0.0
         self.last_funscript_preview_action_count = -1
 
-        # Gauge Window Attributes
-        self.show_gauge_window_timeline1 = self.app_settings.get("show_gauge_window_timeline1", defaults.get("show_gauge_window_timeline1", False))
-        self.show_gauge_window_timeline2 = self.app_settings.get("show_gauge_window_timeline2", defaults.get("show_gauge_window_timeline2", False))
-
-        default_gauge_w = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
-        default_gauge_h = self.app_settings.get("gauge_window_size_h", defaults.get("gauge_window_size_h", 220))
-        # Default Y needs main menu bar height, which is usually set after GUI init.
-        # AppLogic will call initialize_gauge_default_y once GUI provides that height.
-        menu_bar_h_for_default = self.app_settings.get("main_menu_bar_height_for_gauge_default_y", 25)
-        default_gauge_x = self.window_width - default_gauge_w - 20
-        default_gauge_y = menu_bar_h_for_default + 10
-
-        # Timeline 1 Gauge
-        self.gauge_window_pos_t1 = (
-            self.app_settings.get("gauge_window_pos_t1_x", default_gauge_x),
-            self.app_settings.get("gauge_window_pos_t1_y", default_gauge_y)
-        )
-        self.gauge_window_size_t1 = (
-            self.app_settings.get("gauge_window_size_t1_w", default_gauge_w),
-            self.app_settings.get("gauge_window_size_t1_h", default_gauge_h)
-        )
-
-        # Timeline 2 Gauge (with staggered default)
-        default_gauge_t2_x = default_gauge_x - default_gauge_w - 10 # Place it to the left of T1
-        self.gauge_window_pos_t2 = (
-            self.app_settings.get("gauge_window_pos_t2_x", default_gauge_t2_x),
-            self.app_settings.get("gauge_window_pos_t2_y", default_gauge_y)
-        )
-        self.gauge_window_size_t2 = (
-            self.app_settings.get("gauge_window_size_t2_w", default_gauge_w),
-            self.app_settings.get("gauge_window_size_t2_h", default_gauge_h)
-        )
-
-        self.gauge_value_t1 = 0.0  # Live value from script for T1
-        self.gauge_value_t2 = 0.0  # Live value from script for T2
-        self.gauge_pos_initialized = False
-
-        # L/R Dial Window Attributes
-        self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))
-        default_lr_dial_size_w = self.app_settings.get("lr_dial_window_size_w",
-                                                       defaults.get("lr_dial_window_size_w", 180))
-        default_lr_dial_size_h = self.app_settings.get("lr_dial_window_size_h",
-                                                       defaults.get("lr_dial_window_size_h", 220))
-        gauge_w_for_lr_default = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
-        default_lr_dial_x = self.window_width - gauge_w_for_lr_default - default_lr_dial_size_w - 30
-        default_lr_dial_y = menu_bar_h_for_default + 10
-
-        self.lr_dial_window_pos = (
-            self.app_settings.get("lr_dial_window_pos_x", default_lr_dial_x),
-            self.app_settings.get("lr_dial_window_pos_y", default_lr_dial_y)
-        )
-        self.lr_dial_window_size = (default_lr_dial_size_w, default_lr_dial_size_h)
-        self.lr_dial_value = 50.0  # Live value from script (0-100, default 50)
-
         self.fixed_layout_geometry = {}
         self.just_switched_to_floating = False
 
@@ -263,28 +211,6 @@ class AppStateUI:
         else:
             self.logger.warning(f"Attempted to set unknown tracker UI flag: {flag_name}")
         self.app.energy_saver.reset_activity_timer()
-
-    def initialize_gauge_default_y(self, menu_bar_height: float):
-        # This method is called by AppLogic once the GUI main menu bar height is known.
-        if not self.gauge_pos_initialized:
-            defaults = self.app_settings.get_default_settings()
-
-            # Update T1 Gauge Y
-            current_default_t1_y = self.app_settings.get("gauge_window_pos_t1_y", defaults.get("gauge_window_pos_y", 35))
-            if self.gauge_window_pos_t1[1] == current_default_t1_y or self.gauge_window_pos_t1[1] <= menu_bar_height:
-                self.gauge_window_pos_t1 = (self.gauge_window_pos_t1[0], menu_bar_height + 10)
-
-            # Update T2 Gauge Y
-            current_default_t2_y = self.app_settings.get("gauge_window_pos_t2_y", defaults.get("gauge_window_pos_y", 35))
-            if self.gauge_window_pos_t2[1] == current_default_t2_y or self.gauge_window_pos_t2[1] <= menu_bar_height:
-                self.gauge_window_pos_t2 = (self.gauge_window_pos_t2[0], menu_bar_height + 10)
-
-            current_default_lr_dial_y_setting = self.app_settings.get("lr_dial_window_pos_y", defaults.get("lr_dial_window_pos_y", 35))
-            if self.lr_dial_window_pos[1] == current_default_lr_dial_y_setting or self.lr_dial_window_pos[
-                1] <= menu_bar_height:
-                self.lr_dial_window_pos = (self.lr_dial_window_pos[0], menu_bar_height + 10)
-
-            self.gauge_pos_initialized = True
 
     def adjust_video_zoom(self, zoom_multiplier: float, mouse_pos_normalized: Optional[Tuple[float, float]] = None):
         old_zoom = self.video_zoom_factor
