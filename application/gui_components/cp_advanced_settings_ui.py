@@ -209,10 +209,25 @@ class AdvancedSettingsMixin:
         _filtered_section("Analysis##AdvancedAnalysis",
                           ["analysis"], self._render_analysis_developer_settings)
 
-        _filtered_section("Tracker Settings##AdvancedTrackerSettings",
-                          ["live_tracker", "oscillation", "tracker"], self._render_tracker_dynamic_settings)
-
+        # Tracker settings (only if tracker provides render_settings_ui or get_settings_schema)
         tracker_inst = self._get_current_tracker_instance()
+        _has_tracker_settings = False
+        if tracker_inst:
+            try:
+                from tracker.tracker_modules.core.base_tracker import BaseTracker
+                has_custom_ui = hasattr(tracker_inst, 'render_settings_ui') and type(tracker_inst).render_settings_ui is not BaseTracker.render_settings_ui
+            except (ImportError, AttributeError):
+                has_custom_ui = hasattr(tracker_inst, 'render_settings_ui')
+            has_schema = False
+            if hasattr(tracker_inst, 'get_settings_schema'):
+                try:
+                    has_schema = bool(tracker_inst.get_settings_schema().get('properties'))
+                except Exception:
+                    pass
+            _has_tracker_settings = has_custom_ui or has_schema
+        if _has_tracker_settings:
+            _filtered_section("Tracker Settings##AdvancedTrackerSettings",
+                              ["live_tracker", "oscillation", "tracker"], self._render_tracker_dynamic_settings)
         _filtered_section("Class Filtering##AdvancedClassFilter",
                           ["class_filter"], self._render_class_filtering_content,
                           extra_guard=bool(tracker_inst and getattr(tracker_inst, 'uses_class_detection', False)))
