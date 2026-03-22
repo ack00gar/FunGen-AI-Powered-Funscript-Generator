@@ -304,7 +304,7 @@ class ApplicationLogic:
         self.save_and_reset_complete_event = threading.Event()
         # State to hold the selected batch processing method
         self.batch_processing_method_idx: int = 0
-        self.batch_apply_post_processing: bool = True
+        self.batch_pipeline_preset: str = None
         self.batch_copy_funscript_to_video_location: bool = True
         self.batch_overwrite_mode: int = 0  # 0 for Process All, 1 for Skip Existing
         self.batch_generate_roll_file: bool = True
@@ -601,6 +601,65 @@ class ApplicationLogic:
         """
         self.autotuner.trigger_ultimate_autotune_with_defaults(timeline_num)
 
+    def _run_post_analysis_pipeline(self, frame_range=None):
+        """
+        Run post-analysis processing after tracking completes.
+        Checks auto_apply_post_processing setting, then runs:
+        1. CLI --pipeline preset (if specified), OR
+        2. GUI pipeline steps (if any configured), OR
+        3. Ultimate Autotune (legacy batch flag)
+        Returns True if any processing was applied.
+        """
+        # CLI pipeline preset takes priority
+        pipeline_preset = getattr(self, 'batch_pipeline_preset', None)
+        if pipeline_preset:
+            self.logger.info(f"Applying CLI pipeline preset '{pipeline_preset}' after analysis.")
+            from application.classes.plugin_pipeline import PluginPipeline
+            pipeline = PluginPipeline(self)
+            if pipeline.load_preset(pipeline_preset):
+                funscript_obj = self.funscript_processor.get_funscript_obj()
+                if funscript_obj:
+                    success, errors = pipeline.run(funscript_obj, axis='primary')
+                    for err in errors:
+                        self.logger.warning(f"Pipeline: {err}")
+                    return success
+            else:
+                self.logger.warning(f"Pipeline preset '{pipeline_preset}' not found.")
+            return False
+
+        # Batch mode: use batch autotune flag
+        if self.is_batch_processing_active:
+            if self.batch_apply_ultimate_autotune:
+                self.logger.info("Applying Ultimate Autotune for batch processing.")
+                self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+                return True
+            return False
+
+        # Interactive mode: check auto_apply_post_processing setting
+        if not self.app_settings.get("auto_apply_post_processing", True):
+            self.logger.info("Auto post-processing disabled, skipping.")
+            return False
+
+        # Check if GUI pipeline has steps configured
+        gui = getattr(self, 'gui_instance', None)
+        if gui and hasattr(gui, 'plugin_pipeline_ui'):
+            pipeline = gui.plugin_pipeline_ui.pipeline
+            enabled_steps = [s for s in pipeline.steps if s.enabled]
+            if enabled_steps:
+                self.logger.info(f"Running pipeline ({len(enabled_steps)} steps) after analysis.")
+                funscript_obj = self.funscript_processor.get_funscript_obj()
+                if funscript_obj:
+                    success, errors = pipeline.run(funscript_obj, axis='primary')
+                    for err in errors:
+                        self.logger.warning(f"Pipeline: {err}")
+                    return success
+                return False
+
+        # Fallback: run Ultimate Autotune as default post-processing
+        self.logger.info("Running default Ultimate Autotune after analysis.")
+        self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+        return True
+
     def toggle_file_manager_window(self):
         """Toggles the visibility of the Generated File Manager window."""
         if hasattr(self, 'app_state_ui'):
@@ -725,36 +784,12 @@ class ApplicationLogic:
         self.logger.info("Offline analysis completed. Saving raw funscript before post-processing.")
         self.file_manager.save_raw_funscripts_after_generation(video_path)
 
-        # 2. PROCEED WITH POST-PROCESSING (if enabled)
-        post_processing_enabled = self.app_settings.get("enable_auto_post_processing", False)
-        autotune_enabled_for_batch = False # Default to false
-
-        if self.is_batch_processing_active:
-            self.logger.info("Batch processing active. Auto post-processing decision is handled by batch settings.")
-            post_processing_enabled = self.batch_apply_post_processing
-            autotune_enabled_for_batch = self.batch_apply_ultimate_autotune
-
-        # Only run the old post-processing if it's enabled AND Ultimate Autotune is NOT enabled for the batch.
-        if post_processing_enabled and not autotune_enabled_for_batch:
-            self.logger.info("Triggering auto post-processing after completed analysis.")
-            self.funscript_processor.apply_automatic_post_processing()
-            chapters_for_save = self.funscript_processor.video_chapters
-        elif autotune_enabled_for_batch:
-            self.logger.info("Auto post-processing skipped as Ultimate Autotune is enabled for this batch.")
-        else:
-            self.logger.info("Auto post-processing skipped (disabled in settings).")
-
-        if autotune_enabled_for_batch:
-            self.logger.info("Triggering Ultimate Autotune for batch processing.")
-            self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
-            chapters_for_save = self.funscript_processor.video_chapters
+        # 2. PROCEED WITH POST-PROCESSING
+        any_processing_applied = self._run_post_analysis_pipeline()
 
         # Notify user of completion
         action_count = len(self.funscript_processor.get_actions('primary') or [])
         self.notify(f"Analysis complete - {action_count} points generated", "success")
-
-        # 4. SAVE THE FINAL FUNSCRIPT
-        any_processing_applied = post_processing_enabled or autotune_enabled_for_batch
         
         if any_processing_applied:
             self.logger.info("Saving final (post-processed) funscripts...")
@@ -832,27 +867,10 @@ class ApplicationLogic:
                             editor.invalidate_cache()
                             self.logger.debug(f"Timeline {t_num} cache invalidated after live session completion")
 
-                # 2. PROCEED WITH POST-PROCESSING (if enabled)
-                post_processing_enabled = self.app_settings.get("enable_auto_post_processing", False)
-                autotune_enabled = False  # Default to false
-
-                if self.is_batch_processing_active:
-                    post_processing_enabled = self.batch_apply_post_processing
-                    autotune_enabled = self.batch_apply_ultimate_autotune
-
-                if post_processing_enabled and not autotune_enabled:
-                    self.logger.info(
-                        f"Triggering auto post-processing for live tracking session range: {scripted_frame_range}.")
-                    self.funscript_processor.apply_automatic_post_processing(frame_range=scripted_frame_range)
-                else:
-                    self.logger.info("Auto post-processing disabled or superseded by Ultimate Autotune, skipping.")
-
-                if autotune_enabled:
-                    self.logger.info("Triggering Ultimate Autotune for completed live session.")
-                    self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+                # 2. PROCEED WITH POST-PROCESSING
+                any_processing_applied = self._run_post_analysis_pipeline(frame_range=scripted_frame_range)
 
                 # 3. SAVE THE FINAL FUNSCRIPT
-                any_processing_applied = post_processing_enabled or autotune_enabled
 
                 if any_processing_applied:
                     self.logger.info("Saving final (post-processed) funscript.")

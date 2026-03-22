@@ -194,20 +194,10 @@ class AppCLIRunner:
             self.app.batch_overwrite_mode = 2 if args.overwrite else 1
             self.app.batch_apply_ultimate_autotune = args.autotune
             self.app.batch_copy_funscript_to_video_location = args.copy
+            self.app.batch_pipeline_preset = getattr(args, 'pipeline', None)
 
             # Post-processing and Ultimate Autotune are mutually exclusive to avoid double simplification
             # Priority: Ultimate Autotune > Auto Post-processing
-            if args.autotune:
-                # When Ultimate Autotune is enabled, disable post-processing to avoid double simplification
-                self.app.batch_apply_post_processing = False
-                self.app.logger.info("Ultimate Autotune enabled - auto post-processing disabled to prevent double simplification")
-            else:
-                # When Ultimate Autotune is disabled, allow post-processing based on settings
-                self.app.batch_apply_post_processing = self.app.app_settings.get("enable_auto_post_processing", False)
-                if self.app.batch_apply_post_processing:
-                    self.app.logger.info("Ultimate Autotune disabled - auto post-processing enabled from settings")
-                else:
-                    self.app.logger.info("Both Ultimate Autotune and auto post-processing disabled")
             # Determine roll file generation based on CLI argument or tracker capabilities
             if hasattr(args, 'generate_roll') and args.generate_roll:
                 self.app.batch_generate_roll_file = True

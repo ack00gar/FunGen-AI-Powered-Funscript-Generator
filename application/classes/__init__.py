@@ -10,3 +10,4 @@ from .settings_manager import AppSettings
 from .shortcut_manager import ShortcutManager
 from .undo_redo_manager import UndoRedoManager
 from .simulator_3d import Simulator3DWindow
+from .script_gauge import ScriptGaugeWindow

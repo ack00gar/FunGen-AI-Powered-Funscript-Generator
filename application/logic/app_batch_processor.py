@@ -64,9 +64,6 @@ class AppBatchProcessor:
         if self.app.calibration.funscript_output_delay_frames == 0:
             message_lines.append("-> Warning: Optical flow delay is 0. Have you calibrated it?")
 
-        if not self.app.app_settings.get("enable_auto_post_processing", False):
-            message_lines.append("-> Warning: Automatic post-processing is currently disabled.")
-
         # Set the state to trigger the GUI dialog
         self.app.batch_confirmation_message = "\n".join(message_lines)
         self.app.batch_confirmation_videos = video_paths
@@ -108,19 +105,6 @@ class AppBatchProcessor:
         self.app.batch_generate_roll_file = gui.batch_generate_roll_file_ui
         self.app.batch_adaptive_tuning_enabled = getattr(gui, 'batch_adaptive_tuning_ui', False)
         self.app.batch_save_preprocessed_video = getattr(gui, 'batch_save_preprocessed_video_ui', False)
-
-        # Apply same mutual exclusion logic for GUI batch processing
-        if gui.batch_apply_ultimate_autotune_ui:
-            # When Ultimate Autotune is enabled, disable post-processing to avoid double simplification
-            self.app.batch_apply_post_processing = False
-            self.app.logger.info("GUI Batch: Ultimate Autotune enabled - auto post-processing disabled to prevent double simplification")
-        else:
-            # When Ultimate Autotune is disabled, allow post-processing based on settings
-            self.app.batch_apply_post_processing = self.app.app_settings.get("enable_auto_post_processing", False)
-            if self.app.batch_apply_post_processing:
-                self.app.logger.info("GUI Batch: Ultimate Autotune disabled - auto post-processing enabled from settings")
-            else:
-                self.app.logger.info("GUI Batch: Both Ultimate Autotune and auto post-processing disabled")
 
         self.app.logger.info(f"User confirmed. Starting batch with {len(videos_to_process)} videos.")
         self.app.batch_video_paths = videos_to_process # Now a list of dicts

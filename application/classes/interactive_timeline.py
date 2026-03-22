@@ -2265,6 +2265,15 @@ class InteractiveFunscriptTimeline:
         self.plugin_renderer.render_plugin_buttons(self.timeline_num)
 
         imgui.same_line()
+
+        # Pipeline button
+        if imgui.button(f"Pipeline##{self.timeline_num}"):
+            app_state = self.app.app_state_ui
+            app_state.show_plugin_pipeline = not getattr(app_state, 'show_plugin_pipeline', False)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Open Plugin Pipeline builder")
+
+        imgui.same_line()
         imgui.text("|")
         imgui.same_line()
 

@@ -148,6 +148,7 @@ DEFAULT_SHORTCUTS = {
     "toggle_funscript_preview": "P",
     "toggle_waveform": "W",
     "toggle_video_feed": "F",
+    "toggle_script_gauge": "G",
     "reset_timeline_view": "R",
 
     # Editing (Layout-independent modifier+key combinations)

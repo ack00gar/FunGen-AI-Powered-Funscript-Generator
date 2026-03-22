@@ -121,6 +121,8 @@ class ShortcutHandlerMixin:
             pass
         elif check_and_run_shortcut("toggle_3d_simulator", self._handle_toggle_3d_simulator_shortcut):
             pass
+        elif check_and_run_shortcut("toggle_script_gauge", self._handle_toggle_script_gauge_shortcut):
+            pass
         elif check_and_run_shortcut("toggle_chapter_list", self._handle_toggle_chapter_list_shortcut):
             pass
 
@@ -657,6 +659,16 @@ class ShortcutHandlerMixin:
             self.app.project_manager.project_dirty = True
         status = "shown" if app_state.show_simulator_3d else "hidden"
         self.app.logger.info(f"3D Simulator {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_script_gauge_shortcut(self):
+        """Handle keyboard shortcut for toggling gauge (G)"""
+        app_state = self.app.app_state_ui
+        app_state.show_script_gauge = not getattr(app_state, 'show_script_gauge', False)
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_script_gauge else "hidden"
+        self.app.logger.info(f"Gauge {status}", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
 
     def _handle_toggle_chapter_list_shortcut(self):

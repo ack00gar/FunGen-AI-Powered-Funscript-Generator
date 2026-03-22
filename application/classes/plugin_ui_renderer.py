@@ -53,6 +53,8 @@ class PluginUIRenderer:
         # Single dropdown button
         if imgui.button(f"Plugins{popup_id}"):
             imgui.open_popup(popup_id)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Apply individual plugins to the timeline")
 
         if imgui.begin_popup(popup_id):
             # Build category -> [plugin_name] mapping
