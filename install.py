@@ -43,10 +43,10 @@ CONFIG = {
     "main_script": "main.py",
     "min_disk_space_gb": 10,
     "requirements_files": {
-        "core": "core.requirements.txt",
-        "cuda": "cuda.requirements.txt", 
-        "cpu": "cpu.requirements.txt",
-        "rocm": "rocm.requirements.txt"
+        "core": "requirements/core.requirements.txt",
+        "cuda": "requirements/cuda.requirements.txt",
+        "cpu": "requirements/cpu.requirements.txt",
+        "rocm": "requirements/rocm.requirements.txt"
     }
 }
 
@@ -1162,9 +1162,9 @@ class FunGenUniversalInstaller:
                 torchvision_version = "0.23.0"
                 torchaudio_version = "2.8.0"
 
-                if req_file == "cuda.requirements.txt":
+                if req_file == "requirements/cuda.requirements.txt":
                     cuda_version = "cu128"
-                elif req_file == "cuda.50series.requirements.txt":
+                elif req_file == "requirements/cuda.50series.requirements.txt":
                     cuda_version = "cu129"
 
                 if cuda_version:

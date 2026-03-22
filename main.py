@@ -164,16 +164,16 @@ def main():
                                   capture_output=True, text=True)
             if result.returncode != 0:
                 logger.warning(f"Failed to install some bootstrap dependencies: {result.stderr}")
-                logger.info("Attempting to install from core.requirements.txt...")
-                result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", "core.requirements.txt"], 
+                logger.info("Attempting to install from requirements/core.requirements.txt...")
+                result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements/core.requirements.txt"], 
                                       capture_output=True, text=True)
                 if result.returncode != 0:
                     logger.error(f"Failed to install core requirements: {result.stderr}")
-                    logger.error("Please manually install the requirements using: pip install -r core.requirements.txt")
+                    logger.error("Please manually install the requirements using: pip install -r requirements/core.requirements.txt")
                     sys.exit(1)
         except Exception as install_error:
             logger.error(f"Failed to install bootstrap dependencies: {install_error}")
-            logger.error("Please manually install the requirements using: pip install -r core.requirements.txt")
+            logger.error("Please manually install the requirements using: pip install -r requirements/core.requirements.txt")
             sys.exit(1)
     
     # Now try to import and run the dependency checker
