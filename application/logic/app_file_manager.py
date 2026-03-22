@@ -7,22 +7,33 @@ import time
 from typing import List, Optional, Dict, Tuple, Any
 
 
-def _sanitize_path_component(name: str) -> str:
-    """Sanitize a path component for use as a directory or file name.
+def _safe_makedirs(path: str, logger=None) -> str:
+    """Create directory, falling back to a sanitized name if the OS rejects it.
 
-    Removes characters that are invalid on Windows (< > : " / \\ | ? *)
-    and strips emoji/control characters that cause path creation failures.
-    Falls back to 'untitled' if nothing remains.
+    Returns the path that was actually created (may differ from input if
+    the original contained characters the OS can't handle).
     """
-    # Keep only ASCII printable characters (safe on all OS)
-    sanitized = ''.join(c for c in name if 32 <= ord(c) < 127 and c not in '<>:"/\\|?*')
-    # Collapse whitespace
-    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
-    # Remove trailing dots/spaces (Windows restriction)
-    sanitized = sanitized.rstrip('. ')
-    if not sanitized:
-        sanitized = "untitled"
-    return sanitized
+    try:
+        os.makedirs(path, exist_ok=True)
+        return path
+    except (OSError, ValueError):
+        # Path has characters the OS can't handle -- sanitize to ASCII
+        parent = os.path.dirname(path)
+        basename = os.path.basename(path)
+        sanitized = ''.join(c for c in basename if 32 <= ord(c) < 127 and c not in '<>:"/\\|?*')
+        sanitized = re.sub(r'\s+', ' ', sanitized).strip().rstrip('. ') or "untitled"
+        fallback = os.path.join(parent, sanitized)
+        try:
+            os.makedirs(fallback, exist_ok=True)
+            if logger:
+                logger.warning(f"Directory name sanitized: '{basename}' -> '{sanitized}'")
+            return fallback
+        except (OSError, ValueError):
+            # Last resort: use parent directory directly
+            os.makedirs(parent, exist_ok=True)
+            if logger:
+                logger.warning(f"Could not create subdirectory, using parent: '{parent}'")
+            return parent
 
 from application.utils import VideoSegment, check_write_access
 from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, APP_NAME, FUNSCRIPT_METADATA_VERSION
@@ -85,18 +96,13 @@ class AppFileManager:
             return f"error_no_video_path{file_suffix}"
 
         output_folder_base = self.app.app_settings.get("output_folder_path", "output")
-        video_basename = _sanitize_path_component(os.path.splitext(os.path.basename(video_path))[0])
-        video_specific_output_dir = os.path.join(output_folder_base, video_basename)
+        video_basename = os.path.splitext(os.path.basename(video_path))[0]
+        video_specific_output_dir = _safe_makedirs(
+            os.path.join(output_folder_base, video_basename), logger=self.logger)
 
-        try:
-            os.makedirs(video_specific_output_dir, exist_ok=True)
-        except Exception as e:
-            self.logger.error(f"Could not create output directory '{video_specific_output_dir}': {e}")
-            video_specific_output_dir = output_folder_base
-            os.makedirs(video_specific_output_dir, exist_ok=True)
-
-        final_filename = video_basename + file_suffix
-        # Ensure the returned path is always absolute
+        # Use the actual directory name as the file basename (may have been sanitized)
+        actual_basename = os.path.basename(video_specific_output_dir)
+        final_filename = actual_basename + file_suffix
         return os.path.abspath(os.path.join(video_specific_output_dir, final_filename))
 
     def _resolve_axis_name_for_timeline(self, timeline_num: int) -> str:
@@ -821,12 +827,10 @@ class AppFileManager:
             initial_filename = f"timeline{timeline_num}{suffix}.funscript"
 
         if self.video_path:
-            video_basename = _sanitize_path_component(os.path.splitext(os.path.basename(self.video_path))[0])
-            initial_path = os.path.join(output_folder_base, video_basename)
-            initial_filename = f"{video_basename}{suffix}.funscript"
-
-        if not os.path.isdir(initial_path):
-            os.makedirs(initial_path, exist_ok=True)
+            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            initial_path = _safe_makedirs(os.path.join(output_folder_base, video_basename), logger=self.logger)
+            actual_basename = os.path.basename(initial_path)
+            initial_filename = f"{actual_basename}{suffix}.funscript"
 
         self.app.gui_instance.file_dialog.show(
             is_save=True,
@@ -869,12 +873,10 @@ class AppFileManager:
         output_folder = self.app.app_settings.get("output_folder_path", "output")
         initial_filename = "heatmap.png"
         if self.video_path:
-            video_basename = _sanitize_path_component(os.path.splitext(os.path.basename(self.video_path))[0])
-            initial_filename = f"{video_basename}_heatmap.png"
-            output_folder = os.path.join(output_folder, video_basename)
-
-        if not os.path.isdir(output_folder):
-            os.makedirs(output_folder, exist_ok=True)
+            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            output_folder = _safe_makedirs(os.path.join(output_folder, video_basename), logger=self.logger)
+            actual_basename = os.path.basename(output_folder)
+            initial_filename = f"{actual_basename}_heatmap.png"
 
         def _do_export(filepath):
             try:
@@ -913,12 +915,10 @@ class AppFileManager:
         initial_filename = "unified.funscript"
 
         if self.video_path:
-            video_basename = _sanitize_path_component(os.path.splitext(os.path.basename(self.video_path))[0])
-            initial_path = os.path.join(output_folder, video_basename)
-            initial_filename = f"{video_basename}.funscript"
-
-        if not os.path.isdir(initial_path):
-            os.makedirs(initial_path, exist_ok=True)
+            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            initial_path = _safe_makedirs(os.path.join(output_folder, video_basename), logger=self.logger)
+            actual_basename = os.path.basename(initial_path)
+            initial_filename = f"{actual_basename}.funscript"
 
         chapters = self.app.funscript_processor.video_chapters if self.app.funscript_processor else None
 
