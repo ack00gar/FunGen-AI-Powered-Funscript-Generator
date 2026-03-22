@@ -331,11 +331,9 @@ class AppStateUI:
 
             script_val_secondary = self.app.processor.tracker.funscript.get_value(current_time_ms, axis='secondary')
             self.gauge_value_t2 = float(script_val_secondary)
-            self.lr_dial_value = float(script_val_secondary)
         else:
             self.gauge_value_t1 = 0.0
             self.gauge_value_t2 = 0.0
-            self.lr_dial_value = 50.0
 
     def update_settings_from_app(self):
         """Called by AppLogic when settings are loaded or project is loaded."""
