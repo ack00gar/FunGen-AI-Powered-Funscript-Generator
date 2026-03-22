@@ -218,6 +218,9 @@ class AdvancedSettingsMixin:
                           ["class_filter"], self._render_class_filtering_content,
                           extra_guard=bool(tracker_inst and getattr(tracker_inst, 'uses_class_detection', False)))
 
+        # Tracker debug panel (only if tracker provides render_debug_ui)
+        self._render_tracker_debug_panel()
+
         imgui.spacing()
 
         # Reset All Settings button
