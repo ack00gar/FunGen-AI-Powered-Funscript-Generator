@@ -324,34 +324,37 @@ class InfoGraphsUI:
 
         elif tab_selected == "performance":
             imgui.spacing()
-            if performance_tab_now_active:
-                self.perf_monitor.render_info(show_detailed=True)
-            imgui.separator()
-
-            with _section_card("Video Pipeline##PipelineTimingSection",
-                               tier="primary") as pipe_open:
-                if pipe_open:
-                    self._render_content_pipeline_timing()
 
             with _section_card("System Monitor##SystemMonitorSection",
                                tier="primary") as sys_open:
                 if sys_open:
                     self._render_content_performance()
 
-            with _section_card("Disk I/O##DiskIOSection", tier="primary",
-                               open_by_default=False) as disk_open:
-                if disk_open:
-                    self._render_disk_io_section()
-
-            with _section_card("UI Performance##UIPerformanceSection", tier="primary",
-                               open_by_default=False) as ui_open:
-                if ui_open:
-                    self._render_content_ui_performance()
-
             with _section_card("System Report##SystemReportSection", tier="primary",
                                open_by_default=False) as report_open:
                 if report_open:
                     self._render_system_report_section()
+
+            # Developer details (behind Show Advanced Options)
+            if self.app.app_state_ui.show_advanced_options:
+                if performance_tab_now_active:
+                    self.perf_monitor.render_info(show_detailed=True)
+                    imgui.separator()
+
+                with _section_card("Video Pipeline##PipelineTimingSection",
+                                   tier="primary", open_by_default=False) as pipe_open:
+                    if pipe_open:
+                        self._render_content_pipeline_timing()
+
+                with _section_card("Disk I/O##DiskIOSection", tier="primary",
+                                   open_by_default=False) as disk_open:
+                    if disk_open:
+                        self._render_disk_io_section()
+
+                with _section_card("UI Performance##UIPerformanceSection", tier="primary",
+                                   open_by_default=False) as ui_open:
+                    if ui_open:
+                        self._render_content_ui_performance()
 
         # Always check memory alerts
         if hasattr(self, "system_monitor"):
@@ -757,74 +760,6 @@ class InfoGraphsUI:
                     processor.vr_pitch = new_pitch
                     self.last_pitch_value = new_pitch
                     self._schedule_video_render(new_pitch)
-
-        # Navigation Buffer Settings (collapsed by default)
-        imgui.separator()
-        if imgui.collapsing_header("Navigation Buffer##NavBufferSection")[0]:
-            # Get current buffer size from settings (default 600)
-            DEFAULT_BUFFER_SIZE = 600
-            current_buffer_size = self.app.app_settings.get('arrow_nav_buffer_size', DEFAULT_BUFFER_SIZE)
-
-            # Buffer size slider (100-2000 frames)
-            changed_buffer, new_buffer_size = imgui.slider_int(
-                "Buffer Size (frames)##navBuffer",
-                current_buffer_size,
-                100,  # min
-                2000,  # max
-            )
-
-            if changed_buffer:
-                self.app.app_settings.set('arrow_nav_buffer_size', new_buffer_size)
-                if hasattr(self.app, 'project_manager') and self.app.project_manager:
-                    self.app.project_manager.project_dirty = True
-
-                # Log the change
-                self.app.logger.info(
-                    f"Navigation buffer size set to {new_buffer_size} frames. "
-                    "Restart video playback to apply changes.",
-                    extra={'status_message': True, 'duration': 5.0}
-                )
-
-            # Reset to default button (in red) - on its own line for better visibility
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 1.0, 0.3, 0.3, 1.0)  # Lighter red on hover
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.1, 0.1, 1.0)  # Darker red when clicked
-            if imgui.button("Reset to Default##resetNavBuffer"):
-                self.app.app_settings.set('arrow_nav_buffer_size', DEFAULT_BUFFER_SIZE)
-                if hasattr(self.app, 'project_manager') and self.app.project_manager:
-                    self.app.project_manager.project_dirty = True
-                self.app.logger.info(
-                    f"Navigation buffer size reset to default ({DEFAULT_BUFFER_SIZE} frames).",
-                    extra={'status_message': True}
-                )
-            imgui.pop_style_color(3)
-
-            # RAM estimate
-            if processor and hasattr(processor, 'frame_size_bytes'):
-                buffer_size_to_display = new_buffer_size if changed_buffer else current_buffer_size
-                ram_bytes = buffer_size_to_display * processor.frame_size_bytes
-                ram_mb = ram_bytes / (1024 * 1024)
-
-                # Color code based on RAM usage
-                if ram_mb < 500:
-                    ram_color = (0.2, 0.8, 0.2, 1.0)  # Green
-                elif ram_mb < 1000:
-                    ram_color = (1.0, 0.8, 0.2, 1.0)  # Yellow
-                else:
-                    ram_color = (1.0, 0.4, 0.2, 1.0)  # Orange/Red
-
-                imgui.text("Estimated RAM usage: ")
-                imgui.same_line()
-                imgui.text_colored(f"{ram_mb:.1f} MB", *ram_color)
-
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        f"Buffer Size: {buffer_size_to_display} frames\n"
-                        f"Frame Size: {processor.frame_size_bytes / (1024 * 1024):.2f} MB\n"
-                        f"Total RAM: {ram_mb:.1f} MB\n\n"
-                        "This buffer is used for backward arrow navigation.\n"
-                        "Larger buffers allow scrolling further back but use more RAM."
-                    )
 
         self.video_settings_perf.end_timing()
 

@@ -119,11 +119,7 @@ class ShortcutHandlerMixin:
             pass
         elif check_and_run_shortcut("toggle_timeline2", self._handle_toggle_timeline2_shortcut):
             pass
-        elif check_and_run_shortcut("toggle_gauge_window", self._handle_toggle_gauge_window_shortcut):
-            pass
         elif check_and_run_shortcut("toggle_3d_simulator", self._handle_toggle_3d_simulator_shortcut):
-            pass
-        elif check_and_run_shortcut("toggle_movement_bar", self._handle_toggle_movement_bar_shortcut):
             pass
         elif check_and_run_shortcut("toggle_chapter_list", self._handle_toggle_chapter_list_shortcut):
             pass
@@ -653,19 +649,6 @@ class ShortcutHandlerMixin:
         self.app.logger.info(f"Timeline 2 {status}", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
 
-    def _handle_toggle_gauge_window_shortcut(self):
-        """Handle keyboard shortcut for toggling gauge window (G)"""
-        app_state = self.app.app_state_ui
-        # Toggle gauge window for timeline 1
-        if not hasattr(app_state, 'show_gauge_window_timeline1'):
-            app_state.show_gauge_window_timeline1 = False
-        app_state.show_gauge_window_timeline1 = not app_state.show_gauge_window_timeline1
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_gauge_window_timeline1 else "hidden"
-        self.app.logger.info(f"Gauge window {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
     def _handle_toggle_3d_simulator_shortcut(self):
         """Handle keyboard shortcut for toggling 3D simulator (S)"""
         app_state = self.app.app_state_ui
@@ -674,16 +657,6 @@ class ShortcutHandlerMixin:
             self.app.project_manager.project_dirty = True
         status = "shown" if app_state.show_simulator_3d else "hidden"
         self.app.logger.info(f"3D Simulator {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_movement_bar_shortcut(self):
-        """Handle keyboard shortcut for toggling movement bar (M)"""
-        app_state = self.app.app_state_ui
-        app_state.show_lr_dial_graph = not app_state.show_lr_dial_graph
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_lr_dial_graph else "hidden"
-        self.app.logger.info(f"Movement Bar {status}", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
 
     def _handle_toggle_chapter_list_shortcut(self):

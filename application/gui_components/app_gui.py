@@ -13,7 +13,7 @@ from typing import List, Dict
 from collections import deque
 
 from config import constants, element_group_colors
-from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
+from application.classes import ImGuiFileDialog, InteractiveFunscriptTimeline, MainMenu, Simulator3DWindow
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
 from application.gui_components.bookmark_list_window import BookmarkListWindow
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority, get_icon_texture_manager
@@ -105,9 +105,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.file_dialog = ImGuiFileDialog(app_logic_instance=app)
         self.main_menu = MainMenu(app, gui_instance=self)
         self.toolbar_ui = ToolbarUI(app)
-        self.gauge_window_ui_t1 = GaugeWindow(app, timeline_num=1)
-        self.gauge_window_ui_t2 = GaugeWindow(app, timeline_num=2)
-        self.movement_bar_ui = LRDialWindow(app)  # Movement Bar (backward compatible name)
         self.simulator_3d_window_ui = Simulator3DWindow(app)
 
         self.timeline_editor1 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=1)

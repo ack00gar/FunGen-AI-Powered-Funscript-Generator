@@ -481,7 +481,7 @@ class MainMenu:
             if imgui.begin_menu("Export..."):
                 if _menu_item_simple("Multi-Axis Funscript (Single File)..."):
                     fm.export_unified_funscript()
-                if _menu_item_simple("All Axis Files (OFS naming)", enabled=has_video):
+                if _menu_item_simple("All Axis Files (OFS naming)...", enabled=has_video):
                     fm.export_all_axes_ofs()
                 imgui.separator()
                 if _menu_item_simple(f"Funscript from {self._tl_label(1)}..."):
@@ -556,6 +556,11 @@ class MainMenu:
                                selected=False, enabled=bool(has_actions))[0]:
                 if tl:
                     tl.multi_selected_action_indices = set(range(len(tl._get_actions())))
+            if imgui.menu_item("Deselect All", self._get_shortcut_display("deselect_all_points"),
+                               selected=False, enabled=bool(has_sel))[0]:
+                if tl:
+                    tl.multi_selected_action_indices.clear()
+                    tl.selected_action_idx = -1
             if imgui.menu_item("Delete Selected", self._get_shortcut_display("delete_selected_point"),
                                selected=False, enabled=bool(has_sel))[0]:
                 if tl:
@@ -586,9 +591,13 @@ class MainMenu:
         can_undo = mgr.can_undo() if mgr else False
         can_redo = mgr.can_redo() if mgr else False
         tl_lbl = self._tl_label(tl_num)
-        if imgui.menu_item(f"Undo {tl_lbl}", selected=False, enabled=can_undo)[0]:
+        undo_key = "undo_timeline1" if tl_num == 1 else f"undo_timeline{tl_num}"
+        redo_key = "redo_timeline1" if tl_num == 1 else f"redo_timeline{tl_num}"
+        if imgui.menu_item(f"Undo {tl_lbl}", self._get_shortcut_display(undo_key),
+                           selected=False, enabled=can_undo)[0]:
             fs_proc.perform_undo_redo(tl_num, "undo")
-        if imgui.menu_item(f"Redo {tl_lbl}", selected=False, enabled=can_redo)[0]:
+        if imgui.menu_item(f"Redo {tl_lbl}", self._get_shortcut_display(redo_key),
+                           selected=False, enabled=can_redo)[0]:
             fs_proc.perform_undo_redo(tl_num, "redo")
 
     def _render_view_menu(self, app_state, stage_proc):
@@ -639,19 +648,56 @@ class MainMenu:
 
             imgui.separator()
 
-            # Gauges submenu
-            self._render_gauges_submenu(app_state)
+            # --- Display toggles ---
+            pm = self.app.project_manager
+            settings = self.app.app_settings
 
-            # Navigation submenu
-            self._render_navigation_submenu(app_state)
-
-            # Timelines submenu
-            self._render_timelines_submenu(app_state)
+            for label, attr, sc_key in (
+                ("Funscript Preview", "show_funscript_timeline", "toggle_funscript_preview"),
+                ("Heatmap", "show_heatmap", "toggle_heatmap"),
+                ("Audio Waveform", None, "toggle_waveform"),
+                ("3D Simulator", "show_simulator_3d", "toggle_3d_simulator"),
+            ):
+                if attr:
+                    cur = getattr(app_state, attr)
+                    clicked, val = imgui.menu_item(label, self._get_shortcut_display(sc_key), selected=cur)
+                    if clicked:
+                        setattr(app_state, attr, val)
+                        pm.project_dirty = True
+                else:
+                    # Audio waveform has special toggle
+                    clicked, _ = imgui.menu_item(label, self._get_shortcut_display(sc_key),
+                                                 selected=app_state.show_audio_waveform)
+                    if clicked:
+                        self.app.toggle_waveform_visibility()
+                        pm.project_dirty = True
 
             imgui.separator()
 
-            # Video Overlays submenu
+            # Timeline visibility
+            self._render_timelines_submenu(app_state)
+
+            # Video Overlays
             self._render_video_overlays_submenu(app_state, stage_proc)
+
+            imgui.separator()
+
+            # Preview options
+            enhanced_preview = settings.get("enable_enhanced_funscript_preview", True)
+            clicked, new_val = imgui.menu_item("Hover Zoom Preview", selected=enhanced_preview)
+            if clicked and new_val != enhanced_preview:
+                settings.set("enable_enhanced_funscript_preview", new_val)
+
+            use_simplified = settings.get("use_simplified_funscript_preview", False)
+            clicked, new_val = imgui.menu_item("Low-Detail Preview (faster)", selected=use_simplified)
+            if clicked and new_val != use_simplified:
+                settings.set("use_simplified_funscript_preview", new_val)
+                app_state.funscript_preview_dirty = True
+
+            if imgui.menu_item("Reset Timeline View", self._get_shortcut_display("reset_timeline_view"))[0]:
+                app_state.timeline_zoom_factor_ms_per_px = settings.get_default_settings().get(
+                    "timeline_zoom_factor_ms_per_px", 1.0)
+                app_state.timeline_pan_offset_ms = 0.0
 
             imgui.separator()
 
@@ -730,56 +776,6 @@ class MainMenu:
         if imgui.is_item_hovered() and not is_floating:
             imgui.set_tooltip("Window toggles are for floating mode.")
 
-    def _render_navigation_submenu(self, app_state):
-        app = self.app
-        pm = app.project_manager
-        settings = app.app_settings
-
-        if imgui.begin_menu("Navigation"):
-            # Preview displays
-            for label, attr in (
-                ("Funscript Preview Bar", "show_funscript_timeline"),
-                ("Heatmap", "show_heatmap"),
-            ):
-                cur = getattr(app_state, attr)
-                clicked, val = imgui.menu_item(label, selected=cur)
-                if clicked:
-                    setattr(app_state, attr, val)
-                    pm.project_dirty = True
-
-            imgui.separator()
-
-            # Preview options
-            enhanced_preview = settings.get("enable_enhanced_funscript_preview", True)
-            clicked, new_val = imgui.menu_item(
-                "Hover Zoom Preview", selected=enhanced_preview
-            )
-            if clicked and new_val != enhanced_preview:
-                settings.set("enable_enhanced_funscript_preview", new_val)
-
-            use_simplified = settings.get("use_simplified_funscript_preview", False)
-            clicked, new_val = imgui.menu_item(
-                "Low-Detail Preview (faster)", selected=use_simplified
-            )
-            if clicked and new_val != use_simplified:
-                settings.set("use_simplified_funscript_preview", new_val)
-                app.app_state_ui.funscript_preview_dirty = True
-
-            imgui.separator()
-
-            # Full Width Navigation
-            if not hasattr(app_state, 'full_width_nav'):
-                app_state.full_width_nav = False
-            clicked, val = imgui.menu_item(
-                "Full Width Navigation",
-                selected=app_state.full_width_nav
-            )
-            if clicked:
-                app_state.full_width_nav = val
-                pm.project_dirty = True
-
-            imgui.end_menu()
-
     def _render_timelines_submenu(self, app_state):
         app = self.app
         pm = app.project_manager
@@ -793,14 +789,15 @@ class MainMenu:
                 return ""
 
             # Interactive editors
-            for t_num, attr in (
-                (1, "show_funscript_interactive_timeline"),
-                (2, "show_funscript_interactive_timeline2"),
+            for t_num, attr, sc_key in (
+                (1, "show_funscript_interactive_timeline", None),
+                (2, "show_funscript_interactive_timeline2", "toggle_timeline2"),
             ):
                 axis_label = _axis_label_for(t_num)
                 label = f"Timeline {t_num} ({axis_label})" if axis_label else f"Interactive Timeline {t_num}"
                 cur = getattr(app_state, attr)
-                clicked, val = imgui.menu_item(label, selected=cur)
+                hint = self._get_shortcut_display(sc_key) if sc_key else ""
+                clicked, val = imgui.menu_item(label, hint, selected=cur)
                 if clicked:
                     setattr(app_state, attr, val)
                     pm.project_dirty = True
@@ -817,51 +814,6 @@ class MainMenu:
                         setattr(app_state, vis_attr, val)
                         pm.project_dirty = True
 
-            imgui.separator()
-
-            # Audio waveform (moved from Windows submenu)
-            clicked, _ = imgui.menu_item(
-                "Audio Waveform", selected=app_state.show_audio_waveform
-            )
-            if clicked:
-                self.app.toggle_waveform_visibility()
-                pm.project_dirty = True
-
-            imgui.end_menu()
-
-    def _render_gauges_submenu(self, app_state):
-        """Renamed from _render_windows_submenu - displays gauges and visualizations."""
-        pm = self.app.project_manager
-        if imgui.begin_menu("Gauges"):
-            # Script gauges
-            for label, attr in (
-                (f"Script Gauge ({self._tl_label(1)})", "show_gauge_window_timeline1"),
-                (f"Script Gauge ({self._tl_label(2)})", "show_gauge_window_timeline2"),
-            ):
-                cur = getattr(app_state, attr)
-                clicked, val = imgui.menu_item(label, selected=cur)
-                if clicked:
-                    setattr(app_state, attr, val)
-                    pm.project_dirty = True
-
-            imgui.separator()
-
-            # Movement bar
-            clicked, val = imgui.menu_item(
-                "Movement Bar", selected=app_state.show_lr_dial_graph
-            )
-            if clicked:
-                app_state.show_lr_dial_graph = val
-                pm.project_dirty = True
-
-            # 3D Simulator
-            clicked, val = imgui.menu_item(
-                "3D Simulator", selected=app_state.show_simulator_3d
-            )
-            if clicked:
-                app_state.show_simulator_3d = val
-                pm.project_dirty = True
-
             imgui.end_menu()
 
     def _render_markers_menu(self, app_state):
@@ -872,8 +824,11 @@ class MainMenu:
         fs_proc = app.funscript_processor
 
         if imgui.begin_menu("Markers", True):
+            has_video = fm.video_path is not None
+            has_chapters = has_video and len(fs_proc.video_chapters) > 0
+
             # --- Bookmarks ---
-            if imgui.menu_item("Add Bookmark", "B")[0]:
+            if imgui.menu_item("Add Bookmark", self._get_shortcut_display("add_bookmark"))[0]:
                 self._add_bookmark_at_playhead()
 
             if not hasattr(app_state, 'show_bookmark_list_window'):
@@ -884,16 +839,14 @@ class MainMenu:
             if clicked:
                 app_state.show_bookmark_list_window = val
 
-            if imgui.begin_menu("Go to Bookmark"):
-                bm_mgr = self._get_active_bookmark_manager()
-                if bm_mgr and bm_mgr.bookmarks:
-                    for bm in bm_mgr.bookmarks:
-                        time_str = self._format_bookmark_time(bm.time_ms)
-                        label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}"
-                        if imgui.menu_item(label)[0]:
-                            self._seek_to_bookmark(bm.time_ms)
-                else:
-                    imgui.menu_item("(no bookmarks)", enabled=False)
+            bm_mgr = self._get_active_bookmark_manager()
+            has_bookmarks = bm_mgr and bm_mgr.bookmarks
+            if imgui.begin_menu("Go to Bookmark", enabled=bool(has_bookmarks)):
+                for bm in bm_mgr.bookmarks:
+                    time_str = self._format_bookmark_time(bm.time_ms)
+                    label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}"
+                    if imgui.menu_item(label)[0]:
+                        self._seek_to_bookmark(bm.time_ms)
                 imgui.end_menu()
 
             imgui.separator()
@@ -939,13 +892,13 @@ class MainMenu:
                                enabled=video_loaded)[0]:
                 if self.gui and hasattr(self.gui, '_handle_set_chapter_end_shortcut'):
                     self.gui._handle_set_chapter_end_shortcut()
+            if imgui.menu_item("Select Points in Chapter", self._get_shortcut_display("select_points_in_chapter"),
+                               enabled=has_chapters)[0]:
+                pass  # Handled by timeline shortcut handler when focused
 
             imgui.separator()
 
             # --- Chapters I/O ---
-            has_video = fm.video_path is not None
-            has_chapters = has_video and len(fs_proc.video_chapters) > 0
-
             if _menu_item_simple("Save Chapters...", enabled=has_chapters):
                 if self.app.gui_instance and self.app.gui_instance.file_dialog and has_chapters:
                     chapter_mgr = self.app.chapter_manager
@@ -1009,7 +962,8 @@ class MainMenu:
         if imgui.begin_menu("Video Overlays"):
             # Video feed toggle
             clicked, val = imgui.menu_item(
-                "Show Video Feed", selected=app_state.show_video_feed
+                "Show Video Feed", self._get_shortcut_display("toggle_video_feed"),
+                selected=app_state.show_video_feed
             )
             if clicked:
                 app_state.show_video_feed = val
@@ -1048,26 +1002,9 @@ class MainMenu:
 
             imgui.separator()
 
-            # Overlay modes (render widgets on video instead of separate windows)
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
-            imgui.text("Show on Video:")
-            imgui.pop_style_color()
+            # Overlay mode for 3D Simulator
             clicked, val = imgui.menu_item(
-                "Gauges",
-                selected=app.app_settings.get('gauge_overlay_mode', False)
-            )
-            if clicked:
-                app.app_settings.set('gauge_overlay_mode', val)
-
-            clicked, val = imgui.menu_item(
-                "Movement Bar",
-                selected=app.app_settings.get('movement_bar_overlay_mode', False)
-            )
-            if clicked:
-                app.app_settings.set('movement_bar_overlay_mode', val)
-
-            clicked, val = imgui.menu_item(
-                "3D Simulator",
+                "3D Simulator on Video",
                 selected=app.app_settings.get('simulator_3d_overlay_mode', False)
             )
             if clicked:

@@ -142,9 +142,7 @@ DEFAULT_SHORTCUTS = {
     # Window Toggles
     "toggle_video_display": "V",
     "toggle_timeline2": "T",
-    "toggle_gauge_window": "G",
     "toggle_3d_simulator": "S",
-    "toggle_movement_bar": "M",
     "toggle_chapter_list": "L",
     "toggle_heatmap": "H",
     "toggle_funscript_preview": "P",
