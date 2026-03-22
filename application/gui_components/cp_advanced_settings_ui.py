@@ -209,9 +209,8 @@ class AdvancedSettingsMixin:
         _filtered_section("Analysis##AdvancedAnalysis",
                           ["analysis"], self._render_analysis_developer_settings)
 
-        _filtered_section("Live Tracker Settings##AdvancedLiveTracker",
-                          ["live_tracker", "oscillation"], self._render_tracker_dynamic_settings,
-                          extra_guard=self._is_live_tracker(tmode))
+        _filtered_section("Tracker Settings##AdvancedTrackerSettings",
+                          ["live_tracker", "oscillation", "tracker"], self._render_tracker_dynamic_settings)
 
         tracker_inst = self._get_current_tracker_instance()
         _filtered_section("Class Filtering##AdvancedClassFilter",
