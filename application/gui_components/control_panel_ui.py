@@ -1108,14 +1108,41 @@ class ControlPanelUI(
         total_h = y - cursor.y
         imgui.dummy(avail_w, total_h + 4)
 
-        # Edit pipeline button
-        if pipeline and pipeline.steps:
-            step_count = sum(1 for s in pipeline.steps if s.enabled)
-            btn_label = f"Edit Pipeline ({step_count} steps)"
-        else:
-            btn_label = "Configure Pipeline..."
-        if imgui.button(btn_label, width=-1):
+        # Action buttons row: Edit | Preview | Apply
+        has_steps = pipeline and any(s.enabled for s in pipeline.steps)
+        btn_w = (avail_w - imgui.get_style().item_spacing[0] * 2) / 3
+
+        if imgui.button("Edit##PostAnalysis", width=btn_w):
             app_state.show_plugin_pipeline = True
         if imgui.is_item_hovered():
-            imgui.set_tooltip("Open the Plugin Pipeline builder to add/edit processing steps")
+            imgui.set_tooltip("Open the Plugin Pipeline builder")
+
+        imgui.same_line()
+
+        if not has_steps:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.4)
+        if imgui.button("Preview##PostAnalysis", width=btn_w) and has_steps:
+            pipeline_ui = gui.plugin_pipeline_ui if gui else None
+            if pipeline_ui:
+                pipeline_ui._preview_pipeline()
+        if not has_steps:
+            imgui.pop_style_var()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Preview the pipeline result on the timeline" if has_steps
+                              else "Add steps to the pipeline first")
+
+        imgui.same_line()
+
+        if not has_steps:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.4)
+        if imgui.button("Apply##PostAnalysis", width=btn_w) and has_steps:
+            pipeline_ui = gui.plugin_pipeline_ui if gui else None
+            if pipeline_ui:
+                pipeline_ui._clear_preview()
+                pipeline_ui._apply_pipeline()
+        if not has_steps:
+            imgui.pop_style_var()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Apply the pipeline to the funscript (Ctrl+Z to undo)" if has_steps
+                              else "Add steps to the pipeline first")
 
