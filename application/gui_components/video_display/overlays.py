@@ -480,41 +480,18 @@ class VideoOverlaysMixin:
     
 
     def _render_component_overlays(self, app_state):
-        """Render component overlays (gauges, movement bar, 3D simulator) on video display."""
-        # Check if any overlay modes are enabled
-        gauge_overlay = self.app.app_settings.get('gauge_overlay_mode', False)
-        movement_bar_overlay = self.app.app_settings.get('movement_bar_overlay_mode', False)
+        """Render 3D simulator overlay on video display."""
         simulator_3d_overlay = self.app.app_settings.get('simulator_3d_overlay_mode', False)
-
-        if not (gauge_overlay or movement_bar_overlay or simulator_3d_overlay):
+        if not simulator_3d_overlay or not app_state.show_simulator_3d:
             return
 
-        # Get video display rect for positioning
         img_rect = self._actual_video_image_rect_on_screen
         if not img_rect:
             return
 
-        video_min_x = img_rect['min_x']
-        video_min_y = img_rect['min_y']
-        video_max_x = img_rect['max_x']
-        video_max_y = img_rect['max_y']
-        video_width = video_max_x - video_min_x
-        video_height = video_max_y - video_min_y
-
-        # Render gauges overlay (bottom-left and bottom-center)
-        if gauge_overlay:
-            if app_state.show_gauge_window_timeline1:
-                self._render_gauge_overlay(app_state, "timeline1", video_min_x, video_min_y, video_max_x, video_max_y)
-            if app_state.show_gauge_window_timeline2:
-                self._render_gauge_overlay(app_state, "timeline2", video_min_x, video_min_y, video_max_x, video_max_y)
-
-        # Render movement bar overlay (bottom-right)
-        if movement_bar_overlay and app_state.show_lr_dial_graph:
-            self._render_movement_bar_overlay(app_state, video_min_x, video_min_y, video_max_x, video_max_y)
-
-        # Render 3D simulator overlay (top-left)
-        if simulator_3d_overlay and app_state.show_simulator_3d:
-            self._render_simulator_3d_overlay(app_state, video_min_x, video_min_y, video_max_x, video_max_y)
+        self._render_simulator_3d_overlay(
+            app_state, img_rect['min_x'], img_rect['min_y'],
+            img_rect['max_x'], img_rect['max_y'])
 
 
     def _render_movement_bar_overlay(self, app_state, video_min_x, video_min_y, video_max_x, video_max_y):

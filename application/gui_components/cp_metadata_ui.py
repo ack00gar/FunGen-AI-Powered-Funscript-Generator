@@ -38,10 +38,22 @@ class MetadataEditorMixin:
             )
             imgui.spacing()
 
-            # Auto-populate creator with FunGen if empty
-            if not metadata.get("creator"):
+            # Auto-populate from video filename if fields are empty
+            if not metadata.get("creator") or not metadata.get("title"):
+                import os
                 from config.constants import APP_NAME, APP_VERSION
-                metadata["creator"] = f"{APP_NAME} v{APP_VERSION}"
+                if not metadata.get("creator"):
+                    metadata["creator"] = f"{APP_NAME} v{APP_VERSION}"
+                if not metadata.get("title"):
+                    video_path = getattr(self.app, 'file_manager', None)
+                    video_path = video_path.video_path if video_path else None
+                    if video_path:
+                        basename = os.path.splitext(os.path.basename(video_path))[0]
+                        # Clean up: replace separators with spaces, strip leading numbers/IDs
+                        title = basename.replace('_', ' ').replace('.', ' ').replace('-', ' ')
+                        # Collapse multiple spaces
+                        title = ' '.join(title.split())
+                        metadata["title"] = title
                 self._set_project_metadata(metadata)
 
             changed = False
