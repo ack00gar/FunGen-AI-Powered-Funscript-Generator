@@ -6,16 +6,6 @@ This provides a structured way to manage colors for different UI elements.
 from config.constants_colors import CurrentTheme, RGBColors
 
 
-class GaugeColors:
-    """Color constants for gauge components."""
-    BACKGROUND = CurrentTheme.GAUGE_BG
-    BORDER = CurrentTheme.GAUGE_BORDER
-    BAR_RED = CurrentTheme.GAUGE_BAR_RED
-    BAR_GREEN = CurrentTheme.GAUGE_BAR_GREEN
-    TEXT = CurrentTheme.GAUGE_TEXT
-    VALUE_TEXT = CurrentTheme.GAUGE_VALUE_TEXT
-
-
 class TimelineColors:
     """Color constants for interactive timeline components."""
     CANVAS_BACKGROUND = CurrentTheme.TIMELINE_CANVAS_BG
@@ -54,17 +44,6 @@ class CompilerToolColors:
     STARTING = CurrentTheme.COMPILER_STARTING
     STOPPING = CurrentTheme.COMPILER_STOPPING
     OUTPUT_TEXT = CurrentTheme.COMPILER_OUTPUT_TEXT
-
-
-class LRDialColors:
-    """Color constants for LR dial components."""
-    BACKGROUND = CurrentTheme.LR_DIAL_BACKGROUND
-    BORDER = CurrentTheme.LR_DIAL_BORDER
-    LEFT_LABEL = CurrentTheme.LR_DIAL_LEFT_LABEL
-    RIGHT_LABEL = CurrentTheme.LR_DIAL_RIGHT_LABEL
-    INDICATOR_LINE = CurrentTheme.LR_DIAL_INDICATOR_LINE
-    INDICATOR_TIP = CurrentTheme.LR_DIAL_INDICATOR_TIP
-    VALUE_TEXT = CurrentTheme.LR_DIAL_VALUE_TEXT
 
 
 class VideoDisplayColors:
