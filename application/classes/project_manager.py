@@ -320,12 +320,8 @@ class ProjectManager:
             "timeline_zoom_factor_ms_per_px": self.app.app_state_ui.timeline_zoom_factor_ms_per_px,
             "show_funscript_interactive_timeline": self.app.app_state_ui.show_funscript_interactive_timeline,
             "show_funscript_interactive_timeline2": self.app.app_state_ui.show_funscript_interactive_timeline2,
-            "show_lr_dial_graph": self.app.app_state_ui.show_lr_dial_graph,
             "show_simulator_3d": self.app.app_state_ui.show_simulator_3d,
             "show_heatmap": self.app.app_state_ui.show_heatmap,
-            "show_gauge_window_timeline1": getattr(self.app.app_state_ui, 'show_gauge_window_timeline1', True),
-        "show_gauge_window_timeline2": getattr(self.app.app_state_ui, 'show_gauge_window_timeline2', False),
-
             "show_stage2_overlay": self.app.app_state_ui.show_stage2_overlay,
             "show_audio_waveform": self.app.app_state_ui.show_audio_waveform,
             # Note: Window positions/sizes are saved in app_settings, not project file.
@@ -442,11 +438,8 @@ class ProjectManager:
         app_state.timeline_zoom_factor_ms_per_px = project_data.get("timeline_zoom_factor_ms_per_px", self.app.app_settings.get("timeline_zoom_factor_ms_per_px", 20.0))
         app_state.show_funscript_interactive_timeline = project_data.get("show_funscript_interactive_timeline", self.app.app_settings.get("show_funscript_interactive_timeline",True))
         app_state.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2", self.app.app_settings.get("show_funscript_interactive_timeline2", False))
-        app_state.show_lr_dial_graph = project_data.get("show_lr_dial_graph", self.app.app_settings.get("show_lr_dial_graph", True))
         app_state.show_simulator_3d = project_data.get("show_simulator_3d", self.app.app_settings.get("show_simulator_3d", False))
         app_state.show_heatmap = project_data.get("show_heatmap", self.app.app_settings.get("show_heatmap", True))
-        app_state.show_gauge_window_timeline1 = project_data.get("show_gauge_window_timeline1", self.app.app_settings.get("show_gauge_window_timeline1", True))
-        app_state.show_gauge_window_timeline2 = project_data.get("show_gauge_window_timeline2", self.app.app_settings.get("show_gauge_window_timeline2", False))
         app_state.show_stage2_overlay = project_data.get("show_stage2_overlay", self.app.app_settings.get("show_stage2_overlay", True))
         app_state.show_audio_waveform = project_data.get("show_audio_waveform", self.app.app_settings.get("show_audio_waveform", True))
         # Data for Audio Waveform
