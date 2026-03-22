@@ -13,7 +13,7 @@ from typing import List, Dict
 from collections import deque
 
 from config import constants, element_group_colors
-from application.classes import ImGuiFileDialog, InteractiveFunscriptTimeline, MainMenu, Simulator3DWindow
+from application.classes import ImGuiFileDialog, InteractiveFunscriptTimeline, MainMenu, Simulator3DWindow, ScriptGaugeWindow
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
 from application.gui_components.bookmark_list_window import BookmarkListWindow
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority, get_icon_texture_manager
@@ -23,6 +23,7 @@ from application.utils.timeline_modes import TimelineMode
 from application.gui_components.gui_preview_manager import PreviewManagerMixin
 from application.gui_components.gui_shortcut_handler import ShortcutHandlerMixin
 from application.gui_components.gui_dialog_renderer import DialogRendererMixin
+from application.gui_components.plugin_pipeline_ui import PluginPipelineUI
 from application.utils.notifications import NotificationManager
 from application.gui_components.first_run_wizard import FirstRunWizard
 
@@ -106,6 +107,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.main_menu = MainMenu(app, gui_instance=self)
         self.toolbar_ui = ToolbarUI(app)
         self.simulator_3d_window_ui = Simulator3DWindow(app)
+        self.script_gauge_ui = ScriptGaugeWindow(app)
+        self.plugin_pipeline_ui = PluginPipelineUI(app)
 
         self.timeline_editor1 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=1)
         self.timeline_editor2 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=2)
@@ -136,7 +139,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
         self.batch_overwrite_mode_ui = 0  # 0: Process All, 1: Skip Existing
-        self.batch_apply_post_processing_ui = True
         self.batch_copy_funscript_to_video_location_ui = True
         self.batch_generate_roll_file_ui = True
         self.batch_apply_ultimate_autotune_ui = True

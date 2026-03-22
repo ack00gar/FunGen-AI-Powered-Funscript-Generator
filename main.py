@@ -261,6 +261,7 @@ def main():
     parser.add_argument('--recursive', '-r', action='store_true', help='If input_path is a folder, process it recursively.')
     parser.add_argument('--hwaccel', metavar='METHOD', default=None, help='Override hardware acceleration method for this run (e.g. cuda, qsv, auto, none).')
     parser.add_argument('--watch', metavar='FOLDER', help='Watch folder for new videos (requires patreon_features add-on).')
+    parser.add_argument('--pipeline', metavar='PRESET', default=None, help='Apply a plugin pipeline preset after generation (e.g. "Ultimate Autotune", "Light Polish").')
 
     args = parser.parse_args()
 

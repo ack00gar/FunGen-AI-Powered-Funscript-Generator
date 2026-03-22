@@ -73,6 +73,7 @@ class KeyboardShortcutsDialog:
                 ("toggle_video_display", "Toggle Video Display"),
                 ("toggle_timeline2", "Toggle Timeline 2"),
                 ("toggle_3d_simulator", "Toggle 3D Simulator"),
+                ("toggle_script_gauge", "Toggle Gauge"),
                 ("toggle_chapter_list", "Toggle Chapter List"),
             ],
             "Timeline Displays": [

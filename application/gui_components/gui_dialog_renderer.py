@@ -315,6 +315,12 @@ class DialogRendererMixin:
         if getattr(app_state, 'show_simulator_3d', False) and not self.app.app_settings.get('simulator_3d_overlay_mode', False):
             self.simulator_3d_window_ui.render()
 
+        if getattr(app_state, 'show_script_gauge', False):
+            self.script_gauge_ui.render()
+
+        if getattr(app_state, 'show_plugin_pipeline', False):
+            self.plugin_pipeline_ui.render()
+
         # Batch confirmation dialog (has internal visibility check)
         self._render_batch_confirmation_dialog()
 

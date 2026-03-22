@@ -657,6 +657,7 @@ class MainMenu:
                 ("Heatmap", "show_heatmap", "toggle_heatmap"),
                 ("Audio Waveform", None, "toggle_waveform"),
                 ("3D Simulator", "show_simulator_3d", "toggle_3d_simulator"),
+                ("Gauge", "show_script_gauge", "toggle_script_gauge"),
             ):
                 if attr:
                     cur = getattr(app_state, attr)

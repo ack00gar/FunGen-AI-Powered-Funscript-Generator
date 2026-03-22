@@ -979,6 +979,12 @@ class ControlPanelUI(
                 if open_:
                     self._render_range_selection(stage_proc, fs_proc, events)
 
+        # Post-Analysis section
+        with section_card("Post-Analysis##RunControlPostAnalysis",
+                          tier="primary", open_by_default=False) as pa_open:
+            if pa_open:
+                self._render_post_analysis_section(app, app_state)
+
         chapters = getattr(app.funscript_processor, "video_chapters", [])
         if chapters:
             with section_card("Chapters##RunChapters", tier="primary") as is_open:
@@ -1007,5 +1013,109 @@ class ControlPanelUI(
                             imgui.close_current_popup()
                         imgui.end_popup()
 
+    def _render_post_analysis_section(self, app, app_state):
+        """Render the Post-Analysis section: auto-apply toggle + pipeline flow visualization."""
+        settings = app.app_settings
 
+        # --- Auto-apply checkbox ---
+        auto_on = settings.get("auto_apply_post_processing", True)
+        changed, auto_on = imgui.checkbox("Auto-apply post-processing", auto_on)
+        if changed:
+            settings.set("auto_apply_post_processing", auto_on)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Automatically run the pipeline below after analysis completes.\n"
+                "Full video: applies to entire result.\n"
+                "Range analysis: applies to analyzed range only."
+            )
+
+        imgui.spacing()
+
+        # --- Pipeline flow visualization ---
+        gui = getattr(app, 'gui_instance', None)
+        pipeline = gui.plugin_pipeline_ui.pipeline if gui and hasattr(gui, 'plugin_pipeline_ui') else None
+
+        dl = imgui.get_window_draw_list()
+        avail_w = imgui.get_content_region_available_width()
+        cursor = imgui.get_cursor_screen_position()
+
+        step_h = 22
+        arrow_h = 12
+        box_rounding = 4.0
+        pad_x = 4
+
+        # Collect labels: raw + enabled pipeline steps + final
+        flow_labels = ["Raw script"]
+        if pipeline and pipeline.steps:
+            for s in pipeline.steps:
+                if s.enabled:
+                    flow_labels.append(s.plugin_name)
+        flow_labels.append("Final script")
+
+        # Colors
+        col_raw = imgui.get_color_u32_rgba(0.45, 0.55, 0.70, 1.0)
+        col_step = imgui.get_color_u32_rgba(0.30, 0.55, 0.80, 1.0)
+        col_final = imgui.get_color_u32_rgba(0.25, 0.75, 0.40, 1.0)
+        col_bg = imgui.get_color_u32_rgba(0.15, 0.15, 0.18, 0.6)
+        col_arrow = imgui.get_color_u32_rgba(0.4, 0.4, 0.45, 0.7)
+        col_text = imgui.get_color_u32_rgba(0.85, 0.85, 0.88, 1.0)
+        col_disabled = imgui.get_color_u32_rgba(0.4, 0.4, 0.4, 0.6)
+
+        y = cursor.y
+        bx = cursor.x + pad_x
+        bw = avail_w - pad_x * 2
+
+        for i, label in enumerate(flow_labels):
+            is_first = (i == 0)
+            is_last = (i == len(flow_labels) - 1)
+            is_empty_pipeline = (len(flow_labels) == 2)  # only raw + final, no steps
+
+            # Box color
+            if is_first:
+                bc = col_raw
+            elif is_last:
+                bc = col_final
+            else:
+                bc = col_step
+
+            # Draw box
+            dl.add_rect_filled(bx, y, bx + bw, y + step_h, col_bg, box_rounding)
+            dl.add_rect(bx, y, bx + bw, y + step_h, bc, box_rounding, thickness=1.5)
+
+            # Label text centered
+            ts = imgui.calc_text_size(label)
+            tx = bx + (bw - ts.x) * 0.5
+            ty = y + (step_h - ts.y) * 0.5
+            dl.add_text(tx, ty, col_text if not is_empty_pipeline or is_first or is_last else col_disabled, label)
+
+            y += step_h
+
+            # Arrow between boxes (not after the last)
+            if not is_last:
+                mid_x = bx + bw * 0.5
+                arrow_top = y + 2
+                arrow_bot = y + arrow_h - 2
+                dl.add_line(mid_x, arrow_top, mid_x, arrow_bot, col_arrow, 1.5)
+                # Arrowhead
+                dl.add_triangle_filled(
+                    mid_x - 4, arrow_bot - 3,
+                    mid_x + 4, arrow_bot - 3,
+                    mid_x, arrow_bot + 1,
+                    col_arrow
+                )
+                y += arrow_h
+
+        total_h = y - cursor.y
+        imgui.dummy(avail_w, total_h + 4)
+
+        # Edit pipeline button
+        if pipeline and pipeline.steps:
+            step_count = sum(1 for s in pipeline.steps if s.enabled)
+            btn_label = f"Edit Pipeline ({step_count} steps)"
+        else:
+            btn_label = "Configure Pipeline..."
+        if imgui.button(btn_label, width=-1):
+            app_state.show_plugin_pipeline = True
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Open the Plugin Pipeline builder to add/edit processing steps")
 

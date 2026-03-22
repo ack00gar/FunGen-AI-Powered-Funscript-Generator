@@ -83,6 +83,8 @@ class AppStateUI:
         # UI visibility states
         self.show_toolbar = True
         self.show_simulator_3d = self.app_settings.get("show_simulator_3d", defaults.get("show_simulator_3d", True))
+        self.show_script_gauge = self.app_settings.get("show_script_gauge", False)
+        self.show_plugin_pipeline = False
         self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", True))
         self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", True))
         self.show_audio_waveform = self.app_settings.get("show_audio_waveform", False)
@@ -413,6 +415,7 @@ class AppStateUI:
         self.app_settings.set("show_advanced_options", self.show_advanced_options)
         self.app_settings.set("show_video_feed", self.show_video_feed)
         self.app_settings.set("show_video_controls_overlay", self.show_video_controls_overlay)
+        self.app_settings.set("show_script_gauge", self.show_script_gauge)
 
         self.app_settings.set("interactive_refinement_mode_enabled", self.interactive_refinement_mode_enabled)
         self.app_settings.set("selected_processing_speed_mode", self.selected_processing_speed_mode.name)
