@@ -335,7 +335,6 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
                 progress_callback=progress_wrapper,
                 stop_event=stop_event,
                 app=self.app,
-                ml_model_dir_path_arg=getattr(self.app, 'pose_model_artifacts_dir', None),
                 parent_logger_arg=self.logger,
                 output_overlay_msgpack_path=self.output_overlay_path,
                 yolo_input_size_arg=self.yolo_input_size,

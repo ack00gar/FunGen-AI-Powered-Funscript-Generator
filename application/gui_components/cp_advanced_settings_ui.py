@@ -51,14 +51,6 @@ class AdvancedSettingsMixin:
     def _update_pose_model_path(self, path):
         self._update_model_path(path, "pose")
 
-    def _update_artifacts_dir_path(self, path):
-        app = self.app
-        if not path or path == app.pose_model_artifacts_dir:
-            return
-        app.pose_model_artifacts_dir = path
-        app.app_settings.set("pose_model_artifacts_dir", path)
-        app.project_manager.project_dirty = True
-        app.logger.info("Pose Model Artifacts directory updated to: %s." % path)
 
     # ------- Settings profiles -------
 
@@ -333,25 +325,20 @@ class AdvancedSettingsMixin:
                     app.unload_model("pose")
             _tooltip_if_hovered("Path to the YOLO pose estimation model file (%s). This model is optional." % self.AI_modelTooltipExtensions)
 
-            # Pose model artifacts directory
-            imgui.text("Pose Model Artifacts Dir")
-            dir_input_w = avail_w - browse_w - style.item_spacing.x if avail_w > browse_w else -1
-            _readonly_input("##PoseArtifactsDirPath", app.pose_model_artifacts_dir, dir_input_w)
-            imgui.same_line()
-            def _browse_artifacts():
-                gi = getattr(app, "gui_instance", None)
-                if gi:
-                    gi.file_dialog.show(
-                        title="Select Pose Model Artifacts Directory",
-                        callback=self._update_artifacts_dir_path,
-                        is_folder_dialog=True,
-                        initial_path=app.pose_model_artifacts_dir,
-                    )
-            _browse_button("PoseArtifactsDirBrowse", _browse_artifacts)
-            _tooltip_if_hovered(
-                "Path to the folder containing your trained classifier,\n"
-                "imputer, and other .joblib model artifacts."
-            )
+            # Download models button
+            imgui.spacing()
+            is_downloading = app.first_run_thread and app.first_run_thread.is_alive() if hasattr(app, 'first_run_thread') else False
+            with _DisabledScope(is_downloading):
+                with primary_button_style():
+                    if imgui.button("Download / Update Models##DownloadModels", width=-1):
+                        app.trigger_first_run_setup()
+            if is_downloading:
+                progress = getattr(app, 'first_run_progress', 0) / 100.0
+                status = getattr(app, 'first_run_status_message', 'Downloading...')
+                imgui.text(status)
+                imgui.progress_bar(progress, size=(-1, 0), overlay=f"{progress * 100:.0f}%")
+            else:
+                _tooltip_if_hovered("Re-download default AI models from GitHub")
 
             mode = app.app_state_ui.selected_tracker_name
             if self._is_offline_tracker(mode):

@@ -468,7 +468,6 @@ class StageExecutorMixin:
                 progress_callback=self.on_stage2_progress,
                 stop_event=self.stop_stage_event,
                 app=self.app,
-                ml_model_dir_path_arg=self.app.pose_model_artifacts_dir,
                 output_overlay_msgpack_path=s2_overlay_output_path,
                 parent_logger_arg=self.logger,
                 yolo_input_size_arg=self.app.yolo_input_size,
