@@ -327,13 +327,13 @@ class AppStateUI:
             current_time_ms = int(round((self.app.processor.current_frame_index / fps) * 1000.0))
 
             script_val_primary = self.app.processor.tracker.funscript.get_value(current_time_ms, axis='primary')
-            self.gauge_value_t1 = float(script_val_primary)
+            self.script_position_t1 = float(script_val_primary)
 
             script_val_secondary = self.app.processor.tracker.funscript.get_value(current_time_ms, axis='secondary')
-            self.gauge_value_t2 = float(script_val_secondary)
+            self.script_position_t2 = float(script_val_secondary)
         else:
-            self.gauge_value_t1 = 0.0
-            self.gauge_value_t2 = 0.0
+            self.script_position_t1 = 0.0
+            self.script_position_t2 = 0.0
 
     def update_settings_from_app(self):
         """Called by AppLogic when settings are loaded or project is loaded."""
