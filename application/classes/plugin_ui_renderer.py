@@ -34,7 +34,7 @@ class PluginUIRenderer:
         if not imgui:
             self.logger.error("ImGui not available - UI rendering will not work")
     
-    def render_plugin_buttons(self, timeline_num: int, view_mode: str = 'expert') -> bool:
+    def render_plugin_buttons(self, timeline_num: int) -> bool:
         """
         Render a single "Plugins" dropdown button that opens a popup menu
         with plugins organized into categorized sub-menus.

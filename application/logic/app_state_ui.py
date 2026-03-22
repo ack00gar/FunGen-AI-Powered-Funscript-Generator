@@ -357,7 +357,6 @@ class AppStateUI:
 
         self.show_audio_waveform = False
 
-        self.ui_view_mode = self.app_settings.get("ui_view_mode", defaults.get("ui_view_mode", "expert"))
         self.full_width_nav = self.app_settings.get("full_width_nav", defaults.get("full_width_nav", True))
 
         self.ui_layout_mode = self.app_settings.get("ui_layout_mode", defaults.get("ui_layout_mode", self.ui_layout_mode))
@@ -395,7 +394,6 @@ class AppStateUI:
         self.app_settings.set("timeline_zoom_factor_ms_per_px", self.timeline_zoom_factor_ms_per_px)
         self.app_settings.set("timeline_pan_offset_ms", self.timeline_pan_offset_ms)
 
-        self.app_settings.set("ui_view_mode", self.ui_view_mode) # Persist Simple/Expert mode
         self.app_settings.set("ui_layout_mode", self.ui_layout_mode)
         self.app_settings.set("show_control_panel_window", self.show_control_panel_window)
         self.app_settings.set("show_video_display_window", self.show_video_display_window)

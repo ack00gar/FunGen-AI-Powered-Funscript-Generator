@@ -224,8 +224,8 @@ class InteractiveFunscriptTimeline:
     # MAIN RENDER LOOP
     # ==================================================================================
 
-    def render(self, y_pos: float = 0, height: float = 0, view_mode: str = 'expert',
-               container_mode: bool = False):
+    def render(self, y_pos: float = 0, height: float = 0, container_mode: bool = False,
+               **kwargs):
         app_state = self.app.app_state_ui
         visibility_attr = f"show_funscript_interactive_timeline{'' if self.timeline_num == 1 else str(self.timeline_num)}"
 
@@ -269,7 +269,7 @@ class InteractiveFunscriptTimeline:
                 return
 
         # 2. Render Toolbar (Buttons)
-        self._render_toolbar(view_mode)
+        self._render_toolbar()
 
         # 3. Prepare Canvas
         draw_list = imgui.get_window_draw_list()
@@ -2229,9 +2229,7 @@ class InteractiveFunscriptTimeline:
     # TOOLBAR & MENUS
     # ==================================================================================
 
-    def _render_toolbar(self, view_mode):
-        if view_mode != 'expert': return
-        
+    def _render_toolbar(self):
         # Delete / Clear button - adaptive label based on selection
         num_selected = len(self.multi_selected_action_indices) if self.multi_selected_action_indices else 0
         if num_selected > 0:
@@ -2264,7 +2262,7 @@ class InteractiveFunscriptTimeline:
         imgui.same_line()
 
         # Plugin System Buttons
-        self.plugin_renderer.render_plugin_buttons(self.timeline_num, view_mode)
+        self.plugin_renderer.render_plugin_buttons(self.timeline_num)
 
         imgui.same_line()
         imgui.text("|")

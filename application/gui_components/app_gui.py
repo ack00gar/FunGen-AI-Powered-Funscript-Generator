@@ -1069,14 +1069,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             if imgui.begin("##TimelineScrollContainer", True, container_flags):
                 if app_state.show_funscript_interactive_timeline:
                     self._time_render("TimelineEditor1", self.timeline_editor1.render,
-                                      0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
+                                      0, per_tl_h, container_mode=True)
                 if app_state.show_funscript_interactive_timeline2:
                     self._time_render("TimelineEditor2", self.timeline_editor2.render,
-                                      0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
+                                      0, per_tl_h, container_mode=True)
                 for t_num in self._visible_extra_timelines:
                     editor = self._get_or_create_timeline_editor(t_num)
                     self._time_render(f"TimelineEditor{t_num}", editor.render,
-                                      0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
+                                      0, per_tl_h, container_mode=True)
             imgui.end()
             app_state.fixed_layout_geometry['TimelineContainer'] = {
                 'pos': (0, timeline_area_y), 'size': (self.window_width, capped_timelines_h)}
@@ -1084,17 +1084,17 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             timeline_current_y_start = timeline_area_y
             if app_state.show_funscript_interactive_timeline:
                 app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline1_render_h)}
-                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h, view_mode=app_state.ui_view_mode)
+                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h)
                 timeline_current_y_start += timeline1_render_h
             if app_state.show_funscript_interactive_timeline2:
                 app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline2_render_h)}
-                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h, view_mode=app_state.ui_view_mode)
+                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h)
                 timeline_current_y_start += timeline2_render_h
             for t_num in self._visible_extra_timelines:
                 editor = self._get_or_create_timeline_editor(t_num)
                 extra_h = per_tl_h
                 app_state.fixed_layout_geometry[f'Timeline{t_num}'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, extra_h)}
-                self._time_render(f"TimelineEditor{t_num}", editor.render, timeline_current_y_start, extra_h, view_mode=app_state.ui_view_mode)
+                self._time_render(f"TimelineEditor{t_num}", editor.render, timeline_current_y_start, extra_h)
                 timeline_current_y_start += extra_h
 
     def _render_floating_layout(self, app_state):
