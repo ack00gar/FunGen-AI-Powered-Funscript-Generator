@@ -1,9 +1,25 @@
 import os
+import re
 import glob as glob_module
 import orjson
 import msgpack
 import time
 from typing import List, Optional, Dict, Tuple, Any
+
+
+def _sanitize_filename(name: str) -> str:
+    """Remove characters that are invalid in Windows/macOS/Linux filenames."""
+    # Remove characters illegal on Windows: < > : " / \ | ? *
+    # Also remove control characters and common problematic Unicode (emojis etc.)
+    sanitized = re.sub(r'[<>:"/\\|?*]', '', name)
+    # Remove non-printable and emoji characters (keep basic Latin, extended Latin, CJK, etc.)
+    sanitized = re.sub(r'[^\w\s\-\.\(\)\[\]!@#$%^&+=,;\'~`]', '', sanitized, flags=re.UNICODE)
+    # Collapse whitespace
+    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+    # Fallback if everything was stripped
+    if not sanitized:
+        sanitized = "untitled"
+    return sanitized
 
 from application.utils import VideoSegment, check_write_access
 from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, APP_NAME, FUNSCRIPT_METADATA_VERSION
@@ -66,7 +82,7 @@ class AppFileManager:
             return f"error_no_video_path{file_suffix}"
 
         output_folder_base = self.app.app_settings.get("output_folder_path", "output")
-        video_basename = os.path.splitext(os.path.basename(video_path))[0]
+        video_basename = _sanitize_filename(os.path.splitext(os.path.basename(video_path))[0])
         video_specific_output_dir = os.path.join(output_folder_base, video_basename)
 
         try:
@@ -802,7 +818,7 @@ class AppFileManager:
             initial_filename = f"timeline{timeline_num}{suffix}.funscript"
 
         if self.video_path:
-            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            video_basename = _sanitize_filename(os.path.splitext(os.path.basename(self.video_path))[0])
             initial_path = os.path.join(output_folder_base, video_basename)
             initial_filename = f"{video_basename}{suffix}.funscript"
 
@@ -850,7 +866,7 @@ class AppFileManager:
         output_folder = self.app.app_settings.get("output_folder_path", "output")
         initial_filename = "heatmap.png"
         if self.video_path:
-            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            video_basename = _sanitize_filename(os.path.splitext(os.path.basename(self.video_path))[0])
             initial_filename = f"{video_basename}_heatmap.png"
             output_folder = os.path.join(output_folder, video_basename)
 
@@ -894,7 +910,7 @@ class AppFileManager:
         initial_filename = "unified.funscript"
 
         if self.video_path:
-            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            video_basename = _sanitize_filename(os.path.splitext(os.path.basename(self.video_path))[0])
             initial_path = os.path.join(output_folder, video_basename)
             initial_filename = f"{video_basename}.funscript"
 
