@@ -91,7 +91,7 @@ cd FunGen
 
 ### Install the core python requirements
 ```bash
-pip install -r core.requirements.txt
+pip install -r requirements/core.requirements.txt
 ```
 
 ### NVIDIA GPU Setup (CUDA Required)
@@ -105,13 +105,13 @@ pip install -r core.requirements.txt
 
 **For 20xx, 30xx and 40xx-series NVIDIA GPUs:**
 ```bash
-pip install -r cuda.requirements.txt
+pip install -r requirements/cuda.requirements.txt
 pip install tensorrt
 ```
 
 **For 50xx series NVIDIA GPUs (RTX 5070, 5080, 5090):**
 ```bash
-pip install -r cuda.50series.requirements.txt
+pip install -r requirements/cuda.50series.requirements.txt
 pip install tensorrt
 ```
 
@@ -127,13 +127,13 @@ python -c "import torch; print(torch.backends.cudnn.is_available())"  # Check cu
 
 ### If your GPU doesn't support cuda
 ```bash
-pip install -r cpu.requirements.txt
+pip install -r requirements/cpu.requirements.txt
 ```
 
 ### AMD GPU acceleration (ROCm for Linux Only)
 ROCm is supported for AMD GPUs on Linux. To install the required packages, run:
 ```bash
-pip install -r rocm.requirements.txt
+pip install -r requirements/rocm.requirements.txt
 ```
 
 ## Download the YOLO models
