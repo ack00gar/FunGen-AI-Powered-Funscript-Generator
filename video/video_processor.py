@@ -1668,11 +1668,12 @@ class VideoProcessor(
                                 self.logger.error("CPU-only FFmpeg fallback also failed.")
 
                     self.is_processing = False
-                    # Clear tracker processing flag when stream ends naturally
                     self.enable_tracker_processing = False
                     if self.app:
                         was_scripting_at_end = self.tracker and self.tracker.tracking_active
                         end_range = (self.processing_start_frame_limit, self.current_frame_index)
+                        if self.tracker and self.tracker.tracking_active:
+                            self.tracker.stop_tracking()
                         self.app.on_processing_stopped(was_scripting_session=was_scripting_at_end, scripted_frame_range=end_range)
                     break
 
@@ -1694,21 +1695,23 @@ class VideoProcessor(
                 if self.processing_end_frame_limit != -1 and self.current_frame_index > self.processing_end_frame_limit:
                     self.logger.info(f"Reached GUI end_frame_limit ({self.processing_end_frame_limit}). Stopping.")
                     self.is_processing = False
-                    # Clear tracker processing flag when reaching end frame limit naturally
                     self.enable_tracker_processing = False
                     if self.app:
                         was_scripting_at_end_limit = self.tracker and self.tracker.tracking_active
                         end_range_limit = (self.processing_start_frame_limit, self.processing_end_frame_limit)
+                        if self.tracker and self.tracker.tracking_active:
+                            self.tracker.stop_tracking()
                         self.app.on_processing_stopped(was_scripting_session=was_scripting_at_end_limit, scripted_frame_range=end_range_limit)
                     break
                 if self.total_frames > 0 and self.current_frame_index >= self.total_frames:
                     self.logger.info("Reached end of video. Stopping GUI processing.")
                     self.is_processing = False
-                    # Clear tracker processing flag when reaching end of video naturally
                     self.enable_tracker_processing = False
                     if self.app:
                         was_scripting_at_eos = self.tracker and self.tracker.tracking_active
                         end_range_eos = (self.processing_start_frame_limit, self.current_frame_index)
+                        if self.tracker and self.tracker.tracking_active:
+                            self.tracker.stop_tracking()
                         self.app.on_processing_stopped(was_scripting_session=was_scripting_at_eos, scripted_frame_range=end_range_eos)
                     break
 
@@ -1751,7 +1754,7 @@ class VideoProcessor(
                 self._buffer_append(self.current_frame_index, frame_np.copy())
 
                 processed_frame_for_gui = frame_np
-                if self.tracker and self.tracker.tracking_active:
+                if self.tracker and self.tracker.tracking_active and self.enable_tracker_processing:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
                         time.time() * 1000)
 
