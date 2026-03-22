@@ -12,22 +12,30 @@ This project is still at the early stages of development. It is not intended for
 
 ---
 
+## v0.8.0 Highlights
+
+- **Simplified GUI** - Removed Simple Mode (Run tab is now clean enough for everyone). Control panel reduced to Run + Metadata. Settings, Undo, and Performance tabs moved to the Info panel on the right
+- **Toast Notifications** - Non-blocking popup notifications for saves, errors, and plugin results. Replaces old modal dialogs and status bar spam
+- **Ultimate Autotune Popup** - Opens with parameter sliders and live preview overlay. Adjust settings and see the result before applying
+- **Streamlined Menus** - Flattened View menu, added shortcut hints throughout, removed unused gauges and movement bar. All display toggles show their keyboard shortcuts
+- **Cleaner Tracker Settings** - Stripped broken/dead settings from live trackers. Only working, user-relevant controls exposed
+- **Add-on Terminology** - Updated from "Supporter" to ko-fi add-on language with correct purchase URLs
+- **First-run Wizard** - Reduced from 6 to 5 steps (no mode selection needed)
+- **Model Download Button** - Re-download AI models anytime from Settings > AI Models
+- **Auto-populated Metadata** - Creator and Title fields auto-fill from FunGen version and video filename
+
 ## v0.7.5 Highlights
 
-- **VR Hybrid Chapter-Aware Tracker** — New offline tracker combining sparse YOLO chapter detection with per-chapter ROI optical flow. Single-pass video decode, hardware-accelerated encoding via FFmpegEncoder, and automatic reuse of preprocessed video on re-run
-- **Preprocessed Video Infrastructure** — VR Hybrid tracker uses the same FFmpegEncoder (hw accel priority chain) as standard Stage 1. Standard preprocessed path (`_preprocessed.mp4`), automatic reuse, and cleanup via the `Save/Reuse Preprocessed Video` setting
-- **Batch Mode: Save Preprocessed Video Option** — New opt-in setting (default off) in both GUI batch dialog and CLI (`--save-preprocessed`). Prevents accidental disk bloat across batch runs while allowing users who want faster re-runs to keep the files
-- **Finer VR Hybrid Progress Reporting** — Per-frame progress during chapter analysis (Pass 2), CLI stdout progress bar for headless/batch runs
+- **VR Hybrid Chapter-Aware Tracker** - New offline tracker combining sparse YOLO chapter detection with per-chapter ROI optical flow
+- **Preprocessed Video Infrastructure** - Hardware-accelerated encoding, automatic reuse on re-run
+- **Batch Mode Preprocessed Video** - Opt-in setting for faster re-runs in batch processing
 
 ## v0.6.0 Highlights
 
-- **GUI Modernization** — Sidebar navigation, section cards, workflow breadcrumb, pinned action bar, status strip
-- **Multi-Axis Funscript Support** — OFS-compatible axis system (stroke, roll, pitch, surge, sway, twist); per-timeline axis assignment, configurable default secondary axis (e.g. twist for SSR2), `.roll.funscript` / `.twist.funscript` / `.pitch.funscript` export
-- **O(1) Funscript Performance** — Chronological-append fast-path eliminates O(n) bisect during live tracking; undo/redo cache fix, `_draw_curve` vectorization
-- **14+ Built-in Filter Plugins** — Ultimate Autotune, RDP Simplify, Savitzky-Golay, Speed Limiter, Anti-Jerk, Amplify, Dynamic Amplify, Clamp, Invert, Keyframe, Resample, Time Shift, and more
-- **Patreon Supporter Features** — Batch processing, live capture, experimental tracker early access (distributed via Discord bot)
-- **Device Control & VR Streaming Add-ons** — OSR/Buttplug hardware control, HereSphere/Quest 3 streaming (available on Ko-fi)
-- **Automatic DPI Scaling** — System display scaling detection for Windows, macOS, and Linux
+- **Multi-Axis Funscript Support** - OFS-compatible axis system (stroke, roll, pitch, surge, sway, twist)
+- **14+ Built-in Filter Plugins** - Ultimate Autotune, RDP Simplify, Savitzky-Golay, and more
+- **Device Control and VR Streaming Add-ons** - OSR/Buttplug hardware control, HereSphere/Quest 3 streaming (available at ko-fi.com/k00gar)
+- **Batch Processing** - Process entire folders (available as monthly Ko-fi add-on)
 
 ---
 
@@ -176,12 +184,9 @@ python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
 python -c "import torch; print(torch.backends.cudnn.is_available())"  # Check cuDNN
 ```
 
-## GUI Settings
-Find the settings menu in the app to configure optional option.
+## GUI
 
-## Start script
-
-You can use Start windows.bat to launch the gui on windows.
+FunGen launches with a streamlined interface. The control panel (left) has Run and Metadata tabs, plus add-on tabs for Device Control, Streamer, and Batch Processing. The info panel (right) has Info, Settings, Undo, and Performance tabs. All settings are searchable from the Settings tab. Use View > Show Advanced Options to reveal developer controls.
 
 -----
 
@@ -292,7 +297,6 @@ python main.py "/path/to/other_videos" --hwaccel cuda &
 |---|---|---|
 | `input_path` | | **Required for CLI mode.** Path to a single video file or a folder containing videos. |
 | `--mode` | | Sets the processing mode. The available modes are discovered dynamically. |
-| `--od-mode` | | Sets the oscillation detector mode to use in Stage 3. Choices: `current`, `legacy`. Default is `current`. |
 | `--overwrite`| | Forces the app to re-process and overwrite any existing funscripts. By default, it skips videos that already have a funscript. |
 | `--no-autotune`| | Disables the automatic application of Ultimate Autotune after generation. |
 | `--no-copy` | | Prevents saving a copy of the final funscript next to the video file. It will only be saved in the application's output folder. |
@@ -309,9 +313,7 @@ FunGen features a modular architecture for both funscript filtering and motion t
 
 ## Filter Plugin System
 
-The funscript filter system allows you to apply a variety of transformations to your generated funscripts. These can be chained together to achieve complex effects.
-
-### Available Plugins:
+Plugins are accessible from the **Plugins** dropdown in the timeline toolbar. Each plugin opens a popup with adjustable parameters and live preview. Available plugins:
 
 - **Amplify:** Amplifies or reduces position values around a center point.
 - **Autotune SG:** Automatically finds optimal Savitzky-Golay filter parameters.
@@ -323,50 +325,28 @@ The funscript filter system allows you to apply a variety of transformations to 
 - **Smooth (SG):** Applies a Savitzky-Golay smoothing filter.
 - **Speed Limiter:** Limits speed and adds vibrations for hardware device compatibility.
 - **Threshold Clamp:** Clamps positions to 0/100 based on thresholds.
-- **Ultimate Autotune:** A comprehensive 7-stage enhancement pipeline.
+- **Ultimate Autotune:** Comprehensive 8-stage enhancement pipeline with live preview.
 
 ## Tracking System
 
 The tracker system is responsible for analyzing the video and generating the raw motion data. Trackers are organized into categories based on their functionality.
 
+### Offline Trackers (Recommended)
+
+- **VR Hybrid Chapter-Aware** - Single-pass chapter detection + per-chapter ROI optical flow. Best quality for VR videos.
+- **Contact Analysis (2-Stage)** - YOLO-based contact detection and analysis.
+- **Guided Flow (3-Stage)** - Chapter-aware dense optical flow with per-position ROI strategies.
+
 ### Live Trackers
 
-These trackers process the video in real-time.
-
-- **Hybrid Intelligence Tracker:** A multi-modal approach combining frame differentiation, optical flow, YOLO detection, and oscillation analysis.
-- **Oscillation Detector (Experimental 2):** A hybrid approach combining experimental timing precision with legacy amplification and signal conditioning.
-- **Oscillation Detector (Legacy):** The original oscillation tracker with cohesion analysis and superior amplification.
-- **Relative Distance Tracker:** An optimized high-performance tracker with vectorized operations and intelligent caching.
-- **User ROI Tracker:** A manual ROI definition with optical flow tracking and optional sub-tracking.
-- **YOLO ROI Tracker:** Automatic ROI detection using YOLO object detection with optical flow tracking.
-
-### Offline Trackers
-
-These trackers process the video in stages for higher accuracy.
-
-- **VR Hybrid Chapter-Aware (ROI Flow):** Single-pass sparse YOLO chapter detection followed by per-chapter dense ROI optical flow. Automatically creates and optionally reuses a preprocessed video with hardware-accelerated encoding. No separate Stage 1/2/3 pipeline — handles everything internally.
-- **Contact Analysis (2-Stage):** Offline contact detection and analysis using YOLO detection results.
-- **Guided Flow (3-Stage):** YOLO-guided dense optical flow with chapter-aware analysis strategies. Uses Stage 2 detection data to create targeted ROIs per chapter type (penetration, oral, manual, riding, etc.) for precise motion tracking. The recommended 3-stage tracker.
-
-### Legacy Trackers
-
-These trackers are superseded by Guided Flow but remain available for compatibility.
-
-- **Mixed Processing (3-Stage):** A hybrid approach using Stage 2 signals and selective live ROI tracking for BJ/HJ chapters.
-- **Optical Flow Analysis (3-Stage):** Offline optical flow tracking using live tracker algorithms on Stage 2 segments.
-
-### Experimental Trackers
-
-These trackers are in development and may not be as stable as the others.
-
-- **Enhanced Axis Projection Tracker:** A production-grade motion tracking system with multi-scale analysis, temporal coherence, and adaptive thresholding.
-- **Working Axis Projection Tracker:** A simplified but reliable motion tracking with axis projection.
-- **Beat Marker (Visual/Audio):** Generates actions from visual brightness changes, audio beats, or metronome.
-- **DOT Marker (Manual Point):** Tracks a manually selected colored dot/point on screen.
+- **2D POV and VR Hybrid Flow** - YOLO ROI detection with DIS optical flow. Dual axis (stroke + roll).
+- **Oscillation Detector** - Grid-based motion detection with decay mechanism.
+- **YOLO ROI Tracker** - Automatic ROI detection with optical flow.
+- **User ROI Tracker** - Manual ROI definition with sub-tracking.
 
 ### Community Trackers
 
-- **Community Example Tracker:** A template tracker showing basic motion detection and funscript generation.
+Community trackers are auto-discovered from the `tracker/tracker_modules/community/` folder. See the example tracker for how to create your own.
 
 ---
 
@@ -400,15 +380,13 @@ a top of the line card like the 4090 is not required to get similar results. Hav
 
 # Output Files
 
-The script generates the following files in a dedicated subfolder within your specified output directory:
+FunGen generates the following files in a dedicated subfolder within your output directory:
 
-1.  **`_preprocessed.mkv`**: A standardized video file used by the analysis stages for reliable frame processing.
-2.  **`.msgpack`**: Raw YOLO detection data from Stage 1. Can be re-used to accelerate subsequent runs.
-3.  **`_stage2_overlay.msgpack`**: Detailed tracking and segmentation data from Stage 2, used for debugging and visualization.
-4.  **`_t1_raw.funscript`**: The raw, unprocessed funscript generated by the analysis before any enhancements are applied.
-5.  **`.funscript`**: The final, post-processed funscript file for the primary (up/down) axis.
-6.  **`.roll.funscript` / `.twist.funscript`**: The final funscript file for the secondary axis (depends on the "Default Secondary Axis" setting), generated in 3-stage mode.
-7.  **`.fgp`** (FunGen Project): A project file containing all settings, chapter data, and paths related to the video.
+- **`.funscript`** - The final funscript file for the primary (stroke) axis
+- **`.roll.funscript` / `.twist.funscript`** - Secondary axis funscript (if dual-axis tracker is used)
+- **`_t1_raw.funscript`** - Raw unprocessed funscript before any post-processing
+- **`_preprocessed.mkv`** - Preprocessed video for faster re-runs (optional, off by default)
+- **`.fgnproj`** - FunGen project file containing settings, chapters, and metadata
 
 -----
 
@@ -416,12 +394,12 @@ The script generates the following files in a dedicated subfolder within your sp
 
 ## Pipeline Overview
 
-The pipeline for generating Funscript files is as follows:
+Each tracker implements its own pipeline. The VR Hybrid tracker (recommended) works as follows:
 
-1.  **YOLO Object Detection**: A YOLO model detects relevant objects (e.g., penis, hands, mouth, etc.) in each frame of the video.
-2.  **Tracking and Segmentation**: A custom tracking algorithm processes the YOLO detections to identify and segment continuous actions and interactions over time.
-3.  **Funscript Generation**: Based on the mode (2-stage, 3-stage, etc.), the tracked data is used to generate a raw Funscript file.
-4.  **Post-Processing**: The raw Funscript is enhanced with features like **Ultimate Autotune** to smooth motion, normalize intensity, and improve the overall quality of the final `.funscript` file.
+1.  **Chapter Detection** - Sparse YOLO detection at 2fps classifies the video into chapters (cowgirl, missionary, blowjob, etc.)
+2.  **Per-Chapter Analysis** - Dense YOLO + ROI optical flow per chapter, with position-specific amplitude targets
+3.  **Funscript Generation** - Motion signal smoothing, peak detection, and keyframe extraction
+4.  **Optional Post-Processing** - Apply Ultimate Autotune or individual plugins from the timeline's Plugins menu
 
 ## Project Genesis and Evolution
 
