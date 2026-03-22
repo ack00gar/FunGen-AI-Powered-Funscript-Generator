@@ -374,52 +374,6 @@ class AppStateUI:
             self.ui_layout_mode = project_data.get("ui_layout_mode", self.ui_layout_mode)
             self.timeline_pan_offset_ms = project_data.get("timeline_pan_offset_ms", self.timeline_pan_offset_ms)
 
-        self.show_gauge_window_timeline1 = self.app_settings.get("show_gauge_window_timeline1",
-                                                                 defaults.get("show_gauge_window_timeline1",
-                                                                              self.show_gauge_window_timeline1))
-        self.show_gauge_window_timeline2 = self.app_settings.get("show_gauge_window_timeline2",
-                                                                 defaults.get("show_gauge_window_timeline2",
-                                                                              self.show_gauge_window_timeline2))
-
-        default_gauge_w = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
-        default_gauge_h = self.app_settings.get("gauge_window_size_h", defaults.get("gauge_window_size_h", 220))
-        menu_bar_h_for_default = self.app_settings.get("main_menu_bar_height_for_gauge_default_y", 25)
-        default_gauge_x = self.window_width - default_gauge_w - 20
-        default_gauge_y = menu_bar_h_for_default + 10
-
-        self.gauge_window_pos_t1 = (
-            self.app_settings.get("gauge_window_pos_t1_x", default_gauge_x),
-            self.app_settings.get("gauge_window_pos_t1_y", default_gauge_y)
-        )
-        self.gauge_window_size_t1 = (
-            self.app_settings.get("gauge_window_size_t1_w", default_gauge_w),
-            self.app_settings.get("gauge_window_size_t1_h", default_gauge_h)
-        )
-
-        default_gauge_t2_x = default_gauge_x - default_gauge_w - 10
-        self.gauge_window_pos_t2 = (
-            self.app_settings.get("gauge_window_pos_t2_x", default_gauge_t2_x),
-            self.app_settings.get("gauge_window_pos_t2_y", default_gauge_y)
-        )
-        self.gauge_window_size_t2 = (
-            self.app_settings.get("gauge_window_size_t2_w", default_gauge_w),
-            self.app_settings.get("gauge_window_size_t2_h", default_gauge_h)
-        )
-
-        self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", self.show_lr_dial_graph))
-        default_lr_dial_w = self.app_settings.get("lr_dial_window_size_w", defaults.get("lr_dial_window_size_w", 180))
-        default_lr_dial_h = self.app_settings.get("lr_dial_window_size_h", defaults.get("lr_dial_window_size_h", 220))
-        gauge_w_curr = self.gauge_window_size_t1[0]  # Use current gauge width for positioning
-
-        calc_def_lr_dial_x = self.window_width - gauge_w_curr - default_lr_dial_w - 30
-        default_lr_dial_y = menu_bar_h_for_default + 10
-
-        self.lr_dial_window_pos = (
-            self.app_settings.get("lr_dial_window_pos_x", calc_def_lr_dial_x),
-            self.app_settings.get("lr_dial_window_pos_y", default_lr_dial_y)
-        )
-        self.lr_dial_window_size = (default_lr_dial_w, default_lr_dial_h)
-
         # If project data has specific values, they override app_settings
         if hasattr(self.app, 'project_data_on_load') and self.app.project_data_on_load:
             project_data = self.app.project_data_on_load
@@ -430,12 +384,7 @@ class AppStateUI:
             for _t_num in EXTRA_TIMELINE_RANGE:
                 _attr = f"show_funscript_interactive_timeline{_t_num}"
                 setattr(self, _attr, project_data.get(_attr, getattr(self, _attr, False)))
-            self.show_lr_dial_graph = project_data.get("show_lr_dial_graph", self.show_lr_dial_graph)
             self.show_heatmap = project_data.get("show_heatmap", self.show_heatmap)
-            self.show_gauge_window_timeline1 = project_data.get("show_gauge_window_timeline1",
-                                                                self.show_gauge_window_timeline1)
-            self.show_gauge_window_timeline2 = project_data.get("show_gauge_window_timeline2",
-                                                                self.show_gauge_window_timeline2)
             self.show_stage2_overlay = project_data.get("show_stage2_overlay", self.show_stage2_overlay)
             self.interactive_refinement_mode_enabled = project_data.get("interactive_refinement_mode_enabled", False)
 
@@ -468,25 +417,6 @@ class AppStateUI:
         self.app_settings.set("show_advanced_options", self.show_advanced_options)
         self.app_settings.set("show_video_feed", self.show_video_feed)
         self.app_settings.set("show_video_controls_overlay", self.show_video_controls_overlay)
-
-        self.app_settings.set("show_gauge_window_timeline1", self.show_gauge_window_timeline1)
-        self.app_settings.set("show_gauge_window_timeline2", self.show_gauge_window_timeline2)
-
-        self.app_settings.set("gauge_window_pos_t1_x", int(self.gauge_window_pos_t1[0]))
-        self.app_settings.set("gauge_window_pos_t1_y", int(self.gauge_window_pos_t1[1]))
-        self.app_settings.set("gauge_window_size_t1_w", int(self.gauge_window_size_t1[0]))
-        self.app_settings.set("gauge_window_size_t1_h", int(self.gauge_window_size_t1[1]))
-
-        self.app_settings.set("gauge_window_pos_t2_x", int(self.gauge_window_pos_t2[0]))
-        self.app_settings.set("gauge_window_pos_t2_y", int(self.gauge_window_pos_t2[1]))
-        self.app_settings.set("gauge_window_size_t2_w", int(self.gauge_window_size_t2[0]))
-        self.app_settings.set("gauge_window_size_t2_h", int(self.gauge_window_size_t2[1]))
-
-        self.app_settings.set("show_lr_dial_graph", self.show_lr_dial_graph)
-        self.app_settings.set("lr_dial_window_pos_x", int(self.lr_dial_window_pos[0]))
-        self.app_settings.set("lr_dial_window_pos_y", int(self.lr_dial_window_pos[1]))
-        self.app_settings.set("lr_dial_window_size_w", int(self.lr_dial_window_size[0]))
-        self.app_settings.set("lr_dial_window_size_h", int(self.lr_dial_window_size[1]))
 
         self.app_settings.set("interactive_refinement_mode_enabled", self.interactive_refinement_mode_enabled)
         self.app_settings.set("selected_processing_speed_mode", self.selected_processing_speed_mode.name)

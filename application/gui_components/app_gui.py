@@ -1597,9 +1597,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             app_state.show_toolbar = True
         toolbar_height = self.toolbar_ui.get_toolbar_height() if app_state.show_toolbar else 0
 
-        if not app_state.gauge_pos_initialized and self.main_menu_bar_height > 0:
-            app_state.initialize_gauge_default_y(self.main_menu_bar_height + toolbar_height)
-
         app_state.update_current_script_display_values()
 
         status_strip_h = _STATUS_STRIP_HEIGHT
