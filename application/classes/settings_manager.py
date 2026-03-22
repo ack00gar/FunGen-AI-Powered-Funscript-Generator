@@ -96,7 +96,6 @@ class AppSettings:
             "logging_level": "INFO",
 
             # UI & Layout
-            "ui_view_mode": "expert",
             "full_width_nav": True,
             "window_width": constants.DEFAULT_WINDOW_WIDTH,
             "window_height": constants.DEFAULT_WINDOW_HEIGHT,
