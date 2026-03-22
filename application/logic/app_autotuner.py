@@ -185,7 +185,6 @@ class AppAutotuner:
     def trigger_ultimate_autotune_with_defaults(self, timeline_num: int):
         """
         Non-interactively runs the Ultimate Autotune pipeline with default settings.
-        This is called automatically in 'Simple Mode' after an analysis completes.
         """
         self.app.logger.info(f"Triggering default Ultimate Autotune for Timeline {timeline_num}...")
         fs_proc = self.app.funscript_processor
@@ -197,7 +196,7 @@ class AppAutotuner:
 
         # Get default parameters from the funscript processor helper
         params = fs_proc.get_default_ultimate_autotune_params()
-        op_desc = "Auto-Applied Ultimate Autotune (Simple Mode)"
+        op_desc = "Auto-Applied Ultimate Autotune"
 
         # 1. Record state for Undo
         fs_proc._record_timeline_action(timeline_num, op_desc)

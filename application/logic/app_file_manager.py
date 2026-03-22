@@ -10,16 +10,25 @@ from typing import List, Optional, Dict, Tuple, Any
 def _safe_makedirs(path: str, logger=None) -> str:
     """Create directory, falling back to a sanitized name if the OS rejects it.
 
-    Returns the path that was actually created (may differ from input if
-    the original contained characters the OS can't handle).
+    Always strips trailing spaces and dots from directory names (Windows silently
+    strips them, causing path mismatches). Falls back to ASCII-only name if the
+    OS rejects the original, then to the parent directory as last resort.
+
+    Returns the actual path created.
     """
+    # Always strip trailing spaces/dots from the last path component
+    # (Windows silently strips these, causing open() to fail with the unstripped path)
+    parent = os.path.dirname(path)
+    basename = os.path.basename(path).rstrip('. ')
+    if not basename:
+        basename = "untitled"
+    path = os.path.join(parent, basename)
+
     try:
         os.makedirs(path, exist_ok=True)
         return path
     except (OSError, ValueError):
         # Path has characters the OS can't handle -- sanitize to ASCII
-        parent = os.path.dirname(path)
-        basename = os.path.basename(path)
         sanitized = ''.join(c for c in basename if 32 <= ord(c) < 127 and c not in '<>:"/\\|?*')
         sanitized = re.sub(r'\s+', ' ', sanitized).strip().rstrip('. ') or "untitled"
         fallback = os.path.join(parent, sanitized)
