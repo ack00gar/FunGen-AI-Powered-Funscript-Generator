@@ -598,7 +598,6 @@ class ApplicationLogic:
     def trigger_ultimate_autotune_with_defaults(self, timeline_num: int):
         """
         Non-interactively runs the Ultimate Autotune pipeline with default settings.
-        This is called automatically in 'Simple Mode' after an analysis completes.
         """
         self.autotuner.trigger_ultimate_autotune_with_defaults(timeline_num)
 
