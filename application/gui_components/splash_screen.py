@@ -782,26 +782,12 @@ class StandaloneSplashWindow:
         # Get window size
         window_width, window_height = glfw.get_window_size(self.window)
 
-        # Calculate tremble/shake effect
+        # Subtle ambient drift (smooth, not jarring)
         current_time = time.time()
-        tremble_intensity = 0.0  # Default no tremble
-        
-        # Add tremble effect after initial fade-in (more dramatic later in the sequence)
-        if current_time > 0.5:  # Start tremble after initial fade-in
-            tremble_base = math.sin(current_time * 15.0) * 0.7  # High frequency shake
-            tremble_secondary = math.sin(current_time * 7.3) * 0.3  # Secondary frequency
-            tremble_intensity = tremble_base + tremble_secondary
-            
-            # Make tremble stronger during laser scanning patterns
-            if current_time > 1.0:  # After fade-in and when lasers start
-                # Increase tremble during certain laser patterns for more drama
-                pattern_timing = (current_time - 1.0) % 15.0  # Pattern cycle
-                if pattern_timing < 2.0:  # First 2 seconds of each pattern cycle
-                    tremble_intensity *= 2.0  # Double the intensity for dramatic effect
-
-        # Apply tremble to window position
-        tremble_x = tremble_intensity 
-        tremble_y = tremble_intensity * 0.7  # Slightly less vertical tremble
+        drift_x = math.sin(current_time * 1.2) * 1.5 + math.sin(current_time * 3.7) * 0.5
+        drift_y = math.cos(current_time * 0.9) * 1.0 + math.sin(current_time * 2.8) * 0.3
+        tremble_x = drift_x
+        tremble_y = drift_y
 
         # Full-screen window with transparent background and tremble effect
         imgui.set_next_window_position(tremble_x, tremble_y)
@@ -825,8 +811,8 @@ class StandaloneSplashWindow:
 
         imgui.begin("##StandaloneSplash", flags=window_flags)
 
-        # Current time for animations
-        current_time = time.time()
+        # Time since splash started (for animations and typewriter timing)
+        current_time = time.time() - getattr(self, '_splash_start_time', time.time())
 
         # Center logo vertically and horizontally
         if self.logo_texture is not None:
@@ -843,100 +829,49 @@ class StandaloneSplashWindow:
             imgui.set_cursor_pos((logo_x, logo_y + float_offset))
             imgui.image(self.logo_texture, logo_size, logo_size, tint_color=(1, 1, 1, fade_alpha))
 
-            # Draw enhanced lasers AFTER logo (so they appear IN FRONT)
-            # Quality-adaptive rendering: reduce effects if frame rate drops
-            if current_time > 0.3 and self.quality_level > 0.3:  # Start lasers after fade-in
+            # Draw animation effects AFTER logo (so they appear IN FRONT)
+            if current_time > 0.3 and self.quality_level > 0.3:
                 self._render_enhanced_laser_eyes(logo_x, logo_y + float_offset, logo_size, current_time - 0.3)
 
-            # Loading quip and version below the logo
-            if current_time > 0.3:  # Show after fade-in
+            # Content below logo: version, logs, funscript graph, ko-fi
+            if current_time > 0.3:
                 from config.constants import APP_VERSION
+                draw_list_text = imgui.get_window_draw_list()
+                cursor_y = logo_y + logo_size + float_offset + 15
 
-                # Pick a random loading quip (stable per session)
-                if not hasattr(self, '_loading_quip'):
-                    import random
-                    _LOADING_QUIPS = [
-                        "Oops, forgot my pants...",
-                        "Warming up the engines...",
-                        "Calibrating the fun meter...",
-                        "Polishing the algorithms...",
-                        "Stretching before the workout...",
-                        "Finding the right angle...",
-                        "Hold on, almost ready...",
-                        "Did you see my... nevermind.",
-                        "Adjusting for maximum performance...",
-                        "Preparing the magic...",
-                        "Getting into position...",
-                        "Generating excitement...",
-                        "Tuning the sensitivity...",
-                        "Syncing the motions...",
-                        "Lubing up the pipeline...",
-                        "Initiating deep analysis...",
-                        "Almost there, don't stop now...",
-                        "Detecting points of interest...",
-                        "Tracking the action...",
-                        "Calculating optimal stroke...",
-                        # R2D2 & robot vibes
-                        "Beep boop beep...",
-                        "* excited droid noises *",
-                        "Bleep blorp bzzzt...",
-                        "Wrrrr... click click... wrrrr...",
-                        "01001000 01101001...",
-                        "Doot doot doooooot...",
-                        "Bzzt bzzt... processing feels...",
-                        "Whirr clank beep boop!",
-                        "* happy robot sounds *",
-                        "Bweee-ooo bwip bwip...",
-                        "Loading fun subroutines...",
-                        "Engaging pleasure protocols...",
-                        "Neural nets are tingling...",
-                        "Revving up the servo motors...",
-                        "Consulting the funscript oracle...",
-                    ]
-                    self._loading_quip = random.choice(_LOADING_QUIPS)
-                loading_text = self._loading_quip
-
-                # Gentle pulse (stays readable — high baseline)
-                text_pulse = 0.85 + 0.15 * math.sin((current_time - 0.3) * 3.0)
-
-                # --- Loading quip at 1.8x ---
-                imgui.set_window_font_scale(1.8)
-                text_size = imgui.calc_text_size(loading_text)
-                text_x = (window_width - text_size[0]) / 2
-                text_y = logo_y + logo_size + float_offset + 25
-                imgui.set_cursor_pos((text_x, text_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 0.95, 1.0, fade_alpha * text_pulse)
-                imgui.text(loading_text)
-                imgui.pop_style_color()
-
-                # --- Version at 1.4x ---
+                # 1. Version text
                 version_text = f"FunGen v{APP_VERSION}"
                 imgui.set_window_font_scale(1.4)
                 ver_size = imgui.calc_text_size(version_text)
                 ver_x = (window_width - ver_size[0]) / 2
-                ver_y = text_y + text_size[1] + 8
-                imgui.set_cursor_pos((ver_x, ver_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
+                imgui.set_cursor_pos((ver_x, cursor_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
                 imgui.push_style_color(imgui.COLOR_TEXT, 0.75, 0.88, 1.0, 0.95 * fade_alpha)
                 imgui.text(version_text)
                 imgui.pop_style_color()
+                imgui.set_window_font_scale(1.0)
+                cursor_y += ver_size[1] + 14
 
-                # --- Ko-fi support text at 1.2x ---
+                # 2. Boot log (humorous status lines)
+                cursor_y = self._render_boot_log(draw_list_text, window_width, cursor_y,
+                                                 current_time, fade_alpha)
+                cursor_y += 14
+
+                # 3. Funscript timeline graph
+                self._render_funscript_timeline(draw_list_text, window_width, cursor_y,
+                                                current_time, fade_alpha)
+                cursor_y += 140
+
+                # 4. Ko-fi support text
                 support_text = "Support the project and unlock features at ko-fi.com/k00gar"
                 imgui.set_window_font_scale(1.2)
                 sup_size = imgui.calc_text_size(support_text)
                 sup_x = (window_width - sup_size[0]) / 2
-                sup_y = ver_y + ver_size[1] + 10
                 sup_alpha = min(1.0, max(0.0, (current_time - 0.8) / 0.4)) * fade_alpha * 0.9
-                imgui.set_cursor_pos((sup_x, sup_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
+                imgui.set_cursor_pos((sup_x, cursor_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
                 imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.4, sup_alpha)
                 imgui.text(support_text)
                 imgui.pop_style_color()
                 imgui.set_window_font_scale(1.0)
-
-                # Add FunScript timeline visualization below the loading text
-                draw_list_text = imgui.get_window_draw_list()
-                timeline_y = sup_y + sup_size[1] + 15  # Position below the support text
-                self._render_funscript_timeline(draw_list_text, window_width, timeline_y, current_time, fade_alpha)
 
         imgui.end()
         imgui.pop_style_color(2)
@@ -1357,6 +1292,21 @@ class StandaloneSplashWindow:
             laser_g = 0.0 + 0.5 * t_color
             laser_b = 0.5 - 0.5 * t_color
 
+        # ---- HUD ring around logo (subtle rotating reticle, color-matched) ----
+        hud_ring_r = 165
+        hud_angle = laser_time * 0.4
+        hud_alpha = 0.25 * pulse
+        hud_col = imgui.get_color_u32_rgba(laser_r * 0.5, laser_g * 0.5, laser_b * 0.5, hud_alpha)
+        draw_list.add_circle(logo_center_x, logo_center_y, hud_ring_r, hud_col, 64, 1.5)
+        for _ti in range(8):
+            _ta = hud_angle + _ti * math.pi / 4
+            _ix = logo_center_x + math.cos(_ta) * hud_ring_r
+            _iy = logo_center_y + math.sin(_ta) * hud_ring_r
+            _ox = logo_center_x + math.cos(_ta) * (hud_ring_r + 8)
+            _oy = logo_center_y + math.sin(_ta) * (hud_ring_r + 8)
+            draw_list.add_line(_ix, _iy, _ox, _oy,
+                               imgui.get_color_u32_rgba(laser_r * 0.6, laser_g * 0.6, laser_b * 0.6, hud_alpha * 1.5), 1.5)
+
         # Calculate 3D depth effect - distance from screen center determines perceived depth
         screen_center_x = window_width / 2
         screen_center_y = window_height / 2
@@ -1533,113 +1483,196 @@ class StandaloneSplashWindow:
         scan_line_v_color = imgui.get_color_u32_rgba(laser_r * 0.8, laser_g * 0.8, laser_b * 0.8, scan_line_v_alpha)
         draw_list.add_line(target_x_center + horizontal_drift, 0, target_x_center + horizontal_drift, window_height, scan_line_v_color, 2.0)
 
+    # Boot log pool: (tag, tag_color_rgb, message)
+    # 6 random lines picked per session for variety on repeat launches
+    _BOOT_LOG_POOL = [
+        # Technical innuendo
+        ("LOAD", (0.0, 0.85, 1.0), "AI models loaded... heavy breathing..."),
+        ("OK",   (0.0, 1.0, 0.4),  "Stroke detection sensitivity: maximum"),
+        ("OK",   (0.0, 1.0, 0.4),  "Peak detection: deeper than expected"),
+        ("INFO", (0.0, 0.85, 1.0), "Calibrating thrust vectors..."),
+        ("OK",   (0.0, 1.0, 0.4),  "69 plugins loaded... nice"),
+        ("INFO", (0.0, 0.85, 1.0), "Vibration protocols standing by"),
+        ("OK",   (0.0, 1.0, 0.4),  "Oscillation detector: tingling"),
+        # Self-aware
+        ("WARN", (1.0, 0.85, 0.0), "Pants not found in working directory"),
+        ("ERR!", (1.0, 0.35, 0.2), "Dignity module missing... skipping"),
+        ("WARN", (1.0, 0.85, 0.0), "Your ISP is judging you"),
+        ("ERR!", (1.0, 0.35, 0.2), "Found 0 regrets... recounting..."),
+        ("WARN", (1.0, 0.85, 0.0), "DO NOT make eye contact with the AI"),
+        ("WARN", (1.0, 0.85, 0.0), "Incognito mode: lol sure"),
+        # Robot personality
+        ("INFO", (0.0, 0.85, 1.0), "* nervous robot noises *"),
+        ("OK",   (0.0, 1.0, 0.4),  "Asking YOLO model about life choices"),
+        ("INFO", (0.0, 0.85, 1.0), "Analyzing... for science, obviously"),
+        ("OK",   (0.0, 1.0, 0.4),  "Fun-o-meter: off the charts"),
+        ("INFO", (0.0, 0.85, 1.0), "Teaching neural net the meaning of love"),
+        # Fourth wall
+        ("WARN", (1.0, 0.85, 0.0), "You could be doing laundry right now"),
+        ("OK",   (0.0, 1.0, 0.4),  "Plausible deniability: enabled"),
+        ("INFO", (0.0, 0.85, 1.0), "Pretending this is a productivity app..."),
+        ("ERR!", (1.0, 0.35, 0.2), "Shame.dll not found... continuing"),
+        ("OK",   (0.0, 1.0, 0.4),  "Browser history: what browser history?"),
+    ]
+
+    def _render_boot_log(self, draw_list, window_width, start_y, current_time, alpha):
+        """Render staggered typewriter boot log lines. Returns y after last line."""
+        if not hasattr(self, '_boot_lines'):
+            import random
+            pool = list(self._BOOT_LOG_POOL)
+            random.shuffle(pool)
+            self._boot_lines = pool[:2]
+
+        chars_per_sec = 30
+        scale = 1.3
+        y = start_y
+
+        imgui.set_window_font_scale(scale)
+        line_h = imgui.get_text_line_height() + 6
+
+        # Measure widest line for block centering
+        if not hasattr(self, '_boot_block_width') or self._boot_block_width == 0:
+            max_w = 0
+            for tag, _, msg in self._boot_lines:
+                w = imgui.calc_text_size(f"[{tag:4s}] {msg}_")[0]
+                if w > max_w:
+                    max_w = w
+            self._boot_block_width = max_w
+
+        block_x = (window_width - self._boot_block_width) / 2
+
+        for i, (tag, tag_rgb, msg) in enumerate(self._boot_lines):
+            delay = 1.2 + i * 1.2
+            if current_time < delay:
+                break
+            elapsed = current_time - delay
+            full = f"[{tag:4s}] {msg}"
+            visible = min(len(full), int(elapsed * chars_per_sec))
+            if visible == 0:
+                y += line_h
+                continue
+            display = full[:visible]
+            still_typing = visible < len(full)
+
+            glitch = 0
+            if elapsed < 0.06:
+                glitch = int(abs(math.sin(i * 1000 + elapsed * 200)) * 8)
+
+            tx = block_x + glitch
+            line_alpha = min(1.0, elapsed / 0.2) * alpha * 0.8
+
+            # Build display with cursor
+            show_text = display
+            if still_typing and int(current_time * 3) % 2 == 0:
+                show_text += "_"
+
+            # Render as single colored line (tag color for the whole line for simplicity,
+            # since draw_list.add_text doesn't support font scaling)
+            tag_end = len(tag) + 2
+            # Color: tag color for WARN/ERR, muted cyan for OK/INFO
+            if tag in ("WARN", "ERR!"):
+                cr, cg, cb = tag_rgb
+            else:
+                cr, cg, cb = 0.4, 0.75, 0.85
+
+            # Position and render with imgui.text (respects set_window_font_scale)
+            imgui.set_cursor_screen_position((tx, y))
+            imgui.push_style_color(imgui.COLOR_TEXT, cr, cg, cb, line_alpha)
+            imgui.text(show_text)
+            imgui.pop_style_color()
+
+            # WARN/ERR flash
+            if tag in ("WARN", "ERR!") and elapsed < 0.1:
+                flash_g = 0.85 if tag == "WARN" else 0.2
+                draw_list.add_rect_filled(0, 0, window_width, 2000,
+                                          imgui.get_color_u32_rgba(1.0, flash_g, 0.0, 0.05))
+
+            y += line_h
+
+        imgui.set_window_font_scale(1.0)
+        return y
+
     def _render_funscript_timeline(self, draw_list, window_width, timeline_y, current_time, alpha):
-        """Render a prominent FunScript timeline visualization with dramatic effects."""
-        # Bigger timeline parameters for better visibility
-        timeline_height = 80  # Even bigger height for more dramatic amplitude
-        timeline_width = window_width * 0.95  # Wider - 95% of screen width
-        timeline_x = (window_width - timeline_width) / 2
-        
-        # Draw animated waveform representing FunScript events with much more amplitude
-        waveform_color = imgui.get_color_u32_rgba(0.0, 0.9, 1.0, 0.95 * alpha)
-        line_thickness = 4.0  # Even thicker line for more visibility
-        
-        # Draw a more complex and dramatically amplified waveform
-        time_offset = current_time * 1.5  # Adjusted scroll speed for more dramatic effect
+        """Render a funscript-style zigzag timeline with speed-colored segments."""
+        tl_h = 130  # Tall for visual impact
+        tl_w = window_width * 0.95
+        tl_x = (window_width - tl_w) / 2
+        scroll = current_time * 0.6
+
+        # Generate dense zigzag (alternating peaks/valleys with varied timing and amplitude)
+        n_strokes = 40
+        stroke_points = []
+        for si in range(n_strokes):
+            # Varied spacing between strokes (some fast, some slow)
+            base_t = si * 0.28 + math.sin(si * 1.7) * 0.08 + math.sin(si * 0.6) * 0.05
+            # Alternating peaks/valleys with varied amplitude
+            if si % 2 == 0:
+                pos = 0.82 + math.sin(si * 0.9) * 0.15  # Peaks 67-97%
+            else:
+                pos = 0.18 + math.sin(si * 1.3) * 0.15  # Valleys 3-33%
+            stroke_points.append((base_t, pos))
+
+        # Wrap length for seamless scrolling
+        wrap_len = n_strokes * 0.28
+
+        # Convert to screen coordinates with scrolling
         points = []
-        num_points = int(timeline_width)
-        
-        for i in range(num_points):
-            x = timeline_x + i
-            # Create a complex waveform pattern using multiple sine functions for richer visualization
-            progress = i / timeline_width
-            wave_value = (
-                math.sin(progress * 4 + time_offset * 1.0) * 0.8 +      # Primary wave with much more amplitude
-                math.sin(progress * 15 + time_offset * 0.7) * 0.4 +     # Secondary wave with more amplitude  
-                math.sin(progress * 8 + time_offset * 1.3) * 0.3 +      # Tertiary wave
-                math.sin(progress * 25 + time_offset * 1.6) * 0.2       # Fine detail wave
-            )
-            # Use full timeline height with maximum amplitude
-            y = timeline_y + timeline_height / 2 + wave_value * (timeline_height * 0.85)  # 85% of height for max amplitude
-            points.append((x, y))
-        
-        # Draw the main waveform with enhanced visibility
+        for st, sp in stroke_points:
+            sx = tl_x + ((st - scroll) % wrap_len) / wrap_len * tl_w
+            sy = timeline_y + tl_h * (1.0 - sp)
+            points.append((sx, sy, sp))  # keep pos for speed coloring
+        points.sort(key=lambda p: p[0])
+
+        # Speed-colored segments: color based on slope (position change / time change)
+        # Green = slow, yellow = medium, orange = fast, red = very fast
         for i in range(1, len(points)):
-            draw_list.add_line(
-                points[i-1][0], points[i-1][1],
-                points[i][0], points[i][1],
-                waveform_color, line_thickness
-            )
-        
-        # Add a secondary waveform underneath for depth effect
-        secondary_waveform_color = imgui.get_color_u32_rgba(0.0, 0.5, 0.7, 0.4 * alpha)
-        for i in range(1, len(points)):
-            # Slightly offset for a layered effect
-            y_offset = timeline_y + timeline_height / 2 + (points[i][1] - (timeline_y + timeline_height / 2)) * 0.6
-            draw_list.add_line(
-                points[i-1][0], points[i-1][1] - 5,  # More offset for secondary line
-                points[i][0], points[i][1] - 5,
-                secondary_waveform_color, 1.5
-            )
-        
-        # Draw prominent FunScript event markers (without playhead)
-        event_color = imgui.get_color_u32_rgba(0.9, 0.3, 0.5, 0.95 * alpha)
-        for i in range(8):  # More events for more drama
-            event_time = (current_time * 0.4 + i * 1.5) % 8  # Cycle
-            event_pos = (event_time / 8.0) * timeline_width
-            event_x = timeline_x + event_pos
-            # Calculate y-position based on the waveform at this x position
-            event_wave_value = (
-                math.sin(event_pos / timeline_width * 4 + time_offset * 1.0) * 0.8 +
-                math.sin(event_pos / timeline_width * 15 + time_offset * 0.7) * 0.4 +
-                math.sin(event_pos / timeline_width * 8 + time_offset * 1.3) * 0.3 +
-                math.sin(event_pos / timeline_width * 25 + time_offset * 1.6) * 0.2
-            )
-            event_y = timeline_y + timeline_height / 2 + event_wave_value * (timeline_height * 0.85)
-            
-            # Larger circles with glow
-            event_radius = 8.0
-            # Glow effect for event markers
-            for glow_size in [6, 5, 4, 3, 2]:
-                glow_radius = event_radius + glow_size
-                glow_color = imgui.get_color_u32_rgba(0.9, 0.3, 0.5, 0.12 * alpha / glow_size)
-                draw_list.add_circle_filled(
-                    event_x, event_y,
-                    glow_radius, glow_color
-                )
-            
-            # Main event circle
-            draw_list.add_circle_filled(
-                event_x, event_y,
-                event_radius, event_color
-            )
-            # Inner highlight
-            inner_color = imgui.get_color_u32_rgba(1.0, 0.9, 0.8, 0.9 * alpha)
-            draw_list.add_circle_filled(
-                event_x, event_y,
-                event_radius * 0.6, inner_color
-            )
-        
-        # Add funscript speed indicators as animated pulses that follow the waveform
-        for i in range(6):  # More pulses for more drama
-            pulse_time = (current_time * 0.6 + i * 1.8) % 6
-            pulse_pos = (pulse_time / 6.0) * timeline_width
-            pulse_x = timeline_x + pulse_pos
-            # Calculate y-position based on the waveform at this x position
-            pulse_wave_value = (
-                math.sin(pulse_pos / timeline_width * 4 + time_offset * 1.0) * 0.8 +
-                math.sin(pulse_pos / timeline_width * 15 + time_offset * 0.7) * 0.4 +
-                math.sin(pulse_pos / timeline_width * 8 + time_offset * 1.3) * 0.3 +
-                math.sin(pulse_pos / timeline_width * 25 + time_offset * 1.6) * 0.2
-            )
-            pulse_y = timeline_y + timeline_height / 2 + pulse_wave_value * (timeline_height * 0.85)
-            pulse_size = 6 + math.sin(current_time * 5 + i) * 4  # Larger pulsing size
-            pulse_alpha = (0.5 + 0.4 * math.sin(current_time * 4 + i)) * alpha
-            pulse_color = imgui.get_color_u32_rgba(0.5, 1.0, 0.7, pulse_alpha)
-            draw_list.add_circle_filled(
-                pulse_x, pulse_y,
-                pulse_size, pulse_color
-            )
+            x1, y1, p1 = points[i - 1]
+            x2, y2, p2 = points[i]
+            dx = abs(x2 - x1)
+            if dx < 1:
+                continue
+            speed = abs(p2 - p1) / (dx / tl_w)  # Normalized speed
+
+            # Speed -> color: 0=green, 1=yellow, 2+=red
+            if speed < 0.8:
+                r, g, b = 0.15, 0.85, 0.4  # Green (slow)
+            elif speed < 1.5:
+                t_c = (speed - 0.8) / 0.7
+                r = 0.15 + 0.85 * t_c
+                g = 0.85 + 0.15 * t_c
+                b = 0.4 - 0.35 * t_c  # Yellow
+            elif speed < 3.0:
+                t_c = min(1.0, (speed - 1.5) / 1.5)
+                r = 1.0
+                g = 1.0 - 0.6 * t_c  # Orange
+                b = 0.05
+            else:
+                r, g, b = 1.0, 0.25, 0.1  # Red (very fast)
+
+            # Glow behind
+            draw_list.add_line(x1, y1, x2, y2,
+                               imgui.get_color_u32_rgba(r, g, b, 0.12 * alpha), 10.0)
+            # Main line
+            draw_list.add_line(x1, y1, x2, y2,
+                               imgui.get_color_u32_rgba(r, g, b, 0.85 * alpha), 3.5)
+
+        # Dots at peaks and valleys
+        for px, py, pp in points:
+            if tl_x < px < tl_x + tl_w:
+                is_peak = pp > 0.5
+                dot_r = 0.0 if is_peak else 0.9
+                dot_g = 1.0 if is_peak else 0.3
+                dot_b = 0.5 if is_peak else 0.3
+                draw_list.add_circle_filled(px, py, 5,
+                                            imgui.get_color_u32_rgba(dot_r, dot_g, dot_b, 0.2 * alpha))
+                draw_list.add_circle_filled(px, py, 3,
+                                            imgui.get_color_u32_rgba(dot_r, dot_g, dot_b, 0.8 * alpha))
+
+        # Horizontal scale lines (0, 50, 100 reference)
+        for frac in (0.0, 0.5, 1.0):
+            gy = timeline_y + tl_h * (1.0 - frac)
+            draw_list.add_line(tl_x, gy, tl_x + tl_w, gy,
+                               imgui.get_color_u32_rgba(0.3, 0.4, 0.5, 0.12 * alpha), 1.0)
 
     def _render_spinner(self, window_width, window_height, current_time):
         """Render an animated loading spinner."""
@@ -1741,6 +1774,7 @@ class StandaloneSplashWindow:
     def start(self):
         """Start the splash window in the current thread."""
         self.running = True
+        self._splash_start_time = time.time()
         if not self._init_window():
             print("Failed to initialize splash window")
             return False
