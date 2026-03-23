@@ -1490,7 +1490,7 @@ class AppFileManager:
         # Model paths are handled by AppLogic's save_app_settings directly
         pass
 
-    def save_final_funscripts(self, video_path: str, chapters: Optional[List[Dict]] = None) -> List[str]:
+    def save_final_funscripts(self, video_path: str, chapters: Optional[List] = None) -> List[str]:
         """
         Saves the final (potentially post-processed) funscripts.
         Adheres to the 'autosave_final_funscript_to_video_location' setting.
@@ -1509,9 +1509,19 @@ class AppFileManager:
         primary_actions = self.app.funscript_processor.get_actions('primary')
         secondary_actions = self.app.funscript_processor.get_actions('secondary')
 
-        chapters_to_save = []
+        chapters_to_save: List[VideoSegment] = []
         if chapters is not None:
-            chapters_to_save = [VideoSegment.from_dict(chap_data) for chap_data in chapters if isinstance(chap_data, dict)]
+            for chapter_item in chapters:
+                if isinstance(chapter_item, VideoSegment):
+                    chapters_to_save.append(chapter_item)
+                elif isinstance(chapter_item, dict):
+                    chapters_to_save.append(VideoSegment.from_dict(chapter_item))
+            if chapters and not chapters_to_save:
+                self.logger.warning(
+                    "No valid chapter entries provided to save_final_funscripts; "
+                    "falling back to funscript_processor.video_chapters."
+                )
+                chapters_to_save = self.app.funscript_processor.video_chapters
         else:
             chapters_to_save = self.app.funscript_processor.video_chapters
 
