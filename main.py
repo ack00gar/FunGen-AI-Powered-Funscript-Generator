@@ -102,7 +102,7 @@ def _setup_bootstrap_logger():
     console_handler.setFormatter(BootstrapColoredFormatter())
     logger.addHandler(console_handler)
 
-def run_gui():
+def run_gui(video_path=None):
     """Initializes and runs the graphical user interface."""
     from application.logic.app_logic import ApplicationLogic
     from application.gui_components import GUI, show_splash_during_init
@@ -114,6 +114,11 @@ def run_gui():
     core_app = show_splash_during_init(init_app_logic)
     gui = GUI(app_logic=core_app)
     core_app.gui_instance = gui
+
+    # Open video after GUI init if path was provided via CLI
+    if video_path:
+        core_app.file_manager.open_video_from_path(video_path)
+
     gui.run()
 
 def run_cli(args):
@@ -225,6 +230,7 @@ def main():
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation and Processing")
     parser.add_argument('--version', action='version', version=f'FunGen {APP_VERSION}')
     parser.add_argument('input_path', nargs='?', default=None, help='Path to a video file, folder of videos, or funscript file. If omitted, GUI will start.')
+    parser.add_argument('--open', metavar='VIDEO', default=None, help='Open the GUI with a video file pre-loaded. Example: python main.py --open video.mp4')
 
     # Output control
     parser.add_argument('--output', '-o', metavar='DIR', default=None, help='Override output directory for this run.')
@@ -324,7 +330,7 @@ def main():
 
         run_cli(args)
     else:
-        run_gui()
+        run_gui(video_path=args.open)
 
 if __name__ == "__main__":
     main()
