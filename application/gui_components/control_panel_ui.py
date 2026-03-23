@@ -102,15 +102,6 @@ class ControlPanelUI(
         # Active sidebar section (replaces tab bar)
         self._active_section = "run"
 
-        # Advanced tab search
-        self._advanced_search_query = ""
-
-        # Settings profiles state
-        self._profile_name_input = ""
-        self._profile_list_cache = None
-        self._profile_list_cache_time = 0
-        self._selected_profile_idx = 0
-
         # Tracker filter row toggle (ephemeral, resets each session)
         self._tracker_filter_open = False
 
@@ -125,6 +116,18 @@ class ControlPanelUI(
         self._init_batch_state()
 
     # ------- Helpers -------
+
+    @staticmethod
+    def _render_panel_label(text):
+        """Render a dim uppercase centered label at the top of the panel (toolbar-style)."""
+        label = text.upper()
+        text_size = imgui.calc_text_size(label)
+        avail_w = imgui.get_content_region_available_width()
+        x_offset = (avail_w - text_size[0]) * 0.5
+        if x_offset > 0:
+            imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + x_offset)
+        imgui.text_colored(label, 0.45, 0.45, 0.50, 0.7)
+        imgui.spacing()
 
     def _render_addon_version_label(self, module_name, display_name):
         """Render a dim version label for an addon module."""
@@ -288,7 +291,8 @@ class ControlPanelUI(
 
     _SIDEBAR_WIDTH = 40
     _SIDEBAR_CORE_SECTIONS = [
-        ("run", "R", "Run"),
+        ("run", "R", "Analysis"),
+        ("post", "P", "Post-Processing"),
         ("metadata", "M", "Metadata"),
     ]
     _SIDEBAR_ADDON_SECTIONS = [
@@ -298,7 +302,8 @@ class ControlPanelUI(
     ]
     # Map section keys to icon asset filenames for sidebar PNG icons
     _SIDEBAR_ICON_MAP = {
-        "run": "robot.png",
+        "run": "sidebar-run.png",
+        "post": "sidebar-postproc.png",
         "device_control": "sidebar-device.png",
         "native_sync": "sidebar-stream.png",
         "supporter_batch": "sidebar-batch.png",
@@ -574,6 +579,7 @@ class ControlPanelUI(
         else:
             flags = imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE
             imgui.begin("Control Panel##MainControlPanel", flags=flags)
+            self._render_panel_label("AI ANALYSIS")
 
         # --- Sidebar + Content layout ---
         avail = imgui.get_content_region_available()
@@ -598,6 +604,8 @@ class ControlPanelUI(
         imgui.begin_child("TabContentRegion", width=0, height=content_h, border=False)
         if tab_selected == "run":
             self._render_run_control_tab()
+        elif tab_selected == "post":
+            self._render_post_processing_tab()
         elif tab_selected == "device_control":
             if self._feat_device:
                 self._render_device_control_tab()
@@ -979,17 +987,23 @@ class ControlPanelUI(
                 if open_:
                     self._render_range_selection(stage_proc, fs_proc, events)
 
-        # Post-Analysis section
-        with section_card("Post-Analysis##RunControlPostAnalysis",
-                          tier="primary", open_by_default=False) as pa_open:
-            if pa_open:
+        # (Post-Analysis and Chapters moved to dedicated Post-Processing sidebar section)
+
+    def _render_post_processing_tab(self):
+        """Render the Post-Processing sidebar section content."""
+        app = self.app
+        app_state = app.app_state_ui
+
+        # Plugin Pipeline
+        with section_card("Plugin Pipeline##PostProcPipeline", tier="primary") as pp_open:
+            if pp_open:
                 self._render_post_analysis_section(app, app_state)
 
+        # Chapters
         chapters = getattr(app.funscript_processor, "video_chapters", [])
         if chapters:
-            with section_card("Chapters##RunChapters", tier="primary") as is_open:
-                if is_open:
-                    # Clear All Chapters button (DESTRUCTIVE - deletes all chapters)
+            with section_card("Chapters##PostProcChapters", tier="primary") as ch_open:
+                if ch_open:
                     with destructive_button_style():
                         if imgui.button("Clear All Chapters", width=-1):
                             imgui.open_popup("Clear All Chapters?###ConfirmClearChapters")
@@ -1002,7 +1016,6 @@ class ControlPanelUI(
                         bw, cw = 150, 100
                         total = bw + cw + imgui.get_style().item_spacing[0]
                         imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (w - total) * 0.5)
-                        # Confirm button (DESTRUCTIVE - irreversible action)
                         with destructive_button_style():
                             if imgui.button("Yes, clear all", width=bw):
                                 app.funscript_processor.video_chapters.clear()
