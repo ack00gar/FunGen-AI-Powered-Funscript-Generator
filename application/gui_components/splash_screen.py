@@ -856,10 +856,13 @@ class StandaloneSplashWindow:
                                                  current_time, fade_alpha)
                 cursor_y += 14
 
-                # 3. Funscript timeline graph
-                self._render_funscript_timeline(draw_list_text, window_width, cursor_y,
+                # 3. Funscript timeline graph (centered in lower half of screen)
+                graph_height = 120
+                lower_half_center = (window_height + cursor_y) * 0.5 - graph_height * 0.5
+                graph_y = max(cursor_y + 10, lower_half_center)
+                self._render_funscript_timeline(draw_list_text, window_width, graph_y,
                                                 current_time, fade_alpha)
-                cursor_y += 140
+                cursor_y = graph_y + graph_height + 20
 
                 # 4. Ko-fi support text
                 support_text = "Support the project and unlock features at ko-fi.com/k00gar"
