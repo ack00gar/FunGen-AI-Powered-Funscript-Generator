@@ -1084,7 +1084,7 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
             usable_gb = total_gb - constants.MPS_MEMORY_HEADROOM_GB
             mps_max = max(1, int(usable_gb / constants.MPS_MEMORY_PER_CONSUMER_GB))
             if self.num_consumers_stage1 > mps_max:
-                logger.info(
+                self.logger.info(
                     f"MPS: {total_gb:.0f}GB memory, capping consumers "
                     f"from {self.num_consumers_stage1} to {mps_max} "
                     f"({constants.MPS_MEMORY_PER_CONSUMER_GB}GB/consumer + "
