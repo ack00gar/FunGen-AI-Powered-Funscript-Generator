@@ -69,6 +69,12 @@ class KeyboardShortcutsDialog:
                 ("zoom_in_timeline", "Zoom In Timeline"),
                 ("zoom_out_timeline", "Zoom Out Timeline"),
             ],
+            "Video View": [
+                ("zoom_in_video", "Zoom In Video"),
+                ("zoom_out_video", "Zoom Out Video"),
+                ("reset_video_view", "Reset Video View"),
+                ("toggle_fullscreen", "Toggle Fullscreen"),
+            ],
             "Window Toggles": [
                 ("toggle_video_display", "Toggle Video Display"),
                 ("toggle_timeline2", "Toggle Timeline 2"),
@@ -108,6 +114,7 @@ class KeyboardShortcutsDialog:
                 ("nudge_selection_pos_down", "Lower Selected Point Value"),
                 ("nudge_selection_time_prev", "Nudge Selection Time Back"),
                 ("nudge_selection_time_next", "Nudge Selection Time Forward"),
+                ("snap_nearest_to_playhead", "Snap Nearest Point to Playhead"),
             ],
             "Chapters": [
                 ("set_chapter_start", "Set Chapter Start (In-point)"),
