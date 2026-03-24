@@ -88,17 +88,15 @@ class ExecutionMixin:
                 frame_q_size = stage_proc.stage1_frame_queue_size
                 frame_q_max = self.constants.STAGE1_FRAME_QUEUE_MAXSIZE
                 frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
-                suggestion_message, bar_color = "", CurrentTheme.GREEN[:3]
                 if frame_q_fraction > 0.9:
-                    bar_color, suggestion_message = CurrentTheme.RED_LIGHT[:3], "Suggestion: Add consumer if resources allow"
+                    bar_color = CurrentTheme.RED_LIGHT[:3]
                 elif frame_q_fraction > 0.2:
-                    bar_color, suggestion_message = CurrentTheme.ORANGE[:3], "Balanced"
+                    bar_color = CurrentTheme.ORANGE[:3]
                 else:
-                    bar_color, suggestion_message = CurrentTheme.GREEN[:3], "Suggestion: Lessen consumers or add producer"
+                    bar_color = CurrentTheme.GREEN[:3]
                 imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *bar_color)
                 imgui.progress_bar(frame_q_fraction, size=(-1, 0), overlay=f"Frame Queue: {frame_q_size}/{frame_q_max}")
                 imgui.pop_style_color()
-                if suggestion_message: imgui.text(suggestion_message)
 
                 if getattr(stage_proc, 'save_preprocessed_video', False):
                     encoding_q_fraction = frame_q_fraction
