@@ -985,42 +985,44 @@ class ControlPanelUI(
                 imgui.spacing()
                 self._render_execution_progress_display()
 
+                # Clear All Chapters (inside the card, only when chapters exist)
+                chapters = getattr(app.funscript_processor, "video_chapters", [])
+                if chapters:
+                    imgui.spacing()
+                    imgui.separator()
+                    imgui.spacing()
+                    with destructive_button_style():
+                        if imgui.button("Clear All Chapters##RunTab", width=-1):
+                            imgui.open_popup("Clear All Chapters?###ConfirmClearChaptersRun")
+                    imgui.set_next_window_size(380, 0)
+                    opened, _ = imgui.begin_popup_modal("Clear All Chapters?###ConfirmClearChaptersRun")
+                    if opened:
+                        imgui.text_wrapped("Are you sure you want to clear all chapters?\nThis cannot be undone.")
+                        imgui.spacing()
+                        w = imgui.get_content_region_available()[0]
+                        bw, cw = 150, 100
+                        total = bw + cw + imgui.get_style().item_spacing[0]
+                        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (w - total) * 0.5)
+                        with destructive_button_style():
+                            if imgui.button("Yes, clear all##Run", width=bw):
+                                app.funscript_processor.video_chapters.clear()
+                                app.project_manager.project_dirty = True
+                                app.notify("All chapters cleared", "info", 2.0)
+                                imgui.close_current_popup()
+                        imgui.same_line()
+                        if imgui.button("Cancel##Run", width=cw):
+                            imgui.close_current_popup()
+                        imgui.end_popup()
+
         mode = app_state.selected_tracker_name
 
-        # Analysis range (only option kept in Run tab)
+        # Analysis range
         tracker_supports_range = self._get_tracker_property(mode, "supports_range", True)
         if mode and tracker_supports_range and not stage_proc.full_analysis_active:
             with section_card("Analysis Range##RunControlAnalysisRange",
                               tier="primary", open_by_default=False) as open_:
                 if open_:
                     self._render_range_selection(stage_proc, fs_proc, events)
-
-        # Clear All Chapters (visible when chapters exist)
-        chapters = getattr(app.funscript_processor, "video_chapters", [])
-        if chapters:
-            imgui.spacing()
-            with destructive_button_style():
-                if imgui.button("Clear All Chapters##RunTab", width=-1):
-                    imgui.open_popup("Clear All Chapters?###ConfirmClearChaptersRun")
-            imgui.set_next_window_size(380, 0)
-            opened, _ = imgui.begin_popup_modal("Clear All Chapters?###ConfirmClearChaptersRun")
-            if opened:
-                imgui.text_wrapped("Are you sure you want to clear all chapters?\nThis cannot be undone.")
-                imgui.spacing()
-                w = imgui.get_content_region_available()[0]
-                bw, cw = 150, 100
-                total = bw + cw + imgui.get_style().item_spacing[0]
-                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (w - total) * 0.5)
-                with destructive_button_style():
-                    if imgui.button("Yes, clear all##Run", width=bw):
-                        app.funscript_processor.video_chapters.clear()
-                        app.project_manager.project_dirty = True
-                        app.notify("All chapters cleared", "info", 2.0)
-                        imgui.close_current_popup()
-                imgui.same_line()
-                if imgui.button("Cancel##Run", width=cw):
-                    imgui.close_current_popup()
-                imgui.end_popup()
 
     def _render_post_processing_tab(self):
         """Render the Post-Processing sidebar section content."""
