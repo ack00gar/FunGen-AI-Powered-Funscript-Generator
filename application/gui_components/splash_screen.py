@@ -818,7 +818,7 @@ class StandaloneSplashWindow:
         if self.logo_texture is not None:
             logo_size = 250  # Logo fills most of the window
             logo_x = (window_width - logo_size) / 2
-            logo_y = (window_height - logo_size) / 2
+            logo_y = (window_height - logo_size) / 2  # Centered vertically
 
             # Gentle floating animation
             float_offset = math.sin(current_time * 2.0) * 8.0
@@ -826,14 +826,27 @@ class StandaloneSplashWindow:
             # Fade in animation (first 0.3 seconds)
             fade_alpha = min(1.0, current_time / 0.3) if current_time < 0.3 else 1.0
 
+            # Theme-specific animations (picked once per session)
+            theme_name = self._get_splash_theme()
+            theme_data = self._SPLASH_THEMES[theme_name]
+            dl = imgui.get_window_draw_list()
+
+            # Background animation
+            bg_method = getattr(self, theme_data["bg"], None)
+            if bg_method:
+                bg_method(dl, window_width, window_height, current_time, fade_alpha)
+
             imgui.set_cursor_pos((logo_x, logo_y + float_offset))
             imgui.image(self.logo_texture, logo_size, logo_size, tint_color=(1, 1, 1, fade_alpha))
 
-            # Draw animation effects AFTER logo (so they appear IN FRONT)
-            if current_time > 0.3 and self.quality_level > 0.3:
-                self._render_enhanced_laser_eyes(logo_x, logo_y + float_offset, logo_size, current_time - 0.3)
+            # Foreground animation (e.g. laser eyes)
+            fg_name = theme_data.get("fg")
+            if fg_name and current_time > 0.3 and self.quality_level > 0.3:
+                fg_method = getattr(self, fg_name, None)
+                if fg_method:
+                    fg_method(logo_x, logo_y + float_offset, logo_size, current_time - 0.3)
 
-            # Content below logo: version, logs, funscript graph, ko-fi
+            # Content below logo
             if current_time > 0.3:
                 from config.constants import APP_VERSION
                 draw_list_text = imgui.get_window_draw_list()
@@ -849,32 +862,30 @@ class StandaloneSplashWindow:
                 imgui.text(version_text)
                 imgui.pop_style_color()
                 imgui.set_window_font_scale(1.0)
-                cursor_y += ver_size[1] + 14
+                cursor_y += ver_size[1] + 6
 
-                # 2. Boot log (humorous status lines)
-                cursor_y = self._render_boot_log(draw_list_text, window_width, cursor_y,
-                                                 current_time, fade_alpha)
-                cursor_y += 14
-
-                # 3. Funscript timeline graph (centered in lower half of screen)
-                graph_height = 120
-                lower_half_center = (window_height + cursor_y) * 0.5 - graph_height * 0.5
-                graph_y = max(cursor_y + 10, lower_half_center)
-                self._render_funscript_timeline(draw_list_text, window_width, graph_y,
-                                                current_time, fade_alpha)
-                cursor_y = graph_y + graph_height + 20
-
-                # 4. Ko-fi support text
-                support_text = "Support the project and unlock features at ko-fi.com/k00gar"
-                imgui.set_window_font_scale(1.2)
+                # 2. Support text
+                support_text = "Support the project at ko-fi.com/k00gar"
+                imgui.set_window_font_scale(1.1)
                 sup_size = imgui.calc_text_size(support_text)
                 sup_x = (window_width - sup_size[0]) / 2
-                sup_alpha = min(1.0, max(0.0, (current_time - 0.8) / 0.4)) * fade_alpha * 0.9
+                sup_alpha = min(1.0, max(0.0, (current_time - 0.5) / 0.4)) * fade_alpha * 0.85
                 imgui.set_cursor_pos((sup_x, cursor_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
                 imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.4, sup_alpha)
                 imgui.text(support_text)
                 imgui.pop_style_color()
                 imgui.set_window_font_scale(1.0)
+                cursor_y += sup_size[1] + 20
+
+                # 3. Themed one-liner
+                cursor_y = self._render_boot_log(draw_list_text, window_width, cursor_y,
+                                                 current_time, fade_alpha)
+                cursor_y += 20
+
+                # 4. Funscript timeline graph
+                self._render_funscript_timeline(draw_list_text, window_width, cursor_y,
+                                                current_time, fade_alpha)
+                cursor_y += 140
 
         imgui.end()
         imgui.pop_style_color(2)
@@ -1486,114 +1497,455 @@ class StandaloneSplashWindow:
         scan_line_v_color = imgui.get_color_u32_rgba(laser_r * 0.8, laser_g * 0.8, laser_b * 0.8, scan_line_v_alpha)
         draw_list.add_line(target_x_center + horizontal_drift, 0, target_x_center + horizontal_drift, window_height, scan_line_v_color, 2.0)
 
-    # Boot log pool: (tag, tag_color_rgb, message)
-    # 6 random lines picked per session for variety on repeat launches
-    _BOOT_LOG_POOL = [
-        # Technical innuendo
-        ("LOAD", (0.0, 0.85, 1.0), "AI models loaded... heavy breathing..."),
-        ("OK",   (0.0, 1.0, 0.4),  "Stroke detection sensitivity: maximum"),
-        ("OK",   (0.0, 1.0, 0.4),  "Peak detection: deeper than expected"),
-        ("INFO", (0.0, 0.85, 1.0), "Calibrating thrust vectors..."),
-        ("OK",   (0.0, 1.0, 0.4),  "69 plugins loaded... nice"),
-        ("INFO", (0.0, 0.85, 1.0), "Vibration protocols standing by"),
-        ("OK",   (0.0, 1.0, 0.4),  "Oscillation detector: tingling"),
-        # Self-aware
-        ("WARN", (1.0, 0.85, 0.0), "Pants not found in working directory"),
-        ("ERR!", (1.0, 0.35, 0.2), "Dignity module missing... skipping"),
-        ("WARN", (1.0, 0.85, 0.0), "Your ISP is judging you"),
-        ("ERR!", (1.0, 0.35, 0.2), "Found 0 regrets... recounting..."),
-        ("WARN", (1.0, 0.85, 0.0), "DO NOT make eye contact with the AI"),
-        ("WARN", (1.0, 0.85, 0.0), "Incognito mode: lol sure"),
-        # Robot personality
-        ("INFO", (0.0, 0.85, 1.0), "* nervous robot noises *"),
-        ("OK",   (0.0, 1.0, 0.4),  "Asking YOLO model about life choices"),
-        ("INFO", (0.0, 0.85, 1.0), "Analyzing... for science, obviously"),
-        ("OK",   (0.0, 1.0, 0.4),  "Fun-o-meter: off the charts"),
-        ("INFO", (0.0, 0.85, 1.0), "Teaching neural net the meaning of love"),
-        # Fourth wall
-        ("WARN", (1.0, 0.85, 0.0), "You could be doing laundry right now"),
-        ("OK",   (0.0, 1.0, 0.4),  "Plausible deniability: enabled"),
-        ("INFO", (0.0, 0.85, 1.0), "Pretending this is a productivity app..."),
-        ("ERR!", (1.0, 0.35, 0.2), "Shame.dll not found... continuing"),
-        ("OK",   (0.0, 1.0, 0.4),  "Browser history: what browser history?"),
-    ]
+    # Splash themes: bg = background method name, fg = foreground method name or None
+    _SPLASH_THEMES = {
+        "matrix": {
+            "lines": ["There is no spoon", "Follow the white rabbit", "Free your mind",
+                      "He is the one.", "Dodge this.", "The Matrix has you.", "Wake up."],
+            "color": (0.0, 0.9, 0.3, 0.9),
+            "bg": "_render_matrix_rain", "fg": None,
+        },
+        "terminator": {
+            "lines": ["I'll be back", "Come with me if you want to live",
+                      "Hasta la vista, baby", "Target acquired.",
+                      "It can't be bargained with. It can't be reasoned with."],
+            "color": (1.0, 0.3, 0.2, 0.9),
+            "bg": "_render_terminator_hud", "fg": "_render_enhanced_laser_eyes",
+        },
+        "robocop": {
+            "lines": ["Dead or alive, you're coming with me", "Your move, creep.",
+                      "I'd buy that for a dollar!", "Thank you for your cooperation."],
+            "color": (0.3, 0.7, 1.0, 0.9),
+            "bg": "_render_robocop_hud", "fg": None,
+        },
+        "tron": {
+            "lines": ["The Grid. A digital frontier.", "I fight for the users.",
+                      "End of line.", "Greetings, program."],
+            "color": (0.0, 0.9, 1.0, 0.9),
+            "bg": "_render_tron_grid", "fg": None,
+        },
+        "starwars": {
+            "lines": ["May the script be with you", "I find your lack of funscripts disturbing",
+                      "Do or do not, there is no try", "It's a trap!",
+                      "The force is strong with this one"],
+            "color": (1.0, 0.85, 0.0, 0.9),
+            "bg": "_render_starwars_stars", "fg": "_render_starwars_sabers",
+        },
+        "breaking": {
+            "lines": ["I am the one who scripts", "Say my name.", "Tread lightly.",
+                      "Yeah, science!", "No half measures."],
+            "color": (0.1, 0.8, 0.2, 0.9),
+            "bg": "_render_breaking_formula", "fg": None,
+        },
+    }
+
+    def _get_splash_theme(self):
+        """Pick a random theme once per session."""
+        if not hasattr(self, '_splash_theme'):
+            import random
+            theme_name = random.choice(list(self._SPLASH_THEMES.keys()))
+            theme = self._SPLASH_THEMES[theme_name]
+            self._splash_theme = theme_name
+            self._splash_line = random.choice(theme["lines"])
+            self._splash_line_color = theme["color"]
+        return self._splash_theme
+
+    def _render_themed_line(self, draw_list, window_width, y, current_time, alpha):
+        """Render the themed one-liner with typewriter effect."""
+        self._get_splash_theme()
+        line = self._splash_line
+        color = self._splash_line_color
+
+        # Typewriter: reveal chars over time
+        chars_visible = int((current_time - 0.6) * 25)
+        if chars_visible <= 0:
+            return y
+        display = line[:chars_visible]
+
+        imgui.set_window_font_scale(1.2)
+        text_size = imgui.calc_text_size(display)
+        tx = (window_width - text_size[0]) / 2
+        draw_list.add_text(tx, y, imgui.get_color_u32_rgba(color[0], color[1], color[2], color[3] * alpha), display)
+        imgui.set_window_font_scale(1.0)
+        return y + text_size[1] + 8
 
     def _render_boot_log(self, draw_list, window_width, start_y, current_time, alpha):
-        """Render staggered typewriter boot log lines. Returns y after last line."""
-        if not hasattr(self, '_boot_lines'):
+        """Render themed one-liner. Returns y after last line."""
+        return self._render_themed_line(draw_list, window_width, start_y, current_time, alpha)
+
+    def _render_matrix_rain(self, draw_list, window_width, window_height, current_time, alpha):
+        """Render Matrix-style falling character columns."""
+        if not hasattr(self, '_matrix_columns'):
             import random
-            pool = list(self._BOOT_LOG_POOL)
-            random.shuffle(pool)
-            self._boot_lines = pool[:1]
+            n_cols = max(8, int(window_width / 28))
+            self._matrix_columns = []
+            chars = "01{}[]<>|/\\=+-*&%$#@!?abcdefghijklmnopqrstuvwxyz"
+            for i in range(n_cols):
+                x = i * (window_width / n_cols) + random.uniform(0, 12)
+                speed = random.uniform(80, 220)
+                offset = random.uniform(0, window_height * 2)
+                trail_len = random.randint(8, 25)
+                col_chars = [random.choice(chars) for _ in range(trail_len)]
+                self._matrix_columns.append((x, speed, offset, col_chars))
 
-        chars_per_sec = 30
-        scale = 1.3
-        y = start_y
-
-        imgui.set_window_font_scale(scale)
-        line_h = imgui.get_text_line_height() + 6
-
-        # Measure widest line for block centering
-        if not hasattr(self, '_boot_block_width') or self._boot_block_width == 0:
-            max_w = 0
-            for tag, _, msg in self._boot_lines:
-                w = imgui.calc_text_size(f"[{tag:4s}] {msg}_")[0]
-                if w > max_w:
-                    max_w = w
-            self._boot_block_width = max_w
-
-        block_x = (window_width - self._boot_block_width) / 2
-
-        for i, (tag, tag_rgb, msg) in enumerate(self._boot_lines):
-            delay = 1.2 + i * 1.2
-            if current_time < delay:
-                break
-            elapsed = current_time - delay
-            full = f"[{tag:4s}] {msg}"
-            visible = min(len(full), int(elapsed * chars_per_sec))
-            if visible == 0:
-                y += line_h
-                continue
-            display = full[:visible]
-            still_typing = visible < len(full)
-
-            glitch = 0
-            if elapsed < 0.06:
-                glitch = int(abs(math.sin(i * 1000 + elapsed * 200)) * 8)
-
-            tx = block_x + glitch
-            line_alpha = min(1.0, elapsed / 0.2) * alpha * 0.8
-
-            # Build display with cursor
-            show_text = display
-            if still_typing and int(current_time * 3) % 2 == 0:
-                show_text += "_"
-
-            # Render as single colored line (tag color for the whole line for simplicity,
-            # since draw_list.add_text doesn't support font scaling)
-            tag_end = len(tag) + 2
-            # Color: tag color for WARN/ERR, muted cyan for OK/INFO
-            if tag in ("WARN", "ERR!"):
-                cr, cg, cb = tag_rgb
-            else:
-                cr, cg, cb = 0.4, 0.75, 0.85
-
-            # Position and render with imgui.text (respects set_window_font_scale)
-            imgui.set_cursor_screen_position((tx, y))
-            imgui.push_style_color(imgui.COLOR_TEXT, cr, cg, cb, line_alpha)
-            imgui.text(show_text)
-            imgui.pop_style_color()
-
-            # WARN/ERR flash
-            if tag in ("WARN", "ERR!") and elapsed < 0.1:
-                flash_g = 0.85 if tag == "WARN" else 0.2
-                draw_list.add_rect_filled(0, 0, window_width, 2000,
-                                          imgui.get_color_u32_rgba(1.0, flash_g, 0.0, 0.05))
-
-            y += line_h
-
+        char_h = 22
+        imgui.set_window_font_scale(1.3)
+        for x, speed, offset, col_chars in self._matrix_columns:
+            total_h = len(col_chars) * char_h
+            head_y = ((current_time * speed + offset) % (window_height + total_h)) - total_h
+            for ci, ch in enumerate(col_chars):
+                cy = head_y + ci * char_h
+                if cy < -char_h or cy > window_height:
+                    continue
+                # Head character is bright white-green, trail fades to dark green
+                t = ci / max(1, len(col_chars) - 1)
+                if ci == 0:
+                    # Head: bright white-green
+                    r, g, b = 0.7, 1.0, 0.7
+                    a = alpha
+                else:
+                    brightness = 1.0 - t * 0.9
+                    r = 0.0
+                    g = 0.85 * brightness
+                    b = 0.15 * brightness
+                    a = alpha * brightness
+                if a < 0.03:
+                    continue
+                draw_list.add_text(x, cy, imgui.get_color_u32_rgba(r, g, b, a), ch)
         imgui.set_window_font_scale(1.0)
-        return y
+
+    def _render_terminator_hud(self, draw_list, window_width, window_height, current_time, alpha):
+        """Terminator T-800 POV: red HUD overlay with corner brackets and scrolling data."""
+        a = alpha * 0.7
+        red = imgui.get_color_u32_rgba(1.0, 0.1, 0.05, a * 0.4)
+        red_bright = imgui.get_color_u32_rgba(1.0, 0.15, 0.1, a * 0.8)
+        w, h = window_width, window_height
+
+        # Screen border
+        draw_list.add_rect(4, 4, w - 4, h - 4, red, thickness=1.5)
+
+        # Corner brackets (L-shapes, 60px arms)
+        arm = 60
+        t = 2.5
+        for cx, cy, dx, dy in [(0, 0, 1, 1), (w, 0, -1, 1), (0, h, 1, -1), (w, h, -1, -1)]:
+            draw_list.add_line(cx, cy, cx + dx * arm, cy, red_bright, t)
+            draw_list.add_line(cx, cy, cx, cy + dy * arm, red_bright, t)
+
+        # Crosshair at center
+        cx, cy = w / 2, h / 2
+        gap = 12
+        size = 30
+        for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+            draw_list.add_line(cx + dx * gap, cy + dy * gap,
+                               cx + dx * size, cy + dy * size, red_bright, 1.5)
+
+        # Scrolling data readouts on left edge
+        data_lines = [
+            "SCAN MODE 439", "MATCH: 0.97", "THREAT LEVEL: NONE", "CPU TEMP: 47C",
+            "TARGET: LOCKED", "FPS: UNLIMITED", "YOLO: ONLINE", "STATUS: NOMINAL",
+            "TRACKING: ACTIVE", "BUFFER: 98%", "NEURAL NET: OK",
+        ]
+        scroll_offset = current_time * 18
+        imgui.set_window_font_scale(0.85)
+        for i, txt in enumerate(data_lines):
+            ty = ((i * 22 - scroll_offset) % (len(data_lines) * 22 + h)) - 50
+            if 0 < ty < h:
+                line_a = a * 0.5 * (0.5 + 0.5 * math.sin(i + current_time * 2))
+                draw_list.add_text(12, ty, imgui.get_color_u32_rgba(1.0, 0.2, 0.1, line_a), txt)
+        imgui.set_window_font_scale(1.0)
+
+        # Subtle red tint overlay
+        draw_list.add_rect_filled(0, 0, w, h, imgui.get_color_u32_rgba(0.3, 0.0, 0.0, a * 0.08))
+
+    def _render_robocop_hud(self, draw_list, window_width, window_height, current_time, alpha):
+        """RoboCop POV: targeting brackets scan across screen then lock on logo."""
+        w, h = window_width, window_height
+        cx, cy = w / 2, h / 2
+
+        # Blue tint overlay
+        draw_list.add_rect_filled(0, 0, w, h, imgui.get_color_u32_rgba(0.02, 0.05, 0.15, alpha * 0.3))
+
+        # Fast horizontal scan bar (sweeps every ~1.5 seconds)
+        scan_y = (current_time * 250) % h
+        draw_list.add_line(0, scan_y, w, scan_y, imgui.get_color_u32_rgba(0.3, 0.6, 1.0, alpha * 0.6), 2.5)
+        for offset in range(1, 20):
+            a = alpha * 0.04 * (1 - offset / 20)
+            draw_list.add_line(0, scan_y + offset, w, scan_y + offset,
+                               imgui.get_color_u32_rgba(0.2, 0.4, 0.9, a))
+
+        # Multiple targeting brackets that sweep, then lock on logo
+        blue = imgui.get_color_u32_rgba(0.3, 0.6, 1.0, alpha * 0.7)
+        blue_dim = imgui.get_color_u32_rgba(0.2, 0.4, 0.8, alpha * 0.25)
+        arm = 45
+        thick = 2.5
+
+        # Phase 1 (0-2s): brackets sweep across different positions
+        # Phase 2 (2s+): brackets converge and lock on logo center
+        lock_time = 2.0
+        if current_time < lock_time:
+            # Sweeping: 3 brackets at random-ish positions
+            for bi in range(3):
+                phase = current_time * (1.5 + bi * 0.4) + bi * 2.0
+                bx_center = w * (0.2 + 0.6 * (0.5 + 0.5 * math.sin(phase)))
+                by_center = h * (0.2 + 0.6 * (0.5 + 0.5 * math.cos(phase * 0.7)))
+                bsize = 80 + 40 * math.sin(phase * 2)
+                self._draw_bracket(draw_list, bx_center, by_center, bsize, arm, blue_dim, thick * 0.7)
+        else:
+            # Locked on logo: converge smoothly
+            t_lock = min(1.0, (current_time - lock_time) / 0.5)  # 0.5s ease-in
+            ease = t_lock * t_lock * (3 - 2 * t_lock)  # smoothstep
+
+            # Final locked size
+            final_size = 145
+            lock_alpha = alpha * (0.5 + 0.5 * ease)
+            lock_col = imgui.get_color_u32_rgba(0.3, 0.6, 1.0, lock_alpha)
+
+            # Pulse when locked
+            pulse = 1.0 + 0.03 * math.sin(current_time * 4) if t_lock >= 1.0 else 1.0
+            self._draw_bracket(draw_list, cx, cy, final_size * pulse, arm, lock_col, thick)
+
+            # "LOCKED" text when fully converged
+            if t_lock >= 1.0:
+                imgui.set_window_font_scale(0.8)
+                lock_text_a = alpha * 0.6 * (0.5 + 0.5 * math.sin(current_time * 5))
+                draw_list.add_text(cx + final_size - 10, cy - final_size - 18,
+                                   imgui.get_color_u32_rgba(1.0, 0.3, 0.2, lock_text_a), "LOCKED")
+                imgui.set_window_font_scale(1.0)
+
+        # Status readouts (top-right)
+        imgui.set_window_font_scale(0.75)
+        status = ["SYS: ONLINE", f"CPU: {47 + int(current_time * 7) % 12}%",
+                  "THREAT: LOW", f"SCAN: {int(current_time * 40) % 100}%"]
+        for i, s in enumerate(status):
+            draw_list.add_text(w - 140, 12 + i * 16,
+                               imgui.get_color_u32_rgba(0.3, 0.65, 1.0, alpha * 0.5), s)
+
+        # Directives (bottom-left, fast typewriter)
+        directives = ["DIRECTIVE 1: SERVE THE PUBLIC TRUST",
+                      "DIRECTIVE 2: PROTECT THE INNOCENT",
+                      "DIRECTIVE 3: UPHOLD THE LAW",
+                      "DIRECTIVE 4: [CLASSIFIED]"]
+        for i, d in enumerate(directives):
+            chars = int((current_time - 0.5 - i * 0.3) * 30)
+            if chars <= 0:
+                continue
+            col = imgui.get_color_u32_rgba(0.3, 0.6, 1.0, alpha * 0.5)
+            if i == 3:
+                col = imgui.get_color_u32_rgba(1.0, 0.2, 0.1, alpha * (0.4 + 0.4 * math.sin(current_time * 5)))
+            draw_list.add_text(15, h - 85 + i * 18, col, d[:chars])
+        imgui.set_window_font_scale(1.0)
+
+    @staticmethod
+    def _draw_bracket(draw_list, cx, cy, size, arm, color, thickness):
+        """Draw 4 corner bracket pieces around a center point."""
+        for bx, by, dx, dy in [
+            (cx - size, cy - size, 1, 1),
+            (cx + size, cy - size, -1, 1),
+            (cx - size, cy + size, 1, -1),
+            (cx + size, cy + size, -1, -1),
+        ]:
+            draw_list.add_line(bx, by, bx + dx * arm, by, color, thickness)
+            draw_list.add_line(bx, by, bx, by + dy * arm, color, thickness)
+
+    def _render_tron_grid(self, draw_list, window_width, window_height, current_time, alpha):
+        """Tron-style perspective grid floor with neon glow."""
+        w, h = window_width, window_height
+        horizon_y = h * 0.42
+        cx = w / 2
+        a = alpha * 0.7
+        cyan_glow = imgui.get_color_u32_rgba(0.0, 0.7, 1.0, a * 0.15)
+        cyan_line = imgui.get_color_u32_rgba(0.0, 0.85, 1.0, a * 0.55)
+
+        # Horizontal lines (get closer together near horizon)
+        n_hlines = 20
+        scroll = (current_time * 0.3) % 1.0
+        for i in range(n_hlines):
+            t = (i + scroll) / n_hlines
+            y = horizon_y + t * t * (h - horizon_y)  # Quadratic spacing
+            if y > h:
+                continue
+            brightness = t  # Brighter closer to viewer
+            draw_list.add_line(0, y, w, y, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, a * 0.1 * brightness), 3.0)
+            draw_list.add_line(0, y, w, y, imgui.get_color_u32_rgba(0.0, 0.85, 1.0, a * 0.4 * brightness), 1.0)
+
+        # Vertical lines converging to vanishing point
+        n_vlines = 16
+        for i in range(n_vlines):
+            vx = (i / (n_vlines - 1)) * w
+            # Line from bottom to horizon, converging at center
+            bx = vx
+            tx = cx + (vx - cx) * 0.05  # Converge toward center at horizon
+            draw_list.add_line(bx, h, tx, horizon_y, cyan_glow, 3.0)
+            draw_list.add_line(bx, h, tx, horizon_y, cyan_line, 1.0)
+
+        # Light cycle trails (a few horizontal streaks)
+        import random
+        if not hasattr(self, '_tron_trails'):
+            self._tron_trails = [(random.uniform(horizon_y + 30, h - 30),
+                                  random.uniform(0.3, 0.8)) for _ in range(3)]
+        for ty, speed in self._tron_trails:
+            trail_x = ((current_time * speed * w) % (w * 1.5)) - w * 0.25
+            trail_len = 120
+            draw_list.add_line(trail_x, ty, trail_x + trail_len, ty,
+                               imgui.get_color_u32_rgba(0.0, 0.9, 1.0, a * 0.4), 2.5)
+            draw_list.add_line(trail_x + trail_len, ty, trail_x + trail_len + 20, ty,
+                               imgui.get_color_u32_rgba(0.0, 0.9, 1.0, a * 0.8), 2.0)
+
+    def _render_starwars_stars(self, draw_list, window_width, window_height, current_time, alpha):
+        """Star Wars background: bright starfield with a few large stars."""
+        w, h = window_width, window_height
+        if not hasattr(self, '_sw_stars'):
+            import random
+            self._sw_stars = [(random.uniform(0, 1), random.uniform(0, 1),
+                               random.uniform(0.3, 1.0), random.uniform(0.5, 3.0))
+                              for _ in range(150)]
+        for sx, sy, brightness, twinkle_speed in self._sw_stars:
+            twinkle = 0.4 + 0.6 * (0.5 + 0.5 * math.sin(current_time * twinkle_speed + sx * 20))
+            a = alpha * brightness * twinkle
+            size = 1.0 + brightness * 1.5
+            draw_list.add_circle_filled(sx * w, sy * h, size,
+                                        imgui.get_color_u32_rgba(1.0, 1.0, 1.0, a))
+
+    def _render_starwars_sabers(self, logo_x, logo_y, logo_size, laser_time):
+        """Star Wars foreground: keyframed lightsaber duel with strikes and clashes."""
+        draw_list = imgui.get_window_draw_list()
+        window_width, window_height = glfw.get_window_size(self.window)
+        w, h = window_width, window_height
+        cx, cy = w / 2, h / 2
+        t = laser_time + 0.3
+        saber_len = min(w, h) * 0.38
+
+        # Keyframed fight sequence: (time, blue_angle, red_angle, clash?)
+        # Angles in radians from hilt. Sequence loops every ~4 seconds.
+        fight_keys = [
+            # (time_in_loop, blue_angle, red_angle, is_clash)
+            (0.0,  -0.3,   math.pi + 0.3,  False),  # Guard stance
+            (0.3,  -1.2,   math.pi + 0.3,  False),  # Blue winds up high
+            (0.5,   0.4,   math.pi - 0.4,  True),   # CLASH center
+            (0.8,   0.4,   math.pi - 0.4,  True),   # Hold clash
+            (1.0,  -0.2,   math.pi + 0.2,  False),  # Disengage
+            (1.3,  -0.2,   math.pi + 1.3,  False),  # Red winds up
+            (1.5,   0.6,   math.pi - 0.6,  True),   # CLASH low
+            (1.8,   0.6,   math.pi - 0.6,  True),   # Hold
+            (2.0,  -0.8,   math.pi + 0.8,  False),  # Both swing wide
+            (2.3,  -1.5,   math.pi + 0.1,  False),  # Blue overhead
+            (2.5,  -0.1,   math.pi + 0.1,  True),   # CLASH high
+            (2.8,  -0.1,   math.pi + 0.1,  True),   # Hold
+            (3.2,   0.5,   math.pi - 0.5,  False),  # Pull back
+            (3.5,  -0.3,   math.pi + 0.3,  False),  # Return to guard
+            (4.0,  -0.3,   math.pi + 0.3,  False),  # Loop point
+        ]
+        loop_dur = fight_keys[-1][0]
+        t_loop = t % loop_dur
+
+        # Interpolate between keyframes
+        blue_a = fight_keys[0][1]
+        red_a = fight_keys[0][2]
+        is_clash = False
+        for ki in range(len(fight_keys) - 1):
+            t0, ba0, ra0, c0 = fight_keys[ki]
+            t1, ba1, ra1, c1 = fight_keys[ki + 1]
+            if t0 <= t_loop < t1:
+                frac = (t_loop - t0) / (t1 - t0)
+                # Smoothstep for natural motion
+                frac = frac * frac * (3 - 2 * frac)
+                blue_a = ba0 + (ba1 - ba0) * frac
+                red_a = ra0 + (ra1 - ra0) * frac
+                is_clash = c1
+                break
+
+        # Hilt positions (wide apart)
+        blue_hx = cx - 180
+        blue_hy = cy + 60
+        red_hx = cx + 180
+        red_hy = cy + 60
+
+        blue_tx = blue_hx + math.cos(blue_a) * saber_len
+        blue_ty = blue_hy + math.sin(blue_a) * saber_len
+        red_tx = red_hx + math.cos(red_a) * saber_len
+        red_ty = red_hy + math.sin(red_a) * saber_len
+
+        # Draw sabers
+        def draw_saber(hx, hy, tx, ty, r, g, b):
+            draw_list.add_line(hx, hy, tx, ty, imgui.get_color_u32_rgba(r, g, b, 0.12), 22.0)
+            draw_list.add_line(hx, hy, tx, ty, imgui.get_color_u32_rgba(r, g, b, 0.6), 9.0)
+            draw_list.add_line(hx, hy, tx, ty, imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.85), 3.0)
+            draw_list.add_rect_filled(hx - 4, hy - 14, hx + 4, hy + 14,
+                                       imgui.get_color_u32_rgba(0.55, 0.55, 0.6, 0.8), 2.0)
+
+        draw_saber(blue_hx, blue_hy, blue_tx, blue_ty, 0.2, 0.5, 1.0)
+        draw_saber(red_hx, red_hy, red_tx, red_ty, 1.0, 0.15, 0.05)
+
+        # Clash sparks at point of contact
+        if is_clash:
+            clash_x = (blue_tx + red_tx) / 2
+            clash_y = (blue_ty + red_ty) / 2
+            flash_a = 0.5 + 0.5 * math.sin(t * 25)
+
+            draw_list.add_circle_filled(clash_x, clash_y, 45,
+                                        imgui.get_color_u32_rgba(1.0, 1.0, 1.0, flash_a * 0.25))
+            draw_list.add_circle_filled(clash_x, clash_y, 18,
+                                        imgui.get_color_u32_rgba(1.0, 1.0, 0.9, flash_a * 0.8))
+            for si in range(10):
+                sa = t * 14 + si * (math.pi / 5)
+                spark_len = 25 + 30 * math.sin(t * 20 + si * 3)
+                sx = clash_x + math.cos(sa) * spark_len
+                sy = clash_y + math.sin(sa) * spark_len
+                draw_list.add_line(clash_x, clash_y, sx, sy,
+                                   imgui.get_color_u32_rgba(1.0, 0.85, 0.3, flash_a * 0.7), 2.0)
+
+    def _render_breaking_formula(self, draw_list, window_width, window_height, current_time, alpha):
+        """Breaking Bad: periodic table element boxes + chemical formula."""
+        w, h = window_width, window_height
+
+        # Periodic table element boxes scattered across screen
+        elements = [
+            ("Br", "35", "Bromine"), ("Ba", "56", "Barium"),
+            ("H", "1", "Hydrogen"), ("He", "2", "Helium"),
+            ("C", "6", "Carbon"), ("N", "7", "Nitrogen"),
+            ("O", "8", "Oxygen"), ("F", "9", "Fluorine"),
+            ("Na", "11", "Sodium"), ("Cl", "17", "Chlorine"),
+            ("K", "19", "Potassium"), ("Fe", "26", "Iron"),
+            ("Cu", "29", "Copper"), ("Zn", "30", "Zinc"),
+        ]
+        if not hasattr(self, '_bb_positions'):
+            import random
+            self._bb_positions = [(random.uniform(0.05, 0.9), random.uniform(0.05, 0.9))
+                                  for _ in elements]
+
+        box_size = 55
+        for i, ((sym, num, name), (px, py)) in enumerate(zip(elements, self._bb_positions)):
+            bx = px * w
+            by = py * h
+            # Pulse each element at different phase
+            pulse = 0.3 + 0.3 * math.sin(current_time * 1.5 + i * 0.8)
+            box_a = alpha * pulse
+
+            # Box
+            draw_list.add_rect_filled(bx, by, bx + box_size, by + box_size,
+                                       imgui.get_color_u32_rgba(0.05, 0.15, 0.05, box_a * 0.6), 3.0)
+            draw_list.add_rect(bx, by, bx + box_size, by + box_size,
+                               imgui.get_color_u32_rgba(0.1, 0.7, 0.2, box_a * 0.8), 3.0, thickness=1.5)
+
+            # Atomic number (small, top-left)
+            draw_list.add_text(bx + 4, by + 2,
+                               imgui.get_color_u32_rgba(0.3, 0.8, 0.3, box_a * 0.6), num)
+
+            # Symbol (large, centered)
+            imgui.set_window_font_scale(1.8)
+            sym_size = imgui.calc_text_size(sym)
+            draw_list.add_text(bx + (box_size - sym_size[0]) / 2, by + 15,
+                               imgui.get_color_u32_rgba(0.1, 0.9, 0.2, box_a), sym)
+            imgui.set_window_font_scale(1.0)
+
+        # Chemical formula at bottom
+        imgui.set_window_font_scale(1.5)
+        formula = "C10H15N  +  AI  =  FunScript"
+        f_size = imgui.calc_text_size(formula)
+        f_a = alpha * 0.25 * (0.5 + 0.5 * math.sin(current_time * 2))
+        draw_list.add_text((w - f_size[0]) / 2, h - 60,
+                           imgui.get_color_u32_rgba(0.1, 0.8, 0.2, f_a), formula)
+        imgui.set_window_font_scale(1.0)
 
     def _render_funscript_timeline(self, draw_list, window_width, timeline_y, current_time, alpha):
         """Render a funscript-style zigzag timeline with speed-colored segments."""
