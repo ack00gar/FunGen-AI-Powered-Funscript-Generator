@@ -12,6 +12,7 @@ from video import VideoProcessor
 from tracker.tracker_manager import create_tracker_manager
 
 from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
+from application.classes.undo_manager import UndoManager
 from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
 from application.utils.addon_update_checker import AddonUpdateChecker
 from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION, PROJECT_FILE_EXTENSION, MODEL_DOWNLOAD_URLS, YOLO_INPUT_SIZE
@@ -151,8 +152,9 @@ class ApplicationLogic:
         self.yolo_input_size = YOLO_INPUT_SIZE
 
         # --- Undo/Redo Managers ---
-        self.undo_manager_t1: Optional[UndoRedoManager] = None
-        self.undo_manager_t2: Optional[UndoRedoManager] = None
+        self.undo_manager_t1: Optional[UndoRedoManager] = None  # Legacy per-timeline (being replaced)
+        self.undo_manager_t2: Optional[UndoRedoManager] = None  # Legacy per-timeline (being replaced)
+        self.undo_manager = UndoManager(max_history=100)  # Unified command-pattern manager
 
         # --- Initialize Tracker Manager ---
         # Yield before heavy YOLO loading to allow splash rendering

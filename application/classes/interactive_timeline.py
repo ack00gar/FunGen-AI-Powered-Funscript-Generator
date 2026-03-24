@@ -769,11 +769,15 @@ class InteractiveFunscriptTimeline:
     def _update_drag(self, mouse_pos, tf: TimelineTransformer):
         actions = self._get_actions()
         if self.dragging_action_idx < 0 or self.dragging_action_idx >= len(actions): return
-        
+
         # Record Undo State (Once per drag)
         if not self.drag_undo_recorded:
             self.app.funscript_processor._record_timeline_action(self.timeline_num, "Drag Point")
             self.drag_undo_recorded = True
+            # Capture original values for unified undo
+            idx = self.dragging_action_idx
+            self._drag_old_at = actions[idx]['at']
+            self._drag_old_pos = actions[idx]['pos']
 
         # Calculate New Values
         t_raw = tf.x_to_time(mouse_pos[0])
@@ -805,7 +809,16 @@ class InteractiveFunscriptTimeline:
 
     def _finalize_drag(self):
         if self.drag_undo_recorded:
-             self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Drag Point")
+            self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Drag Point")
+            # New unified undo: capture final position
+            actions = self._get_actions()
+            idx = self.dragging_action_idx
+            if actions and 0 <= idx < len(actions):
+                from application.classes.undo_manager import MovePointCmd
+                self.app.undo_manager.push_done(MovePointCmd(
+                    self.timeline_num, idx,
+                    getattr(self, '_drag_old_at', 0), getattr(self, '_drag_old_pos', 0),
+                    actions[idx]['at'], actions[idx]['pos']))
 
     def _finalize_marquee(self, tf, actions, append: bool):
         if not self.marquee_start or not self.marquee_end: return
@@ -896,10 +909,10 @@ class InteractiveFunscriptTimeline:
     def _nudge_selection_value(self, delta: int):
         actions = self._get_actions()
         if not actions: return
-        
+
         snap = self.app.app_state_ui.snap_to_grid_pos
         actual_delta = delta * (snap if snap > 0 else 1)
-        
+
         self.app.funscript_processor._record_timeline_action(self.timeline_num, "Nudge Value")
         for idx in self.multi_selected_action_indices:
             if idx < len(actions):
@@ -909,6 +922,10 @@ class InteractiveFunscriptTimeline:
             fs._invalidate_cache(axis or 'both')
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Value")
         self.invalidate_cache()
+
+        from application.classes.undo_manager import NudgeValuesCmd
+        self.app.undo_manager.push_done(NudgeValuesCmd(
+            self.timeline_num, list(self.multi_selected_action_indices), actual_delta))
 
     def _nudge_selection_time(self, delta_ms: int):
         actions = self._get_actions()
@@ -933,6 +950,10 @@ class InteractiveFunscriptTimeline:
             fs._invalidate_cache(axis or 'both')
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Time")
         self.invalidate_cache()
+
+        from application.classes.undo_manager import NudgeTimesCmd
+        self.app.undo_manager.push_done(NudgeTimesCmd(
+            self.timeline_num, list(self.multi_selected_action_indices), delta_ms))
 
     def _snap_nearest_to_playhead(self):
         """Snap the nearest action point to the current playhead (video) position."""
@@ -975,6 +996,9 @@ class InteractiveFunscriptTimeline:
         next_limit = actions[best_idx + 1]['at'] - 1 if best_idx < len(actions) - 1 else float('inf')
         new_at = int(max(prev_limit, min(next_limit, new_at)))
 
+        # Capture old value for unified undo
+        old_at = actions[best_idx]['at']
+
         # Record undo, apply, finalize
         self.app.funscript_processor._record_timeline_action(
             self.timeline_num, "Snap to Playhead")
@@ -989,6 +1013,10 @@ class InteractiveFunscriptTimeline:
         self.invalidate_cache()
         self.app.project_manager.project_dirty = True
         self.app.notify("Point snapped to playhead", "info", 1.5)
+
+        from application.classes.undo_manager import SnapToPlayheadCmd
+        self.app.undo_manager.push_done(SnapToPlayheadCmd(
+            self.timeline_num, best_idx, old_at, new_at))
 
     def _nudge_all_time(self, frames: int):
         """Nudge ALL points by a number of frames (not just selection)"""
@@ -2925,10 +2953,15 @@ class InteractiveFunscriptTimeline:
         snap_v = self.app.app_state_ui.snap_to_grid_pos
         v = int(round(v / snap_v) * snap_v) if snap_v > 0 else int(v)
 
+        # Legacy undo (keep until full migration)
         self.app.funscript_processor._record_timeline_action(self.timeline_num, "Add Point")
         fs.add_action(t, v if axis=='primary' else None, v if axis=='secondary' else None)
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Add Point")
         self.invalidate_cache()
+
+        # New unified undo
+        from application.classes.undo_manager import AddPointCmd
+        self.app.undo_manager.push_done(AddPointCmd(self.timeline_num, {'at': t, 'pos': v}))
 
     def _delete_selected(self):
         if not self.multi_selected_action_indices:
@@ -2939,12 +2972,25 @@ class InteractiveFunscriptTimeline:
             self.logger.error(f"Could not get funscript details for timeline {self.timeline_num}")
             return
 
+        # Capture deleted points for unified undo before mutation
+        actions = self._get_actions()
+        deleted_info = []
+        for idx in sorted(self.multi_selected_action_indices):
+            if idx < len(actions):
+                deleted_info.append({'index': idx, 'action': actions[idx]})
+
+        # Legacy undo
         self.app.funscript_processor._record_timeline_action(self.timeline_num, "Delete Points")
         fs.clear_points(axis=axis, selected_indices=list(self.multi_selected_action_indices))
         self.multi_selected_action_indices.clear()
         self.selected_action_idx = -1
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Delete Points")
         self.invalidate_cache()
+
+        # New unified undo
+        if deleted_info:
+            from application.classes.undo_manager import DeletePointsCmd
+            self.app.undo_manager.push_done(DeletePointsCmd(self.timeline_num, deleted_info))
 
     def _clear_all_points(self):
         """Delete all points on this timeline (undoable)."""
