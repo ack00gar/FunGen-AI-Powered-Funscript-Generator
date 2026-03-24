@@ -295,6 +295,14 @@ class InteractiveFunscriptTimeline:
         # Data Layers
         main_actions = self._get_actions()
 
+        # Empty state hint
+        if not main_actions:
+            hint = "Click to add points  |  0-9 keys set position  |  M snaps to playhead"
+            hint_size = imgui.calc_text_size(hint)
+            hx = canvas_pos[0] + (canvas_size[0] - hint_size[0]) * 0.5
+            hy = canvas_pos[1] + (canvas_size[1] - hint_size[1]) * 0.5
+            draw_list.add_text(hx, hy, imgui.get_color_u32_rgba(*TimelineColors.EMPTY_HINT), hint)
+
         # 6-pre. Speed limit overlay (behind curve)
         if self._show_speed_warnings and main_actions:
             self._draw_speed_limit_overlay(draw_list, tf, main_actions)
@@ -1588,7 +1596,7 @@ class InteractiveFunscriptTimeline:
         xs = tf.vec_time_to_x(ats)
         xs = np.clip(xs, tf.x_offset - 100, tf.x_offset + tf.width + 100)
 
-        violation_col = imgui.get_color_u32_rgba(0.9, 0.1, 0.1, 0.15)
+        violation_col = imgui.get_color_u32_rgba(*TimelineColors.SPEED_VIOLATION)
         for i in range(len(speeds)):
             if speeds[i] > threshold:
                 x1 = float(xs[i])
@@ -1764,8 +1772,8 @@ class InteractiveFunscriptTimeline:
         """Draw semi-transparent red bands over detected problem sections."""
         if not self._reference_problem_sections:
             return
-        band_col = imgui.get_color_u32_rgba(0.9, 0.15, 0.15, 0.12)
-        border_col = imgui.get_color_u32_rgba(0.9, 0.15, 0.15, 0.35)
+        band_col = imgui.get_color_u32_rgba(*TimelineColors.REFERENCE_PROBLEM_FILL)
+        border_col = imgui.get_color_u32_rgba(*TimelineColors.REFERENCE_PROBLEM_BORDER)
         for sec in self._reference_problem_sections:
             x1 = tf.time_to_x(sec['start_ms'])
             x2 = tf.time_to_x(sec['end_ms'])
@@ -1856,9 +1864,9 @@ class InteractiveFunscriptTimeline:
         quarter_interval = base_interval / 4.0 if base_interval > 0 else 0
 
         # 3-tier colors: downbeat (bright), quarter (medium), subdivision (faint)
-        downbeat_col = imgui.get_color_u32_rgba(0.7, 0.3, 0.9, 0.7)
-        quarter_col = imgui.get_color_u32_rgba(0.65, 0.3, 0.85, 0.45)
-        sub_col = imgui.get_color_u32_rgba(0.6, 0.3, 0.8, 0.2)
+        downbeat_col = imgui.get_color_u32_rgba(*TimelineColors.BPM_DOWNBEAT)
+        quarter_col = imgui.get_color_u32_rgba(*TimelineColors.BPM_QUARTER)
+        sub_col = imgui.get_color_u32_rgba(*TimelineColors.BPM_SUB)
 
         for beat_num in range(start_beat, end_beat + 1):
             t_ms = cfg.offset_ms + beat_num * interval_ms
@@ -2186,19 +2194,19 @@ class InteractiveFunscriptTimeline:
             t1, t2 = sorted([self.range_start_time, self.range_end_time])
             x1 = tf.time_to_x(t1)
             x2 = tf.time_to_x(t2)
-            dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.2))
-            dl.add_line(x1, tf.y_offset, x1, tf.y_offset+tf.height, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.5))
-            dl.add_line(x2, tf.y_offset, x2, tf.y_offset+tf.height, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.5))
+            dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, imgui.get_color_u32_rgba(*TimelineColors.SELECTION_RANGE_FILL))
+            dl.add_line(x1, tf.y_offset, x1, tf.y_offset+tf.height, imgui.get_color_u32_rgba(*TimelineColors.SELECTION_RANGE_BORDER))
+            dl.add_line(x2, tf.y_offset, x2, tf.y_offset+tf.height, imgui.get_color_u32_rgba(*TimelineColors.SELECTION_RANGE_BORDER))
 
         # 4. Bookmarks
         self._draw_bookmarks(dl, tf)
 
         # 5. Recording indicator
         if self._recording_capture and self._recording_capture.is_recording:
-            rec_col = imgui.get_color_u32_rgba(0.9, 0.1, 0.1, 1.0)
+            rec_col = imgui.get_color_u32_rgba(*TimelineColors.RECORDING)
             dl.add_circle_filled(tf.x_offset + 12, tf.y_offset + 12, 5, rec_col)
             dl.add_text(tf.x_offset + 20, tf.y_offset + 5,
-                        imgui.get_color_u32_rgba(0.9, 0.1, 0.1, 1.0), "REC")
+                        imgui.get_color_u32_rgba(*TimelineColors.RECORDING), "REC")
 
         # 6. Calibration modal
         if self._calibration and self._calibration.is_running:
@@ -2245,24 +2253,35 @@ class InteractiveFunscriptTimeline:
         """
         is_active = app_state.active_timeline_num == self.timeline_num
 
+        is_read_only = self._is_timeline_read_only(app_state) if is_active else False
+
         if not is_active:
-            # Gray border for inactive timeline
-            border_color = imgui.get_color_u32_rgba(0.4, 0.4, 0.4, 0.6)
+            border_color = imgui.get_color_u32_rgba(*TimelineColors.STATE_BORDER_NORMAL)
         else:
-            # Check if editable or read-only
-            is_read_only = self._is_timeline_read_only(app_state)
             if is_read_only:
                 # Red border for active but read-only
-                border_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.8)
+                border_color = imgui.get_color_u32_rgba(*TimelineColors.STATE_BORDER_LOCKED)
             else:
                 # Green border for active and editable
-                border_color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 0.8)
+                border_color = imgui.get_color_u32_rgba(*TimelineColors.STATE_BORDER_ACTIVE)
 
         # Draw border around canvas area
         x1, y1 = canvas_pos[0], canvas_pos[1]
         x2, y2 = x1 + canvas_size[0], y1 + canvas_size[1]
         border_thickness = 2.0 if is_active else 1.0
         dl.add_rect(x1, y1, x2, y2, border_color, 0.0, 0, border_thickness)
+
+        # Tooltip on border hover (bottom 6px strip)
+        mouse = imgui.get_mouse_pos()
+        if (x1 <= mouse[0] <= x2 and y2 - 6 <= mouse[1] <= y2):
+            imgui.begin_tooltip()
+            if not is_active:
+                imgui.text("Inactive (click to activate)")
+            elif is_read_only:
+                imgui.text_colored("Read-only (stop playback to edit)", 0.9, 0.3, 0.3, 1.0)
+            else:
+                imgui.text_colored("Active (editable)", 0.3, 0.8, 0.3, 1.0)
+            imgui.end_tooltip()
 
     def _is_timeline_read_only(self, app_state) -> bool:
         """Check if timeline is in read-only mode (shortcuts blocked)."""

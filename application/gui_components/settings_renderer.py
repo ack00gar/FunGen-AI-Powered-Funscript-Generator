@@ -4,11 +4,10 @@ Owns all application settings UI and the Tracker tab rendering.
 Not a mixin — takes `app` as constructor argument and owns its own state.
 """
 import imgui
-import os
 import time
 import logging
 import config
-from application.utils import destructive_button_style, primary_button_style
+from application.utils import destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
 from application.utils.section_card import section_card
 from funscript.axis_registry import FunscriptAxis, file_suffix_for_axis, tcode_for_axis
@@ -162,13 +161,14 @@ class SettingsRenderer:
                 return True
             return any(t in kw.get(key, "") for t in sq.split())
 
-        def filtered(label, keys, fn, guard=True):
+        def filtered(label, keys, fn, guard=True, accent=None):
             if not guard:
                 return
             matched = any(matches(k) for k in keys)
             if not matched:
                 return
             with section_card(label, tier="primary",
+                              accent_color=accent,
                               open_by_default=bool(sq and matched)) as o:
                 if o:
                     fn()

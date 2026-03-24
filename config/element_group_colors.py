@@ -33,6 +33,26 @@ class TimelineColors:
     REFERENCE_MATCH_YELLOW = CurrentTheme.REFERENCE_MATCH_YELLOW
     REFERENCE_MATCH_RED = CurrentTheme.REFERENCE_MATCH_RED
     REFERENCE_UNMATCHED = CurrentTheme.REFERENCE_UNMATCHED
+    # Speed violation overlay
+    SPEED_VIOLATION = (0.9, 0.1, 0.1, 0.15)
+    # Reference problem bands
+    REFERENCE_PROBLEM_FILL = (0.9, 0.15, 0.15, 0.12)
+    REFERENCE_PROBLEM_BORDER = (0.9, 0.15, 0.15, 0.35)
+    # BPM grid
+    BPM_DOWNBEAT = (0.7, 0.3, 0.9, 0.7)
+    BPM_QUARTER = (0.65, 0.3, 0.85, 0.45)
+    BPM_SUB = (0.6, 0.3, 0.8, 0.2)
+    # Selection range
+    SELECTION_RANGE_FILL = (0.0, 0.7, 1.0, 0.2)
+    SELECTION_RANGE_BORDER = (0.0, 0.7, 1.0, 0.5)
+    # Recording indicator
+    RECORDING = (0.9, 0.1, 0.1, 1.0)
+    # State border
+    STATE_BORDER_NORMAL = (0.4, 0.4, 0.4, 0.6)
+    STATE_BORDER_LOCKED = (0.9, 0.2, 0.2, 0.8)
+    STATE_BORDER_ACTIVE = (0.2, 0.8, 0.2, 0.8)
+    # Empty state hint
+    EMPTY_HINT = (0.5, 0.5, 0.55, 0.5)
 
 
 class CompilerToolColors:
