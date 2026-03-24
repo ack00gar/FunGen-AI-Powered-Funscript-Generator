@@ -1069,27 +1069,27 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
             cpu_cores = os.cpu_count() or 4
             self.num_producers_stage1 = max(1, min(5, cpu_cores // 2 - 2) if cpu_cores > 4 else 1)
             self.num_consumers_stage1 = max(1, min(9, cpu_cores // 2 + 2) if cpu_cores > 4 else 1)
-            # MPS (Apple Silicon) shares unified memory with the system.
-            # Scale consumers by available memory so low-RAM Macs don't OOM
-            # while beefy Mac Studios keep their full throughput.
-            if constants.DEVICE == 'mps':
-                try:
-                    import psutil
-                    total_gb = psutil.virtual_memory().total / (1024 ** 3)
-                except ImportError:
-                    total_gb = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024 ** 3)
-                usable_gb = total_gb - constants.MPS_MEMORY_HEADROOM_GB
-                mps_max = max(1, int(usable_gb / constants.MPS_MEMORY_PER_CONSUMER_GB))
-                if self.num_consumers_stage1 > mps_max:
-                    logger.info(
-                        f"MPS backend: {total_gb:.0f}GB unified memory → "
-                        f"scaling consumers from {self.num_consumers_stage1} to {mps_max} "
-                        f"({constants.MPS_MEMORY_PER_CONSUMER_GB}GB/consumer + "
-                        f"{constants.MPS_MEMORY_HEADROOM_GB}GB headroom)")
-                    self.num_consumers_stage1 = mps_max
         else:
             self.num_producers_stage1 = prod_usr
             self.num_consumers_stage1 = cons_usr
+
+        # MPS (Apple Silicon) memory cap: always enforced regardless of saved settings.
+        # Each consumer loads det + pose models sharing unified memory with the system.
+        if constants.DEVICE == 'mps':
+            try:
+                import psutil
+                total_gb = psutil.virtual_memory().total / (1024 ** 3)
+            except ImportError:
+                total_gb = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024 ** 3)
+            usable_gb = total_gb - constants.MPS_MEMORY_HEADROOM_GB
+            mps_max = max(1, int(usable_gb / constants.MPS_MEMORY_PER_CONSUMER_GB))
+            if self.num_consumers_stage1 > mps_max:
+                logger.info(
+                    f"MPS: {total_gb:.0f}GB memory, capping consumers "
+                    f"from {self.num_consumers_stage1} to {mps_max} "
+                    f"({constants.MPS_MEMORY_PER_CONSUMER_GB}GB/consumer + "
+                    f"{constants.MPS_MEMORY_HEADROOM_GB}GB headroom)")
+                self.num_consumers_stage1 = mps_max
 
     def save_settings_to_app(self):
         self.app_settings.set("num_producers_stage1", self.num_producers_stage1)
