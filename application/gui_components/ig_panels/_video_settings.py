@@ -109,6 +109,23 @@ class VideoSettingsMixin:
                 if vr_open:
                     self._render_vr_settings(processor)
 
+        # Reset button
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        if imgui.button("Reset Video Settings##ResetVideoDefaults", width=-1):
+            self.app.hardware_acceleration_method = "auto"
+            self.app.app_settings.set("hardware_acceleration_method", "auto")
+            processor.set_active_video_type_setting("auto")
+            if hasattr(processor, 'vr_unwarp_method_override'):
+                processor.vr_unwarp_method_override = "auto"
+                self.app.app_settings.set("vr_unwarp_method", "auto")
+            processor.vr_pitch = 0
+            self.app.app_settings.set("vr_crop_panel", "first")
+            if processor.is_video_open():
+                threading.Thread(target=processor.reapply_video_settings, daemon=True, name='ResetReapply').start()
+            self.app.notify("Video settings reset to defaults", "info", 2.0)
+
         self.video_settings_perf.end_timing()
 
     def _render_vr_settings(self, processor):
@@ -133,15 +150,27 @@ class VideoSettingsMixin:
         row_end()
 
         # Unwarp Method
-        row_label("Unwarp Method",
-                  "Auto: choose Metal or OpenGL automatically\n"
-                  "GPU Metal: Metal shader (macOS)\n"
-                  "GPU OpenGL: OpenGL shader (cross-platform)\n"
-                  "CPU (v360): FFmpeg v360 filter (slower)\n"
-                  "None (Crop Only): skip unwarping, just crop one panel")
-        unwarp_disp = ["Auto (Metal/OpenGL)", "GPU Metal", "GPU OpenGL", "CPU (v360)", "None (Crop Only)"]
-        unwarp_val = ["auto", "metal", "opengl", "v360", "none"]
+        show_advanced = self.app.app_state_ui.show_advanced_options
+        if show_advanced:
+            row_label("Unwarp Method",
+                      "Auto: choose GPU backend automatically\n"
+                      "GPU Metal: Metal shader (macOS)\n"
+                      "GPU OpenGL: OpenGL shader (cross-platform)\n"
+                      "CPU (v360): FFmpeg v360 filter (best quality)\n"
+                      "None (Crop Only): skip unwarping, just crop one panel")
+            unwarp_disp = ["Auto (GPU)", "GPU Metal", "GPU OpenGL", "CPU (v360)", "None (Crop Only)"]
+            unwarp_val = ["auto", "metal", "opengl", "v360", "none"]
+        else:
+            row_label("Unwarp Method",
+                      "Auto: GPU unwarping (fast)\n"
+                      "CPU (v360): FFmpeg v360 filter (best quality, slower)\n"
+                      "None (Crop Only): skip unwarping, just crop")
+            unwarp_disp = ["Auto (GPU)", "CPU (v360)", "None (Crop Only)"]
+            unwarp_val = ["auto", "v360", "none"]
         current_unwarp = getattr(processor, 'vr_unwarp_method_override', 'auto')
+        # Map advanced values to simple list when not in advanced mode
+        if not show_advanced and current_unwarp in ("metal", "opengl"):
+            current_unwarp = "auto"
         try:
             current_unwarp_idx = unwarp_val.index(current_unwarp)
         except ValueError:

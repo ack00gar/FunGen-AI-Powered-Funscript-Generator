@@ -164,12 +164,6 @@ class InfoGraphsUI(InfoGraphsMixin):
         if tab_selected == "info":
             imgui.spacing()
 
-            # Video Information (collapsed by default, read-only metadata only)
-            with _section_card("Video##VideoParentSection", tier="primary",
-                               open_by_default=False) as vid_open:
-                if vid_open:
-                    self._render_content_video_info()
-
             # Funscript (expanded by default)
             with _section_card("Funscript##FunscriptParentSection", tier="primary") as fs_open:
                 if fs_open:
@@ -195,10 +189,22 @@ class InfoGraphsUI(InfoGraphsMixin):
 
         elif tab_selected == "video":
             imgui.spacing()
-            with _section_card("Video Settings##VideoSettingsSection", tier="primary",
-                               ) as vs_open:
+
+            # VR tip (only when VR active)
+            if self.app.processor and self.app.processor.is_vr_active_or_potential():
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.65, 0.8, 0.9)
+                imgui.text_wrapped("VR: recommended unwarp is CPU (v360) for best quality. Pitch -21 for typical POV angle.")
+                imgui.pop_style_color()
+                imgui.spacing()
+
+            with _section_card("Video Settings##VideoSettingsSection", tier="primary") as vs_open:
                 if vs_open:
                     self._render_content_video_settings()
+
+            with _section_card("Video Information##VideoInfoSection", tier="primary",
+                               open_by_default=False) as vi_open:
+                if vi_open:
+                    self._render_content_video_info()
 
         elif tab_selected == "settings":
             imgui.spacing()
