@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from typing import List, Dict, Optional, Tuple
 from bisect import bisect_left, bisect_right
 import numpy as np
@@ -675,6 +676,7 @@ class AppFunscriptProcessor:
             try:
                 # Ensure reference is current (already handled by _ensure_undo_managers_linked)
                 undo_manager.record_state_before_action(action_description)
+                self._last_point_edit_time = time.monotonic()
                 self.logger.debug(f"UndoRec: T{timeline_num} - '{action_description}'")
             except Exception as e:
                 self.logger.error(f"Error recording undo for T{timeline_num} ('{action_description}'): {e}", exc_info=True)
@@ -682,7 +684,14 @@ class AppFunscriptProcessor:
             self.logger.warning(f"Could not record undo for T{timeline_num}: Undo manager not found.")
 
     def perform_undo_redo_focused(self, direction: str):
-        """Undo/redo on the last-edited timeline."""
+        """Undo/redo on the last-edited timeline. Also handles chapter deletion undo."""
+        # Chapter undo only if it was the most recent action
+        if direction == 'undo' and getattr(self, '_last_deleted_chapters', None):
+            chapter_del_time = getattr(self, '_last_deleted_chapters_time', 0)
+            point_edit_time = getattr(self, '_last_point_edit_time', 0)
+            if chapter_del_time > point_edit_time:
+                self.undo_delete_chapters()
+                return
         self.perform_undo_redo(self._last_edited_timeline, direction)
 
     def perform_undo_redo(self, timeline_num: int, operation: str):  # operation is 'undo' or 'redo'
@@ -1238,27 +1247,50 @@ class AppFunscriptProcessor:
             self.logger.info("No chapter IDs provided for deletion.")
             return
 
+        # Save deleted chapters for undo
+        deleted_chapters = [ch for ch in self.video_chapters if ch.unique_id in chapter_ids]
         initial_count = len(self.video_chapters)
         self.video_chapters = [ch for ch in self.video_chapters if ch.unique_id not in chapter_ids]
         deleted_count = initial_count - len(self.video_chapters)
 
         if deleted_count > 0:
+            # Store for undo (single-level, overwritten on next delete)
+            self._last_deleted_chapters = deleted_chapters
+            self._last_deleted_chapters_time = time.monotonic()
             self.logger.info(f"Deleted {deleted_count} chapter(s): {chapter_ids}")
-            
+
             # Sync chapters to funscript object
             self._sync_chapters_to_funscript()
-            
+
             self.app.project_manager.project_dirty = True
             self.app.app_state_ui.heatmap_dirty = True
             self.app.app_state_ui.funscript_preview_dirty = True
-            # TODO: Add Undo/Redo record
             self.reset_scripting_range()
             self.logger.info("Scripting range was reset after chapter deletion to prevent stale state.")
 
             self.app.set_status_message(f"Deleted {deleted_count} chapter(s).")
+            self.app.notify(f"Deleted {deleted_count} chapter(s) (Ctrl+Z to restore)", "info", 3.0)
         else:
             self.logger.info(f"No chapters found matching IDs for deletion: {chapter_ids}")
             self.app.set_status_message("No matching chapters found to delete.")
+
+    def undo_delete_chapters(self) -> bool:
+        """Restore the last deleted chapter(s). Returns True if restored."""
+        chapters = getattr(self, '_last_deleted_chapters', None)
+        if not chapters:
+            return False
+        for ch in chapters:
+            self.video_chapters.append(ch)
+        self.video_chapters.sort(key=lambda c: c.start_frame_id)
+        self._sync_chapters_to_funscript()
+        self.app.project_manager.project_dirty = True
+        self.app.app_state_ui.heatmap_dirty = True
+        self.app.app_state_ui.funscript_preview_dirty = True
+        count = len(chapters)
+        self._last_deleted_chapters = None
+        self.logger.info(f"Restored {count} deleted chapter(s)")
+        self.app.notify(f"Restored {count} chapter(s)", "success", 2.0)
+        return True
 
     def clear_script_points_in_selected_chapters(self, selected_chapters: List[VideoSegment]):
         if not selected_chapters:

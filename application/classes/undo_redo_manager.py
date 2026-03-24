@@ -1,89 +1,106 @@
 import collections
+import struct
 from typing import Optional, List, Tuple
+
+# Each action is (at: int32, pos: int32) = 8 bytes
+_ACTION_FMT = '<ii'  # little-endian, two signed int32
+_ACTION_SIZE = struct.calcsize(_ACTION_FMT)
+
+
+def _pack_actions(actions: list) -> bytes:
+    """Pack a list of {'at': int, 'pos': int} dicts into compact bytes.
+
+    ~29x smaller than list-of-dicts: 8 bytes per action vs ~232 bytes.
+    """
+    buf = bytearray(len(actions) * _ACTION_SIZE)
+    offset = 0
+    for a in actions:
+        struct.pack_into(_ACTION_FMT, buf, offset, a['at'], a['pos'])
+        offset += _ACTION_SIZE
+    return bytes(buf)
+
+
+def _unpack_actions(data: bytes) -> list:
+    """Unpack bytes back into a list of {'at': int, 'pos': int} dicts."""
+    count = len(data) // _ACTION_SIZE
+    result = []
+    offset = 0
+    for _ in range(count):
+        at, pos = struct.unpack_from(_ACTION_FMT, data, offset)
+        result.append({'at': at, 'pos': pos})
+        offset += _ACTION_SIZE
+    return result
 
 
 class UndoRedoManager:
     def __init__(self, max_history: int = 50):
         self.max_history: int = max_history
-        # undo_stack: Stores (description_of_action_that_led_AWAY_from_this_state, state_snapshot)
-        # So, if state S0 was changed by "Add Point" to S1, undo_stack gets ("Add Point", S0)
-        self.undo_stack: collections.deque[Tuple[str, list]] = collections.deque(maxlen=max_history)
-        # redo_stack: Stores (description_of_action_to_REAPPLY, state_snapshot_that_results_from_reapply)
-        self.redo_stack: collections.deque[Tuple[str, list]] = collections.deque(maxlen=max_history)
+        # Stacks store (description, packed_bytes) instead of (description, list[dict])
+        self.undo_stack: collections.deque[Tuple[str, bytes]] = collections.deque(maxlen=max_history)
+        self.redo_stack: collections.deque[Tuple[str, bytes]] = collections.deque(maxlen=max_history)
 
         self._actions_list_reference: Optional[list] = None
+        # Cache last packed state to avoid redundant packing on dedup check
+        self._last_packed: Optional[bytes] = None
+        self._last_packed_len: int = -1
 
     def set_actions_reference(self, actions_list_ref: list):
         self._actions_list_reference = actions_list_ref
+        self._last_packed = None
+        self._last_packed_len = -1
         self.clear_history()
 
     def record_state_before_action(self, action_description: str):
-        """
-        Call this *BEFORE* the actions list is modified.
-        'action_description' describes the action that is *about to happen*.
-        """
+        """Call this BEFORE the actions list is modified."""
         if self._actions_list_reference is None:
             return
 
-        # Action dicts contain only immutable values (int), so shallow
-        # dict copies are safe and ~20x faster than deepcopy.
-        state_before_action = [d.copy() for d in self._actions_list_reference]
+        packed = _pack_actions(self._actions_list_reference)
 
-        # Avoid pushing identical states if the description is also the same (less likely but possible)
-        # Short-circuit with length check to avoid O(n) list comparison in most cases
+        # Dedup: skip if identical to last pushed state with same description
         if self.undo_stack:
-            prev_desc, prev_state = self.undo_stack[-1]
-            if prev_desc == action_description and len(prev_state) == len(state_before_action):
-                if prev_state == state_before_action:
-                    return
+            prev_desc, prev_packed = self.undo_stack[-1]
+            if prev_desc == action_description and prev_packed == packed:
+                return
 
-        self.undo_stack.append((action_description, state_before_action))
-        self.redo_stack.clear()  # A new action clears the redo stack
+        self.undo_stack.append((action_description, packed))
+        self.redo_stack.clear()
 
-    def undo(self) -> Optional[str]:  # Returns description of the action that was undone
-        """
-        Performs an undo. The current state is pushed to redo.
-        The state from the top of the undo stack is restored.
-        """
+    def undo(self) -> Optional[str]:
+        """Undo: push current state to redo, restore previous state."""
         if not self.undo_stack or self._actions_list_reference is None:
             return None
 
-        # action_description is "what was done to get from prev_state to current_state"
-        # prev_state is the state we are restoring TO.
-        action_description_that_was_done, previous_state_to_restore = self.undo_stack.pop()
+        action_desc, prev_packed = self.undo_stack.pop()
 
-        # The current live state is the result of 'action_description_that_was_done'
-        current_live_state_for_redo = [d.copy() for d in self._actions_list_reference]
-        # When redoing, we re-apply 'action_description_that_was_done' to get 'current_live_state_for_redo'
-        self.redo_stack.append((action_description_that_was_done, current_live_state_for_redo))
+        # Save current state for redo
+        current_packed = _pack_actions(self._actions_list_reference)
+        self.redo_stack.append((action_desc, current_packed))
 
+        # Restore
+        restored = _unpack_actions(prev_packed)
         self._actions_list_reference.clear()
-        self._actions_list_reference.extend([d.copy() for d in previous_state_to_restore])
+        self._actions_list_reference.extend(restored)
 
-        return action_description_that_was_done  # This is the action that was just "undone"
+        return action_desc
 
-    def redo(self) -> Optional[str]:  # Returns description of the action that was redone
-        """
-        Performs a redo. The state before redoing is pushed to undo.
-        The state from the top of the redo stack is restored.
-        """
+    def redo(self) -> Optional[str]:
+        """Redo: push current state to undo, restore redo state."""
         if not self.redo_stack or self._actions_list_reference is None:
             return None
 
-        # action_to_reapply_desc is "what will be done to get from current_state to next_state"
-        # state_to_restore_via_redo is the "next_state"
-        action_to_reapply_desc, state_to_restore_via_redo = self.redo_stack.pop()
+        action_desc, redo_packed = self.redo_stack.pop()
 
-        # The current live state is the one *before* this redo operation.
-        current_live_state_for_undo = [d.copy() for d in self._actions_list_reference]
-        # If we undo this redo, we revert 'action_to_reapply_desc', going back to 'current_live_state_for_undo'.
-        # So, on undo_stack, we store (action_to_reapply_desc, current_live_state_for_undo)
-        self.undo_stack.append((action_to_reapply_desc, current_live_state_for_undo))
+        # Save current state for undo
+        current_packed = _pack_actions(self._actions_list_reference)
+        self.undo_stack.append((action_desc, current_packed))
 
+        # Restore
+        restored = _unpack_actions(redo_packed)
         self._actions_list_reference.clear()
-        self._actions_list_reference.extend([d.copy() for d in state_to_restore_via_redo])
+        self._actions_list_reference.extend(restored)
 
-        return action_to_reapply_desc  # This is the action that was just "redone"
+        return action_desc
 
     def can_undo(self) -> bool:
         return bool(self.undo_stack)
@@ -96,11 +113,7 @@ class UndoRedoManager:
         self.redo_stack.clear()
 
     def get_undo_history_for_display(self) -> List[str]:
-        """Returns a list of descriptions for actions that can be undone."""
-        # The last item pushed to undo_stack is the most recent action taken.
         return [item[0] for item in reversed(self.undo_stack)]
 
     def get_redo_history_for_display(self) -> List[str]:
-        """Returns a list of descriptions for actions that can be redone."""
-        # The last item pushed to redo_stack is the most recent action undone.
         return [item[0] for item in reversed(self.redo_stack)]

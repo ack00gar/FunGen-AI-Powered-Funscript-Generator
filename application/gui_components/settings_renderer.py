@@ -241,7 +241,7 @@ class SettingsRenderer:
                 return
 
             now = time.time()
-            if self._profile_list_cache is None or (now - self._profile_list_cache_time) > 2.0:
+            if self._profile_list_cache is None or (now - self._profile_list_cache_time) > 30.0:
                 self._profile_list_cache = settings.list_profiles()
                 self._profile_list_cache_time = now
 
