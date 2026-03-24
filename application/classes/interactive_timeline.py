@@ -300,7 +300,7 @@ class InteractiveFunscriptTimeline:
             hint = "Click to add points  |  0-9 keys set position  |  M snaps to playhead"
             hint_size = imgui.calc_text_size(hint)
             hx = canvas_pos[0] + (canvas_size[0] - hint_size[0]) * 0.5
-            hy = canvas_pos[1] + (canvas_size[1] - hint_size[1]) * 0.5
+            hy = canvas_pos[1] + canvas_size[1] * 0.3
             draw_list.add_text(hx, hy, imgui.get_color_u32_rgba(*TimelineColors.EMPTY_HINT), hint)
 
         # 6-pre. Speed limit overlay (behind curve)
