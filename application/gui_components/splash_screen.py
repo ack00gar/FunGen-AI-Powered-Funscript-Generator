@@ -1626,31 +1626,20 @@ class StandaloneSplashWindow:
             points.append((sx, sy, sp))  # keep pos for speed coloring
         points.sort(key=lambda p: p[0])
 
-        # Speed-colored segments: color based on slope (position change / time change)
-        # Green = slow, yellow = medium, orange = fast, red = very fast
+        # Speed-colored segments using the same gradient as the interactive timeline
+        from application.utils.heatmap_utils import HeatmapColorMapper
+        mapper = HeatmapColorMapper(max_speed=400.0)
+
         for i in range(1, len(points)):
             x1, y1, p1 = points[i - 1]
             x2, y2, p2 = points[i]
             dx = abs(x2 - x1)
             if dx < 1:
                 continue
-            speed = abs(p2 - p1) / (dx / tl_w)  # Normalized speed
-
-            # Speed -> color: 0=green, 1=yellow, 2+=red
-            if speed < 0.8:
-                r, g, b = 0.15, 0.85, 0.4  # Green (slow)
-            elif speed < 1.5:
-                t_c = (speed - 0.8) / 0.7
-                r = 0.15 + 0.85 * t_c
-                g = 0.85 + 0.15 * t_c
-                b = 0.4 - 0.35 * t_c  # Yellow
-            elif speed < 3.0:
-                t_c = min(1.0, (speed - 1.5) / 1.5)
-                r = 1.0
-                g = 1.0 - 0.6 * t_c  # Orange
-                b = 0.05
-            else:
-                r, g, b = 1.0, 0.25, 0.1  # Red (very fast)
+            # Convert normalized speed to units/sec (100 units range, time from pixel spacing)
+            dt_sec = (dx / tl_w) * wrap_len * 0.8  # approximate time span in seconds
+            speed_units_per_sec = abs(p2 - p1) * 100.0 / max(0.001, dt_sec)
+            r, g, b, _ = mapper.speed_to_color_rgba(speed_units_per_sec)
 
             # Glow behind
             draw_list.add_line(x1, y1, x2, y2,
