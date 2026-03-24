@@ -279,7 +279,10 @@ class AppBatchProcessor:
 
                 print(f"\n--- Processing Video {i + 1} of {len(self.app.batch_video_paths)}: {video_basename} ---")
 
-                self.app.logger.info(f"Batch processing video {i + 1}/{len(self.app.batch_video_paths)}: {video_basename}")
+                batch_total = len(self.app.batch_video_paths)
+                self.app.logger.info(f"Batch processing video {i + 1}/{batch_total}: {video_basename}",
+                                     extra={'status_message': True})
+                self.app.notify(f"Batch {i + 1}/{batch_total}: {video_basename}", "info", 3.0)
 
                 # --- Pre-flight checks for overwrite strategy ---
                 # This is now the very first step for each video in the loop.
