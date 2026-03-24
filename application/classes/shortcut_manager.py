@@ -10,6 +10,17 @@ class ShortcutManager:
         self.is_recording_shortcut_for: Optional[str] = None
         self._initialize_reverse_key_map()
 
+    def reinitialize_key_map(self):
+        """Rebuild the key map after GLFW is initialized.
+
+        Must be called after glfw.init() + window creation so that
+        glfw.get_key_name() returns layout-aware results (AZERTY, QWERTZ, etc.).
+        Also clears the shortcut mapping cache so new mappings take effect.
+        """
+        self._initialize_reverse_key_map()
+        if hasattr(self.app, 'invalidate_shortcut_cache'):
+            self.app.invalidate_shortcut_cache()
+
     def should_handle_shortcuts(self) -> bool:
         """
         Check if shortcuts should be processed based on current UI state.
