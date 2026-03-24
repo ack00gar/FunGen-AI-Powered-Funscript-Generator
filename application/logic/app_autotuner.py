@@ -198,6 +198,9 @@ class AppAutotuner:
         params = fs_proc.get_default_ultimate_autotune_params()
         op_desc = "Auto-Applied Ultimate Autotune"
 
+        # Capture before for unified undo
+        actions_before = list(funscript_instance.get_axis_actions(axis_name) or [])
+
         # 1. Record state for Undo
         fs_proc._record_timeline_action(timeline_num, op_desc)
 
@@ -215,6 +218,12 @@ class AppAutotuner:
                     fs_proc._finalize_action_and_update_ui(timeline_num, op_desc)
                     self.app.logger.info("Default Ultimate Autotune applied successfully.",
                                          extra={'status_message': True, 'duration': 5.0})
+                    # Unified undo
+                    actions_after = list(funscript_instance.get_axis_actions(axis_name) or [])
+                    from application.classes.undo_manager import BulkReplaceCmd
+                    self.app.undo_manager.push_done(BulkReplaceCmd(
+                        timeline_num, actions_before, actions_after,
+                        f"Ultimate Autotune (T{timeline_num})"))
                 else:
                     self.app.logger.warning("Default Ultimate Autotune failed to produce a result.",
                                           extra={'status_message': True})

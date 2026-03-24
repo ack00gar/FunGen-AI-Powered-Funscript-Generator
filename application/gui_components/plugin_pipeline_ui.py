@@ -346,9 +346,13 @@ class PluginPipelineUI:
 
         funscript_obj = processor.tracker.funscript
 
-        # Record undo
-        if hasattr(processor, '_record_timeline_action'):
-            processor._record_timeline_action(1, "Plugin Pipeline")
+        # Capture before for unified undo
+        actions_before = list(funscript_obj.get_axis_actions('primary') or [])
+
+        # Record legacy undo
+        fs_proc = self.app.funscript_processor
+        if fs_proc:
+            fs_proc._record_timeline_action(1, "Plugin Pipeline")
 
         success, errors = self.pipeline.run(funscript_obj, axis='primary')
 
@@ -356,11 +360,16 @@ class PluginPipelineUI:
             self._last_errors = errors
 
         # Refresh UI
-        if hasattr(processor, '_finalize_action_and_update_ui'):
-            processor._finalize_action_and_update_ui(1, "Plugin Pipeline")
+        if fs_proc:
+            fs_proc._finalize_action_and_update_ui(1, "Plugin Pipeline")
 
         if success:
             self.app.logger.info("Pipeline applied successfully", extra={'status_message': True})
+            # Unified undo
+            actions_after = list(funscript_obj.get_axis_actions('primary') or [])
+            from application.classes.undo_manager import BulkReplaceCmd
+            self.app.undo_manager.push_done(BulkReplaceCmd(
+                1, actions_before, actions_after, "Plugin Pipeline (T1)"))
 
     # ---- Parameter rendering (mirrors plugin_ui_renderer patterns) ----
 
