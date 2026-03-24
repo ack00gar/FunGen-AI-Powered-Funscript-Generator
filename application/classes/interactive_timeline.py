@@ -3143,7 +3143,10 @@ class InteractiveFunscriptTimeline:
                 frame_idx = getattr(self.app, 'current_frame_index', 0)
                 params['current_time_ms'] = int((frame_idx / fps) * 1000)
 
-            # Record undo action
+            # Capture actions before plugin for unified undo
+            actions_before = list(fs.get_axis_actions(axis) or [])
+
+            # Record legacy undo
             self.app.funscript_processor._record_timeline_action(
                 self.timeline_num,
                 f"Apply {plugin_name}"
@@ -3153,8 +3156,6 @@ class InteractiveFunscriptTimeline:
             try:
                 result = plugin_instance.transform(fs, axis, **params)
 
-                # Plugins may return the modified funscript or None (for in-place modifications)
-                # Both are valid - what matters is that the transformation was applied
                 self.logger.info(f"Successfully applied {plugin_name} to timeline {self.timeline_num}")
                 self.app.notify(f"Applied {plugin_name}", "success")
 
@@ -3166,6 +3167,13 @@ class InteractiveFunscriptTimeline:
 
                 # Invalidate caches
                 self.invalidate_cache()
+
+                # Unified undo
+                actions_after = list(fs.get_axis_actions(axis) or [])
+                from application.classes.undo_manager import BulkReplaceCmd
+                self.app.undo_manager.push_done(BulkReplaceCmd(
+                    self.timeline_num, actions_before, actions_after,
+                    f"Apply {plugin_name} (T{self.timeline_num})"))
         
                 # Close the plugin window and clear its preview
                 self.plugin_renderer.plugin_manager.set_plugin_state(

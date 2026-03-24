@@ -506,44 +506,30 @@ class MainMenu:
     def _render_edit_menu(self, app_state):
         app = self.app
         fs_proc = app.funscript_processor
+        mgr = app.undo_manager
 
         if imgui.begin_menu("Edit", True):
-            # Focused undo/redo (last-edited timeline, clamped to visible)
-            focused_tl = fs_proc._last_edited_timeline
-            if focused_tl == 2 and not app_state.show_funscript_interactive_timeline2:
-                focused_tl = 1
-            focused_mgr = fs_proc._get_undo_manager(focused_tl)
-            can_undo_f = focused_mgr.can_undo() if focused_mgr else False
-            can_redo_f = focused_mgr.can_redo() if focused_mgr else False
+            # Unified undo/redo
+            undo_desc = mgr.peek_undo()
+            redo_desc = mgr.peek_redo()
+
+            undo_label = f"Undo: {undo_desc}" if undo_desc else "Undo"
+            redo_label = f"Redo: {redo_desc}" if redo_desc else "Redo"
 
             if imgui.menu_item(
-                f"Undo ({self._tl_label(focused_tl)})", self._get_shortcut_display("undo_timeline1"),
-                selected=False, enabled=can_undo_f
+                undo_label, self._get_shortcut_display("undo_timeline1"),
+                selected=False, enabled=bool(undo_desc)
             )[0]:
-                fs_proc.perform_undo_redo_focused("undo")
+                desc = mgr.undo(app)
+                if desc:
+                    app.notify(f"Undo: {desc}", "info", 1.5)
             if imgui.menu_item(
-                f"Redo ({self._tl_label(focused_tl)})", self._get_shortcut_display("redo_timeline1"),
-                selected=False, enabled=can_redo_f
+                redo_label, self._get_shortcut_display("redo_timeline1"),
+                selected=False, enabled=bool(redo_desc)
             )[0]:
-                fs_proc.perform_undo_redo_focused("redo")
-
-            imgui.separator()
-
-            # Per-timeline undo submenu
-            if imgui.begin_menu("Per-Timeline Undo..."):
-                # T1 always visible
-                self._render_per_timeline_undo_items(fs_proc, 1)
-                # T2 if visible
-                if app_state.show_funscript_interactive_timeline2:
-                    imgui.separator()
-                    self._render_per_timeline_undo_items(fs_proc, 2)
-                # T3+ if visible (supporter feature)
-                for tl_num in EXTRA_TIMELINE_RANGE:
-                    vis_attr = f"show_funscript_interactive_timeline{tl_num}"
-                    if getattr(app_state, vis_attr, False):
-                        imgui.separator()
-                        self._render_per_timeline_undo_items(fs_proc, tl_num)
-                imgui.end_menu()
+                desc = mgr.redo(app)
+                if desc:
+                    app.notify(f"Redo: {desc}", "info", 1.5)
 
             imgui.separator()
 

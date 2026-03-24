@@ -79,16 +79,11 @@ class ShortcutHandlerMixin:
         elif check_and_run_shortcut("open_project", self._handle_open_project_shortcut):
             pass
 
-        # Editing — focused undo/redo (operates on last-edited timeline)
-        elif check_and_run_shortcut("undo_timeline1", fs_proc.perform_undo_redo_focused, 'undo'):
+        # Editing — unified undo/redo (single chronological stack)
+        elif check_and_run_shortcut("undo_timeline1", self._handle_unified_undo):
             pass
-        elif check_and_run_shortcut("redo_timeline1", fs_proc.perform_undo_redo_focused, 'redo'):
+        elif check_and_run_shortcut("redo_timeline1", self._handle_unified_redo):
             pass
-        # Per-timeline overrides for power users
-        elif self.app.app_state_ui.show_funscript_interactive_timeline2 and (
-            check_and_run_shortcut("undo_timeline2", fs_proc.perform_undo_redo, 2, 'undo')
-            or check_and_run_shortcut("redo_timeline2", fs_proc.perform_undo_redo, 2, 'redo')
-        ): pass
 
         # Playback & Navigation
         elif check_and_run_shortcut("toggle_playback", self.app.event_handlers.handle_playback_control, "play_pause"):
@@ -436,6 +431,16 @@ class ShortcutHandlerMixin:
 
     # Removed complex predictive caching - it was blocking the UI
     # Keep navigation simple: cache check first, then single frame fetch if needed
+
+    def _handle_unified_undo(self):
+        desc = self.app.undo_manager.undo(self.app)
+        if desc:
+            self.app.notify(f"Undo: {desc}", "info", 1.5)
+
+    def _handle_unified_redo(self):
+        desc = self.app.undo_manager.redo(self.app)
+        if desc:
+            self.app.notify(f"Redo: {desc}", "info", 1.5)
 
     def _handle_snap_nearest_to_playhead(self):
         """Handle snap nearest point to playhead shortcut (delegates to active timeline)."""
