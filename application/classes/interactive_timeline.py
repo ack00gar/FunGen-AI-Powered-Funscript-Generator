@@ -625,6 +625,8 @@ class InteractiveFunscriptTimeline:
             imgui.end_popup()
 
     def _handle_keyboard_shortcuts(self, app_state, io):
+        if not self.app.shortcut_manager.should_handle_shortcuts():
+            return
         shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
         
         # Helper to map shortcuts (for single-press actions)
@@ -680,10 +682,12 @@ class InteractiveFunscriptTimeline:
                     target_frame = min(target_frame, self.app.processor.total_frames - 1)
                 self.app.event_handlers.seek_video_with_sync(target_frame)
 
-        # 2. Select All (Ctrl+A)
+        # 2. Select All / Deselect All
         if check_shortcut("select_all_points", "CTRL+A"):
             actions = self._get_actions()
             self.multi_selected_action_indices = set(range(len(actions)))
+        if check_shortcut("deselect_all_points", "SUPER+D"):
+            self.multi_selected_action_indices.clear()
 
         # 3. Delete (Delete/Backspace)
         if check_shortcut("delete_selected_point", "DELETE") or check_shortcut("delete_selected_point_alt", "BACKSPACE"):
@@ -720,9 +724,7 @@ class InteractiveFunscriptTimeline:
         if nudge_t != 0 and self.multi_selected_action_indices:
             self._nudge_selection_time(nudge_t)
 
-        # 6b. Snap nearest point to playhead (M = magnet)
-        if check_shortcut("snap_nearest_to_playhead", "M"):
-            self._snap_nearest_to_playhead()
+        # 6b. Snap nearest to playhead — handled by global shortcut handler
 
         # 7. Bookmark at playhead (B key)
         if check_shortcut("add_bookmark", "B"):

@@ -574,9 +574,14 @@ class ChapterBarMixin:
             self.is_dragging_chapter_range = False
 
         # Chapter keyboard shortcuts (when chapters are context-selected)
-        if len(self.context_selected_chapters) > 0:
+        if len(self.context_selected_chapters) > 0 and self.app.shortcut_manager.should_handle_shortcuts():
             shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
             io = imgui.get_io()
+
+            # Check if active timeline has point selection (DELETE prefers points over chapters)
+            _active_tl_num = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
+            _active_editor = self.gui_instance.timeline_editor1 if _active_tl_num == 1 else getattr(self.gui_instance, 'timeline_editor2', None)
+            _timeline_has_point_selection = bool(_active_editor and _active_editor.multi_selected_action_indices)
 
             # Check Select Points in Chapter (E key) - must come before delete checks
             sel_pts_sc_str = shortcuts.get("select_points_in_chapter", "E")
@@ -623,9 +628,9 @@ class ChapterBarMixin:
                 # Delete points in the selected chapters
                 fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
                 self.app.logger.info(f"Deleted points in {len(self.context_selected_chapters)} chapter(s) via keyboard shortcut", extra={'status_message': True})
-            else:
-                # Only check regular delete if delete points wasn't pressed
-                # Delete Selected Chapter (DELETE or BACKSPACE without modifiers)
+            elif not _timeline_has_point_selection:
+                # Only check regular delete if delete-points wasn't pressed
+                # AND timeline has no point selection (points take priority over chapters)
                 del_sc_str = shortcuts.get("delete_selected_chapter", "DELETE")
                 del_alt_sc_str = shortcuts.get("delete_selected_chapter_alt", "BACKSPACE")
                 del_key_tuple = self.app._map_shortcut_to_glfw_key(del_sc_str)
