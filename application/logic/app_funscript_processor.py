@@ -650,12 +650,7 @@ class AppFunscriptProcessor:
             self.logger.error(f"Error updating chapter {chapter_id}: {e}", exc_info=True)
             self.app.set_status_message("Error updating chapter.", level=logging.ERROR)
 
-    def _record_timeline_action(self, timeline_num: int, action_description: str):
-        """Legacy no-op. Kept for call-site compatibility during migration.
-        Undo recording is now handled by command objects via app.undo_manager."""
-        pass
-
-    def _finalize_action_and_update_ui(self, timeline_num: int, change_description: str):
+    def _post_mutation_refresh(self, timeline_num: int, change_description: str):
         self._revision += 1
         self.update_funscript_stats_for_timeline(timeline_num, change_description)
         self.app.project_manager.project_dirty = True
@@ -700,8 +695,6 @@ class AppFunscriptProcessor:
             self.logger.warning(f"Cannot clear/set baseline for T{timeline_num}: Target funscript or axis not found.")
             return
 
-        self._record_timeline_action(timeline_num, f"Replace T{timeline_num} with: {loaded_from_description}")
-
         live_actions_list = target_funscript.get_axis_actions(axis_name)
 
         live_actions_list.clear()
@@ -716,7 +709,7 @@ class AppFunscriptProcessor:
             self.app.undo_manager.clear()
             self.logger.debug(f"Undo history cleared due to: {loaded_from_description}")
 
-        self._finalize_action_and_update_ui(timeline_num, loaded_from_description)
+        self._post_mutation_refresh(timeline_num, loaded_from_description)
         self.app.energy_saver.reset_activity_timer()
 
     def swap_timelines(self, timeline_a: int, timeline_b: int):
@@ -727,11 +720,11 @@ class AppFunscriptProcessor:
             self.logger.warning(f"Cannot swap T{timeline_a} <-> T{timeline_b}: funscript not available.")
             return
 
-        self._record_timeline_action(timeline_a, f"Swap T{timeline_a} with T{timeline_b}")
-        self._record_timeline_action(timeline_b, f"Swap T{timeline_b} with T{timeline_a}")
-
         list_a = fs_a.get_axis_actions(axis_a)
         list_b = fs_b.get_axis_actions(axis_b)
+
+        actions_a_before = list(fs_a.get_axis_actions(axis_a) or [])
+        actions_b_before = list(fs_b.get_axis_actions(axis_b) or [])
 
         # Snapshot both sides before mutating. Action dicts contain only
         # immutable values (int/float), so shallow dict copies suffice and
@@ -766,9 +759,17 @@ class AppFunscriptProcessor:
                 if editor and hasattr(editor, 'multi_selected_action_indices'):
                     editor.multi_selected_action_indices.clear()
 
-        self._finalize_action_and_update_ui(timeline_a, f"Swap with T{timeline_b}")
-        self._finalize_action_and_update_ui(timeline_b, f"Swap with T{timeline_a}")
+        self._post_mutation_refresh(timeline_a, f"Swap with T{timeline_b}")
+        self._post_mutation_refresh(timeline_b, f"Swap with T{timeline_a}")
         self.app.energy_saver.reset_activity_timer()
+
+        actions_a_after = list(fs_a.get_axis_actions(axis_a) or [])
+        actions_b_after = list(fs_b.get_axis_actions(axis_b) or [])
+        from application.classes.undo_manager import BulkReplaceCmd, CompoundCmd
+        self.app.undo_manager.push_done(CompoundCmd([
+            BulkReplaceCmd(timeline_a, actions_a_before, actions_a_after, f"Swap T{timeline_a}"),
+            BulkReplaceCmd(timeline_b, actions_b_before, actions_b_after, f"Swap T{timeline_b}"),
+        ], f"Swap T{timeline_a} with T{timeline_b}"))
 
     def update_funscript_stats_for_timeline(self, timeline_num: int, source_type_description: str = "N/A"):
         if timeline_num == 1:
@@ -863,7 +864,7 @@ class AppFunscriptProcessor:
             self.logger.warning(f"Cannot clear and inject for T{timeline_num}: Target funscript or axis not found.")
             return
 
-        self._record_timeline_action(timeline_num, operation_description)  # Record state BEFORE modification
+        actions_before = list(target_funscript.get_axis_actions(axis_name) or [])
 
         # Make a copy of current actions to work with for filtering and merging
         original_actions_copy: List[Dict] = [a.copy() for a in target_funscript.get_axis_actions(axis_name)]
@@ -901,11 +902,15 @@ class AppFunscriptProcessor:
         self._update_last_timestamp(target_funscript, axis_name, unique_final_actions)
         target_funscript._invalidate_cache(axis_name)
 
-        self._finalize_action_and_update_ui(timeline_num, operation_description)
+        self._post_mutation_refresh(timeline_num, operation_description)
         self.logger.info(
             f"Funscript T{timeline_num}: Range [{range_start_ms}-{range_end_ms}]ms updated. Injected {len(processed_new_actions)} new. Total: {len(unique_final_actions)}.",
             extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
+
+        actions_after = list(target_funscript.get_axis_actions(axis_name) or [])
+        from application.classes.undo_manager import BulkReplaceCmd
+        self.app.undo_manager.push_done(BulkReplaceCmd(timeline_num, actions_before, actions_after, f"Clear & Inject Range (T{timeline_num})"))
 
     def get_effective_scripting_range(self) -> Tuple[bool, Optional[int], Optional[int]]:
         """
@@ -1034,8 +1039,6 @@ class AppFunscriptProcessor:
             self.logger.info("RDP: Epsilon must be > 0.", extra={'status_message': True})
             return
 
-        self._record_timeline_action(timeline_num, action_desc)  # Record state BEFORE
-
         op_dispatch = {
             'clamp_0': lambda: target_fs_obj.apply_plugin('Value Clamp', axis=axis, clamp_value=0, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
             'clamp_100': lambda: target_fs_obj.apply_plugin('Value Clamp', axis=axis, clamp_value=100, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
@@ -1057,7 +1060,7 @@ class AppFunscriptProcessor:
             self.logger.error(f"Dispatch failed for {operation_name}")
             return
 
-        self._finalize_action_and_update_ui(timeline_num, action_desc)
+        self._post_mutation_refresh(timeline_num, action_desc)
         self.logger.info(f"Applied: {action_desc}", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
 
@@ -1211,18 +1214,17 @@ class AppFunscriptProcessor:
 
         op_desc = f"Delete Points in {len(selected_chapters)} Chapter(s)"
 
-        # Record the state for each timeline that has actions, as 'axis=both' affects both.
-        if funscript_obj.primary_actions:
-            self._record_timeline_action(1, op_desc)
-
-        if funscript_obj.secondary_actions:
-            self._record_timeline_action(2, op_desc)
-
         fps = self._get_current_fps()
         if fps == 30.0 and not (
                 self.app.processor and hasattr(self.app.processor, 'video_info') and self.app.processor.video_info):
             self.logger.warning(
                 f"Valid FPS not found, using default {fps}fps for point clearing. Accuracy may be affected.")
+
+        # Capture actions for both timelines before mutation
+        fs_t1, axis_t1 = self._get_target_funscript_object_and_axis(1)
+        fs_t2, axis_t2 = self._get_target_funscript_object_and_axis(2)
+        actions_t1_before = list(fs_t1.get_axis_actions(axis_t1) or []) if fs_t1 and axis_t1 else []
+        actions_t2_before = list(fs_t2.get_axis_actions(axis_t2) or []) if fs_t2 and axis_t2 else []
 
         cleared_any_points = False
         for chapter in selected_chapters:
@@ -1246,6 +1248,17 @@ class AppFunscriptProcessor:
             self.update_funscript_stats_for_timeline(1, "Points Cleared in Chapter")
             self.update_funscript_stats_for_timeline(2, "Points Cleared in Chapter")
             self.app.set_status_message(f"Cleared script points in {len(selected_chapters)} chapter(s).")
+
+            actions_t1_after = list(fs_t1.get_axis_actions(axis_t1) or []) if fs_t1 and axis_t1 else []
+            actions_t2_after = list(fs_t2.get_axis_actions(axis_t2) or []) if fs_t2 and axis_t2 else []
+            from application.classes.undo_manager import BulkReplaceCmd, CompoundCmd
+            cmds = []
+            if actions_t1_before or actions_t1_after:
+                cmds.append(BulkReplaceCmd(1, actions_t1_before, actions_t1_after, "Delete Chapter Points (T1)"))
+            if actions_t2_before or actions_t2_after:
+                cmds.append(BulkReplaceCmd(2, actions_t2_before, actions_t2_after, "Delete Chapter Points (T2)"))
+            if cmds:
+                self.app.undo_manager.push_done(CompoundCmd(cmds, f"Delete Chapter Points") if len(cmds) > 1 else cmds[0])
 
     def merge_selected_chapters(self, chapter1: VideoSegment, chapter2: VideoSegment,
                                 return_chapter_object: bool = False):

@@ -349,10 +349,7 @@ class PluginPipelineUI:
         # Capture before for unified undo
         actions_before = list(funscript_obj.get_axis_actions('primary') or [])
 
-        # Record legacy undo
         fs_proc = self.app.funscript_processor
-        if fs_proc:
-            fs_proc._record_timeline_action(1, "Plugin Pipeline")
 
         success, errors = self.pipeline.run(funscript_obj, axis='primary')
 
@@ -361,7 +358,7 @@ class PluginPipelineUI:
 
         # Refresh UI
         if fs_proc:
-            fs_proc._finalize_action_and_update_ui(1, "Plugin Pipeline")
+            fs_proc._post_mutation_refresh(1, "Plugin Pipeline")
 
         if success:
             self.app.logger.info("Pipeline applied successfully", extra={'status_message': True})

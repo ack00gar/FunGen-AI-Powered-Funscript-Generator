@@ -772,7 +772,6 @@ class InteractiveFunscriptTimeline:
 
         # Record Undo State (Once per drag)
         if not self.drag_undo_recorded:
-            self.app.funscript_processor._record_timeline_action(self.timeline_num, "Drag Point")
             self.drag_undo_recorded = True
             # Capture original values for unified undo
             idx = self.dragging_action_idx
@@ -809,7 +808,7 @@ class InteractiveFunscriptTimeline:
 
     def _finalize_drag(self):
         if self.drag_undo_recorded:
-            self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Drag Point")
+            self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Drag Point")
             # New unified undo: capture final position
             actions = self._get_actions()
             idx = self.dragging_action_idx
@@ -913,14 +912,13 @@ class InteractiveFunscriptTimeline:
         snap = self.app.app_state_ui.snap_to_grid_pos
         actual_delta = delta * (snap if snap > 0 else 1)
 
-        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Nudge Value")
         for idx in self.multi_selected_action_indices:
             if idx < len(actions):
                 actions[idx]['pos'] = max(0, min(100, actions[idx]['pos'] + actual_delta))
         fs, axis = self._get_target_funscript_details()
         if fs:
             fs._invalidate_cache(axis or 'both')
-        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Value")
+        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Nudge Value")
         self.invalidate_cache()
 
         from application.classes.undo_manager import NudgeValuesCmd
@@ -930,8 +928,6 @@ class InteractiveFunscriptTimeline:
     def _nudge_selection_time(self, delta_ms: int):
         actions = self._get_actions()
         if not actions: return
-
-        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Nudge Time")
 
         # Sort indices to avoid collision logic issues
         indices = sorted(list(self.multi_selected_action_indices), reverse=(delta_ms > 0))
@@ -948,7 +944,7 @@ class InteractiveFunscriptTimeline:
         fs, axis = self._get_target_funscript_details()
         if fs:
             fs._invalidate_cache(axis or 'both')
-        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Time")
+        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Nudge Time")
         self.invalidate_cache()
 
         from application.classes.undo_manager import NudgeTimesCmd
@@ -999,16 +995,12 @@ class InteractiveFunscriptTimeline:
         # Capture old value for unified undo
         old_at = actions[best_idx]['at']
 
-        # Record undo, apply, finalize
-        self.app.funscript_processor._record_timeline_action(
-            self.timeline_num, "Snap to Playhead")
-
         actions[best_idx]['at'] = new_at
 
         fs, axis = self._get_target_funscript_details()
         if fs:
             fs._invalidate_cache(axis or 'both')
-        self.app.funscript_processor._finalize_action_and_update_ui(
+        self.app.funscript_processor._post_mutation_refresh(
             self.timeline_num, "Snap to Playhead")
         self.invalidate_cache()
         self.app.project_manager.project_dirty = True
@@ -1029,10 +1021,10 @@ class InteractiveFunscriptTimeline:
         fps = processor.fps
         if fps <= 0: return
 
+        actions_before = list(self._get_actions() or [])
+
         # Convert frames to milliseconds
         delta_ms = int((frames / fps) * 1000.0)
-
-        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Nudge All Points")
 
         # Nudge all points by the same amount
         for action in actions:
@@ -1042,8 +1034,12 @@ class InteractiveFunscriptTimeline:
         if fs and axis:
             fs._invalidate_cache(axis)
 
-        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge All Points")
+        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Nudge All Points")
         self.invalidate_cache()
+
+        actions_after = list(self._get_actions() or [])
+        from application.classes.undo_manager import BulkReplaceCmd
+        self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Nudge All Points (T{self.timeline_num})"))
 
     def _nudge_chapter_time(self, frames: int):
         """Nudge points within the selected chapter(s) by a number of frames"""
@@ -1068,10 +1064,10 @@ class InteractiveFunscriptTimeline:
         fps = processor.fps
         if fps <= 0: return
 
+        actions_before = list(self._get_actions() or [])
+
         # Convert frames to milliseconds
         delta_ms = int((frames / fps) * 1000.0)
-
-        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Nudge Chapter Points")
 
         # Process each selected chapter
         total_nudged = 0
@@ -1101,8 +1097,12 @@ class InteractiveFunscriptTimeline:
         if fs and axis:
             fs._invalidate_cache(axis)
 
-        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Chapter Points")
+        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Nudge Chapter Points")
         self.invalidate_cache()
+
+        actions_after = list(self._get_actions() or [])
+        from application.classes.undo_manager import BulkReplaceCmd
+        self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Nudge Chapter Points (T{self.timeline_num})"))
 
     def select_points_in_chapter(self):
         """Select all funscript points within the context-selected chapter boundaries."""
@@ -1174,9 +1174,9 @@ class InteractiveFunscriptTimeline:
 
         fs, axis = self._get_target_funscript_details()
         if not fs: return
-        
-        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Paste")
-        
+
+        actions_before = list(self._get_actions() or [])
+
         new_actions = []
         for item in clip:
             t = int(paste_at_ms + item['relative_at'])
@@ -1186,10 +1186,14 @@ class InteractiveFunscriptTimeline:
                 'primary_pos': v if axis=='primary' else None,
                 'secondary_pos': v if axis=='secondary' else None
             })
-            
+
         fs.add_actions_batch(new_actions, is_from_live_tracker=False)
-        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Paste")
+        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Paste")
         self.invalidate_cache()
+
+        actions_after = list(self._get_actions() or [])
+        from application.classes.undo_manager import BulkReplaceCmd
+        self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Paste (T{self.timeline_num})"))
 
     def _handle_swap_timeline(self, target_num=None):
         if target_num is None:
@@ -1205,10 +1209,10 @@ class InteractiveFunscriptTimeline:
 
         if not fs_other: return
 
+        other_actions_before = list(fs_other.get_axis_actions(axis_other) or [])
+
         indices = sorted(list(self.multi_selected_action_indices))
         points_to_copy = [actions[i] for i in indices]
-
-        self.app.funscript_processor._record_timeline_action(other_num, f"Copy from T{self.timeline_num}")
 
         if axis_other in ('primary', 'secondary'):
             # Use batch add for built-in axes
@@ -1225,7 +1229,11 @@ class InteractiveFunscriptTimeline:
             for p in points_to_copy:
                 fs_other.add_action_to_axis(axis_other, p['at'], p['pos'])
 
-        self.app.funscript_processor._finalize_action_and_update_ui(other_num, f"Copy from T{self.timeline_num}")
+        self.app.funscript_processor._post_mutation_refresh(other_num, f"Copy from T{self.timeline_num}")
+
+        other_actions_after = list(fs_other.get_axis_actions(axis_other) or [])
+        from application.classes.undo_manager import BulkReplaceCmd
+        self.app.undo_manager.push_done(BulkReplaceCmd(other_num, other_actions_before, other_actions_after, f"Copy from T{self.timeline_num} (T{other_num})"))
 
     # --- Selection Filters ---
     def _filter_selection(self, mode: str):
@@ -2038,14 +2046,18 @@ class InteractiveFunscriptTimeline:
             return
         simplified = self._recording_capture.stop_recording(self._recording_rdp_epsilon)
         if simplified:
-            self._record_timeline_action()
+            actions_before = list(self._get_actions() or [])
             actions = self._get_actions()
             merged = list(actions) + simplified
             merged.sort(key=lambda a: a['at'])
             fs, axis = self._get_target_funscript_details()
             if fs and axis:
                 fs.set_axis_actions(axis, merged)
-                self._finalize_action_and_update_ui()
+                self._post_mutation_refresh()
+
+                actions_after = list(self._get_actions() or [])
+                from application.classes.undo_manager import BulkReplaceCmd
+                self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Recording Inject (T{self.timeline_num})"))
 
     def _send_device_preview(self, primary: float, secondary: float):
         """Send position to device_manager for haptic feedback (optional)."""
@@ -2158,8 +2170,7 @@ class InteractiveFunscriptTimeline:
             if dt < 40:
                 return  # Segment too short
 
-            # Record undo
-            self._record_timeline_action()
+            actions_before = list(self._get_actions() or [])
 
             # Generate interpolated points
             num_injections = max(1, int(dt / 100)) - 1
@@ -2183,7 +2194,11 @@ class InteractiveFunscriptTimeline:
             fs, axis = self._get_target_funscript_details()
             if fs and axis:
                 fs.set_axis_actions(axis, new_actions)
-                self._finalize_action_and_update_ui()
+                self._post_mutation_refresh()
+
+                actions_after = list(self._get_actions() or [])
+                from application.classes.undo_manager import BulkReplaceCmd
+                self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Interpolate (T{self.timeline_num})"))
 
     def _draw_ui_overlays(self, dl, tf: TimelineTransformer):
         # 1. Playhead (Center) — line + inverted triangle at top
@@ -2796,14 +2811,18 @@ class InteractiveFunscriptTimeline:
                                     t, _ = getattr(self, 'new_point_candidate', (0, 0))
                                     new_actions = pattern_lib.apply_pattern(pattern, t)
                                     if new_actions:
-                                        self._record_timeline_action()
+                                        actions_before = list(self._get_actions() or [])
                                         actions = self._get_actions()
                                         merged = list(actions) + new_actions
                                         merged.sort(key=lambda a: a['at'])
                                         fs, axis = self._get_target_funscript_details()
                                         if fs and axis:
                                             fs.set_axis_actions(axis, merged)
-                                            self._finalize_action_and_update_ui()
+                                            self._post_mutation_refresh()
+
+                                            actions_after = list(self._get_actions() or [])
+                                            from application.classes.undo_manager import BulkReplaceCmd
+                                            self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Apply Pattern (T{self.timeline_num})"))
                                 imgui.close_current_popup()
                     else:
                         imgui.menu_item("(library not loaded)", enabled=False)
@@ -2894,13 +2913,9 @@ class InteractiveFunscriptTimeline:
     # DATA MODIFICATION HELPERS
     # ==================================================================================
 
-    def _record_timeline_action(self):
-        """Convenience wrapper for undo recording."""
-        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Edit")
-
-    def _finalize_action_and_update_ui(self):
+    def _post_mutation_refresh(self):
         """Convenience wrapper for undo finalization."""
-        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Edit")
+        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Edit")
         self.invalidate_cache()
 
     def _trigger_multi_axis_generation(self, target_axis: str):
@@ -2909,7 +2924,9 @@ class InteractiveFunscriptTimeline:
             fs, _ = self._get_target_funscript_details()
             if not fs:
                 return
-            self._record_timeline_action()
+
+            actions_before = list(self._get_actions() or [])
+
             fs.apply_plugin("Multi-Axis Generator", axis='primary',
                            target_axis=target_axis, generation_mode='heuristic')
 
@@ -2931,7 +2948,11 @@ class InteractiveFunscriptTimeline:
                     if pos_axis != target_axis:
                         fs.set_axis_actions(pos_axis, generated)
 
-            self._finalize_action_and_update_ui()
+            self._post_mutation_refresh()
+
+            actions_after = list(self._get_actions() or [])
+            from application.classes.undo_manager import BulkReplaceCmd
+            self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Multi-Axis Generation (T{self.timeline_num})"))
         except Exception as e:
             if self.logger:
                 self.logger.warning(f"Multi-axis generation failed: {e}")
@@ -2953,10 +2974,8 @@ class InteractiveFunscriptTimeline:
         snap_v = self.app.app_state_ui.snap_to_grid_pos
         v = int(round(v / snap_v) * snap_v) if snap_v > 0 else int(v)
 
-        # Legacy undo (keep until full migration)
-        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Add Point")
         fs.add_action(t, v if axis=='primary' else None, v if axis=='secondary' else None)
-        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Add Point")
+        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Add Point")
         self.invalidate_cache()
 
         # New unified undo
@@ -2979,12 +2998,10 @@ class InteractiveFunscriptTimeline:
             if idx < len(actions):
                 deleted_info.append({'index': idx, 'action': actions[idx]})
 
-        # Legacy undo
-        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Delete Points")
         fs.clear_points(axis=axis, selected_indices=list(self.multi_selected_action_indices))
         self.multi_selected_action_indices.clear()
         self.selected_action_idx = -1
-        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Delete Points")
+        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Delete Points")
         self.invalidate_cache()
 
         # New unified undo
@@ -3005,8 +3022,7 @@ class InteractiveFunscriptTimeline:
         if num_points == 0:
             return
 
-        # Record for undo
-        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Clear All Points")
+        actions_before = list(self._get_actions() or [])
 
         # Select all points then delete them
         all_indices = list(range(num_points))
@@ -3017,8 +3033,12 @@ class InteractiveFunscriptTimeline:
         self.selected_action_idx = -1
 
         # Finalize
-        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Clear All Points")
+        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Clear All Points")
         self.invalidate_cache()
+
+        actions_after = list(self._get_actions() or [])
+        from application.classes.undo_manager import BulkReplaceCmd
+        self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Clear All Points (T{self.timeline_num})"))
 
     def _set_axis_assignment(self, axis_name: str):
         """Assign a semantic axis name to this timeline."""
@@ -3146,12 +3166,6 @@ class InteractiveFunscriptTimeline:
             # Capture actions before plugin for unified undo
             actions_before = list(fs.get_axis_actions(axis) or [])
 
-            # Record legacy undo
-            self.app.funscript_processor._record_timeline_action(
-                self.timeline_num,
-                f"Apply {plugin_name}"
-            )
-
             # Apply the plugin transformation
             try:
                 result = plugin_instance.transform(fs, axis, **params)
@@ -3160,7 +3174,7 @@ class InteractiveFunscriptTimeline:
                 self.app.notify(f"Applied {plugin_name}", "success")
 
                 # Finalize and update UI
-                self.app.funscript_processor._finalize_action_and_update_ui(
+                self.app.funscript_processor._post_mutation_refresh(
                     self.timeline_num,
                     f"Apply {plugin_name}"
                 )
