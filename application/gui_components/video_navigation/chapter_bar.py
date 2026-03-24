@@ -897,7 +897,6 @@ class ChapterBarMixin:
                             imgui.close_current_popup()
                             return
 
-                        fs_proc._record_timeline_action(1, f"Prepare for Gap Track & Merge: {gap_fill_c1.unique_id[:4]}+{gap_fill_c2.unique_id[:4]}")
                         self.app.set_pending_action_after_tracking(
                             action_type='finalize_gap_merge_after_tracking',
                             chapter1_id=gap_fill_c1.unique_id,

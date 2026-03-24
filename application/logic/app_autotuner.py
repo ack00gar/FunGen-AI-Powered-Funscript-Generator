@@ -201,10 +201,7 @@ class AppAutotuner:
         # Capture before for unified undo
         actions_before = list(funscript_instance.get_axis_actions(axis_name) or [])
 
-        # 1. Record state for Undo
-        fs_proc._record_timeline_action(timeline_num, op_desc)
-
-        # 2. Apply Ultimate Autotune using the plugin system
+        # Apply Ultimate Autotune using the plugin system
         try:
             from funscript.plugins.base_plugin import plugin_registry
             # Import the plugin to ensure it's registered
@@ -215,7 +212,7 @@ class AppAutotuner:
                 result = ultimate_plugin.transform(funscript_instance, axis_name, **params)
 
                 if result:
-                    fs_proc._finalize_action_and_update_ui(timeline_num, op_desc)
+                    fs_proc._post_mutation_refresh(timeline_num, op_desc)
                     self.app.logger.info("Default Ultimate Autotune applied successfully.",
                                          extra={'status_message': True, 'duration': 5.0})
                     # Unified undo

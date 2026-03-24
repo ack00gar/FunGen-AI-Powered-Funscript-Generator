@@ -277,19 +277,23 @@ class MainMenu:
                     fs_proc = app.funscript_processor
                     op_desc = "Apply Timeline Offset (%dms)" % offset_ms
 
-                    fs_proc._record_timeline_action(target_num, op_desc)
                     funscript_obj, axis_name = fs_proc._get_target_funscript_object_and_axis(
                         target_num
                     )
 
                     if funscript_obj and axis_name:
+                        actions_before = list(funscript_obj.get_axis_actions(axis_name) or [])
                         # Negative => shift earlier to match reference
                         funscript_obj.shift_points_time(axis=axis_name, time_delta_ms=-offset_ms)
-                        fs_proc._finalize_action_and_update_ui(target_num, op_desc)
+                        fs_proc._post_mutation_refresh(target_num, op_desc)
                         app.logger.info(
                             "Applied %dms offset to Timeline %s." % (offset_ms, str(target_num)),
                             extra={"status_message": True},
                         )
+
+                        actions_after = list(funscript_obj.get_axis_actions(axis_name) or [])
+                        from application.classes.undo_manager import BulkReplaceCmd
+                        app.undo_manager.push_done(BulkReplaceCmd(target_num, actions_before, actions_after, "Apply Timeline Offset (T%s)" % str(target_num)))
 
                     app_state.show_timeline_comparison_results_popup = False
                     imgui.close_current_popup()

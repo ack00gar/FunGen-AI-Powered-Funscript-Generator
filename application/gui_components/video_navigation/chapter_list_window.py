@@ -248,7 +248,6 @@ class ChapterListWindow:
         gap_start = c1.end_frame_id + 1
         gap_end = c2.start_frame_id - 1
 
-        fs_proc._record_timeline_action(1, f"Prepare for Gap Track & Merge: {c1.unique_id[:4]}+{c2.unique_id[:4]}")
         self.app.set_pending_action_after_tracking(
             action_type='finalize_gap_merge_after_tracking',
             chapter1_id=c1.unique_id,
