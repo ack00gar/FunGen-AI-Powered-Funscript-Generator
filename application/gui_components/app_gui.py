@@ -367,6 +367,11 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             self.app.logger.error("Could not create GLFW window")
             return False
 
+        # Reinitialize keyboard layout map now that GLFW is ready
+        # (ShortcutManager was created before glfw.init, so layout detection was wrong)
+        if self.app.shortcut_manager:
+            self.app.shortcut_manager.reinitialize_key_map()
+
         # Set window icon (macOS doesn't support window icons in GLFW, skip on macOS)
         try:
             import platform
