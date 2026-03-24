@@ -1521,7 +1521,7 @@ class StandaloneSplashWindow:
             import random
             pool = list(self._BOOT_LOG_POOL)
             random.shuffle(pool)
-            self._boot_lines = pool[:2]
+            self._boot_lines = pool[:1]
 
         chars_per_sec = 30
         scale = 1.3
