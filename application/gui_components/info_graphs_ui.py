@@ -196,7 +196,8 @@ class InfoGraphsUI(InfoGraphsMixin):
                 video_type = processor.determined_video_type or "2D"
                 imgui.text_colored(f"{video_type} Video", 0.4, 0.8, 1.0, 1.0)
                 if video_type == "VR":
-                    imgui.text_wrapped("Recommended unwarp: CPU (v360). Recommended pitch: -21 for typical POV.")
+                    imgui.text_wrapped("Recommended unwarp: CPU (v360)")
+                    imgui.text_wrapped("Recommended pitch: -21 for typical POV")
                 imgui.spacing()
             else:
                 imgui.text_disabled("No video loaded.")
