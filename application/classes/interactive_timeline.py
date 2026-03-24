@@ -712,6 +712,10 @@ class InteractiveFunscriptTimeline:
         if nudge_t != 0 and self.multi_selected_action_indices:
             self._nudge_selection_time(nudge_t)
 
+        # 6b. Snap nearest point to playhead (M = magnet)
+        if check_shortcut("snap_nearest_to_playhead", "M"):
+            self._snap_nearest_to_playhead()
+
         # 7. Bookmark at playhead (B key)
         if check_shortcut("add_bookmark", "B"):
             center_x = (app_state.window_width or 800) / 2
@@ -919,6 +923,61 @@ class InteractiveFunscriptTimeline:
             fs._invalidate_cache(axis or 'both')
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Time")
         self.invalidate_cache()
+
+    def _snap_nearest_to_playhead(self):
+        """Snap the nearest action point to the current playhead (video) position."""
+        from bisect import bisect_left
+
+        actions = self._get_actions()
+        if not actions:
+            return
+
+        # Get playhead time from video position
+        processor = self.app.processor
+        if not processor or processor.fps <= 0:
+            return
+        playhead_ms = (processor.current_frame_index / processor.fps) * 1000.0
+
+        # Find nearest point using binary search
+        timestamps = [a['at'] for a in actions]
+        idx = bisect_left(timestamps, playhead_ms)
+
+        # Check idx-1 and idx to find actual nearest
+        best_idx = None
+        best_dist = float('inf')
+        for candidate in (idx - 1, idx):
+            if 0 <= candidate < len(actions):
+                dist = abs(actions[candidate]['at'] - playhead_ms)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = candidate
+
+        if best_idx is None:
+            return
+
+        # Already at playhead? Nothing to do.
+        new_at = int(round(playhead_ms))
+        if actions[best_idx]['at'] == new_at:
+            return
+
+        # Enforce neighbor constraints (cannot cross adjacent points)
+        prev_limit = actions[best_idx - 1]['at'] + 1 if best_idx > 0 else 0
+        next_limit = actions[best_idx + 1]['at'] - 1 if best_idx < len(actions) - 1 else float('inf')
+        new_at = int(max(prev_limit, min(next_limit, new_at)))
+
+        # Record undo, apply, finalize
+        self.app.funscript_processor._record_timeline_action(
+            self.timeline_num, "Snap to Playhead")
+
+        actions[best_idx]['at'] = new_at
+
+        fs, axis = self._get_target_funscript_details()
+        if fs:
+            fs._invalidate_cache(axis or 'both')
+        self.app.funscript_processor._finalize_action_and_update_ui(
+            self.timeline_num, "Snap to Playhead")
+        self.invalidate_cache()
+        self.app.project_manager.project_dirty = True
 
     def _nudge_all_time(self, frames: int):
         """Nudge ALL points by a number of frames (not just selection)"""
