@@ -712,6 +712,7 @@ class AppFunscriptProcessor:
             self._finalize_action_and_update_ui(timeline_num, f"{operation.capitalize()}: {action_description}")
             self.logger.info(f"Performed {operation.capitalize()} on Timeline {timeline_num}: {action_description}",
                              extra={'status_message': True})
+            self.app.notify(f"{operation.capitalize()}: {action_description}", "info", 1.5)
             self.app.energy_saver.reset_activity_timer()
         else:
             self.logger.info(

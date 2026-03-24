@@ -96,19 +96,22 @@ class AppEventHandlers:
         stage_processor = self.app.stage_processor
         if stage_processor.full_analysis_active:
             stage_processor.abort_stage_processing()
-            self.app.on_processing_stopped() # If aborting stage proc should also check pending app logic actions
+            self.app.on_processing_stopped()
+            self.app.notify("Analysis aborted", "warning", 3.0)
 
         elif self.app.processor and self.app.processor.is_processing:
             self.app.processor.stop_processing()
+            self.app.notify("Processing stopped", "info", 2.0)
         elif self.app.tracker and self.app.tracker.tracking_active:
-            # Handle case where tracker is active but processor is not (edge case/stuck state)
             self.logger.info("Stopping active tracker...")
             self.app.tracker.stop_tracking()
             if self.app.processor:
                 self.app.processor.enable_tracker_processing = False
-        elif self.app.is_setting_user_roi_mode:  # Abort ROI selection
+            self.app.notify("Tracking stopped", "info", 2.0)
+        elif self.app.is_setting_user_roi_mode:
             self.app.exit_set_user_roi_mode()
             self.logger.info("User ROI selection aborted.", extra={'status_message': True})
+            self.app.notify("ROI selection aborted", "info", 2.0)
         else:
             self.logger.info("No process running to abort.", extra={'status_message': False})
         self.app.energy_saver.reset_activity_timer()
@@ -120,6 +123,7 @@ class AppEventHandlers:
         
         self.app.tracker.set_tracking_mode(self.app.app_state_ui.selected_tracker_name)
         self.app.stage_processor.start_full_analysis(processing_mode=self.app.app_state_ui.selected_tracker_name)
+        self.app.notify("Analysis started", "info", 2.0)
         self.app.energy_saver.reset_activity_timer()
 
     def handle_start_live_tracker_click(self):
@@ -232,6 +236,7 @@ class AppEventHandlers:
         # Explicitly start the tracker before starting video processing
         self.app.tracker.start_tracking()
         self.app.processor.set_tracker_processing_enabled(True)
+        self.app.notify(f"Tracking started: {display_name}", "success", 2.0)
 
         # Auto-skip "Not Relevant" category chapters when starting tracking
         if self.app.processor and self.app.funscript_processor:

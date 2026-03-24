@@ -772,6 +772,7 @@ class AppFileManager:
             self.logger.info(
                 f"Unified funscript saved ({axis_count} axes) to {os.path.basename(filepath)}",
                 extra={'status_message': True})
+            self.app.notify(f"Exported {os.path.basename(filepath)} ({axis_count} axes)", "success")
         except Exception as e:
             self.logger.error(f"Error saving unified funscript to '{filepath}': {e}",
                               extra={'status_message': True})
@@ -791,6 +792,7 @@ class AppFileManager:
 
         # Call the centralized saving method
         self._save_funscript_file(filepath, actions, chapters)
+        self.app.notify(f"Exported {os.path.basename(filepath)}", "success")
 
         if timeline_num == 1:
             self.funscript_path = filepath
@@ -894,6 +896,7 @@ class AppFileManager:
                 exporter.export_png(filepath, actions, duration_ms)
                 self.logger.info(f"Heatmap exported to {os.path.basename(filepath)}",
                                  extra={"status_message": True})
+                self.app.notify(f"Heatmap saved: {os.path.basename(filepath)}", "success")
             except Exception as e:
                 self.logger.error(f"Heatmap export failed: {e}", extra={"status_message": True})
 

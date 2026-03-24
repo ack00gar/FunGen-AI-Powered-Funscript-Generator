@@ -15,44 +15,14 @@ from funscript.axis_registry import FunscriptAxis, file_suffix_for_axis, tcode_f
 
 _logger = logging.getLogger(__name__)
 
-# ------------------------------------------------------------------ #
-#  Layout helpers — consistent row presentation                       #
-# ------------------------------------------------------------------ #
-
-_LABEL_MIN_WIDTH = 160  # minimum label column px (before font scaling)
-
-
-def _begin_settings_columns(col_id="settings_cols"):
-    """Start a two-column layout for label : widget rows."""
-    imgui.columns(2, col_id, border=False)
-    scale = imgui.get_io().font_global_scale
-    lw = max(_LABEL_MIN_WIDTH * scale, imgui.get_content_region_available_width() * 0.45)
-    imgui.set_column_width(0, lw)
-
-
-def _end_settings_columns():
-    imgui.columns(1)
-
-
-def _row_label(text, tooltip=None):
-    """Render a left-column label, advance to widget column."""
-    imgui.text(text)
-    if tooltip and imgui.is_item_hovered():
-        imgui.set_tooltip(tooltip)
-    imgui.next_column()
-
-
-def _row_end():
-    """Advance back to label column after widget."""
-    imgui.next_column()
-
-
-def _row_separator():
-    """Visual break between groups within a section."""
-    _end_settings_columns()
-    imgui.spacing()
-    imgui.separator()
-    imgui.spacing()
+# Layout helpers — imported from shared module
+from application.utils.imgui_layout_helpers import (
+    begin_settings_columns as _begin_settings_columns,
+    end_settings_columns as _end_settings_columns,
+    row_label as _row_label,
+    row_end as _row_end,
+    row_separator as _row_separator,
+)
 
 
 # ------------------------------------------------------------------ #
@@ -293,6 +263,7 @@ class SettingsRenderer:
                 if imgui.button("Load##LP"):
                     if sel_name and settings.load_profile(sel_name):
                         app.logger.info("Profile loaded: %s" % sel_name, extra={"status_message": True})
+                        app.notify("Profile loaded: %s" % sel_name, "success", 2.0)
                         self._profile_list_cache = None
                 imgui.same_line()
                 with destructive_button_style():
@@ -310,6 +281,7 @@ class SettingsRenderer:
                             if settings.delete_profile(sel_name):
                                 app.logger.info("Profile deleted: %s" % sel_name,
                                                 extra={"status_message": True})
+                                app.notify("Profile deleted: %s" % sel_name, "info", 2.0)
                                 self._profile_list_cache = None
                                 self._selected_profile_idx = 0
                             imgui.close_current_popup()
@@ -338,6 +310,7 @@ class SettingsRenderer:
                     if settings.save_profile(self._profile_name_input):
                         app.logger.info("Profile saved: %s" % self._profile_name_input.strip(),
                                         extra={"status_message": True})
+                        app.notify("Profile saved: %s" % self._profile_name_input.strip(), "success", 2.0)
                         self._profile_name_input = ""
                         self._profile_list_cache = None
             _tooltip_if_hovered("Saves current processing settings as a reusable preset\n"

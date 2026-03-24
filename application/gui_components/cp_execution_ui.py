@@ -228,6 +228,7 @@ class ExecutionMixin:
                             tr.stop_tracking()
                             tr.clear_user_defined_roi_and_point()
                         app.logger.info("User ROI cleared.", extra={"status_message": True})
+                        app.notify("User ROI cleared", "info", 2.0)
                 _tooltip_if_hovered("Remove the current ROI and tracking point.")
 
         if app.is_setting_user_roi_mode:
