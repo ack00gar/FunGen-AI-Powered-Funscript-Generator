@@ -158,6 +158,10 @@ class ShortcutHandlerMixin:
         elif check_and_run_shortcut("set_user_roi", self._handle_toggle_user_roi_mode):
             pass
 
+        # Snap nearest point to playhead
+        elif video_loaded and check_and_run_shortcut("snap_nearest_to_playhead", self._handle_snap_nearest_to_playhead):
+            pass
+
         # Chapters
         elif check_and_run_shortcut("set_chapter_start", self._handle_set_chapter_start_shortcut):
             pass
@@ -432,6 +436,19 @@ class ShortcutHandlerMixin:
 
     # Removed complex predictive caching - it was blocking the UI
     # Keep navigation simple: cache check first, then single frame fetch if needed
+
+    def _handle_snap_nearest_to_playhead(self):
+        """Handle snap nearest point to playhead shortcut (delegates to active timeline)."""
+        active_tl_num = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
+        tl = None
+        if active_tl_num == 1:
+            tl = self.timeline_editor1
+        elif active_tl_num == 2:
+            tl = getattr(self, 'timeline_editor2', None)
+        else:
+            tl = self._extra_timeline_editors.get(active_tl_num)
+        if tl and hasattr(tl, '_snap_nearest_to_playhead'):
+            tl._snap_nearest_to_playhead()
 
     def _handle_set_chapter_start_shortcut(self):
         """Handle keyboard shortcut for setting chapter start (I key)"""
