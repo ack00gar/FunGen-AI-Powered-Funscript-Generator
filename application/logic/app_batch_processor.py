@@ -2,6 +2,7 @@
 import os
 import time
 import threading
+from datetime import datetime
 from typing import Optional, Dict, Tuple, List, Any
 
 from config.constants import FUNSCRIPT_METADATA_VERSION
@@ -244,6 +245,8 @@ class AppBatchProcessor:
         if self.app.batch_adaptive_tuning_enabled:
             self.app.adaptive_tuning_state = self._init_adaptive_tuning()
 
+        batch_failures = []  # (video_path, reason, timestamp)
+
         try:
             for i, video_data in enumerate(self.app.batch_video_paths):
                 if self.app.stop_batch_event.is_set():
@@ -315,6 +318,7 @@ class AppBatchProcessor:
                 open_success = self.app.file_manager.open_video_from_path(video_path)
                 if not open_success:
                     self.app.logger.error(f"Failed to open video, skipping: {video_path}")
+                    batch_failures.append((video_path, "Failed to open video", datetime.now().isoformat()))
                     continue
 
                 time.sleep(1.0)
@@ -328,10 +332,12 @@ class AppBatchProcessor:
                     selected_tracker = discovery.get_tracker_info(self.app.batch_tracker_name)
                     if not selected_tracker:
                         self.app.logger.error(f"Invalid tracker name: {self.app.batch_tracker_name}. Skipping video.")
+                        batch_failures.append((video_path, f"Invalid tracker: {self.app.batch_tracker_name}", datetime.now().isoformat()))
                         continue
                     selected_mode = selected_tracker.internal_name
                 else:
                     self.app.logger.error("No tracker selected for batch processing. Skipping video.")
+                    batch_failures.append((video_path, "No tracker selected", datetime.now().isoformat()))
                     continue
 
                 # Check tracker category to determine processing mode
@@ -468,7 +474,12 @@ class AppBatchProcessor:
 
         except Exception as e:
             self.app.logger.error(f"An error occurred during the batch process: {e}", exc_info=True)
+            batch_failures.append(("(batch process)", str(e), datetime.now().isoformat()))
         finally:
+            # Write batch error report if any failures occurred
+            if batch_failures:
+                self._write_batch_error_report(batch_failures)
+
             # Persist best adaptive tuning settings
             if self.app.adaptive_tuning_state:
                 self._adaptive_tuning_apply_best(self.app.adaptive_tuning_state)
@@ -479,3 +490,28 @@ class AppBatchProcessor:
             self.app.stop_batch_event.clear()
             self.app.pause_batch_event.clear()
             self.app.logger.info("Batch processing finished.", extra={'status_message': True})
+
+    def _write_batch_error_report(self, failures):
+        """Write a batch error report file listing all failed videos."""
+        try:
+            output_dir = self.app.app_settings.get("output_folder_path", "output")
+            os.makedirs(output_dir, exist_ok=True)
+            date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{date_str}_FunGen_batch_errors.txt"
+            filepath = os.path.join(output_dir, filename)
+
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(f"FunGen Batch Error Report\n")
+                f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Total failures: {len(failures)}\n")
+                f.write("=" * 60 + "\n\n")
+                for video_path, reason, ts in failures:
+                    f.write(f"[{ts}] {os.path.basename(video_path)}\n")
+                    f.write(f"  Path:   {video_path}\n")
+                    f.write(f"  Reason: {reason}\n\n")
+
+            self.app.logger.warning(
+                f"Batch errors ({len(failures)} failures) saved to: {filepath}",
+                extra={"status_message": True})
+        except Exception as e:
+            self.app.logger.error(f"Failed to write batch error report: {e}")
