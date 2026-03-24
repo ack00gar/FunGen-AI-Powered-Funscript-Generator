@@ -301,53 +301,6 @@ class AppFunscriptProcessor:
                 return funscript_obj, axis_name
         return None, None
 
-    def _ensure_undo_managers_linked(self):
-        """Ensures undo managers are created and linked if they weren't at init."""
-        if not (self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript):
-            return
-
-        funscript_obj = self.app.processor.tracker.funscript
-        if self.app.undo_manager_t1 is None:
-            from application.classes import UndoRedoManager
-            self.app.undo_manager_t1 = UndoRedoManager(max_history=50)
-            self.logger.debug("UndoManager T1 created dynamically.")
-        if self.app.undo_manager_t1._actions_list_reference is not funscript_obj.primary_actions:
-            self.app.undo_manager_t1.set_actions_reference(funscript_obj.primary_actions)
-
-        if self.app.undo_manager_t2 is None:
-            from application.classes import UndoRedoManager
-            self.app.undo_manager_t2 = UndoRedoManager(max_history=50)
-            self.logger.debug("UndoManager T2 created dynamically.")
-        if self.app.undo_manager_t2._actions_list_reference is not funscript_obj.secondary_actions:
-            self.app.undo_manager_t2.set_actions_reference(funscript_obj.secondary_actions)
-
-        # Link additional axis undo managers (timeline 3+)
-        for axis_name in funscript_obj.additional_axes:
-            # Extract timeline number from axis name (e.g. "axis_3" -> 3)
-            try:
-                t_num = int(axis_name.split('_')[1])
-            except (IndexError, ValueError):
-                continue
-            manager_attr = f'undo_manager_t{t_num}'
-            if not hasattr(self.app, manager_attr) or getattr(self.app, manager_attr) is None:
-                from application.classes import UndoRedoManager
-                setattr(self.app, manager_attr, UndoRedoManager(max_history=50))
-                self.logger.debug(f"UndoManager T{t_num} created dynamically.")
-            manager = getattr(self.app, manager_attr)
-            actions_list = funscript_obj.additional_axes[axis_name]
-            if manager._actions_list_reference is not actions_list:
-                manager.set_actions_reference(actions_list)
-
-    def _get_undo_manager(self, timeline_num: int) -> Optional[object]:  # Actually UndoRedoManager
-        self._ensure_undo_managers_linked()
-        if timeline_num == 1: return self.app.undo_manager_t1
-        if timeline_num == 2: return self.app.undo_manager_t2
-        if timeline_num >= 3:
-            manager_attr = f'undo_manager_t{timeline_num}'
-            return getattr(self.app, manager_attr, None)
-        self.logger.warning(f"Requested undo manager for invalid timeline_num: {timeline_num}")
-        return None
-
     def _get_current_fps(self) -> float:  # Duplicated for internal use, could centralize in app_logic
         fps = 30.0
         if self.app.processor and hasattr(self.app.processor, 'video_info') and \
@@ -698,63 +651,9 @@ class AppFunscriptProcessor:
             self.app.set_status_message("Error updating chapter.", level=logging.ERROR)
 
     def _record_timeline_action(self, timeline_num: int, action_description: str):
-        self._last_edited_timeline = timeline_num
-        undo_manager = self._get_undo_manager(timeline_num)
-        if undo_manager:
-            try:
-                # Ensure reference is current (already handled by _ensure_undo_managers_linked)
-                undo_manager.record_state_before_action(action_description)
-                self._last_point_edit_time = time.monotonic()
-                self.logger.debug(f"UndoRec: T{timeline_num} - '{action_description}'")
-            except Exception as e:
-                self.logger.error(f"Error recording undo for T{timeline_num} ('{action_description}'): {e}", exc_info=True)
-        else:
-            self.logger.warning(f"Could not record undo for T{timeline_num}: Undo manager not found.")
-
-    def perform_undo_redo_focused(self, direction: str):
-        """Undo/redo on the last-edited timeline. Also handles chapter deletion undo."""
-        # Chapter undo only if it was the most recent action
-        if direction == 'undo' and getattr(self, '_last_deleted_chapters', None):
-            chapter_del_time = getattr(self, '_last_deleted_chapters_time', 0)
-            point_edit_time = getattr(self, '_last_point_edit_time', 0)
-            if chapter_del_time > point_edit_time:
-                self.undo_delete_chapters()
-                return
-        self.perform_undo_redo(self._last_edited_timeline, direction)
-
-    def perform_undo_redo(self, timeline_num: int, operation: str):  # operation is 'undo' or 'redo'
-        undo_manager = self._get_undo_manager(timeline_num)
-        if not undo_manager:
-            self.logger.info(f"Cannot {operation} on Timeline {timeline_num}: Manager missing.", extra={'status_message': False})
-            return
-
-        action_description = None
-        success = False
-        if operation == 'undo' and undo_manager.can_undo():
-            action_description = undo_manager.undo()
-            success = action_description is not None
-        elif operation == 'redo' and undo_manager.can_redo():
-            action_description = undo_manager.redo()
-            success = action_description is not None
-
-        if success:
-            target_funscript, axis_name = self._get_target_funscript_object_and_axis(timeline_num)
-            if target_funscript and axis_name:  # Update funscript object's internal state like last_timestamp
-                actions_list = target_funscript.get_axis_actions(axis_name)
-                self._update_last_timestamp(target_funscript, axis_name, actions_list)
-                # Undo/redo replaces the actions list contents via clear()+extend(),
-                # so the timestamp cache is now stale and must be rebuilt.
-                target_funscript._invalidate_cache(axis_name)
-
-            self._finalize_action_and_update_ui(timeline_num, f"{operation.capitalize()}: {action_description}")
-            self.logger.info(f"Performed {operation.capitalize()} on Timeline {timeline_num}: {action_description}",
-                             extra={'status_message': True})
-            self.app.notify(f"{operation.capitalize()}: {action_description}", "info", 1.5)
-            self.app.energy_saver.reset_activity_timer()
-        else:
-            self.logger.info(
-                f"Cannot {operation} on Timeline {timeline_num}: No actions in history or operation failed.",
-                extra={'status_message': False})
+        """Legacy no-op. Kept for call-site compatibility during migration.
+        Undo recording is now handled by command objects via app.undo_manager."""
+        pass
 
     def _finalize_action_and_update_ui(self, timeline_num: int, change_description: str):
         self._revision += 1
@@ -811,15 +710,11 @@ class AppFunscriptProcessor:
         self._update_last_timestamp(target_funscript, axis_name, live_actions_list)
         target_funscript._invalidate_cache(axis_name)
 
-        # Undo manager's redo stack is auto-cleared by record_state_before_action.
-        # For major events, explicitly clear full history.
+        # For major events, clear unified undo history
         if any(kw in loaded_from_description for kw in
                ["New Project", "Project Loaded", "Video Closed", "Stage 1 Pending", "Stage 2"]):
-            undo_manager = self._get_undo_manager(timeline_num)
-            if undo_manager:
-                undo_manager.clear_history()
-                # After clearing, the state recorded by _record_timeline_action IS the new baseline's undo.
-                self.logger.debug(f"Undo history cleared for T{timeline_num} due to: {loaded_from_description}")
+            self.app.undo_manager.clear()
+            self.logger.debug(f"Undo history cleared due to: {loaded_from_description}")
 
         self._finalize_action_and_update_ui(timeline_num, loaded_from_description)
         self.app.energy_saver.reset_activity_timer()
@@ -1282,9 +1177,6 @@ class AppFunscriptProcessor:
         deleted_count = initial_count - len(self.video_chapters)
 
         if deleted_count > 0:
-            # Legacy single-level undo (kept until full migration)
-            self._last_deleted_chapters = deleted_chapters
-            self._last_deleted_chapters_time = time.monotonic()
             self.logger.info(f"Deleted {deleted_count} chapter(s): {chapter_ids}")
 
             # Sync chapters to funscript object
@@ -1306,24 +1198,6 @@ class AppFunscriptProcessor:
         else:
             self.logger.info(f"No chapters found matching IDs for deletion: {chapter_ids}")
             self.app.set_status_message("No matching chapters found to delete.")
-
-    def undo_delete_chapters(self) -> bool:
-        """Restore the last deleted chapter(s). Returns True if restored."""
-        chapters = getattr(self, '_last_deleted_chapters', None)
-        if not chapters:
-            return False
-        for ch in chapters:
-            self.video_chapters.append(ch)
-        self.video_chapters.sort(key=lambda c: c.start_frame_id)
-        self._sync_chapters_to_funscript()
-        self.app.project_manager.project_dirty = True
-        self.app.app_state_ui.heatmap_dirty = True
-        self.app.app_state_ui.funscript_preview_dirty = True
-        count = len(chapters)
-        self._last_deleted_chapters = None
-        self.logger.info(f"Restored {count} deleted chapter(s)")
-        self.app.notify(f"Restored {count} chapter(s)", "success", 2.0)
-        return True
 
     def clear_script_points_in_selected_chapters(self, selected_chapters: List[VideoSegment]):
         if not selected_chapters:
