@@ -234,10 +234,14 @@ class FFmpegEncoder:
             for line in iter(self.encoder_process.stderr.readline, b""):
                 decoded = line.decode("utf-8", errors="replace").strip()
                 if decoded:
-                    if 'WARNING' in decoded or 'GLib' in decoded:
-                        log_vid.debug(f"FFmpeg: {decoded}")
-                    else:
+                    # FFmpeg writes info/stats to stderr; only real errors should be ERROR level
+                    low = decoded.lower()
+                    if any(kw in low for kw in ('error', 'fatal', 'failed', 'invalid', 'no such')):
                         log_vid.error(f"FFmpeg: {decoded}")
+                    elif any(kw in low for kw in ('warning', 'deprecated')):
+                        log_vid.warning(f"FFmpeg: {decoded}")
+                    else:
+                        log_vid.debug(f"FFmpeg: {decoded}")
 
     def encode_frame(self, frame_bytes):
         if self.encoder_process and self.encoder_process.stdin:
