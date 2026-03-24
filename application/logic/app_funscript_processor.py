@@ -570,7 +570,10 @@ class AppFunscriptProcessor:
             self.logger.info(
                 f"Successfully created new chapter: {new_chapter.unique_id} ({new_chapter.position_short_name}) with color {new_chapter.color}")
             self.app.set_status_message(f"Chapter '{new_chapter.position_short_name}' created.")
-            # TODO: Add undo action
+
+            # Unified undo
+            from application.classes.undo_manager import CreateChapterCmd
+            self.app.undo_manager.push_done(CreateChapterCmd(new_chapter.unique_id, data))
         except ValueError:
             self.logger.error("Invalid frame number format for new chapter.")
             self.app.set_status_message("Error: Frame numbers must be integers.", level=logging.ERROR)
@@ -591,6 +594,18 @@ class AppFunscriptProcessor:
 
         try:
             from application.utils.video_segment import VideoSegment
+
+            # Capture old fields for unified undo
+            _old_fields = {
+                'start_frame_id': chapter_to_update.start_frame_id,
+                'end_frame_id': chapter_to_update.end_frame_id,
+                'position_short_name': chapter_to_update.position_short_name,
+                'position_long_name': chapter_to_update.position_long_name,
+                'class_name': chapter_to_update.class_name,
+                'segment_type': chapter_to_update.segment_type,
+                'source': chapter_to_update.source,
+                'color': chapter_to_update.color,
+            }
 
             # Use flexible parser to support both frame numbers and timecodes
             fps = self.video_fps if hasattr(self, 'video_fps') and self.video_fps else 30.0
@@ -661,7 +676,20 @@ class AppFunscriptProcessor:
             self.app.app_state_ui.funscript_preview_dirty = True
             self.logger.info(f"Successfully updated chapter: {chapter_id}")
             self.app.set_status_message(f"Chapter '{chapter_to_update.position_short_name}' updated.")
-            # TODO: Add undo action using original_data_for_undo
+
+            # Unified undo
+            _new_fields = {
+                'start_frame_id': chapter_to_update.start_frame_id,
+                'end_frame_id': chapter_to_update.end_frame_id,
+                'position_short_name': chapter_to_update.position_short_name,
+                'position_long_name': chapter_to_update.position_long_name,
+                'class_name': chapter_to_update.class_name,
+                'segment_type': chapter_to_update.segment_type,
+                'source': chapter_to_update.source,
+                'color': chapter_to_update.color,
+            }
+            from application.classes.undo_manager import UpdateChapterCmd
+            self.app.undo_manager.push_done(UpdateChapterCmd(chapter_id, _old_fields, _new_fields))
         except ValueError:
             self.logger.error("Invalid frame number format for chapter update.")
             self.app.set_status_message("Error: Frame numbers must be integers.", level=logging.ERROR)
@@ -1242,7 +1270,7 @@ class AppFunscriptProcessor:
         self.app.set_status_message(
             f"Edit Chapter {chapter_to_edit.position_short_name}: Not fully implemented (needs UI dialog).")
 
-    def delete_video_chapters_by_ids(self, chapter_ids: List[str]):
+    def delete_video_chapters_by_ids(self, chapter_ids: List[str], _skip_undo_record: bool = False):
         if not chapter_ids:
             self.logger.info("No chapter IDs provided for deletion.")
             return
@@ -1254,7 +1282,7 @@ class AppFunscriptProcessor:
         deleted_count = initial_count - len(self.video_chapters)
 
         if deleted_count > 0:
-            # Store for undo (single-level, overwritten on next delete)
+            # Legacy single-level undo (kept until full migration)
             self._last_deleted_chapters = deleted_chapters
             self._last_deleted_chapters_time = time.monotonic()
             self.logger.info(f"Deleted {deleted_count} chapter(s): {chapter_ids}")
@@ -1270,6 +1298,11 @@ class AppFunscriptProcessor:
 
             self.app.set_status_message(f"Deleted {deleted_count} chapter(s).")
             self.app.notify(f"Deleted {deleted_count} chapter(s) (Ctrl+Z to restore)", "info", 3.0)
+
+            # Unified undo
+            if not _skip_undo_record and deleted_chapters:
+                from application.classes.undo_manager import DeleteChaptersCmd
+                self.app.undo_manager.push_done(DeleteChaptersCmd(deleted_chapters))
         else:
             self.logger.info(f"No chapters found matching IDs for deletion: {chapter_ids}")
             self.app.set_status_message("No matching chapters found to delete.")
