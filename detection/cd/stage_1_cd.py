@@ -277,10 +277,11 @@ class FFmpegEncoder:
         
         # Define encoder types to test
         encoder_configs = [
+            ("hevc_videotoolbox", "VideoToolbox (Apple)"),
             ("hevc_nvenc", "NVENC (NVIDIA)"),
             ("hevc_amf", "AMF (AMD)"),
             ("hevc_qsv", "QSV (Intel)"),
-            ("hevc_vaapi", "VAAPI (Linux)")
+            ("hevc_vaapi", "VAAPI (Linux)"),
         ]
         
         all_devices = []
@@ -322,10 +323,8 @@ class FFmpegEncoder:
 
         self._detect_encoding_devices()
 
-        if self.hwaccel_method == "none":
-            log_vid.info("Using software libx265 encoder (CPU-only mode).")
-            return ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p"]
-
+        # Note: hwaccel_method controls DECODING, not encoding.
+        # Always try hardware encoding regardless of decode setting.
         try:
             output = subprocess.check_output([self.ffmpeg_path, "-hide_banner", "-encoders"], text=True)
         except Exception as e:
