@@ -978,6 +978,7 @@ class InteractiveFunscriptTimeline:
             self.timeline_num, "Snap to Playhead")
         self.invalidate_cache()
         self.app.project_manager.project_dirty = True
+        self.app.notify("Point snapped to playhead", "info", 1.5)
 
     def _nudge_all_time(self, frames: int):
         """Nudge ALL points by a number of frames (not just selection)"""

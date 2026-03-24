@@ -172,6 +172,7 @@ class ProjectManager:
                 self.app.logger.info(f"State restored from autosave: {os.path.basename(filepath)}", extra={'status_message': True})
             else:
                 self.app.logger.info(f"Project '{os.path.basename(filepath)}' loaded.", extra={'status_message': True})
+                self.app.notify(f"Project loaded: {os.path.basename(filepath)}", "success")
 
         except Exception as e:
             self.app.logger.error(f"Error loading project '{os.path.basename(filepath)}': {e}", exc_info=True, extra={'status_message': True})
@@ -226,6 +227,7 @@ class ProjectManager:
             self.app.app_settings.set("last_opened_project_path", os.path.abspath(filepath))
 
             self.app.logger.info(f"Project saved to '{os.path.basename(filepath)}'.", extra={'status_message': True})
+            self.app.notify(f"Project saved", "success", 2.0)
             self.app.energy_saver.reset_activity_timer()
         except Exception as e:
             self.app.logger.error(f"Error saving project to '{filepath}': {e}", exc_info=True, extra={'status_message': True})

@@ -954,27 +954,35 @@ class ControlPanelUI(
                         tr = app.tracker
                         if tr:
                             tr.set_tracking_mode(new_mode)
+                        # Toast notification for tracker switch
+                        display = self._get_tracker_display_name(new_mode) if self.tracker_ui else new_mode
+                        app.notify(f"Switched to {display}", "success")
 
-                # Tracker version
+                # Tracker info line: version + description
+                tracker_info = self.tracker_ui.discovery.get_tracker_info(app_state.selected_tracker_name) if self.tracker_ui else None
                 tracker_version = self._get_tracker_property(app_state.selected_tracker_name, "version", None)
-                if not tracker_version:
-                    info = self.tracker_ui.discovery.get_tracker_info(app_state.selected_tracker_name) if self.tracker_ui else None
-                    if info:
-                        tracker_version = info.version
+                if not tracker_version and tracker_info:
+                    tracker_version = tracker_info.version
+
+                info_parts = []
                 if tracker_version:
+                    info_parts.append(f"v{tracker_version}")
+                if tracker_info and tracker_info.description:
+                    info_parts.append(tracker_info.description)
+                if info_parts:
                     imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.6, 1.0)
-                    imgui.text(f"v{tracker_version}")
+                    imgui.text_wrapped(" - ".join(info_parts))
                     imgui.pop_style_color()
 
-                # Axis mode combo
+                # Axis mode
                 imgui.spacing()
                 imgui.separator()
-                imgui.text("Tracking Axes:")
+                imgui.spacing()
+                imgui.text("Tracking Axes")
                 self._render_tracking_axes_mode(stage_proc)
 
-                proc = app.processor
-                video_loaded = proc and proc.is_video_open()
-                processing_active = stage_proc.full_analysis_active
+                # Execution progress
+                imgui.spacing()
                 self._render_execution_progress_display()
 
         mode = app_state.selected_tracker_name
