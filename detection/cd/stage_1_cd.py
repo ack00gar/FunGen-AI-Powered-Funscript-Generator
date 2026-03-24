@@ -653,6 +653,19 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
 
             except Empty:
                 continue
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    consumer_logger.critical(
+                        f"[S1 Consumer-{consumer_idx}] GPU out of memory. "
+                        "Reduce consumer count in Settings > Processing. Stopping.")
+                    stop_event_local.set()
+                    break
+                consecutive_errors += 1
+                consumer_logger.error(f"[S1 Consumer-{consumer_idx}] Error processing frame ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}", exc_info=True)
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    consumer_logger.critical(f"[S1 Consumer-{consumer_idx}] {MAX_CONSECUTIVE_ERRORS} consecutive errors, stopping pipeline.")
+                    stop_event_local.set()
+                    break
             except Exception as e:
                 consecutive_errors += 1
                 consumer_logger.error(f"[S1 Consumer-{consumer_idx}] Error processing frame ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}", exc_info=True)
