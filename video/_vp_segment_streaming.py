@@ -121,6 +121,9 @@ class SegmentStreamingMixin:
 
         frames_yielded = 0
         segment_ffmpeg_process = self.ffmpeg_process
+        FRAME_READ_TIMEOUT = 10.0  # Kill and restart FFmpeg if a single frame takes >10s
+        consecutive_timeouts = 0
+        MAX_CONSECUTIVE_TIMEOUTS = 3  # Give up after 3 consecutive stuck frames
         try:
             for i in range(num_frames_to_read):
                 if stop_event and stop_event.is_set():
@@ -137,9 +140,38 @@ class SegmentStreamingMixin:
                         f"FFmpeg process (segment) terminated prematurely. Exit: {segment_ffmpeg_process.returncode}. Stderr: '{stderr_output.strip()}'")
                     break
 
+                # Read frame with timeout to detect stuck FFmpeg
                 t_decode_start = time.time()
-                raw_frame_bytes = segment_ffmpeg_process.stdout.read(self.frame_size_bytes)
+                raw_frame_bytes = self._read_frame_with_timeout(
+                    segment_ffmpeg_process, self.frame_size_bytes, FRAME_READ_TIMEOUT)
                 decode_ms = (time.time() - t_decode_start) * 1000.0
+
+                if raw_frame_bytes is None:
+                    # Timeout: FFmpeg hung on this frame
+                    consecutive_timeouts += 1
+                    current_frame = start_frame_abs_idx + frames_yielded
+                    self.logger.warning(
+                        f"Frame read timeout ({FRAME_READ_TIMEOUT}s) at frame {current_frame}. "
+                        f"Restarting FFmpeg from next frame ({consecutive_timeouts}/{MAX_CONSECUTIVE_TIMEOUTS}).")
+                    if consecutive_timeouts >= MAX_CONSECUTIVE_TIMEOUTS:
+                        self.logger.error(
+                            f"{MAX_CONSECUTIVE_TIMEOUTS} consecutive timeouts. Stopping segment stream.")
+                        break
+                    # Kill stuck FFmpeg and restart from next frame
+                    self._terminate_ffmpeg_processes()
+                    skip_to_frame = current_frame + 1
+                    remaining = num_frames_to_read - (frames_yielded + 1)
+                    if remaining <= 0:
+                        break
+                    if not self._start_ffmpeg_for_segment_streaming(skip_to_frame, remaining):
+                        self.logger.error("Failed to restart FFmpeg after timeout. Aborting segment.")
+                        break
+                    segment_ffmpeg_process = self.ffmpeg_process
+                    frames_yielded += 1  # Count the skipped frame
+                    continue
+
+                consecutive_timeouts = 0  # Reset on success
+
                 if len(raw_frame_bytes) < self.frame_size_bytes:
                     stderr_on_short_read = segment_ffmpeg_process.stderr.read(4096).decode(errors='ignore') if segment_ffmpeg_process.stderr else ""
                     self.logger.info(
@@ -178,3 +210,29 @@ class SegmentStreamingMixin:
                 frames_yielded += 1
         finally:
             self._terminate_ffmpeg_processes()
+
+    @staticmethod
+    def _read_frame_with_timeout(ffmpeg_proc, frame_size, timeout_sec):
+        """Read exactly frame_size bytes from FFmpeg stdout with a timeout.
+        Returns bytes on success, None on timeout."""
+        result = [None]
+
+        def _read():
+            try:
+                result[0] = ffmpeg_proc.stdout.read(frame_size)
+            except Exception:
+                result[0] = b''
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(timeout=timeout_sec)
+
+        if reader.is_alive():
+            # Read timed out -- FFmpeg is stuck. Kill it.
+            try:
+                ffmpeg_proc.kill()
+            except Exception:
+                pass
+            return None
+
+        return result[0] if result[0] else b''
