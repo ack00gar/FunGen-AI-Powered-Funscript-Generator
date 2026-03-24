@@ -884,7 +884,7 @@ class SettingsRenderer:
         is_active = (tracker_inst is active_inst)
 
         # Active tracker: try custom UI first (it has full app context)
-        if is_active:
+        if is_active and hasattr(tracker_inst, 'render_settings_ui'):
             try:
                 if tracker_inst.render_settings_ui():
                     return
@@ -893,16 +893,15 @@ class SettingsRenderer:
                 return
 
         # Schema-based rendering (works for both active and lazy instances)
-        schema = None
-        try:
-            schema = tracker_inst.get_settings_schema()
-        except Exception:
-            pass
-
-        if schema and schema.get('properties'):
-            from application.utils.schema_settings_renderer import render_schema_settings
-            render_schema_settings(schema, self.app.app_settings, tracker_inst)
-            return
+        if hasattr(tracker_inst, 'get_settings_schema'):
+            try:
+                schema = tracker_inst.get_settings_schema()
+                if schema and schema.get('properties'):
+                    from application.utils.schema_settings_renderer import render_schema_settings
+                    render_schema_settings(schema, self.app.app_settings, tracker_inst)
+                    return
+            except Exception:
+                pass
 
         if is_active:
             imgui.text_disabled("No configurable settings.")
