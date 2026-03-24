@@ -509,6 +509,36 @@ class UndoManager:
         """Get description of next redo without performing it."""
         return self.redo_stack[-1].description if self.redo_stack else None
 
+    def undo_to(self, index: int, app) -> int:
+        """Undo multiple steps. index=0 means undo 1 (most recent), index=N means undo N+1.
+        Returns number of steps actually undone."""
+        count = index + 1
+        done = 0
+        for _ in range(count):
+            if not self.undo_stack:
+                break
+            cmd = self.undo_stack.pop()
+            cmd.undo(app)
+            cmd.finalize(app)
+            self.redo_stack.append(cmd)
+            done += 1
+        return done
+
+    def redo_to(self, index: int, app) -> int:
+        """Redo multiple steps. index=0 means redo 1 (most recent), index=N means redo N+1.
+        Returns number of steps actually redone."""
+        count = index + 1
+        done = 0
+        for _ in range(count):
+            if not self.redo_stack:
+                break
+            cmd = self.redo_stack.pop()
+            cmd.execute(app)
+            cmd.finalize(app)
+            self.undo_stack.append(cmd)
+            done += 1
+        return done
+
     def get_undo_history(self) -> List[str]:
         """Get descriptions for display (most recent first)."""
         return [cmd.description for cmd in reversed(self.undo_stack)]

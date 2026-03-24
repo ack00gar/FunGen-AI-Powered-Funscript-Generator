@@ -14,7 +14,7 @@ except ImportError:
 ####################################################################################################
 APP_NAME = "FunGen"
 APP_VERSION = "0.8.0"
-APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION} - AI Computer Vision"
+APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION}"
 FUNSCRIPT_AUTHOR = "FunGen"
 
 # --- Component Versions ---
