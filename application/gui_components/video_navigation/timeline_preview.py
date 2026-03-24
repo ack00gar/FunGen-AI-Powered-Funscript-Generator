@@ -42,21 +42,32 @@ class TimelinePreviewMixin:
                         chapter_number_str = str(i + 1)
                         break
 
-        imgui.text(f"Chapter #{chapter_number_str}: {segment.position_short_name} ({segment.segment_type})")
-        imgui.text(f"Pos:  {segment.position_long_name}")
-        imgui.text(f"Source: {segment.source}")
-        imgui.text(f"Frames: {segment.start_frame_id} - {segment.end_frame_id}")
+        # Title line
+        title = f"Chapter #{chapter_number_str}: {segment.position_short_name}"
+        if segment.segment_type and segment.segment_type != segment.position_short_name:
+            title += f" ({segment.segment_type})"
+        imgui.text(title)
 
+        # Position + source
+        if segment.position_long_name and segment.position_long_name != segment.position_short_name:
+            imgui.text_colored(segment.position_long_name, 0.6, 0.7, 0.8, 1.0)
+        imgui.text_disabled(f"Source: {segment.source}")
+
+        imgui.spacing()
+
+        # Time range + duration
         fps_tt = self._get_current_fps()
-        start_t_tt = segment.start_frame_id / fps_tt if fps_tt > 0 else 0
-        end_t_tt = segment.end_frame_id / fps_tt if fps_tt > 0 else 0
-        imgui.text(f"Time: {_format_time(self.app, start_t_tt)} - {_format_time(self.app, end_t_tt)}")
-
-        # Duration
+        start_t = segment.start_frame_id / fps_tt if fps_tt > 0 else 0
+        end_t = segment.end_frame_id / fps_tt if fps_tt > 0 else 0
         duration_frames = segment.end_frame_id - segment.start_frame_id + 1
         duration_s = duration_frames / fps_tt if fps_tt > 0 else 0
-        duration_timecode = _format_time(self.app, duration_s)
-        imgui.text(f"Duration: {duration_timecode} ({duration_frames} frames)")
+        imgui.text(f"{_format_time(self.app, start_t)} - {_format_time(self.app, end_t)}  ({_format_time(self.app, duration_s)})")
+        imgui.text_disabled(f"Frames {segment.start_frame_id:,} - {segment.end_frame_id:,}  ({duration_frames:,})")
+
+        # ROI badge
+        if getattr(segment, 'user_roi_fixed', False):
+            imgui.spacing()
+            imgui.text_colored("[R] Has fixed ROI", 0.3, 0.8, 0.5, 1.0)
 
         imgui.end_tooltip()
 

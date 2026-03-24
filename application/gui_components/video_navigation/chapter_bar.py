@@ -59,6 +59,15 @@ class ChapterBarMixin:
             imgui.spacing()
             return
 
+        # Empty state hint when no chapters exist (non-blocking — mouse interaction still runs)
+        if not fs_proc.video_chapters:
+            hint = "No chapters - use I/O keys, drag on bar, or run chapter detection"
+            hint_size = imgui.calc_text_size(hint)
+            hint_x = bar_start_x + (bar_width - hint_size[0]) * 0.5
+            hint_y = bar_start_y + (bar_height - hint_size[1]) * 0.5
+            draw_list.add_text(hint_x, hint_y,
+                               imgui.get_color_u32_rgba(0.5, 0.5, 0.55, 0.6), hint)
+
         # For marker alignment with slider track, calculate effective start_x and width
         effective_marker_area_start_x = bar_start_x + style.frame_padding[0]
         effective_marker_area_width = bar_width - (style.frame_padding[0] * 2)

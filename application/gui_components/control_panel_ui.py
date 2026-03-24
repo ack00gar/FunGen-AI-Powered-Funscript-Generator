@@ -26,7 +26,7 @@ except ImportError:
 
 # Import mixin sub-modules
 from .cp_post_processing_ui import PostProcessingMixin
-from .cp_advanced_settings_ui import AdvancedSettingsMixin
+from .cp_ai_models_ui import AIModelsMixin
 from .cp_execution_ui import ExecutionMixin
 from .cp_tracker_settings_ui import TrackerSettingsMixin
 from .cp_device_control_ui import DeviceControlMixin
@@ -44,7 +44,7 @@ def _readonly_input(label_id, value, width=-1):
 
 class ControlPanelUI(
     PostProcessingMixin,
-    AdvancedSettingsMixin,
+    AIModelsMixin,
     ExecutionMixin,
     TrackerSettingsMixin,
     DeviceControlMixin,

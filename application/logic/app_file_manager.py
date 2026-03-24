@@ -1363,7 +1363,8 @@ class AppFileManager:
             self.app.logger.error(f"Video file not found: {file_path}")
             return False
 
-        self.app.logger.info(f"Opening video: {os.path.basename(file_path)}", extra={'status_message': True})
+        self.app.logger.info(f"Loading video: {os.path.basename(file_path)}...", extra={'status_message': True})
+        self.app.notify(f"Loading {os.path.basename(file_path)}...", "info", 2.0)
 
         # Reset relevant states before loading a new video
         self.close_video_action(clear_funscript_unconditionally=True)

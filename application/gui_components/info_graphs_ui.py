@@ -1,6 +1,5 @@
 import imgui
 import threading
-import time
 from application.utils.component_perf_monitor import ComponentPerformanceMonitor
 from application.utils.system_monitor import SystemMonitor
 from application.utils.section_card import section_card as _section_card
@@ -189,13 +188,15 @@ class InfoGraphsUI(InfoGraphsMixin):
                         self._render_reference_comparison_standalone()
 
             # Segment Statistics
-            with _section_card("Segment Statistics##SegStatSection", tier="primary") as seg_open:
+            with _section_card("Segment Statistics##SegStatSection", tier="primary",
+                               ) as seg_open:
                 if seg_open:
                     self._render_segment_statistics()
 
         elif tab_selected == "video":
             imgui.spacing()
-            with _section_card("Video Settings##VideoSettingsSection", tier="primary") as vs_open:
+            with _section_card("Video Settings##VideoSettingsSection", tier="primary",
+                               ) as vs_open:
                 if vs_open:
                     self._render_content_video_settings()
 
