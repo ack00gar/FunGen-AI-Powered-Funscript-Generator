@@ -402,9 +402,9 @@ STAGE1_FRAME_QUEUE_MAXSIZE = 99
 DEFAULT_S1_NUM_PRODUCERS = 1
 DEFAULT_S1_NUM_CONSUMERS = max(os.cpu_count() // 2, 1) if os.cpu_count() else 2
 # MPS (Apple Silicon) shares unified memory — each consumer loads det + pose models.
-# Real-world measurement: 7 consumers on 48GB hit OOM at 47.7GB = ~6.8GB per consumer.
-MPS_MEMORY_PER_CONSUMER_GB = 7.0  # Measured per consumer (det + pose + PyTorch overhead)
-MPS_MEMORY_HEADROOM_GB = 8.0      # Reserve for OS, app, video decode, and other processes
+# Real-world: 4 consumers on 48GB still OOM. CoreML/ANE memory is unpredictable.
+MPS_MEMORY_PER_CONSUMER_GB = 12.0  # Conservative: accounts for CoreML + PyTorch + ANE overhead
+MPS_MEMORY_HEADROOM_GB = 10.0      # Reserve for OS, app, video decode, FFmpeg, and other processes
 
 
 ####################################################################################################
