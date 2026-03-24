@@ -11,7 +11,7 @@ from ultralytics import YOLO
 from video import VideoProcessor
 from tracker.tracker_manager import create_tracker_manager
 
-from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
+from application.classes import AppSettings, ProjectManager, ShortcutManager
 from application.classes.undo_manager import UndoManager
 from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
 from application.utils.addon_update_checker import AddonUpdateChecker
@@ -151,10 +151,8 @@ class ApplicationLogic:
         self.yolo_pose_model_path = self.yolo_pose_model_path_setting
         self.yolo_input_size = YOLO_INPUT_SIZE
 
-        # --- Undo/Redo Managers ---
-        self.undo_manager_t1: Optional[UndoRedoManager] = None  # Legacy per-timeline (being replaced)
-        self.undo_manager_t2: Optional[UndoRedoManager] = None  # Legacy per-timeline (being replaced)
-        self.undo_manager = UndoManager(max_history=100)  # Unified command-pattern manager
+        # --- Undo/Redo ---
+        self.undo_manager = UndoManager(max_history=100)
 
         # --- Initialize Tracker Manager ---
         # Yield before heavy YOLO loading to allow splash rendering
@@ -325,7 +323,6 @@ class ApplicationLogic:
 
         # --- Final Setup Steps ---
         self._apply_loaded_settings()
-        self.funscript_processor._ensure_undo_managers_linked()
         if not self.is_cli_mode:
             self._load_last_project_on_startup()
         self.energy_saver.reset_activity_timer()
@@ -1124,10 +1121,7 @@ class ApplicationLogic:
             self.tracker.pose_model_path = self.yolo_pose_model_path
 
         # Clear undo history for both timelines
-        if self.undo_manager_t1: self.undo_manager_t1.clear_history()
-        if self.undo_manager_t2: self.undo_manager_t2.clear_history()
-        # Ensure they are re-linked to (now empty) actions lists
-        self.funscript_processor._ensure_undo_managers_linked()
+        self.undo_manager.clear()
         self.app_state_ui.heatmap_dirty = True
         self.app_state_ui.funscript_preview_dirty = True
         self.app_state_ui.force_timeline_pan_to_current_frame = True

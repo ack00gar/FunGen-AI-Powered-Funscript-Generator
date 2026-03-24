@@ -361,22 +361,28 @@ class ToolbarUI:
 
         imgui.same_line(spacing=8)
 
-        # --- Undo/Redo for selected timeline ---
-        undo_mgr = fs_proc._get_undo_manager(selected_tl) if fs_proc else None
-        can_undo = undo_mgr.can_undo() if undo_mgr else False
-        can_redo = undo_mgr.can_redo() if undo_mgr else False
+        # --- Undo/Redo (unified) ---
+        umgr = self.app.undo_manager
+        can_undo = umgr.can_undo()
+        can_redo = umgr.can_redo()
 
         if can_undo:
-            if self._toolbar_button(icon_mgr, 'undo.png', btn_size, f"Undo (T{selected_tl})"):
-                fs_proc.perform_undo_redo(selected_tl, "undo")
+            tooltip = f"Undo: {umgr.peek_undo()}"
+            if self._toolbar_button(icon_mgr, 'undo.png', btn_size, tooltip):
+                desc = umgr.undo(self.app)
+                if desc:
+                    self.app.notify(f"Undo: {desc}", "info", 1.5)
         else:
             self._toolbar_button_disabled(icon_mgr, 'undo.png', btn_size, "Undo (Nothing to undo)")
 
         imgui.same_line()
 
         if can_redo:
-            if self._toolbar_button(icon_mgr, 'redo.png', btn_size, f"Redo (T{selected_tl})"):
-                fs_proc.perform_undo_redo(selected_tl, "redo")
+            tooltip = f"Redo: {umgr.peek_redo()}"
+            if self._toolbar_button(icon_mgr, 'redo.png', btn_size, tooltip):
+                desc = umgr.redo(self.app)
+                if desc:
+                    self.app.notify(f"Redo: {desc}", "info", 1.5)
         else:
             self._toolbar_button_disabled(icon_mgr, 'redo.png', btn_size, "Redo (Nothing to redo)")
 

@@ -572,19 +572,6 @@ class MainMenu:
 
             imgui.end_menu()
 
-    def _render_per_timeline_undo_items(self, fs_proc, tl_num):
-        mgr = fs_proc._get_undo_manager(tl_num)
-        can_undo = mgr.can_undo() if mgr else False
-        can_redo = mgr.can_redo() if mgr else False
-        tl_lbl = self._tl_label(tl_num)
-        undo_key = "undo_timeline1" if tl_num == 1 else f"undo_timeline{tl_num}"
-        redo_key = "redo_timeline1" if tl_num == 1 else f"redo_timeline{tl_num}"
-        if imgui.menu_item(f"Undo {tl_lbl}", self._get_shortcut_display(undo_key),
-                           selected=False, enabled=can_undo)[0]:
-            fs_proc.perform_undo_redo(tl_num, "undo")
-        if imgui.menu_item(f"Redo {tl_lbl}", self._get_shortcut_display(redo_key),
-                           selected=False, enabled=can_redo)[0]:
-            fs_proc.perform_undo_redo(tl_num, "redo")
 
     def _render_view_menu(self, app_state, stage_proc):
         if imgui.begin_menu("View", True):
