@@ -190,11 +190,16 @@ class InfoGraphsUI(InfoGraphsMixin):
         elif tab_selected == "video":
             imgui.spacing()
 
-            # VR tip (only when VR active)
-            if self.app.processor and self.app.processor.is_vr_active_or_potential():
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.65, 0.8, 0.9)
-                imgui.text_wrapped("VR: recommended unwarp is CPU (v360) for best quality. Pitch -21 for typical POV angle.")
-                imgui.pop_style_color()
+            # Header (same style as Tracker tab)
+            processor = self.app.processor
+            if processor and processor.video_info:
+                video_type = processor.determined_video_type or "2D"
+                imgui.text_colored(f"{video_type} Video", 0.4, 0.8, 1.0, 1.0)
+                if video_type == "VR":
+                    imgui.text_wrapped("Recommended unwarp: CPU (v360). Recommended pitch: -21 for typical POV.")
+                imgui.spacing()
+            else:
+                imgui.text_disabled("No video loaded.")
                 imgui.spacing()
 
             with _section_card("Video Settings##VideoSettingsSection", tier="primary") as vs_open:
