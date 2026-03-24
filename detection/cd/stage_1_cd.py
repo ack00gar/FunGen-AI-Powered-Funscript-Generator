@@ -767,8 +767,12 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
     parent_logger.info(f"[S1 Logger] Result gathering loop ended. Written count: {written_count}.")
 
     if stop_event_local.is_set():
-        parent_logger.warning(f"[S1 Logger] Abort signal received. Skipping save of partial file: {output_file_local}")
-        return
+        if written_count > 0:
+            parent_logger.warning(f"[S1 Logger] Abort/stall detected. Saving partial results ({written_count} frames) to: {output_file_local}")
+            # Fall through to save logic instead of returning -- partial data is better than no data
+        else:
+            parent_logger.warning(f"[S1 Logger] Abort signal received with 0 results. Skipping save.")
+            return
 
     # Save the results — use start_frame_offset for correct frame ID lookup
     # When frame_range_arg is used, frame IDs are absolute (e.g. 30000-33596)
@@ -1027,7 +1031,7 @@ def perform_yolo_analysis(
         all_procs = producers_list + consumers_list
         loop_start_time = time.time()
         ANALYSIS_TIMEOUT_SECONDS = 60  # 1 minute (autotune only)
-        STALL_TIMEOUT_SECONDS = 300  # 5 minutes with no progress = stalled
+        STALL_TIMEOUT_SECONDS = 60  # 1 minute with no progress = stalled (partial results saved)
 
         while any(p.is_alive() for p in all_procs):
             # Conditionally check for timeout ONLY if it's an autotuner run
