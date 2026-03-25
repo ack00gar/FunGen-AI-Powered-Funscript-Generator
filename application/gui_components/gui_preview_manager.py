@@ -343,8 +343,17 @@ class PreviewManagerMixin:
                         # Take right half for preview
                         frame = frame[:, width//2:]
 
-            # Resize for preview (keep aspect ratio)
+            # Crop out black padding if frame is padded (non-HD 640x640 mode)
             height, width = frame.shape[:2]
+            if hasattr(self.app, 'app_state_ui'):
+                c_l, c_t, c_r, c_b = self.app.app_state_ui.get_processing_content_uv_rect()
+                if (c_l, c_t, c_r, c_b) != (0.0, 0.0, 1.0, 1.0):
+                    y0, y1 = int(c_t * height), int(c_b * height)
+                    x0, x1 = int(c_l * width), int(c_r * width)
+                    frame = frame[y0:y1, x0:x1]
+                    height, width = frame.shape[:2]
+
+            # Resize for preview (keep aspect ratio)
             aspect_ratio = width / height if height > 0 else 16/9
 
             # For VR content, make preview larger since it's typically wider
