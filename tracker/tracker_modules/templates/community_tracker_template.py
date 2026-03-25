@@ -146,6 +146,7 @@ class CommunityExampleTracker(BaseTracker):
         5. Returns results
         """
         try:
+            self.live_overlay = {}
             self.frame_count += 1
             processed_frame = frame.copy()
             action_log = []
@@ -159,7 +160,7 @@ class CommunityExampleTracker(BaseTracker):
                 x, y, w, h = self.roi_rect
                 roi_gray = gray_frame[y:y+h, x:x+w]
                 # Draw ROI rectangle
-                self._draw_roi_rectangle(processed_frame, self.roi_rect, (0, 255, 0))
+                self._draw_roi_rectangle(self.roi_rect, (0, 1.0, 0, 1.0))
             else:
                 roi_gray = gray_frame
 
@@ -182,8 +183,8 @@ class CommunityExampleTracker(BaseTracker):
                     action_log.append(action)
 
             # Apply visual overlays
-            self._draw_motion_visualization(processed_frame, smoothed_motion)
-            self._draw_status_overlay(processed_frame, smoothed_motion, len(action_log) > 0)
+            self._draw_motion_visualization(smoothed_motion)
+            self._draw_status_overlay(smoothed_motion, len(action_log) > 0)
 
             # Store current frame for next iteration
             self.previous_frame = roi_gray.copy() if self.roi_rect else gray_frame.copy()
@@ -496,57 +497,54 @@ class CommunityExampleTracker(BaseTracker):
             'motion_intensity': motion_intensity
         }
 
-    def _draw_roi_rectangle(self, frame: np.ndarray, roi: Tuple[int, int, int, int], color: Tuple[int, int, int]):
-        """Draw ROI rectangle on frame."""
-        try:
-            import cv2
-            x, y, w, h = roi
-            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-            cv2.putText(frame, "ROI", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-        except ImportError:
-            pass  # OpenCV not available
+    def _draw_roi_rectangle(self, roi: Tuple[int, int, int, int], color_rgba: Tuple[float, float, float, float]):
+        """Populate live_overlay with ROI rectangle."""
+        x, y, w, h = roi
+        self.live_overlay.setdefault('rects', []).append({
+            'x1': x, 'y1': y, 'x2': x + w, 'y2': y + h,
+            'color': color_rgba, 'thickness': 2.0, 'label': 'ROI'
+        })
 
-    def _draw_motion_visualization(self, frame: np.ndarray, motion_intensity: float):
-        """Draw motion intensity visualization on frame."""
-        try:
-            import cv2
+    def _draw_motion_visualization(self, motion_intensity: float):
+        """Populate live_overlay with motion intensity visualization."""
+        bar_width = int((motion_intensity / max(self.motion_threshold * 2, 1)) * 200)
+        bar_width = min(bar_width, 200)
 
-            # Draw motion bar
-            bar_width = int((motion_intensity / max(self.motion_threshold * 2, 1)) * 200)
-            bar_width = min(bar_width, 200)
+        # Color based on intensity (green -> yellow -> red)
+        if motion_intensity < self.motion_threshold:
+            color_rgba = (0, 1.0, 0, 1.0)  # Green
+        elif motion_intensity < self.motion_threshold * 2:
+            color_rgba = (0, 1.0, 1.0, 1.0)  # Yellow
+        else:
+            color_rgba = (1.0, 0, 0, 1.0)  # Red
 
-            # Color based on intensity (green -> yellow -> red)
-            if motion_intensity < self.motion_threshold:
-                color = (0, 255, 0)  # Green
-            elif motion_intensity < self.motion_threshold * 2:
-                color = (0, 255, 255)  # Yellow
-            else:
-                color = (0, 0, 255)  # Red
+        self.live_overlay.setdefault('filled_rects', []).append({
+            'x1': 10, 'y1': 10, 'x2': 10 + bar_width, 'y2': 30,
+            'color': color_rgba
+        })
+        self.live_overlay.setdefault('rects', []).append({
+            'x1': 10, 'y1': 10, 'x2': 210, 'y2': 30,
+            'color': (1.0, 1.0, 1.0, 1.0), 'thickness': 1.0, 'label': None
+        })
 
-            cv2.rectangle(frame, (10, 10), (10 + bar_width, 30), color, -1)
-            cv2.rectangle(frame, (10, 10), (210, 30), (255, 255, 255), 1)
+    def _draw_status_overlay(self, motion_intensity: float, action_generated: bool):
+        """Populate live_overlay with status information."""
+        status_text = f"Motion: {motion_intensity:.1f}"
+        if action_generated:
+            status_text += " | ACTION"
 
-        except ImportError:
-            pass  # OpenCV not available
+        self.live_overlay.setdefault('texts', []).append({
+            'x': 10, 'y': 60,
+            'text': status_text,
+            'color': (1.0, 1.0, 1.0, 1.0)
+        })
 
-    def _draw_status_overlay(self, frame: np.ndarray, motion_intensity: float, action_generated: bool):
-        """Draw status information on frame."""
-        try:
-            import cv2
-
-            status_text = f"Motion: {motion_intensity:.1f}"
-            if action_generated:
-                status_text += " | ACTION"
-
-            cv2.putText(frame, status_text, (10, 60),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-            if self.tracking_active:
-                cv2.putText(frame, "TRACKING", (10, frame.shape[0] - 20),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-
-        except ImportError:
-            pass  # OpenCV not available
+        if self.tracking_active:
+            self.live_overlay.setdefault('texts', []).append({
+                'x': 10, 'y': 620,
+                'text': 'TRACKING',
+                'color': (0, 1.0, 0, 1.0)
+            })
 
 
 # The tracker will be automatically discovered and registered.

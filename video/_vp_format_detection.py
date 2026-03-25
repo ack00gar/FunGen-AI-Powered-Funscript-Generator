@@ -197,8 +197,9 @@ class FormatDetectionMixin:
                 self.vr_input_format = ""
                 self.vr_fov = 0
             self.logger.info(f"Using configured video type: {self.determined_video_type}")
+            self._compute_display_dimensions()
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            self.frame_size_bytes = self._display_frame_w * self._display_frame_h * 3
             return
 
         # STEP 1: Try filename-based detection first
@@ -210,8 +211,9 @@ class FormatDetectionMixin:
             # Clear VR metadata for 2D videos
             self.vr_input_format = ""
             self.vr_fov = 0
+            self._compute_display_dimensions()
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            self.frame_size_bytes = self._display_frame_w * self._display_frame_h * 3
             return
 
         if filename_result['type'] == 'VR':
@@ -228,8 +230,9 @@ class FormatDetectionMixin:
                 self.vr_fov = filename_result['fov']
                 self.logger.info(f"Set VR FOV to: {self.vr_fov}")
 
+            self._compute_display_dimensions()
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            self.frame_size_bytes = self._display_frame_w * self._display_frame_h * 3
             return
 
         # STEP 2: Filename inconclusive - check resolution
@@ -241,8 +244,9 @@ class FormatDetectionMixin:
             # Clear VR metadata for 2D videos
             self.vr_input_format = ""
             self.vr_fov = 0
+            self._compute_display_dimensions()
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            self.frame_size_bytes = self._display_frame_w * self._display_frame_h * 3
             return
 
         # STEP 3: Resolution suggests VR - run ML detection
@@ -280,9 +284,10 @@ class FormatDetectionMixin:
                             self.vr_fov = 0
 
                         self._ml_detection_cached = True  # Cache result to avoid re-running on settings changes
+                        self._compute_display_dimensions()
                         self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-                        self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-                        self.logger.debug(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
+                        self.frame_size_bytes = self._display_frame_w * self._display_frame_h * 3
+                        self.logger.debug(f"Frame size bytes updated to: {self.frame_size_bytes} for display size {self._display_frame_w}x{self._display_frame_h}")
                         return
                     else:
                         self.logger.debug("ML detection confidence low, falling back to resolution heuristics")
@@ -312,9 +317,10 @@ class FormatDetectionMixin:
             self.vr_input_format = ""
             self.vr_fov = 0
 
+        self._compute_display_dimensions()
         self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-        self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-        self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
+        self.frame_size_bytes = self._display_frame_w * self._display_frame_h * 3
+        self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for display size {self._display_frame_w}x{self._display_frame_h}")
 
     @staticmethod
     def get_video_type_heuristic(video_path: str, use_ml: bool = False) -> str:

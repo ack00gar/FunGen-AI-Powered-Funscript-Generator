@@ -406,6 +406,7 @@ class YoloRoiTracker(BaseTracker):
                     status_message=f"Error: Invalid frame shape {frame.shape}"
                 )
 
+            self.live_overlay = {}
             self.internal_frame_counter += 1
             self._update_fps()
             processed_frame = self._preprocess_frame(frame)
@@ -459,7 +460,7 @@ class YoloRoiTracker(BaseTracker):
                 )
             
             # Apply visualizations
-            self._draw_visualizations(processed_frame, detected_objects_this_frame)
+            self._draw_visualizations(detected_objects_this_frame)
             
             # Prepare debug info
             debug_info = {
@@ -1467,39 +1468,45 @@ class YoloRoiTracker(BaseTracker):
         
         return action_log_list
     
-    def _draw_visualizations(self, processed_frame: np.ndarray, detected_objects: List[Dict]):
-        """Draw visualization overlays on the frame."""
+    def _draw_visualizations(self, detected_objects: List[Dict]):
+        """Populate live_overlay with visualization data."""
         # Draw object detection masks
         if self.show_masks and detected_objects:
-            self._draw_detections(processed_frame, detected_objects)
-        
+            self._draw_detections(detected_objects)
+
         # Draw ROI rectangle
         if self.show_roi and self.roi:
             rx, ry, rw, rh = self.roi
-            color = self._get_class_color(
+            color_bgr = self._get_class_color(
                 self.main_interaction_class or ("penis" if self.penis_last_known_box else "persisting")
             )
-            cv2.rectangle(processed_frame, (rx, ry), (rx + rw, ry + rh), color, 2)
-        
+            # Convert BGR 0-255 to RGBA 0-1
+            color_rgba = (color_bgr[2] / 255.0, color_bgr[1] / 255.0, color_bgr[0] / 255.0, 1.0)
+            self.live_overlay.setdefault('rects', []).append({
+                'x1': rx, 'y1': ry, 'x2': rx + rw, 'y2': ry + rh,
+                'color': color_rgba, 'thickness': 2.0, 'label': None
+            })
+
         # Add tracking indicator
-        self._draw_tracking_indicator(processed_frame)
-    
-    def _draw_detections(self, frame: np.ndarray, detections: List[Dict]):
-        """Draw detection bounding boxes and labels."""
+        self._draw_tracking_indicator()
+
+    def _draw_detections(self, detections: List[Dict]):
+        """Populate live_overlay with detection bounding boxes and labels."""
         for detection in detections:
             box = detection["box"]
             class_name = detection["class_name"]
             confidence = detection.get("confidence", 1.0)
-            
+
             x, y, w, h = box
-            color = self._get_class_color(class_name)
-            
-            # Draw bounding box
-            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-            
-            # Draw label
+            color_bgr = self._get_class_color(class_name)
+            # Convert BGR 0-255 to RGBA 0-1
+            color_rgba = (color_bgr[2] / 255.0, color_bgr[1] / 255.0, color_bgr[0] / 255.0, 1.0)
+
             label = f"{class_name} {confidence:.2f}"
-            cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            self.live_overlay.setdefault('rects', []).append({
+                'x1': x, 'y1': y, 'x2': x + w, 'y2': y + h,
+                'color': color_rgba, 'thickness': 2.0, 'label': label
+            })
     
     def _get_class_color(self, class_name: str) -> Tuple[int, int, int]:
         """Get color for a specific class."""

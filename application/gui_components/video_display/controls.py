@@ -70,20 +70,22 @@ class VideoControlsMixin:
         # Get icon texture manager for playback controls
         icon_mgr = get_icon_texture_manager()
 
-        # Button sizing
+        # Button sizing — slightly larger for modern feel
         button_h_ref = imgui.get_frame_height()
-        pb_icon_w, pb_play_w, pb_stop_w, pb_btn_spacing = button_h_ref, button_h_ref, button_h_ref, 4.0
+        pb_icon_w, pb_play_w, pb_stop_w = button_h_ref, button_h_ref, button_h_ref
+        pb_btn_spacing = 6.0  # More breathing room between buttons
+        group_separator = 14.0  # Visual gap between transport group and extras
 
         # Account for handy + fullscreen buttons in width calculation
-        total_controls_width = (pb_icon_w * 9) + (pb_btn_spacing * 8) + (button_h_ref * 2.8)
+        total_controls_width = (pb_icon_w * 6) + (pb_btn_spacing * 5) + group_separator + (button_h_ref * 2.8) + button_h_ref
 
         img_rect = self._actual_video_image_rect_on_screen
         if img_rect['w'] <= 0 or img_rect['h'] <= 0:
             return
 
-        padding = 6.0
+        padding = 8.0
         overlay_x = img_rect['min_x'] + (img_rect['w'] - total_controls_width) / 2 - padding
-        overlay_y = img_rect['max_y'] - button_h_ref - padding * 3
+        overlay_y = img_rect['max_y'] - button_h_ref - padding * 4
         # Clamp both edges so the overlay stays within the video panel.
         # Without the right clamp the rightmost buttons can overlap the adjacent
         # panel, which captures their mouse events and makes them unresponsive.
@@ -102,15 +104,16 @@ class VideoControlsMixin:
 
         imgui.begin("##VideoPlaybackOverlay", flags=flags)
 
-        # Semi-transparent background behind buttons
+        # Pill-shaped semi-transparent background
         draw_list = imgui.get_window_draw_list()
         win_pos = imgui.get_window_position()
         win_size = imgui.get_window_size()
+        pill_rounding = win_size[1] / 2.0  # Full pill shape
         draw_list.add_rect_filled(
             win_pos[0], win_pos[1],
             win_pos[0] + win_size[0], win_pos[1] + win_size[1],
-            imgui.get_color_u32_rgba(0.0, 0.0, 0.0, 0.5 * alpha),
-            rounding=6.0
+            imgui.get_color_u32_rgba(0.08, 0.08, 0.08, 0.6 * alpha),
+            rounding=pill_rounding
         )
 
         # Keep controls visible while hovering the overlay itself
@@ -192,6 +195,16 @@ class VideoControlsMixin:
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Jump to End (END)")
 
+        # Separator before extras group (Handy + Fullscreen)
+        imgui.same_line(spacing=group_separator)
+        # Subtle vertical divider
+        sep_x = imgui.get_cursor_screen_pos()[0] - group_separator / 2
+        sep_y_top = win_pos[1] + padding + 2
+        sep_y_bot = win_pos[1] + win_size[1] - padding - 2
+        draw_list.add_line(sep_x, sep_y_top, sep_x, sep_y_bot,
+                           imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.15 * alpha), 1.0)
+        imgui.same_line(spacing=0)
+
         # Handy and Fullscreen buttons manage their own disabled state
         self._render_handy_control_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
         self._render_fullscreen_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
@@ -206,7 +219,7 @@ class VideoControlsMixin:
         img_rect = self._actual_video_image_rect_on_screen
         if img_rect['w'] <= 0 or img_rect['h'] <= 0: return
 
-        padding = 6.0
+        padding = 8.0
         overlay_x = img_rect['min_x'] + padding
         overlay_y = img_rect['min_y'] + padding
 
@@ -220,15 +233,16 @@ class VideoControlsMixin:
 
         imgui.begin("##VideoZoomPanOverlay", flags=flags)
 
-        # Semi-transparent background
+        # Pill-shaped semi-transparent background
         draw_list = imgui.get_window_draw_list()
         win_pos = imgui.get_window_position()
         win_size = imgui.get_window_size()
+        pill_rounding = min(win_size[1] / 2.0, 12.0)
         draw_list.add_rect_filled(
             win_pos[0], win_pos[1],
             win_pos[0] + win_size[0], win_pos[1] + win_size[1],
-            imgui.get_color_u32_rgba(0.0, 0.0, 0.0, 0.5 * alpha),
-            rounding=6.0
+            imgui.get_color_u32_rgba(0.08, 0.08, 0.08, 0.6 * alpha),
+            rounding=pill_rounding
         )
 
         # Keep controls visible while hovering the overlay itself

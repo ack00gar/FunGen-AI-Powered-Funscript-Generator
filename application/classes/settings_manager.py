@@ -127,6 +127,7 @@ class AppSettings:
             "show_advanced_options": False,
             "show_toast_notifications": True,
             "show_video_feed": True,
+            "hd_video_display": True,  # Decode at display resolution (up to 1920px) for sharper preview
 
             # File Handling & Output
             "autosave_final_funscript_to_video_location": True,

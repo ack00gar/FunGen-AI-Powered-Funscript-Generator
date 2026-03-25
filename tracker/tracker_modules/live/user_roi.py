@@ -191,6 +191,7 @@ class UserRoiTracker(BaseTracker):
         5. Updates tracked point position
         6. Generates funscript actions based on motion
         """
+        self.live_overlay = {}
         try:
             self._update_fps()
             processed_frame = self._preprocess_frame(frame)
@@ -225,7 +226,7 @@ class UserRoiTracker(BaseTracker):
                 )
             
             # Apply visualizations
-            self._draw_visualizations(processed_frame)
+            self._draw_visualizations()
             
             # Prepare debug info
             debug_info = {
@@ -783,29 +784,28 @@ class UserRoiTracker(BaseTracker):
         
         return action_log_list
     
-    def _draw_visualizations(self, processed_frame: np.ndarray):
-        """Draw visualization overlays on the frame."""
+    def _draw_visualizations(self):
+        """Populate live_overlay with visualization data."""
         # Draw User ROI rectangle
         if self.show_roi and self.user_roi_fixed:
             urx, ury, urw, urh = self.user_roi_fixed
-            color = (0, 255, 255)  # Yellow for user ROI
-            cv2.rectangle(processed_frame, (urx, ury), (urx + urw, ury + urh), color, 2)
-            
-            # ROI label removed for cleaner display
-            
-            # Draw the tracked point moving with optical flow (blue, bold)
+            self.live_overlay.setdefault('rects', []).append({
+                'x1': urx, 'y1': ury, 'x2': urx + urw, 'y2': ury + urh,
+                'color': (0, 1.0, 1.0, 1.0), 'thickness': 2.0, 'label': None
+            })
+
+            # Draw the tracked point moving with optical flow
             if self.user_roi_tracked_point_relative:
                 rel_x, rel_y = self.user_roi_tracked_point_relative
-                
-                # Convert relative coordinates to absolute
                 abs_x = urx + rel_x
                 abs_y = ury + rel_y
-                
-                # Draw bold blue point that moves with optical flow
-                cv2.circle(processed_frame, (int(abs_x), int(abs_y)), 6, (255, 0, 0), -1)  # Bold blue dot
-        
+                self.live_overlay.setdefault('circles', []).append({
+                    'x': abs_x, 'y': abs_y, 'radius': 6.0,
+                    'color': (1.0, 0, 0, 1.0), 'filled': True
+                })
+
         # Add tracking indicator
-        self._draw_tracking_indicator(processed_frame)
+        self._draw_tracking_indicator()
     
     def get_current_penis_size_factor(self) -> float:
         """Calculate current penis size factor (EXACT original method adapted for User ROI)."""

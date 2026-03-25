@@ -225,6 +225,8 @@ class HybridFlowTracker(BaseTracker):
         if frame is None or frame.size == 0:
             return TrackerResult(frame, None)
 
+        self.live_overlay = {}
+
         if not self.tracking_active:
             return TrackerResult(frame, None, {})
 
@@ -320,8 +322,8 @@ class HybridFlowTracker(BaseTracker):
         action_log = [{'at': frame_time_ms, 'pos': primary_to_write, 'secondary_pos': secondary_to_write}]
 
         # --- Debug overlay ---
-        display_frame = frame.copy()
-        self._draw_overlay(display_frame)
+        display_frame = frame
+        self._draw_overlay()
 
         debug_info = {
             'position': final_primary,
@@ -508,19 +510,28 @@ class HybridFlowTracker(BaseTracker):
                 self.current_fps = 1.0 / dt
         self._fps_last_time = now
 
-    def _draw_overlay(self, frame: np.ndarray):
-        """Draw ROI box and detection boxes on frame."""
+    def _draw_overlay(self):
+        """Populate live_overlay with ROI box and detection boxes."""
         if self._current_roi is not None:
             rx1, ry1, rx2, ry2 = self._current_roi
-            cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (255, 255, 0), 1)
+            self.live_overlay.setdefault('rects', []).append({
+                'x1': rx1, 'y1': ry1, 'x2': rx2, 'y2': ry2,
+                'color': (0, 1.0, 1.0, 1.0), 'thickness': 1.0, 'label': None
+            })
 
         if self._last_penis_box is not None:
             px1, py1, px2, py2 = [int(v) for v in self._last_penis_box]
-            cv2.rectangle(frame, (px1, py1), (px2, py2), (0, 255, 0), 2)
+            self.live_overlay.setdefault('rects', []).append({
+                'x1': px1, 'y1': py1, 'x2': px2, 'y2': py2,
+                'color': (0, 1.0, 0, 1.0), 'thickness': 2.0, 'label': None
+            })
 
         if self._last_contact_box is not None:
             cx1, cy1, cx2, cy2 = [int(v) for v in self._last_contact_box]
-            cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), (0, 255, 255), 2)
+            self.live_overlay.setdefault('rects', []).append({
+                'x1': cx1, 'y1': cy1, 'x2': cx2, 'y2': cy2,
+                'color': (0, 1.0, 1.0, 1.0), 'thickness': 2.0, 'label': None
+            })
 
     def get_status_info(self) -> Dict[str, Any]:
         """Get detailed status information."""

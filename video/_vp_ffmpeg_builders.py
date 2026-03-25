@@ -49,6 +49,10 @@ class FFmpegBuildersMixin:
 
     def _get_2d_video_filters(self) -> List[str]:
         """Builds the list of FFmpeg filter segments for standard 2D video."""
+        # HD display mode: scale to display dimensions, no padding
+        if self.is_hd_active:
+            return [f"scale={self._display_frame_w}:{self._display_frame_h}"]
+
         if not self.video_info:
             # Fallback if no video info
             return [
@@ -171,6 +175,11 @@ class FFmpegBuildersMixin:
             if self.determined_video_type == 'VR' and not self._is_using_preprocessed_video():
                 vr_format = self.vr_input_format
 
+            # Pass HD display dimensions so thumbnails match the display frame format
+            display_dims = None
+            if self.is_hd_active:
+                display_dims = (self._display_frame_w, self._display_frame_h)
+
             extractor = ThumbnailExtractor(
                 video_path=self._active_video_source_path,
                 fps=self.fps,
@@ -179,6 +188,7 @@ class FFmpegBuildersMixin:
                 vr_input_format=vr_format,
                 vr_fov=getattr(self, 'vr_fov', 190),
                 vr_pitch=getattr(self, 'vr_pitch', 0.0),
+                display_dimensions=display_dims,
                 logger=self.logger,
             )
             if extractor.is_open:

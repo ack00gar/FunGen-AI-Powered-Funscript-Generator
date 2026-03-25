@@ -93,6 +93,7 @@ class MultiAxisStressTestTracker(BaseTracker):
 
     def process_frame(self, frame: np.ndarray, frame_time_ms: int,
                       frame_index: Optional[int] = None) -> TrackerResult:
+        self.live_overlay = {}
         action_log = None
         secondary_action_log = None
         multi_axis = {}
@@ -118,17 +119,20 @@ class MultiAxisStressTestTracker(BaseTracker):
                     else:
                         multi_axis.setdefault(axis_name, []).append(action)
 
-        # Minimal overlay: stamp text on frame
-        display_frame = frame.copy() if frame is not None else np.zeros((480, 640, 3), dtype=np.uint8)
+        # Minimal overlay: populate live_overlay with text
+        display_frame = frame if frame is not None else np.zeros((480, 640, 3), dtype=np.uint8)
         if self.tracking_active:
-            import cv2
-            cv2.putText(display_frame, "STRESS TEST - ALL AXES",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (0, 255, 0), 2)
+            self.live_overlay.setdefault('texts', []).append({
+                'x': 10, 'y': 30,
+                'text': 'STRESS TEST - ALL AXES',
+                'color': (0, 1.0, 0, 1.0)
+            })
             if frame_time_ms > 0:
-                cv2.putText(display_frame, f"t={frame_time_ms}ms",
-                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                            (200, 200, 200), 1)
+                self.live_overlay.setdefault('texts', []).append({
+                    'x': 10, 'y': 60,
+                    'text': f't={frame_time_ms}ms',
+                    'color': (0.78, 0.78, 0.78, 1.0)
+                })
 
         return TrackerResult(
             processed_frame=display_frame,

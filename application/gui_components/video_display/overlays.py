@@ -208,29 +208,87 @@ class VideoOverlaysMixin:
 
 
     def _render_live_tracker_overlay(self, draw_list):
-        """Renders overlays specific to the live tracker, like motion mode."""
+        """Renders overlays specific to the live tracker, like motion mode and live_overlay data."""
         tracker = self.app.tracker
-
-        # Ensure the tracker is active and has a defined ROI to anchor the text
-        if not tracker or not tracker.tracking_active or not tracker.roi:
+        if not tracker:
             return
 
-        # Check if the video is VR, as this feature is VR-specific
-        is_vr_video = tracker._is_vr_video()
+        # Existing motion mode rendering (requires ROI and tracking active)
+        if tracker.tracking_active and getattr(tracker, 'roi', None):
+            is_vr_video = tracker._is_vr_video() if hasattr(tracker, '_is_vr_video') else False
 
-        if tracker.enable_inversion_detection and is_vr_video:
-            # Get the necessary data from the live tracker instance
-            interaction_class = tracker.main_interaction_class
-            roi_video_coords = tracker.roi
-            motion_mode = tracker.motion_mode
+            if getattr(tracker, 'enable_inversion_detection', False) and is_vr_video:
+                interaction_class = tracker.main_interaction_class
+                roi_video_coords = tracker.roi
+                motion_mode = tracker.motion_mode
 
-            # Call the existing motion mode rendering function with live data
-            self._render_motion_mode_overlay(
-                draw_list=draw_list,
-                motion_mode=motion_mode,
-                interaction_class=interaction_class,
-                roi_video_coords=roi_video_coords
-            )
+                self._render_motion_mode_overlay(
+                    draw_list=draw_list,
+                    motion_mode=motion_mode,
+                    interaction_class=interaction_class,
+                    roi_video_coords=roi_video_coords
+                )
+
+        # Render live_overlay data from tracker
+        overlay = getattr(tracker, 'live_overlay', None)
+        if not overlay:
+            return
+
+        app_state = self.app.app_state_ui
+        img_rect = self._actual_video_image_rect_on_screen
+        if img_rect['w'] <= 0 or img_rect['h'] <= 0:
+            return
+
+        c_left, c_top, c_right, c_bottom = app_state.get_content_uv_rect()
+        c_w, c_h = c_right - c_left, c_bottom - c_top
+        buf_size = self.app.yolo_input_size
+        uv_span_x = c_w / app_state.video_zoom_factor
+        uv_span_y = c_h / app_state.video_zoom_factor
+        if uv_span_x <= 0 or uv_span_y <= 0:
+            return
+
+        scale_x = img_rect['w'] / (uv_span_x * buf_size)
+        scale_y = img_rect['h'] / (uv_span_y * buf_size)
+        off_x = img_rect['min_x'] - (c_left + app_state.video_pan_normalized[0] * c_w) * buf_size * scale_x
+        off_y = img_rect['min_y'] - (c_top + app_state.video_pan_normalized[1] * c_h) * buf_size * scale_y
+
+        def to_screen(vx, vy):
+            return vx * scale_x + off_x, vy * scale_y + off_y
+
+        # Clip to video area
+        draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
+
+        for rect in overlay.get('filled_rects', []):
+            sx1, sy1 = to_screen(rect['x1'], rect['y1'])
+            sx2, sy2 = to_screen(rect['x2'], rect['y2'])
+            r, g, b, a = rect['color']
+            draw_list.add_rect_filled(sx1, sy1, sx2, sy2, imgui.get_color_u32_rgba(r, g, b, a))
+
+        for rect in overlay.get('rects', []):
+            sx1, sy1 = to_screen(rect['x1'], rect['y1'])
+            sx2, sy2 = to_screen(rect['x2'], rect['y2'])
+            r, g, b, a = rect['color']
+            draw_list.add_rect(sx1, sy1, sx2, sy2, imgui.get_color_u32_rgba(r, g, b, a),
+                              thickness=rect.get('thickness', 1.0))
+            label = rect.get('label')
+            if label:
+                draw_list.add_text(sx1 + 3, sy1 + 3, imgui.get_color_u32_rgba(r, g, b, a), label)
+
+        for circle in overlay.get('circles', []):
+            sx, sy = to_screen(circle['x'], circle['y'])
+            r, g, b, a = circle['color']
+            radius = circle.get('radius', 3.0)
+            if circle.get('filled', False):
+                draw_list.add_circle_filled(sx, sy, radius, imgui.get_color_u32_rgba(r, g, b, a))
+            else:
+                draw_list.add_circle(sx, sy, radius, imgui.get_color_u32_rgba(r, g, b, a))
+
+        for text in overlay.get('texts', []):
+            sx, sy = to_screen(text['x'], text['y'])
+            r, g, b, a = text['color']
+            draw_list.add_text(sx, sy, imgui.get_color_u32_rgba(r, g, b, a), text['text'])
+
+        draw_list.pop_clip_rect()
 
 
     def _render_stage2_overlay(self, stage_proc, app_state):
@@ -495,13 +553,13 @@ class VideoOverlaysMixin:
 
 
     def _render_simulator_3d_overlay(self, app_state, video_min_x, video_min_y, video_max_x, video_max_y):
-        """Render 3D simulator as overlay on video display (bottom-right, half size)."""
+        """Render 3D simulator as overlay on video display (bottom-right, fixed aspect)."""
         video_width = video_max_x - video_min_x
         video_height = video_max_y - video_min_y
 
-        # Size: exactly half of video width and height
-        overlay_width = int(video_width / 2)
-        overlay_height = int(video_height / 2)
+        # Height-based sizing with square aspect ratio to prevent stretching on widescreen
+        overlay_height = int(min(video_height * 0.45, video_width * 0.35))
+        overlay_width = overlay_height  # Square for 3D cylinder rendering
 
         # Position at bottom-right of video (aligned to corner)
         overlay_x = video_max_x - overlay_width

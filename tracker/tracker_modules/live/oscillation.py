@@ -154,7 +154,8 @@ class OscillationExperimental2Tracker(BaseTracker):
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, 
                      frame_index: Optional[int] = None) -> TrackerResult:
         """Process frame using hybrid oscillation detection."""
-        
+        self.live_overlay = {}
+
         self._update_fps()
         
         processed_frame, action_log = self._process_oscillation_experimental_2(
@@ -431,10 +432,17 @@ class OscillationExperimental2Tracker(BaseTracker):
         # --- Step 9: Visualization ---
         if self.show_masks:
             active_block_positions = {b['pos'] for b in active_blocks_list}
-            for r,c in list(self.oscillation_cell_persistence.keys()):
+            for r, c in list(self.oscillation_cell_persistence.keys()):
                 x1, y1 = c * local_block_size + ax, r * local_block_size + ay
-                color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
-                cv2.rectangle(processed_frame, (x1, y1), (x1 + local_block_size, y1 + local_block_size), color, 1)
+                if (r, c) in active_block_positions:
+                    color_rgba = (0, 1.0, 0, 1.0)  # Green for active
+                else:
+                    color_rgba = (0.39, 0.39, 0.71, 1.0)  # Muted blue for persistent
+                self.live_overlay.setdefault('rects', []).append({
+                    'x1': x1, 'y1': y1,
+                    'x2': x1 + local_block_size, 'y2': y1 + local_block_size,
+                    'color': color_rgba, 'thickness': 1.0, 'label': None
+                })
 
         # Keep reusable prev gray buffer
         if self._prev_gray_osc_buffer is None or self._prev_gray_osc_buffer.shape != current_gray.shape:

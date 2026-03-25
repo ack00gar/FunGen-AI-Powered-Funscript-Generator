@@ -28,6 +28,9 @@ class AppStateUI:
         self.video_pan_normalized = [0.0, 0.0]  # [pan_x_norm, pan_y_norm] top-left of visible UV
         self.video_pan_step = 0.05  # Percentage of visible video width/height
 
+        # Cached content UV rect (invalidated on video load / settings change)
+        self._cached_content_uv = None
+
         # Status Message
         self.status_message: str = ""
         self.status_message_time: float = 0.0
@@ -284,6 +287,65 @@ class AppStateUI:
         self.app.project_manager.project_dirty = True
         self.app.energy_saver.reset_activity_timer()
 
+    def invalidate_content_uv_cache(self):
+        """Call when video changes (load, settings reapply) to recompute content UV rect."""
+        self._cached_content_uv = None
+
+    def get_content_uv_rect(self) -> Tuple[float, float, float, float]:
+        """Returns (uv_left, uv_top, uv_right, uv_bottom) of actual video content within the texture.
+
+        Cached per-video — only recomputes when invalidated (video load/settings change).
+        """
+        if self._cached_content_uv is not None:
+            return self._cached_content_uv
+
+        result = self._compute_content_uv_rect()
+        self._cached_content_uv = result
+        return result
+
+    def _compute_content_uv_rect(self) -> Tuple[float, float, float, float]:
+        """Compute content UV rect (uncached)."""
+        proc = self.app.processor
+        if not proc or not proc.video_info:
+            return (0.0, 0.0, 1.0, 1.0)
+
+        # HD mode: display frame is already at native AR, no padding
+        if proc.is_hd_active:
+            return (0.0, 0.0, 1.0, 1.0)
+
+        # VR videos fill the entire square (v360 / GPU unwarp / crop+scale)
+        if proc.determined_video_type == 'VR':
+            return (0.0, 0.0, 1.0, 1.0)
+
+        # Preprocessed videos have no padding
+        if hasattr(proc, '_is_using_preprocessed_video') and proc._is_using_preprocessed_video():
+            return (0.0, 0.0, 1.0, 1.0)
+
+        width = proc.video_info.get('width', 0)
+        height = proc.video_info.get('height', 0)
+        if width <= 0 or height <= 0:
+            return (0.0, 0.0, 1.0, 1.0)
+
+        aspect = width / height
+        size = proc.yolo_input_size
+
+        if 0.95 < aspect < 1.05:
+            return (0.0, 0.0, 1.0, 1.0)  # Square — no padding
+        elif aspect > 1.05:
+            # Landscape — padded top/bottom
+            scaled_h = size / aspect
+            scaled_h = int(scaled_h) & ~1
+            scaled_h = min(scaled_h, size)
+            pad = (size - scaled_h) / 2.0
+            return (0.0, pad / size, 1.0, (size - pad) / size)
+        else:
+            # Portrait — padded left/right
+            scaled_w = size * aspect
+            scaled_w = int(scaled_w) & ~1
+            scaled_w = min(scaled_w, size)
+            pad = (size - scaled_w) / 2.0
+            return (pad / size, 0.0, (size - pad) / size, 1.0)
+
     def calculate_video_display_dimensions(self, available_w: float, available_h: float) -> Tuple[
         float, float, float, float]:
         if not (self.app.processor and self.app.processor.current_frame is not None and \
@@ -292,9 +354,16 @@ class AppStateUI:
 
         frame_h_orig, frame_w_orig = self.app.processor.current_frame.shape[:2]
         if frame_h_orig == 0 or frame_w_orig == 0: return 0, 0, 0, 0
-        aspect_ratio = frame_w_orig / frame_h_orig
 
-        # Calculate display dimensions maintaining aspect ratio
+        # Use content aspect ratio (without black padding) for display sizing
+        c_left, c_top, c_right, c_bottom = self.get_content_uv_rect()
+        content_w_frac = c_right - c_left
+        content_h_frac = c_bottom - c_top
+        if content_w_frac <= 0 or content_h_frac <= 0:
+            return 0, 0, 0, 0
+        aspect_ratio = (frame_w_orig * content_w_frac) / (frame_h_orig * content_h_frac)
+
+        # Calculate display dimensions maintaining content aspect ratio
         display_w = available_w
         display_h = display_w / aspect_ratio
 
@@ -309,13 +378,23 @@ class AppStateUI:
         return display_w, display_h, offset_x, offset_y
 
     def get_video_uv_coords(self) -> Tuple[float, float, float, float]:
-        """Returns (uv0_x, uv0_y, uv1_x, uv1_y) for the zoomed/panned video texture."""
-        uv0_x = self.video_pan_normalized[0]
-        uv0_y = self.video_pan_normalized[1]
-        uv_width = 1.0 / self.video_zoom_factor
-        uv_height = 1.0 / self.video_zoom_factor
-        uv1_x = uv0_x + uv_width
-        uv1_y = uv0_y + uv_height
+        """Returns (uv0_x, uv0_y, uv1_x, uv1_y) for the zoomed/panned video texture.
+
+        Maps pan/zoom through the content UV rect so only actual video content
+        is displayed (black padding from 640x640 scaling is cropped out).
+        """
+        c_left, c_top, c_right, c_bottom = self.get_content_uv_rect()
+        c_w = c_right - c_left
+        c_h = c_bottom - c_top
+
+        # Pan/zoom operate in content-relative [0,1] space
+        uv_span_x = c_w / self.video_zoom_factor
+        uv_span_y = c_h / self.video_zoom_factor
+
+        uv0_x = c_left + self.video_pan_normalized[0] * c_w
+        uv0_y = c_top + self.video_pan_normalized[1] * c_h
+        uv1_x = uv0_x + uv_span_x
+        uv1_y = uv0_y + uv_span_y
         return uv0_x, uv0_y, uv1_x, uv1_y
 
     def update_current_script_display_values(self):

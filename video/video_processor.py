@@ -121,6 +121,17 @@ class VideoProcessor(
         self.ffmpeg_filter_string = ""
         self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
 
+        # HD display: decode at higher resolution for GUI, downsample to yolo_input_size for processing
+        self.hd_display_enabled = False
+        self._display_frame_w = self.yolo_input_size
+        self._display_frame_h = self.yolo_input_size
+        self._is_hd_active = False
+        self._processing_frame_buf = np.zeros((self.yolo_input_size, self.yolo_input_size, 3), dtype=np.uint8)
+        self._proc_resize_dims = (self.yolo_input_size, self.yolo_input_size)
+        self._proc_pad_offset = (0, 0)
+        if self.app and hasattr(self.app, 'app_settings'):
+            self.hd_display_enabled = self.app.app_settings.get('hd_video_display', True)
+
         # GPU Unwarp Worker for VR optimization
         self.gpu_unwarp_worker = None
         self.gpu_unwarp_enabled = False
@@ -296,6 +307,108 @@ class VideoProcessor(
             self._last_timing_update = current_time
 
 
+    # ------------------------------------------------------------------ #
+    #  HD Display Helpers                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _compute_display_dimensions(self):
+        """Compute display frame dimensions based on video info and HD setting.
+
+        When HD is enabled for 2D video, scales to max 1920px on longest edge
+        preserving aspect ratio with even dimensions. Otherwise falls back to
+        yolo_input_size square.
+        """
+        size = self.yolo_input_size
+        self._display_frame_w = size
+        self._display_frame_h = size
+        self._is_hd_active = False
+        # Pre-allocated processing frame buffer + cached resize params
+        self._processing_frame_buf = np.zeros((size, size, 3), dtype=np.uint8)
+        self._proc_resize_dims = (size, size)
+        self._proc_pad_offset = (0, 0)
+
+        # Re-read setting each time (user may toggle between video loads)
+        if self.app and hasattr(self.app, 'app_settings'):
+            self.hd_display_enabled = self.app.app_settings.get('hd_video_display', True)
+
+        if not self.hd_display_enabled:
+            return
+        if not self.video_info:
+            return
+        if self.determined_video_type != '2D':
+            return
+        if hasattr(self, '_is_using_preprocessed_video') and self._is_using_preprocessed_video():
+            return
+
+        src_w = self.video_info.get('width', 0)
+        src_h = self.video_info.get('height', 0)
+        if src_w <= 0 or src_h <= 0:
+            return
+
+        max_dim = 1920
+        # Scale so the longest edge is at most max_dim
+        if max(src_w, src_h) <= max_dim:
+            out_w, out_h = src_w, src_h
+        elif src_w >= src_h:
+            out_w = max_dim
+            out_h = int(src_h * max_dim / src_w)
+        else:
+            out_h = max_dim
+            out_w = int(src_w * max_dim / src_h)
+
+        # Ensure even dimensions (FFmpeg requirement)
+        out_w = out_w & ~1
+        out_h = out_h & ~1
+
+        # Never smaller than yolo_input_size on longest edge
+        if max(out_w, out_h) < size:
+            return
+
+        self._display_frame_w = out_w
+        self._display_frame_h = out_h
+        self._is_hd_active = True
+        self.frame_size_bytes = out_w * out_h * 3
+
+        # Pre-compute processing frame resize params (avoids per-frame math)
+        scale = size / max(out_w, out_h)
+        new_w = int(out_w * scale) & ~1
+        new_h = int(out_h * scale) & ~1
+        new_w = min(new_w, size)
+        new_h = min(new_h, size)
+        self._proc_resize_dims = (new_w, new_h)
+        self._proc_pad_offset = ((size - new_w) // 2, (size - new_h) // 2)
+
+        self.logger.info(f"HD display: {out_w}x{out_h} ({out_w * out_h * 3} bytes/frame)")
+
+    def _make_processing_frame(self, display_frame):
+        """Resize an HD display frame down to yolo_input_size square with padding for YOLO/tracker.
+
+        Uses pre-allocated buffer and cached resize parameters to avoid
+        per-frame allocation overhead.
+        """
+        h, w = display_frame.shape[:2]
+        size = self.yolo_input_size
+        if h == size and w == size:
+            return display_frame
+
+        # Use cached resize params (computed once in _compute_display_dimensions)
+        new_w, new_h = self._proc_resize_dims
+        x_off, y_off = self._proc_pad_offset
+
+        import cv2
+        resized = cv2.resize(display_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+        # Reuse pre-allocated buffer (zero once, then overwrite content region)
+        buf = self._processing_frame_buf
+        buf[:] = 0
+        buf[y_off:y_off + new_h, x_off:x_off + new_w] = resized
+        return buf
+
+    @property
+    def is_hd_active(self):
+        """True when display frame is larger than processing frame."""
+        return self._is_hd_active
+
     def set_active_video_type_setting(self, video_type: str):
         if video_type not in ['auto', '2D', 'VR']:
             self.logger.warning(f"Invalid video_type: {video_type}.")
@@ -311,7 +424,8 @@ class VideoProcessor(
         if self.yolo_input_size != size:
             self.yolo_input_size = size
             self.logger.info(f"YOLO input size changed to: {self.yolo_input_size}.")
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            self._compute_display_dimensions()
+            self.frame_size_bytes = self._display_frame_w * self._display_frame_h * 3
 
     def set_active_vr_parameters(self, fov: Optional[int] = None, pitch: Optional[int] = None, input_format: Optional[str] = None):
         changed = False
@@ -370,6 +484,10 @@ class VideoProcessor(
     def open_video(self, video_path: str, from_project_load: bool = False) -> bool:
         video_filename = os.path.basename(video_path)
         self.logger.info(f"Opening video: {video_filename}...", extra={'status_message': True, 'duration': 2.0})
+
+        # Invalidate content UV cache for new video dimensions
+        if self.app and hasattr(self.app, 'app_state_ui'):
+            self.app.app_state_ui.invalidate_content_uv_cache()
 
         self.stop_processing()
         self.video_path = video_path # This will always be the ORIGINAL video path
@@ -490,9 +608,14 @@ class VideoProcessor(
 
 
     def reapply_video_settings(self):
+        # Invalidate content UV cache so GUI picks up new dimensions
+        if self.app and hasattr(self.app, 'app_state_ui'):
+            self.app.app_state_ui.invalidate_content_uv_cache()
+
         if not self.video_path or not self.video_info:
             self.logger.info("No video loaded. Settings will apply when a video is opened.")
-            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            self._compute_display_dimensions()
+            self.frame_size_bytes = self._display_frame_w * self._display_frame_h * 3
             return
 
         self.logger.info(f"Applying video settings...", extra={'status_message': True})
@@ -604,7 +727,7 @@ class VideoProcessor(
                         f"get_frames_batch CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in cmd_single)}")
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 # Always use BGR24 (3 bytes per pixel)
-                buffer_frame_size = self.yolo_input_size * self.yolo_input_size * 3
+                buffer_frame_size = self._display_frame_w * self._display_frame_h * 3
                 local_p2_proc = subprocess.Popen(cmd_single, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=-1, creationflags=creation_flags)
 
             if not local_p2_proc or local_p2_proc.stdout is None:
@@ -612,7 +735,7 @@ class VideoProcessor(
                 return frames_batch
 
             # Always use BGR24 (3 bytes per pixel)
-            frame_size = self.yolo_input_size * self.yolo_input_size * 3
+            frame_size = self._display_frame_w * self._display_frame_h * 3
 
             # Initialize progress tracking for frame buffer creation
             # Only show overlay for large batches — single-frame seeks should be invisible
@@ -635,7 +758,7 @@ class VideoProcessor(
                     break
 
                 frame = np.frombuffer(raw_frame_data, dtype=np.uint8).reshape(
-                    self.yolo_input_size, self.yolo_input_size, 3)  # BGR24
+                    self._display_frame_h, self._display_frame_w, 3)  # BGR24
 
                 # Apply GPU unwarp for VR frames if enabled
                 if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
@@ -1399,10 +1522,13 @@ class VideoProcessor(
             timestamp_ms = int(self.current_frame_index * (1000.0 / fps_for_timestamp))
             try:
                 if not self.is_processing:
-                    processed_frame_tuple = self.tracker.process_frame(raw_frame_to_process.copy(), timestamp_ms, self.current_frame_index)
-                    with self.frame_lock:
-                        self.current_frame = processed_frame_tuple[0]
-                        self._frame_version += 1
+                    # Create 640x640 processing frame for tracker (HD frame is display-only)
+                    if self.is_hd_active:
+                        processing_frame = self._make_processing_frame(raw_frame_to_process)
+                    else:
+                        processing_frame = raw_frame_to_process.copy()
+                    # Tracker populates live_overlay; display frame stays clean
+                    self.tracker.process_frame(processing_frame, timestamp_ms, self.current_frame_index)
             except Exception as e:
                 self.logger.error(f"Error processing frame with tracker in display_current_frame: {e}", exc_info=True)
 
@@ -1716,7 +1842,7 @@ class VideoProcessor(
                     break
 
                 # Always use BGR24 format (3 bytes per pixel)
-                expected_size = self.yolo_input_size * self.yolo_input_size * 3
+                expected_size = self._display_frame_w * self._display_frame_h * 3
                 actual_bytes = len(raw_frame_bytes)
 
                 # Validate frame size
@@ -1724,9 +1850,9 @@ class VideoProcessor(
                     self.logger.error(f"Invalid frame size: {actual_bytes} bytes (expected {expected_size}). Skipping frame.")
                     continue
 
-                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
+                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self._display_frame_h, self._display_frame_w, 3)
 
-                # Apply GPU unwarp for VR frames if enabled
+                # Apply GPU unwarp for VR frames if enabled (before processing frame creation)
                 if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
                     unwarp_start = time.perf_counter()
 
@@ -1749,18 +1875,26 @@ class VideoProcessor(
                     unwarp_time = (time.perf_counter() - unwarp_start) * 1000.0
                     self._unwarp_samples.append(unwarp_time)
 
+                # Create processing frame for tracker (640x640 with padding) when HD active.
+                # Must be AFTER GPU unwarp so VR frames are already unwrapped.
+                if self.is_hd_active:
+                    processing_frame = self._make_processing_frame(frame_np)
+                else:
+                    processing_frame = frame_np
+
                 # Feed clean decoded frame into unified buffer (before tracker overlays)
                 # so arrow-key backward nav works seamlessly after play stops.
                 self._buffer_append(self.current_frame_index, frame_np.copy())
 
-                processed_frame_for_gui = frame_np
                 if self.tracker and self.tracker.tracking_active and self.enable_tracker_processing:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
                         time.time() * 1000)
 
                     try:
                         yolo_start = time.perf_counter()
-                        processed_frame_for_gui = self.tracker.process_frame(frame_np.copy(), timestamp_ms, self.current_frame_index)[0]
+                        # Tracker processes the 640x640 processing_frame (not the display frame).
+                        # Overlays are rendered via ImGui draw_list, not burned into the frame.
+                        self.tracker.process_frame(processing_frame.copy(), timestamp_ms, self.current_frame_index)
                         yolo_time = (time.perf_counter() - yolo_start) * 1000.0
                         self._yolo_samples.append(yolo_time)
                     except Exception as e:
@@ -1770,7 +1904,8 @@ class VideoProcessor(
                 self._update_timing_metrics()
 
                 with self.frame_lock:
-                    self.current_frame = processed_frame_for_gui
+                    # Always display the clean frame (HD or standard) — overlays via ImGui
+                    self.current_frame = frame_np
                     self._frame_version += 1
 
                 self.frames_for_fps_calc += 1
