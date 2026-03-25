@@ -1512,12 +1512,6 @@ class StandaloneSplashWindow:
             "color": (1.0, 0.3, 0.2, 0.9),
             "bg": "_render_terminator_hud", "fg": "_render_enhanced_laser_eyes",
         },
-        "robocop": {
-            "lines": ["Dead or alive, you're coming with me", "Your move, creep.",
-                      "I'd buy that for a dollar!", "Thank you for your cooperation."],
-            "color": (0.3, 0.7, 1.0, 0.9),
-            "bg": "_render_robocop_hud", "fg": None,
-        },
         "tron": {
             "lines": ["The Grid. A digital frontier.", "I fight for the users.",
                       "End of line.", "Greetings, program."],
@@ -1656,96 +1650,6 @@ class StandaloneSplashWindow:
 
         # Subtle red tint overlay
         draw_list.add_rect_filled(0, 0, w, h, imgui.get_color_u32_rgba(0.3, 0.0, 0.0, a * 0.08))
-
-    def _render_robocop_hud(self, draw_list, window_width, window_height, current_time, alpha):
-        """RoboCop POV: targeting brackets scan across screen then lock on logo."""
-        w, h = window_width, window_height
-        cx, cy = w / 2, h / 2
-
-        # Blue tint overlay
-        draw_list.add_rect_filled(0, 0, w, h, imgui.get_color_u32_rgba(0.02, 0.05, 0.15, alpha * 0.3))
-
-        # Fast horizontal scan bar (sweeps every ~1.5 seconds)
-        scan_y = (current_time * 250) % h
-        draw_list.add_line(0, scan_y, w, scan_y, imgui.get_color_u32_rgba(0.3, 0.6, 1.0, alpha * 0.6), 2.5)
-        for offset in range(1, 20):
-            a = alpha * 0.04 * (1 - offset / 20)
-            draw_list.add_line(0, scan_y + offset, w, scan_y + offset,
-                               imgui.get_color_u32_rgba(0.2, 0.4, 0.9, a))
-
-        # Multiple targeting brackets that sweep, then lock on logo
-        blue = imgui.get_color_u32_rgba(0.3, 0.6, 1.0, alpha * 0.7)
-        blue_dim = imgui.get_color_u32_rgba(0.2, 0.4, 0.8, alpha * 0.25)
-        arm = 45
-        thick = 2.5
-
-        # Phase 1 (0-2s): brackets sweep across different positions
-        # Phase 2 (2s+): brackets converge and lock on logo center
-        lock_time = 2.0
-        if current_time < lock_time:
-            # Sweeping: 3 brackets at random-ish positions
-            for bi in range(3):
-                phase = current_time * (1.5 + bi * 0.4) + bi * 2.0
-                bx_center = w * (0.2 + 0.6 * (0.5 + 0.5 * math.sin(phase)))
-                by_center = h * (0.2 + 0.6 * (0.5 + 0.5 * math.cos(phase * 0.7)))
-                bsize = 80 + 40 * math.sin(phase * 2)
-                self._draw_bracket(draw_list, bx_center, by_center, bsize, arm, blue_dim, thick * 0.7)
-        else:
-            # Locked on logo: converge smoothly
-            t_lock = min(1.0, (current_time - lock_time) / 0.5)  # 0.5s ease-in
-            ease = t_lock * t_lock * (3 - 2 * t_lock)  # smoothstep
-
-            # Final locked size
-            final_size = 145
-            lock_alpha = alpha * (0.5 + 0.5 * ease)
-            lock_col = imgui.get_color_u32_rgba(0.3, 0.6, 1.0, lock_alpha)
-
-            # Pulse when locked
-            pulse = 1.0 + 0.03 * math.sin(current_time * 4) if t_lock >= 1.0 else 1.0
-            self._draw_bracket(draw_list, cx, cy, final_size * pulse, arm, lock_col, thick)
-
-            # "LOCKED" text when fully converged
-            if t_lock >= 1.0:
-                imgui.set_window_font_scale(0.8)
-                lock_text_a = alpha * 0.6 * (0.5 + 0.5 * math.sin(current_time * 5))
-                draw_list.add_text(cx + final_size - 10, cy - final_size - 18,
-                                   imgui.get_color_u32_rgba(1.0, 0.3, 0.2, lock_text_a), "LOCKED")
-                imgui.set_window_font_scale(1.0)
-
-        # Status readouts (top-right)
-        imgui.set_window_font_scale(0.75)
-        status = ["SYS: ONLINE", f"CPU: {47 + int(current_time * 7) % 12}%",
-                  "THREAT: LOW", f"SCAN: {int(current_time * 40) % 100}%"]
-        for i, s in enumerate(status):
-            draw_list.add_text(w - 140, 12 + i * 16,
-                               imgui.get_color_u32_rgba(0.3, 0.65, 1.0, alpha * 0.5), s)
-
-        # Directives (bottom-left, fast typewriter)
-        directives = ["DIRECTIVE 1: SERVE THE PUBLIC TRUST",
-                      "DIRECTIVE 2: PROTECT THE INNOCENT",
-                      "DIRECTIVE 3: UPHOLD THE LAW",
-                      "DIRECTIVE 4: [CLASSIFIED]"]
-        for i, d in enumerate(directives):
-            chars = int((current_time - 0.5 - i * 0.3) * 30)
-            if chars <= 0:
-                continue
-            col = imgui.get_color_u32_rgba(0.3, 0.6, 1.0, alpha * 0.5)
-            if i == 3:
-                col = imgui.get_color_u32_rgba(1.0, 0.2, 0.1, alpha * (0.4 + 0.4 * math.sin(current_time * 5)))
-            draw_list.add_text(15, h - 85 + i * 18, col, d[:chars])
-        imgui.set_window_font_scale(1.0)
-
-    @staticmethod
-    def _draw_bracket(draw_list, cx, cy, size, arm, color, thickness):
-        """Draw 4 corner bracket pieces around a center point."""
-        for bx, by, dx, dy in [
-            (cx - size, cy - size, 1, 1),
-            (cx + size, cy - size, -1, 1),
-            (cx - size, cy + size, 1, -1),
-            (cx + size, cy + size, -1, -1),
-        ]:
-            draw_list.add_line(bx, by, bx + dx * arm, by, color, thickness)
-            draw_list.add_line(bx, by, bx, by + dy * arm, color, thickness)
 
     def _render_tron_grid(self, draw_list, window_width, window_height, current_time, alpha):
         """Tron-style perspective grid floor with neon glow."""
