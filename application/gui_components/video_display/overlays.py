@@ -288,6 +288,28 @@ class VideoOverlaysMixin:
             r, g, b, a = text['color']
             draw_list.add_text(sx, sy, imgui.get_color_u32_rgba(r, g, b, a), text['text'])
 
+        for line in overlay.get('lines', []):
+            sx1, sy1 = to_screen(line['x1'], line['y1'])
+            sx2, sy2 = to_screen(line['x2'], line['y2'])
+            r, g, b, a = line['color']
+            color_u32 = imgui.get_color_u32_rgba(r, g, b, a)
+            thickness = line.get('thickness', 2.0)
+            draw_list.add_line(sx1, sy1, sx2, sy2, color_u32, thickness)
+            # Arrow tip if requested
+            if line.get('arrow', False):
+                import math
+                dx, dy = sx2 - sx1, sy2 - sy1
+                length = math.sqrt(dx * dx + dy * dy)
+                if length > 0:
+                    tip_len = min(length * 0.3, 12.0)
+                    ux, uy = dx / length, dy / length
+                    px, py = -uy, ux  # perpendicular
+                    tx1 = sx2 - ux * tip_len + px * tip_len * 0.4
+                    ty1 = sy2 - uy * tip_len + py * tip_len * 0.4
+                    tx2 = sx2 - ux * tip_len - px * tip_len * 0.4
+                    ty2 = sy2 - uy * tip_len - py * tip_len * 0.4
+                    draw_list.add_triangle_filled(sx2, sy2, tx1, ty1, tx2, ty2, color_u32)
+
         draw_list.pop_clip_rect()
 
 
