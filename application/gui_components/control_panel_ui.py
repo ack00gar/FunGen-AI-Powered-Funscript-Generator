@@ -458,10 +458,11 @@ class ControlPanelUI(
         stage_proc = app.stage_processor
         events = app.event_handlers
 
-        bar_h = 50
-        avail = imgui.get_content_region_available()
-
-        imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + max(0, avail[1] - bar_h))
+        # Pin action bar to bottom of visible window area.
+        content_max_y = imgui.get_window_content_region_max()[1]
+        bar_h = 46  # separator + spacing + button (32) + margin
+        target_y = content_max_y - bar_h
+        imgui.set_cursor_pos_y(max(imgui.get_cursor_pos_y(), target_y))
 
         imgui.separator()
         imgui.spacing()
@@ -482,14 +483,7 @@ class ControlPanelUI(
                     elif hasattr(app, 'file_manager') and hasattr(app.file_manager, 'open_video_dialog'):
                         app.file_manager.open_video_dialog()
         elif is_offline_active:
-            # Offline analysis active — show progress and Stop
-            selected_mode = app.app_state_ui.selected_tracker_name
-            if selected_mode and self._is_hybrid_tracker(selected_mode):
-                progress = getattr(stage_proc, 'stage2_main_progress_value', 0.0)
-            else:
-                progress = getattr(stage_proc, 'overall_progress', 0.0)
-            imgui.progress_bar(progress, (-1, 18),
-                               f"{int(progress * 100)}%")
+            # Offline analysis active — Stop button only (progress shown in execution display above)
             with destructive_button_style():
                 if imgui.button("Stop Analysis##PinnedAction", width=-1, height=32):
                     events.handle_abort_process_click()
@@ -981,10 +975,6 @@ class ControlPanelUI(
                 imgui.text("Tracking Axes")
                 self._render_tracking_axes_mode(stage_proc)
 
-                # Execution progress
-                imgui.spacing()
-                self._render_execution_progress_display()
-
                 # Clear All Chapters (inside the card, only when chapters exist)
                 chapters = getattr(app.funscript_processor, "video_chapters", [])
                 if chapters:
@@ -1015,6 +1005,18 @@ class ControlPanelUI(
                         imgui.end_popup()
 
         mode = app_state.selected_tracker_name
+
+        # Progress card (only during analysis)
+        if self._is_offline_tracker(mode) and stage_proc.full_analysis_active:
+            imgui.spacing()
+            with section_card("Progress##RunControlProgress", tier="secondary") as progress_open:
+                if progress_open:
+                    self._render_execution_progress_display()
+
+        # Force re-run option for offline trackers (only when idle)
+        if self._is_offline_tracker(mode) and not stage_proc.full_analysis_active:
+            _, stage_proc.force_rerun_stage1 = imgui.checkbox(
+                "Force re-run (ignore cache)##FRCard", stage_proc.force_rerun_stage1)
 
         # Analysis range
         tracker_supports_range = self._get_tracker_property(mode, "supports_range", True)

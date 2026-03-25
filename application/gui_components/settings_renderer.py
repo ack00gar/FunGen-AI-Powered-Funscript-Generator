@@ -632,23 +632,31 @@ class SettingsRenderer:
         _begin_settings_columns("proc_cols")
 
         # Stage Reruns
-        if _is_offline_tracker(tmode) and not _is_hybrid_tracker(tmode):
-            _row_label("Force Re-run",
-                       "Re-run stages even if cached results exist.")
-            with _DisabledScope(busy):
-                _, stage_proc.force_rerun_stage1 = imgui.checkbox("Stage 1##FR1", stage_proc.force_rerun_stage1)
-                imgui.same_line()
-                _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
-                    "Stage 2##FR2", stage_proc.force_rerun_stage2_segmentation)
-            _row_end()
+        if _is_offline_tracker(tmode):
+            if _is_hybrid_tracker(tmode):
+                _row_label("Force Re-run",
+                           "Re-run analysis even if cached results exist\n(preprocessed video, detection data).")
+                with _DisabledScope(busy):
+                    _, stage_proc.force_rerun_stage1 = imgui.checkbox(
+                        "Force Re-run##FRHybrid", stage_proc.force_rerun_stage1)
+                _row_end()
+            else:
+                _row_label("Force Re-run",
+                           "Re-run stages even if cached results exist.")
+                with _DisabledScope(busy):
+                    _, stage_proc.force_rerun_stage1 = imgui.checkbox("Stage 1##FR1", stage_proc.force_rerun_stage1)
+                    imgui.same_line()
+                    _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
+                        "Stage 2##FR2", stage_proc.force_rerun_stage2_segmentation)
+                _row_end()
 
-            _row_label("Keep Stage 2 DB",
-                       "Keep the database file after processing.\nDisable to save disk space.")
-            with _DisabledScope(busy):
-                ch, nv = imgui.checkbox("##RetDB", settings.get("retain_stage2_database", True))
-                if ch:
-                    settings.set("retain_stage2_database", nv)
-            _row_end()
+                _row_label("Keep Stage 2 DB",
+                           "Keep the database file after processing.\nDisable to save disk space.")
+                with _DisabledScope(busy):
+                    ch, nv = imgui.checkbox("##RetDB", settings.get("retain_stage2_database", True))
+                    if ch:
+                        settings.set("retain_stage2_database", nv)
+                _row_end()
 
         # Preprocessed video
         if _is_offline_tracker(tmode):

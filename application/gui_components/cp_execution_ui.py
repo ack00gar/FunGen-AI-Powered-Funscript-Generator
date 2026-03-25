@@ -58,6 +58,11 @@ class ExecutionMixin:
         active_progress_color = self.ControlPanelColors.ACTIVE_PROGRESS # Vibrant blue for active
         completed_progress_color = self.ControlPanelColors.COMPLETED_PROGRESS # Vibrant green for completed
 
+        # Hybrid trackers have their own internal pipeline -- skip S1/S2/S3 breakdown
+        if self._is_hybrid_tracker(selected_mode):
+            self._render_hybrid_progress_ui(stage_proc, is_analysis_running, active_progress_color, completed_progress_color)
+            return
+
         # Stage 1
         imgui.text("Stage 1: YOLO Object Detection")
         if is_analysis_running and stage_proc.current_analysis_stage == 1:
@@ -197,6 +202,47 @@ class ExecutionMixin:
                 imgui.pop_style_color()
             else:
                 imgui.text_wrapped(f"Status: {stage_proc.stage3_status_text}")
+        imgui.spacing()
+
+    def _render_hybrid_progress_ui(self, stage_proc, is_analysis_running, active_color, completed_color):
+        """Simplified progress display for hybrid trackers (VR Hybrid, etc.)."""
+        if is_analysis_running:
+            # Status text from stage_proc (hybrid reports via S2 fields)
+            status = stage_proc.stage2_status_text or "Processing..."
+            imgui.text_wrapped(f"Status: {status}")
+
+            main_label = stage_proc.stage2_main_progress_label
+            if main_label:
+                imgui.text_wrapped(f"Main: {main_label}")
+
+            # Timing from S1 fields (hybrid reuses these for decode/yolo/flow timing)
+            timing_parts = []
+            decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
+            yolo_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
+            flow_ms = getattr(stage_proc, 'stage2_flow_ms', 0.0)
+            if decode_ms > 0:
+                timing_parts.append(f"Decode: {decode_ms:.1f}ms")
+            if yolo_ms > 0:
+                timing_parts.append(f"YOLO: {yolo_ms:.1f}ms")
+            if flow_ms > 0:
+                timing_parts.append(f"Flow: {flow_ms:.1f}ms")
+            if timing_parts:
+                imgui.text(" | ".join(timing_parts))
+
+            progress = stage_proc.stage2_main_progress_value
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_color)
+            imgui.progress_bar(progress, size=(-1, 0),
+                               overlay=f"{progress * 100:.0f}%")
+            imgui.pop_style_color()
+        elif stage_proc.stage2_final_elapsed_time_str:
+            imgui.text_wrapped(f"Completed in {stage_proc.stage2_final_elapsed_time_str}")
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_color)
+            imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+            imgui.pop_style_color()
+        else:
+            status = stage_proc.stage2_status_text
+            if status and status != "N/A":
+                imgui.text_wrapped(f"Status: {status}")
         imgui.spacing()
 
     # ------- Common actions -------
