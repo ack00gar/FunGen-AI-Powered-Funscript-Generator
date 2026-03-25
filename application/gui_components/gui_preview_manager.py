@@ -343,9 +343,10 @@ class PreviewManagerMixin:
                         # Take right half for preview
                         frame = frame[:, width//2:]
 
-            # Crop out black padding if frame is padded (non-HD 640x640 mode)
+            # Crop out black padding if frame is padded (non-HD 640x640 mode only)
             height, width = frame.shape[:2]
-            if hasattr(self.app, 'app_state_ui'):
+            is_hd = self.app.processor and self.app.processor.is_hd_active
+            if not is_hd and hasattr(self.app, 'app_state_ui'):
                 c_l, c_t, c_r, c_b = self.app.app_state_ui.get_processing_content_uv_rect()
                 if (c_l, c_t, c_r, c_b) != (0.0, 0.0, 1.0, 1.0):
                     y0, y1 = int(c_t * height), int(c_b * height)
