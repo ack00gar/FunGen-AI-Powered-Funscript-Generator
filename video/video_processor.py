@@ -632,6 +632,9 @@ class VideoProcessor(
         # Reinitialize GPU unwarp worker in case unwarp method changed
         self._init_gpu_unwarp_worker()
 
+        # Reinitialize thumbnail extractor with new display dimensions
+        self._init_thumbnail_extractor()
+
         self.logger.info(f"Attempting to fetch frame {stored_frame_index} with new settings.")
         new_frame = self._get_specific_frame(stored_frame_index, use_thumbnail=True)
         if new_frame is not None:
