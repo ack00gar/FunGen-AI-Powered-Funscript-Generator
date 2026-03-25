@@ -6,7 +6,6 @@ import platform
 import sys
 from threading import Thread as PyThread
 from queue import Empty, Full
-from ultralytics import YOLO
 import os
 import logging
 from typing import Optional, Tuple, List
@@ -582,12 +581,15 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
             consumer_logger.warning(f"[S1 Consumer-{consumer_idx}] Failed to pre-import torchvision: {e}")
 
         # Load BOTH models in the same worker
+        from tracker.tracker_modules.helpers.yolo_detection_helper import (
+            load_model, run_detection, run_pose, detection_to_dict, pose_to_dict,
+        )
         consumer_logger.info(f"[S1 Consumer-{consumer_idx}] Loading models...")
-        det_model = YOLO(yolo_det_model_path, task='detect')
+        det_model = load_model(yolo_det_model_path, task='detect')
 
         # Force CPU for pose model on Apple MPS to avoid known bugs ?
         pose_device = constants.DEVICE
-        pose_model = YOLO(yolo_pose_model_path, task='pose')
+        pose_model = load_model(yolo_pose_model_path, task='pose')
         consumer_logger.info(
             f"[S1 Consumer-{consumer_idx}] Models loaded. Detection on '{constants.DEVICE}', Pose on '{pose_device}'.")
 
@@ -605,19 +607,9 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
 
                 # --- Step 1: Perform Detection (on every frame) ---
                 t_det_start = time.time()
-                det_results = det_model(frame, device=constants.DEVICE, verbose=False, imgsz=yolo_input_size_consumer,
-                                        conf=confidence_threshold)
-                detections = []
-                for r in det_results:
-                    if r.boxes:
-                        for i in range(len(r.boxes)):
-                            box_data = r.boxes[i]
-                            detections.append({
-                                'bbox': box_data.xyxy[0].tolist(),
-                                'confidence': float(box_data.conf[0]),
-                                'class': int(box_data.cls[0]),
-                                'class_name': det_model.names[int(box_data.cls[0])]
-                            })
+                det_objs = run_detection(det_model, frame, conf=confidence_threshold,
+                                         imgsz=yolo_input_size_consumer, device=constants.DEVICE)
+                detections = [detection_to_dict(d) for d in det_objs]
                 yolo_det_ms = (time.time() - t_det_start) * 1000.0
 
                 # --- Step 2: Conditionally perform Pose Estimation ---
@@ -626,14 +618,9 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                 yolo_pose_ms = 0.0
                 if frame_id % max(1, int(round(video_fps))) == 0:
                     t_pose_start = time.time()
-                    pose_results = pose_model(frame, device=pose_device, verbose=False, imgsz=yolo_input_size_consumer, conf=confidence_threshold)
-                    for r in pose_results:
-                        if r.keypoints and r.boxes:
-                            for i in range(len(r.boxes)):
-                                poses.append({
-                                    'bbox': r.boxes.xyxy[i].tolist(),
-                                    'keypoints': r.keypoints.data[i].tolist()
-                                })
+                    pose_objs = run_pose(pose_model, frame, conf=confidence_threshold,
+                                         imgsz=yolo_input_size_consumer, device=pose_device)
+                    poses = [pose_to_dict(p) for p in pose_objs]
                     yolo_pose_ms = (time.time() - t_pose_start) * 1000.0
 
                 # --- Step 3: Package results ---

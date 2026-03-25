@@ -142,8 +142,11 @@ class HybridFlowTracker(BaseTracker):
                 self.logger.error(f"YOLO model not found: {yolo_model_path}")
                 return False
 
-            from ultralytics import YOLO
-            self._yolo_model = YOLO(yolo_model_path, task='detect')
+            from tracker.tracker_modules.helpers.yolo_detection_helper import (
+                load_model as _yolo_load_model, run_detection as _yolo_run_detection,
+            )
+            self._yolo_run_detection = _yolo_run_detection
+            self._yolo_model = _yolo_load_model(yolo_model_path)
             self.logger.info(f"YOLO model loaded: {yolo_model_path}")
 
             # Initialize DIS optical flow
@@ -350,30 +353,27 @@ class HybridFlowTracker(BaseTracker):
                   ) -> Tuple[Optional[Tuple[int, int, int, int]], Optional[Tuple], Optional[Tuple]]:
         """Run YOLO, return (roi_box, penis_box, contact_box) or (None, None, None)."""
         try:
-            results = self._yolo_model(frame, device=config_constants.DEVICE, verbose=False,
-                                       conf=self._yolo_confidence,
-                                       imgsz=getattr(self.app, 'yolo_input_size', 640))
+            det_objs = self._yolo_run_detection(
+                self._yolo_model, frame,
+                conf=self._yolo_confidence,
+                imgsz=getattr(self.app, 'yolo_input_size', 640),
+                device=config_constants.DEVICE)
         except Exception:
             return None, None, None
 
-        if not results or len(results) == 0:
+        if not det_objs:
             return None, None, None
 
         penis_box = None
         best_conf = 0.0
         contact_boxes = []
 
-        for box in results[0].boxes:
-            cls_id = int(box.cls[0])
-            cls_name = self._yolo_model.names.get(cls_id, '')
-            conf = float(box.conf[0])
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-
-            if cls_name == 'penis' and conf > best_conf:
-                penis_box = (x1, y1, x2, y2)
-                best_conf = conf
-            elif cls_name in CONTACT_CLASSES:
-                contact_boxes.append((x1, y1, x2, y2))
+        for d in det_objs:
+            if d.class_name == 'penis' and d.confidence > best_conf:
+                penis_box = d.bbox
+                best_conf = d.confidence
+            elif d.class_name in CONTACT_CLASSES:
+                contact_boxes.append(d.bbox)
 
         if penis_box is None:
             return None, None, None
