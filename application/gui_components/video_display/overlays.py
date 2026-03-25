@@ -239,7 +239,7 @@ class VideoOverlaysMixin:
         if img_rect['w'] <= 0 or img_rect['h'] <= 0:
             return
 
-        c_left, c_top, c_right, c_bottom = app_state.get_content_uv_rect()
+        c_left, c_top, c_right, c_bottom = app_state.get_processing_content_uv_rect()
         c_w, c_h = c_right - c_left, c_bottom - c_top
         buf_size = self.app.yolo_input_size
         uv_span_x = c_w / app_state.video_zoom_factor

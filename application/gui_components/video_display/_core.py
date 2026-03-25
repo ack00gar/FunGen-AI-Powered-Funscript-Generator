@@ -95,8 +95,8 @@ class VideoDisplayCoreMixin:
         if not (0 <= norm_visible_x <= 1 and 0 <= norm_visible_y <= 1):  # Click outside displayed image
             return None
 
-        # Map through content UV rect (accounts for black border cropping)
-        c_left, c_top, c_right, c_bottom = app_state.get_content_uv_rect()
+        # Map through processing content UV rect (640x640 padded space -> screen)
+        c_left, c_top, c_right, c_bottom = app_state.get_processing_content_uv_rect()
         c_w = c_right - c_left
         c_h = c_bottom - c_top
 
@@ -136,8 +136,8 @@ class VideoDisplayCoreMixin:
         tex_norm_x = video_x / video_buffer_w
         tex_norm_y = video_y / video_buffer_h
 
-        # Map through content UV rect (reverse of get_video_uv_coords)
-        c_left, c_top, c_right, c_bottom = app_state.get_content_uv_rect()
+        # Map through processing content UV rect (reverse: screen -> 640x640 padded space)
+        c_left, c_top, c_right, c_bottom = app_state.get_processing_content_uv_rect()
         c_w = c_right - c_left
         c_h = c_bottom - c_top
 

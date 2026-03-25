@@ -28,8 +28,9 @@ class AppStateUI:
         self.video_pan_normalized = [0.0, 0.0]  # [pan_x_norm, pan_y_norm] top-left of visible UV
         self.video_pan_step = 0.05  # Percentage of visible video width/height
 
-        # Cached content UV rect (invalidated on video load / settings change)
+        # Cached content UV rects (invalidated on video load / settings change)
         self._cached_content_uv = None
+        self._cached_processing_uv = None
 
         # Status Message
         self.status_message: str = ""
@@ -290,27 +291,42 @@ class AppStateUI:
     def invalidate_content_uv_cache(self):
         """Call when video changes (load, settings reapply) to recompute content UV rect."""
         self._cached_content_uv = None
+        self._cached_processing_uv = None
 
     def get_content_uv_rect(self) -> Tuple[float, float, float, float]:
-        """Returns (uv_left, uv_top, uv_right, uv_bottom) of actual video content within the texture.
+        """Content UV for display (texture UV coords and display sizing).
 
-        Cached per-video — only recomputes when invalidated (video load/settings change).
+        Returns (0,0,1,1) in HD mode since the display texture has no padding.
+        Cached per-video.
         """
         if self._cached_content_uv is not None:
             return self._cached_content_uv
 
-        result = self._compute_content_uv_rect()
-        self._cached_content_uv = result
-        return result
+        proc = self.app.processor
+        if proc and proc.is_hd_active:
+            self._cached_content_uv = (0.0, 0.0, 1.0, 1.0)
+        else:
+            self._cached_content_uv = self._compute_processing_content_uv()
+        return self._cached_content_uv
 
-    def _compute_content_uv_rect(self) -> Tuple[float, float, float, float]:
-        """Compute content UV rect (uncached)."""
+    def get_processing_content_uv_rect(self) -> Tuple[float, float, float, float]:
+        """Content UV for overlay coordinate mapping (640x640 processing space).
+
+        Always returns where content sits within the padded 640x640 processing
+        frame, regardless of HD mode. Used by _video_to_screen_coords and
+        overlay renderers to correctly position overlays.
+        Cached per-video.
+        """
+        if self._cached_processing_uv is not None:
+            return self._cached_processing_uv
+
+        self._cached_processing_uv = self._compute_processing_content_uv()
+        return self._cached_processing_uv
+
+    def _compute_processing_content_uv(self) -> Tuple[float, float, float, float]:
+        """Compute where actual content sits within 640x640 processing frame."""
         proc = self.app.processor
         if not proc or not proc.video_info:
-            return (0.0, 0.0, 1.0, 1.0)
-
-        # HD mode: display frame is already at native AR, no padding
-        if proc.is_hd_active:
             return (0.0, 0.0, 1.0, 1.0)
 
         # VR videos fill the entire square (v360 / GPU unwarp / crop+scale)
@@ -330,16 +346,16 @@ class AppStateUI:
         size = proc.yolo_input_size
 
         if 0.95 < aspect < 1.05:
-            return (0.0, 0.0, 1.0, 1.0)  # Square — no padding
+            return (0.0, 0.0, 1.0, 1.0)  # Square -- no padding
         elif aspect > 1.05:
-            # Landscape — padded top/bottom
+            # Landscape -- padded top/bottom
             scaled_h = size / aspect
             scaled_h = int(scaled_h) & ~1
             scaled_h = min(scaled_h, size)
             pad = (size - scaled_h) / 2.0
             return (0.0, pad / size, 1.0, (size - pad) / size)
         else:
-            # Portrait — padded left/right
+            # Portrait -- padded left/right
             scaled_w = size * aspect
             scaled_w = int(scaled_w) & ~1
             scaled_w = min(scaled_w, size)
