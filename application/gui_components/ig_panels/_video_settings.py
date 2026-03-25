@@ -100,6 +100,23 @@ class VideoSettingsMixin:
             threading.Thread(target=processor.reapply_video_settings, daemon=True, name='VideoTypeReapply').start()
         row_end()
 
+        # HD Video Display — only for 2D videos, disabled during playback/processing
+        is_2d = processor.determined_video_type == '2D' or (processor.determined_video_type is None and processor.video_type_setting != 'VR')
+        is_busy = processor.is_processing
+        if is_2d:
+            row_label("HD Video Display", "Decode at higher resolution for sharper preview.\nDisable on slow machines.\nStop playback to change.")
+            if is_busy:
+                imgui.begin_disabled()
+            hd_val = self.app.app_settings.get("hd_video_display", True)
+            changed, hd_val = imgui.checkbox("Enabled##HDVideoVid", hd_val)
+            if changed and not is_busy:
+                self.app.app_settings.set("hd_video_display", hd_val)
+                if processor.is_video_open():
+                    threading.Thread(target=processor.reapply_video_settings, daemon=True, name='HDVideoReapply').start()
+            if is_busy:
+                imgui.end_disabled()
+            row_end()
+
         end_settings_columns()
 
         # --- VR Settings (conditional) ---

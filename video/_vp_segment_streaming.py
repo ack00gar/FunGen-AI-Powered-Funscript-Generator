@@ -180,7 +180,7 @@ class SegmentStreamingMixin:
                     break
 
                 # Always use BGR24 format (3 bytes per pixel)
-                expected_size = self.yolo_input_size * self.yolo_input_size * 3
+                expected_size = self._display_frame_w * self._display_frame_h * 3
                 actual_bytes = len(raw_frame_bytes)
 
                 # Validate frame size
@@ -188,7 +188,7 @@ class SegmentStreamingMixin:
                     self.logger.error(f"Invalid frame size: {actual_bytes} bytes (expected {expected_size}). Skipping frame.")
                     continue
 
-                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
+                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self._display_frame_h, self._display_frame_w, 3)
 
                 # Apply GPU unwarp for VR frames if enabled
                 unwarp_ms = 0.0

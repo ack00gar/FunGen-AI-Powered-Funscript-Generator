@@ -76,7 +76,7 @@ class VideoDisplayCoreMixin:
 
 
     def _screen_to_video_coords(self, screen_x: float, screen_y: float) -> tuple | None:
-        """Converts absolute screen coordinates to video buffer coordinates, accounting for pan and zoom."""
+        """Converts absolute screen coordinates to video buffer coordinates, accounting for pan, zoom, and content UV cropping."""
         app_state = self.app.app_state_ui
 
         img_rect = self._actual_video_image_rect_on_screen
@@ -95,21 +95,24 @@ class VideoDisplayCoreMixin:
         if not (0 <= norm_visible_x <= 1 and 0 <= norm_visible_y <= 1):  # Click outside displayed image
             return None
 
-        # Account for pan and zoom to find normalized position on the *full* texture
-        uv_pan_x, uv_pan_y = app_state.video_pan_normalized
-        uv_disp_w_tex = 1.0 / app_state.video_zoom_factor
-        uv_disp_h_tex = 1.0 / app_state.video_zoom_factor
+        # Map through content UV rect (accounts for black border cropping)
+        c_left, c_top, c_right, c_bottom = app_state.get_content_uv_rect()
+        c_w = c_right - c_left
+        c_h = c_bottom - c_top
 
-        tex_norm_x = uv_pan_x + norm_visible_x * uv_disp_w_tex
-        tex_norm_y = uv_pan_y + norm_visible_y * uv_disp_h_tex
+        # Pan/zoom in content-relative space, then map to full texture UV
+        uv_span_x = c_w / app_state.video_zoom_factor
+        uv_span_y = c_h / app_state.video_zoom_factor
+
+        tex_norm_x = c_left + app_state.video_pan_normalized[0] * c_w + norm_visible_x * uv_span_x
+        tex_norm_y = c_top + app_state.video_pan_normalized[1] * c_h + norm_visible_y * uv_span_y
 
         if not (0 <= tex_norm_x <= 1 and 0 <= tex_norm_y <= 1):  # Point is outside the full texture due to pan/zoom
             return None
 
-        video_buffer_w, video_buffer_h = self.app.yolo_input_size, self.app.yolo_input_size  # Assume tracker works on this size
-        if self.app.processor and self.app.processor.current_frame is not None:
-            h, w = self.app.processor.current_frame.shape[:2]
-            video_buffer_w, video_buffer_h = w, h
+        # Always use processing frame dimensions (yolo_input_size) for overlay coordinate space
+        video_buffer_w = self.app.yolo_input_size
+        video_buffer_h = self.app.yolo_input_size
 
         video_x = int(tex_norm_x * video_buffer_w)
         video_y = int(tex_norm_y * video_buffer_h)
@@ -118,14 +121,13 @@ class VideoDisplayCoreMixin:
 
 
     def _video_to_screen_coords(self, video_x: int, video_y: int) -> tuple | None:
-        """Converts video buffer coordinates to absolute screen coordinates, accounting for pan and zoom."""
+        """Converts video buffer coordinates to absolute screen coordinates, accounting for pan, zoom, and content UV cropping."""
         app_state = self.app.app_state_ui
         img_rect = self._actual_video_image_rect_on_screen
 
-        video_buffer_w, video_buffer_h = self.app.yolo_input_size, self.app.yolo_input_size
-        if self.app.processor and self.app.processor.current_frame is not None:
-            h, w = self.app.processor.current_frame.shape[:2]
-            video_buffer_w, video_buffer_h = w, h
+        # Always use processing frame dimensions (yolo_input_size) for overlay coordinate space
+        video_buffer_w = self.app.yolo_input_size
+        video_buffer_h = self.app.yolo_input_size
 
         if video_buffer_w <= 0 or video_buffer_h <= 0 or img_rect['w'] <= 0 or img_rect['h'] <= 0:
             return None
@@ -134,15 +136,22 @@ class VideoDisplayCoreMixin:
         tex_norm_x = video_x / video_buffer_w
         tex_norm_y = video_y / video_buffer_h
 
-        # Account for pan and zoom to find normalized position on the *visible part* of the texture
-        uv_pan_x, uv_pan_y = app_state.video_pan_normalized
-        uv_disp_w_tex = 1.0 / app_state.video_zoom_factor
-        uv_disp_h_tex = 1.0 / app_state.video_zoom_factor
+        # Map through content UV rect (reverse of get_video_uv_coords)
+        c_left, c_top, c_right, c_bottom = app_state.get_content_uv_rect()
+        c_w = c_right - c_left
+        c_h = c_bottom - c_top
 
-        if uv_disp_w_tex == 0 or uv_disp_h_tex == 0: return None  # Avoid division by zero
+        if c_w <= 0 or c_h <= 0: return None
 
-        norm_visible_x = (tex_norm_x - uv_pan_x) / uv_disp_w_tex
-        norm_visible_y = (tex_norm_y - uv_pan_y) / uv_disp_h_tex
+        uv_span_x = c_w / app_state.video_zoom_factor
+        uv_span_y = c_h / app_state.video_zoom_factor
+
+        if uv_span_x == 0 or uv_span_y == 0: return None
+
+        # Convert texture-space position to content-relative visible position
+        # tex_norm = c_left + pan * c_w + norm_visible * uv_span  =>  solve for norm_visible
+        norm_visible_x = (tex_norm_x - c_left - app_state.video_pan_normalized[0] * c_w) / uv_span_x
+        norm_visible_y = (tex_norm_y - c_top - app_state.video_pan_normalized[1] * c_h) / uv_span_y
 
         # If the video point is outside the current view due to pan/zoom, don't draw it
         if not (0 <= norm_visible_x <= 1 and 0 <= norm_visible_y <= 1):

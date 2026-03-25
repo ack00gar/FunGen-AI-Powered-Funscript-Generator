@@ -86,7 +86,7 @@ class NavBufferMixin:
             if len(raw) < self.frame_size_bytes:
                 return None
             frame = np.frombuffer(raw, dtype=np.uint8).reshape(
-                self.yolo_input_size, self.yolo_input_size, 3
+                self._display_frame_h, self._display_frame_w, 3
             ).copy()
             self._ffmpeg_read_position += 1
             return frame

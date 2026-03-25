@@ -12,7 +12,7 @@ import subprocess
 import sys
 import numpy as np
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 from threading import Lock
 
 
@@ -27,6 +27,7 @@ class ThumbnailExtractor:
     def __init__(self, video_path: str, fps: float, total_frames: int,
                  output_size: int = 320, vr_input_format: str = None,
                  vr_fov: int = 190, vr_pitch: float = 0.0,
+                 display_dimensions: Optional[Tuple[int, int]] = None,
                  logger: Optional[logging.Logger] = None):
         self.video_path = video_path
         self.logger = logger or logging.getLogger(__name__)
@@ -36,6 +37,9 @@ class ThumbnailExtractor:
         self.vr_input_format = vr_input_format
         self.vr_fov = vr_fov
         self.vr_pitch = vr_pitch
+
+        # HD display dimensions (width, height) — when set, 2D output is non-square
+        self._display_w, self._display_h = display_dimensions if display_dimensions else (output_size, output_size)
 
         self.lock = Lock()
         self.is_open = fps > 0 and total_frames > 0
@@ -53,7 +57,7 @@ class ThumbnailExtractor:
         if self.is_open:
             self.logger.debug(
                 f"ThumbnailExtractor: {fps:.2f} FPS, "
-                f"{total_frames} frames, output={output_size}px"
+                f"{total_frames} frames, output={self._display_w}x{self._display_h}"
             )
 
     def _build_vf_filters(self) -> str:
@@ -81,13 +85,18 @@ class ThumbnailExtractor:
                 f'w={self.output_size}:h={self.output_size}:interp=linear'
             )
         else:
-            # 2D: scale preserving aspect ratio, pad to square
-            filters.append(
-                f'scale={self.output_size}:{self.output_size}'
-                f':force_original_aspect_ratio=decrease,'
-                f'pad={self.output_size}:{self.output_size}'
-                f':(ow-iw)/2:(oh-ih)/2:black'
-            )
+            # 2D: scale to display dimensions (no padding when HD, padded square when standard)
+            if self._display_w != self.output_size or self._display_h != self.output_size:
+                # HD mode: scale to exact display dimensions, no padding
+                filters.append(f'scale={self._display_w}:{self._display_h}')
+            else:
+                # Standard mode: scale preserving aspect ratio, pad to square
+                filters.append(
+                    f'scale={self.output_size}:{self.output_size}'
+                    f':force_original_aspect_ratio=decrease,'
+                    f'pad={self.output_size}:{self.output_size}'
+                    f':(ow-iw)/2:(oh-ih)/2:black'
+                )
 
         return ','.join(filters)
 
@@ -96,7 +105,7 @@ class ThumbnailExtractor:
         Extract a single frame at the specified index using FFmpeg.
 
         Returns:
-            Frame as BGR24 numpy array (output_size x output_size) or None.
+            Frame as BGR24 numpy array (display_h x display_w x 3) or None.
         """
         if not self.is_open:
             return None
@@ -125,7 +134,7 @@ class ThumbnailExtractor:
                     creationflags=creation_flags
                 )
 
-                frame_size = self.output_size * self.output_size * 3
+                frame_size = self._display_w * self._display_h * 3
                 if len(proc.stdout) < frame_size:
                     self.logger.warning(
                         f"ThumbnailExtractor: Incomplete data for frame {frame_index} "
@@ -135,7 +144,7 @@ class ThumbnailExtractor:
 
                 return np.frombuffer(
                     proc.stdout[:frame_size], dtype=np.uint8
-                ).reshape(self.output_size, self.output_size, 3)
+                ).reshape(self._display_h, self._display_w, 3)
 
         except subprocess.TimeoutExpired:
             self.logger.warning(f"ThumbnailExtractor: FFmpeg timeout for frame {frame_index}")

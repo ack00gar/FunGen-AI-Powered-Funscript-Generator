@@ -181,9 +181,6 @@ class SettingsRenderer:
         # --- Interface ---
         filtered("Interface##SettingsInterface", ["interface"], self._render_interface)
 
-        # --- Video ---
-        filtered("Video##SettingsVideo", ["video"], self._render_video_settings)
-
         # --- Energy & Performance ---
         filtered("Energy & Performance##SettingsEnergy", ["energy"], self._render_energy_perf)
 
@@ -379,37 +376,6 @@ class SettingsRenderer:
         ch, v = imgui.checkbox("Show##PerfInd", settings.get("show_timeline_optimization_indicator", False))
         if ch:
             settings.set("show_timeline_optimization_indicator", v)
-        _row_end()
-
-        _end_settings_columns()
-
-    # ================================================================ #
-    #  Video                                                           #
-    # ================================================================ #
-
-    def _render_video_settings(self):
-        app = self.app
-        settings = app.app_settings
-
-        _begin_settings_columns("vid_set_cols")
-
-        _row_label("HW Acceleration", "FFmpeg hardware acceleration method.\nRequires video reload to take effect.")
-        imgui.push_item_width(-1)
-        opts = app.available_ffmpeg_hwaccels
-        disp = [o.replace("videotoolbox", "VideoToolbox (macOS)") for o in opts]
-        try:
-            hw_idx = opts.index(app.hardware_acceleration_method)
-        except ValueError:
-            hw_idx = 0
-        ch, nidx = imgui.combo("##HWAccel", hw_idx, disp)
-        if ch:
-            method = opts[nidx]
-            if method != app.hardware_acceleration_method:
-                app.hardware_acceleration_method = method
-                settings.set("hardware_acceleration_method", method)
-                app.logger.info("Hardware acceleration set to: %s. Reload video to apply." % method,
-                                extra={"status_message": True})
-        imgui.pop_item_width()
         _row_end()
 
         _end_settings_columns()

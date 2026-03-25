@@ -70,6 +70,9 @@ class TrackerManager:
         
         # Current ROI for visualization overlay
         self.roi = None
+
+        # Live overlay data (proxied from inner tracker for ImGui rendering)
+        self.live_overlay = {}
         
         # Additional GUI compatibility attributes that were in the old bridge
         self.oscillation_area_fixed = None  # Should be None or (x, y, w, h) tuple
@@ -1009,7 +1012,10 @@ class TrackerManager:
         """Update visualization state from current tracker."""
         if not self._current_tracker:
             return
-            
+
+        # Proxy live_overlay from inner tracker for ImGui rendering
+        self.live_overlay = getattr(self._current_tracker, 'live_overlay', {})
+
         # Update ROI for visualization overlay
         if hasattr(self._current_tracker, 'roi'):
             self.roi = getattr(self._current_tracker, 'roi', None)

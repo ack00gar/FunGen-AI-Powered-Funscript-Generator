@@ -173,6 +173,7 @@ class BaseTracker(ABC):
         self.app = None
         self.tracking_active = False
         self._initialized = False
+        self.live_overlay = {}
     
     @property
     @abstractmethod
@@ -371,17 +372,14 @@ class BaseTracker(ABC):
         """
         return {}
     
-    def _draw_tracking_indicator(self, frame: np.ndarray) -> None:
-        """
-        Draw simple 'Tracking' indicator in bottom right when active.
-        
-        Args:
-            frame: Frame to draw on (modified in-place)
-        """
+    def _draw_tracking_indicator(self) -> None:
+        """Populate live_overlay with tracking indicator text."""
         if self.tracking_active:
-            h, w = frame.shape[:2]
-            cv2.putText(frame, "Tracking", (w - 80, h - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            size = 640  # yolo_input_size reference
+            self.live_overlay.setdefault('texts', []).append({
+                'x': size - 120, 'y': size - 15,
+                'text': 'Tracking', 'color': (0, 1.0, 0, 1.0)
+            })
 
 
 class TrackerError(Exception):
