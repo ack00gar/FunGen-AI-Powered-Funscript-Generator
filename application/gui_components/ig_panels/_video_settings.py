@@ -4,6 +4,7 @@ import threading
 from application.utils.imgui_layout_helpers import (
     begin_settings_columns, end_settings_columns, row_label, row_end, row_separator,
 )
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card
 
 
@@ -105,16 +106,13 @@ class VideoSettingsMixin:
         is_busy = processor.is_processing
         if is_2d:
             row_label("HD Video Display", "Decode at higher resolution for sharper preview.\nDisable on slow machines.\nStop playback to change.")
-            if is_busy:
-                imgui.begin_disabled()
-            hd_val = self.app.app_settings.get("hd_video_display", True)
-            changed, hd_val = imgui.checkbox("Enabled##HDVideoVid", hd_val)
-            if changed and not is_busy:
-                self.app.app_settings.set("hd_video_display", hd_val)
-                if processor.is_video_open():
-                    threading.Thread(target=processor.reapply_video_settings, daemon=True, name='HDVideoReapply').start()
-            if is_busy:
-                imgui.end_disabled()
+            with _DisabledScope(is_busy):
+                hd_val = self.app.app_settings.get("hd_video_display", True)
+                changed, hd_val = imgui.checkbox("Enabled##HDVideoVid", hd_val)
+                if changed and not is_busy:
+                    self.app.app_settings.set("hd_video_display", hd_val)
+                    if processor.is_video_open():
+                        threading.Thread(target=processor.reapply_video_settings, daemon=True, name='HDVideoReapply').start()
             row_end()
 
         end_settings_columns()
