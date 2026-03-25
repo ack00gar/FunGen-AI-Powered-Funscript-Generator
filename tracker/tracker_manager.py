@@ -741,7 +741,11 @@ class TrackerManager:
                 if isinstance(action, dict) and 'at' in action and 'pos' in action:
                     timestamp_ms = action['at']
                     position = action['pos']
-                    self.funscript.add_action(timestamp_ms, position)
+                    axis = action.get('axis', 'primary')
+                    if axis == 'secondary':
+                        self.funscript.add_action(timestamp_ms, primary_pos=None, secondary_pos=position)
+                    else:
+                        self.funscript.add_action(timestamp_ms, position)
         except Exception as e:
             self.logger.error(f"Error adding actions to funscript: {e}")
 
