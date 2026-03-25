@@ -31,9 +31,11 @@ from typing import Dict, Any, Optional, List, Tuple
 try:
     from ..core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
     from ..helpers.signal_amplifier import SignalAmplifier
+    from ..helpers.yolo_detection_helper import YoloDetectionHelper, Detection
 except ImportError:
     from tracker.tracker_modules.core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
     from tracker.tracker_modules.helpers.signal_amplifier import SignalAmplifier
+    from tracker.tracker_modules.helpers.yolo_detection_helper import YoloDetectionHelper, Detection
 
 
 class YoloRoiTracker(BaseTracker):
@@ -59,8 +61,9 @@ class YoloRoiTracker(BaseTracker):
         # Import constants once at the top
         from config import constants
         
-        # YOLO model
-        self.yolo_model = None
+        # YOLO model (via YoloDetectionHelper)
+        self._yolo_helper = None
+        self.yolo_model = None  # backward-compat alias (set to helper.det_model)
         self.yolo_model_path = None
         
         # ROI tracking state
@@ -278,26 +281,33 @@ class YoloRoiTracker(BaseTracker):
             
             if yolo_model_path:
                 try:
-                    # Load the actual YOLO model like the original tracker did
-                    from ultralytics import YOLO
+                    from config import constants as config_constants
+                    device = getattr(config_constants, 'DEVICE', 'auto')
+
                     self.yolo_model_path = yolo_model_path
-                    self.yolo_model = YOLO(yolo_model_path, task='detect')
-                    self.logger.info(f"YOLO model loaded successfully from: {yolo_model_path}")
-                    
-                    # Load class names
-                    names_attr = getattr(self.yolo_model, 'names', None)
-                    if names_attr:
-                        if isinstance(names_attr, dict):
-                            self.classes = list(names_attr.values())
-                        else:
-                            self.classes = list(names_attr)
+                    self._yolo_helper = YoloDetectionHelper(
+                        det_model_path=yolo_model_path,
+                        device=device,
+                        conf=self.confidence_threshold,
+                        imgsz=640,
+                        logger_instance=self.logger,
+                    )
+                    # Backward-compat alias so any code checking self.yolo_model still works
+                    self.yolo_model = self._yolo_helper.det_model
+
+                    # Load class names from helper
+                    names_map = self._yolo_helper.class_names
+                    if names_map:
+                        self.classes = list(names_map.values())
                         self.logger.info(f"Loaded {len(self.classes)} classes from YOLO model")
                 except Exception as e:
                     self.logger.error(f"Failed to load YOLO model: {e}")
+                    self._yolo_helper = None
                     self.yolo_model = None
                     return False
             else:
                 self.logger.warning("No YOLO model path provided - object detection will be disabled")
+                self._yolo_helper = None
                 self.yolo_model = None
             
             # Initialize optical flow - use DIS with ultrafast preset for better performance
@@ -433,7 +443,7 @@ class YoloRoiTracker(BaseTracker):
                 self.stats_display.append(f"Mode: {self.motion_mode}")
             
             # Add model availability status for user feedback
-            if not self.yolo_model:
+            if not self._yolo_helper:
                 self.stats_display.append("No YOLO model - Manual ROI required")
             elif self.roi is None:
                 self.stats_display.append("No ROI detected - Scanning for objects")
@@ -710,6 +720,7 @@ class YoloRoiTracker(BaseTracker):
     
     def cleanup(self):
         """Clean up resources."""
+        self._yolo_helper = None
         self.yolo_model = None
         self.roi = None
         self.penis_last_known_box = None
@@ -742,71 +753,51 @@ class YoloRoiTracker(BaseTracker):
     
     def _detect_objects(self, frame: np.ndarray) -> List[Dict]:
         """
-        Run YOLO object detection on the frame using the loaded model.
-        This is the actual implementation ported from the original tracker.
+        Run YOLO object detection on the frame using YoloDetectionHelper.
+
+        Returns a list of legacy dicts with keys: class_name, confidence, box (xywh), class_id.
+        Downstream code (_process_detections, _find_interacting_objects, _draw_detections)
+        expects this dict format with 'box' in (x, y, w, h).
         """
-        detected_objects = []
-
-        # Check if detection model is available
-        if self.yolo_model is None:
+        if self._yolo_helper is None:
             self.logger.debug("No YOLO model available for detection")
-            return detected_objects
+            return []
 
-        # Get confidence threshold
+        # Get confidence threshold (may be updated in real-time via control panel)
         confidence_threshold = self._get_current_confidence_threshold()
-        
+
         # Determine discarded classes based on app context if available
-        discarded_classes_runtime = []
+        exclude_classes = None
         if self.app and hasattr(self.app, 'discarded_tracking_classes'):
-            discarded_classes_runtime = self.app.discarded_tracking_classes
+            discarded = self.app.discarded_tracking_classes
+            if discarded:
+                exclude_classes = set(c.lower() for c in discarded)
 
         try:
-            # Run YOLO detection - this is the actual detection call from original tracker
-            from config import constants as config_constants
-            device = getattr(config_constants, 'DEVICE', 'auto')
-            
-            results = self.yolo_model(frame, device=device, verbose=False, conf=confidence_threshold)
+            # Run detection via helper (handles device, imgsz, result parsing)
+            detections: List[Detection] = self._yolo_helper.detect_filtered(
+                frame,
+                exclude_classes=exclude_classes,
+                conf=confidence_threshold,
+            )
 
-            for result in results:
-                for box in result.boxes:
-                    conf = float(box.conf[0])
-                    class_id = int(box.cls[0])
-                    class_name = None
-                    
-                    # Get class name from model names
-                    if hasattr(self, 'classes') and self.classes and 0 <= class_id < len(self.classes):
-                        class_name = self.classes[class_id]
-                    else:
-                        # Try names in result
-                        rn = getattr(result, 'names', None)
-                        if isinstance(rn, dict) and class_id in rn:
-                            class_name = rn[class_id]
-                        else:
-                            class_name = f"unknown_{class_id}"
+            # Convert Detection objects to legacy dict format with xywh box
+            detected_objects = []
+            for det in detections:
+                x1, y1, x2, y2 = det.bbox
+                w, h = int(x2) - int(x1), int(y2) - int(y1)
+                detected_objects.append({
+                    "class_name": det.class_name,
+                    "confidence": det.confidence,
+                    "box": (int(x1), int(y1), w, h),  # xywh format
+                    "class_id": det.class_id,
+                })
 
-                    # Skip discarded classes
-                    if class_name and class_name.lower() in discarded_classes_runtime:
-                        continue
+            return detected_objects
 
-                    # Convert bounding box from xyxy to xywh format
-                    xyxy = box.xyxy[0].cpu().numpy()
-                    x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
-                    w, h = x2 - x1, y2 - y1
-                    
-                    # Create detection object
-                    detection = {
-                        "class_name": class_name,
-                        "confidence": conf,
-                        "box": (x1, y1, w, h),  # xywh format
-                        "class_id": class_id
-                    }
-                    
-                    detected_objects.append(detection)
-                    
         except Exception as e:
             self.logger.error(f"YOLO detection error: {e}", exc_info=True)
-        
-        return detected_objects
+            return []
     
     def _process_detections(self, detected_objects: List[Dict], frame_shape: Tuple[int, int]):
         """Process YOLO detection results to update ROI."""

@@ -47,12 +47,17 @@ try:
 except Exception:
     MODULES_AVAILABLE = False
 
-# Try to import YOLO for sparse detection
+# YOLO detection via unified helper
 try:
-    from ultralytics import YOLO
+    from tracker.tracker_modules.helpers.yolo_detection_helper import (
+        load_model as _yolo_load_model, run_detection as _yolo_run_detection,
+        detection_to_dict as _yolo_det_to_dict,
+    )
     YOLO_AVAILABLE = True
 except ImportError:
-    YOLO = None
+    _yolo_load_model = None
+    _yolo_run_detection = None
+    _yolo_det_to_dict = None
     YOLO_AVAILABLE = False
 
 # Constants
@@ -372,7 +377,7 @@ class VRHybridChapterTracker(BaseOfflineTracker):
             self.logger.error(f"YOLO model not found: {yolo_model_path}")
             return []
 
-        model = YOLO(yolo_model_path)
+        model = _yolo_load_model(yolo_model_path)
         self._yolo_model = model
 
         # Create VP for video info and filter building (streams ALL frames)
@@ -473,8 +478,10 @@ class VRHybridChapterTracker(BaseOfflineTracker):
 
                 t_yolo_start = time.perf_counter()
                 try:
-                    results = model(frame, device=config_constants.DEVICE, verbose=False,
-                                  conf=DEFAULT_CONFIDENCE, imgsz=self.yolo_input_size)
+                    det_objs = _yolo_run_detection(model, frame,
+                                                   conf=DEFAULT_CONFIDENCE,
+                                                   imgsz=self.yolo_input_size,
+                                                   device=config_constants.DEVICE)
                 except Exception as e:
                     self.logger.debug(f"YOLO error on frame {frame_idx}: {e}")
                     t_frame_start = time.perf_counter()
@@ -487,28 +494,18 @@ class VRHybridChapterTracker(BaseOfflineTracker):
                 # Parse detections
                 penis_box = None
                 other_boxes = []
-                frame_dets = []
+                frame_dets = [_yolo_det_to_dict(d) for d in det_objs]
 
-                if results and len(results) > 0:
-                    for box in results[0].boxes:
-                        cls_id = int(box.cls[0])
-                        cls_name = model.names.get(cls_id, f"class_{cls_id}")
-                        conf = float(box.conf[0])
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
-
-                        det = {'bbox': [x1, y1, x2, y2], 'class_name': cls_name,
-                               'confidence': conf}
-                        frame_dets.append(det)
-
-                        if cls_name == penis_class_name:
-                            if penis_box is None or conf > penis_box['conf']:
-                                penis_box = {'box': (x1, y1, x2, y2), 'conf': conf}
-                        elif cls_name in CONTACT_TO_POSITION:
-                            other_boxes.append({
-                                'box': (x1, y1, x2, y2),
-                                'class': cls_name,
-                                'conf': conf
-                            })
+                for d in det_objs:
+                    if d.class_name == penis_class_name:
+                        if penis_box is None or d.confidence > penis_box['conf']:
+                            penis_box = {'box': d.bbox, 'conf': d.confidence}
+                    elif d.class_name in CONTACT_TO_POSITION:
+                        other_boxes.append({
+                            'box': d.bbox,
+                            'class': d.class_name,
+                            'conf': d.confidence
+                        })
 
                 sparse_detections[frame_idx] = frame_dets
 
@@ -1411,12 +1408,14 @@ class VRHybridChapterTracker(BaseOfflineTracker):
                           h: int, w: int) -> Tuple[Optional[Tuple[int, int, int, int]], List[Dict]]:
         """Run YOLO on a single frame. Returns (padded_roi_or_None, overlay_dets_list)."""
         try:
-            results = yolo_model(frame, device=config_constants.DEVICE, verbose=False,
-                                 conf=DEFAULT_CONFIDENCE, imgsz=self.yolo_input_size)
+            det_objs = _yolo_run_detection(yolo_model, frame,
+                                           conf=DEFAULT_CONFIDENCE,
+                                           imgsz=self.yolo_input_size,
+                                           device=config_constants.DEVICE)
         except Exception:
             return None, []
 
-        if not results or len(results) == 0:
+        if not det_objs:
             return None, []
 
         penis_box = None
@@ -1424,22 +1423,17 @@ class VRHybridChapterTracker(BaseOfflineTracker):
         contact_boxes = []
         overlay_dets = []
 
-        for box in results[0].boxes:
-            cls_id = int(box.cls[0])
-            cls_name = yolo_model.names.get(cls_id, f"class_{cls_id}")
-            conf = float(box.conf[0])
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-
+        for d in det_objs:
             overlay_dets.append({
-                'bbox': [x1, y1, x2, y2], 'class_name': cls_name,
-                'confidence': conf, 'track_id': None, 'status': None,
+                'bbox': list(d.bbox), 'class_name': d.class_name,
+                'confidence': d.confidence, 'track_id': None, 'status': None,
             })
 
-            if cls_name == 'penis' and conf > best_conf:
-                penis_box = (x1, y1, x2, y2)
-                best_conf = conf
-            elif cls_name in CONTACT_TO_POSITION:
-                contact_boxes.append((x1, y1, x2, y2))
+            if d.class_name == 'penis' and d.confidence > best_conf:
+                penis_box = d.bbox
+                best_conf = d.confidence
+            elif d.class_name in CONTACT_TO_POSITION:
+                contact_boxes.append(d.bbox)
 
         if penis_box is None:
             return None, overlay_dets
