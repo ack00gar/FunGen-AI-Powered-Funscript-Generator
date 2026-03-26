@@ -371,8 +371,23 @@ class PluginPipelineUI:
         # Default to T1 (also for "All")
         return getattr(gui, 'timeline_editor1', None)
 
+    def _get_all_timeline_editors(self):
+        """Get all timeline editors as (label, editor) pairs."""
+        gui = getattr(self.app, 'gui_instance', None)
+        if not gui:
+            return []
+        editors = []
+        if hasattr(gui, 'timeline_editor1'):
+            editors.append(("T1", gui.timeline_editor1))
+        if hasattr(gui, 'timeline_editor2'):
+            editors.append(("T2", gui.timeline_editor2))
+        if hasattr(gui, '_extra_timeline_editors'):
+            for tnum, editor in sorted(gui._extra_timeline_editors.items()):
+                editors.append((f"T{tnum}", editor))
+        return editors
+
     def _preview_pipeline(self):
-        """Run pipeline on a copy and show preview overlay on the timeline."""
+        """Run pipeline on a copy and show preview overlay on affected timelines."""
         import copy as _copy
         self._last_errors.clear()
         processor = getattr(self.app, 'processor', None)
@@ -382,13 +397,6 @@ class PluginPipelineUI:
 
         funscript_obj = processor.tracker.funscript
         target = self.pipeline.target_axis
-        # Determine preview axis (for "All", preview T1)
-        preview_axis = timeline_label_to_axis("T1" if target == "All" else target, funscript_obj)
-
-        original_actions = list(funscript_obj.get_axis_actions(preview_axis) or [])
-        if not original_actions:
-            self._last_errors.append(f"No actions on {target}")
-            return
 
         # Run pipeline on a deep copy
         preview_funscript = _copy.deepcopy(funscript_obj)
@@ -397,38 +405,43 @@ class PluginPipelineUI:
             self._last_errors = errors
             return
 
-        transformed_actions = list(preview_funscript.get_axis_actions(preview_axis) or [])
+        # Determine which editors to preview on
+        if target == "All":
+            targets = [label for label, _ in self._get_all_timeline_editors()]
+        else:
+            targets = [target]
 
-        # Build preview data for the timeline renderer
-        preview_points = []
-        for action in transformed_actions:
-            preview_points.append({
-                'at': action['at'],
-                'pos': action['pos'],
-                'is_modified': True,
-                'is_selected': True,
-            })
+        any_set = False
+        for t_label in targets:
+            axis_name = timeline_label_to_axis(t_label, funscript_obj)
+            transformed = list(preview_funscript.get_axis_actions(axis_name) or [])
+            if not transformed:
+                continue
 
-        preview_data = {
-            'preview_points': preview_points,
-            'style': 'default',
-            'plugin_name': 'Pipeline',
-        }
+            preview_points = [{'at': a['at'], 'pos': a['pos'],
+                               'is_modified': True, 'is_selected': True}
+                              for a in transformed]
+            preview_data = {
+                'preview_points': preview_points,
+                'style': 'default',
+                'plugin_name': 'Pipeline',
+            }
+            editor = self._get_timeline_editor_for_axis(t_label)
+            if editor and editor.plugin_preview_renderer:
+                editor.plugin_preview_renderer.set_preview_data('Pipeline', preview_data)
+                any_set = True
 
-        # Send to the appropriate timeline's preview renderer
-        editor = self._get_timeline_editor_for_axis(target)
-        if editor and editor.plugin_preview_renderer:
-            editor.plugin_preview_renderer.set_preview_data('Pipeline', preview_data)
+        if any_set:
             self._previewing = True
         else:
-            self._last_errors.append("Timeline preview not available")
+            self._last_errors.append("No preview data or timeline not available")
 
     def _clear_preview(self):
-        """Clear the preview overlay from the timeline."""
+        """Clear preview overlay from all timeline editors."""
         if self._previewing:
-            editor = self._get_timeline_editor()
-            if editor and editor.plugin_preview_renderer:
-                editor.plugin_preview_renderer.clear_preview('Pipeline')
+            for _, editor in self._get_all_timeline_editors():
+                if editor and editor.plugin_preview_renderer:
+                    editor.plugin_preview_renderer.clear_preview('Pipeline')
             self._previewing = False
 
     def _apply_pipeline(self):
