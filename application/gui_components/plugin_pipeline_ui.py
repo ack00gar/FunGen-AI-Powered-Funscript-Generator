@@ -19,7 +19,7 @@ try:
 except ImportError:
     imgui = None
 
-from application.classes.plugin_pipeline import PluginPipeline
+from application.classes.plugin_pipeline import PluginPipeline, timeline_label_to_axis
 
 _CATEGORY_ORDER = ["Autotune", "Quickfix Tools", "Transform", "Smoothing", "Timing & Generation", "General"]
 
@@ -80,6 +80,9 @@ class PluginPipelineUI:
 
         # Bottom: preview / apply / clear
         self._render_bottom_bar()
+
+        # Auto pipeline assignments per axis
+        self._render_auto_assignments()
 
         # Error display
         if self._last_errors:
@@ -247,7 +250,34 @@ class PluginPipelineUI:
 
     # ---- Bottom bar ----
 
+    def _get_axis_choices(self):
+        """Build axis choices from the current funscript (T1, T2, T3..., All)."""
+        choices = ["T1", "T2"]
+        processor = getattr(self.app, 'processor', None)
+        if processor and processor.tracker and processor.tracker.funscript:
+            fs = processor.tracker.funscript
+            if hasattr(fs, 'get_all_axis_names'):
+                all_axes = fs.get_all_axis_names()
+                for i, name in enumerate(all_axes[2:], start=3):
+                    choices.append(f"T{i}")
+        choices.append("All")
+        return choices
+
     def _render_bottom_bar(self):
+        # Axis selector
+        axis_choices = self._get_axis_choices()
+        imgui.text("Target:")
+        imgui.same_line()
+        cur_idx = axis_choices.index(self.pipeline.target_axis) if self.pipeline.target_axis in axis_choices else 0
+        imgui.set_next_item_width(80)
+        changed, new_idx = imgui.combo("##PipelineAxis", cur_idx, axis_choices)
+        if changed:
+            self.pipeline.target_axis = axis_choices[new_idx]
+
+        imgui.same_line()
+        imgui.text(" ")
+        imgui.same_line()
+
         btn_w = 100
 
         if imgui.button("Preview", width=btn_w):
@@ -273,12 +303,68 @@ class PluginPipelineUI:
                 self.pipeline.clear()
                 self._last_errors.clear()
 
+    def _render_auto_assignments(self):
+        """Render per-axis preset assignment for auto post-processing."""
+        imgui.spacing()
+        if not imgui.tree_node("Auto Post-Processing (per axis)##AutoAssign"):
+            return
+
+        presets = self.pipeline.get_available_presets()
+        preset_names = ["(none)"] + sorted(presets.keys())
+        assignments = self.app.app_settings.get("auto_pipeline_assignments", {})
+        changed = False
+
+        axis_labels = self._get_axis_choices()
+        # Remove "All" from assignable axes
+        axis_labels = [a for a in axis_labels if a != "All"]
+
+        for axis_label in axis_labels:
+            current_preset = assignments.get(axis_label, "")
+            cur_idx = preset_names.index(current_preset) if current_preset in preset_names else 0
+
+            imgui.text(f"{axis_label}:")
+            imgui.same_line(40)
+            imgui.set_next_item_width(-1)
+            ch, new_idx = imgui.combo(f"##AutoAssign_{axis_label}", cur_idx, preset_names)
+            if ch:
+                new_preset = preset_names[new_idx] if new_idx > 0 else ""
+                if new_preset:
+                    assignments[axis_label] = new_preset
+                elif axis_label in assignments:
+                    del assignments[axis_label]
+                changed = True
+
+        if changed:
+            self.app.app_settings.set("auto_pipeline_assignments", assignments)
+
+        if assignments:
+            imgui.spacing()
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.7, 0.5, 1.0)
+            imgui.text_wrapped("These presets run automatically after tracking completes.")
+            imgui.pop_style_color()
+
+        imgui.tree_pop()
+
     def _get_timeline_editor(self):
         """Get the active timeline editor (T1)."""
         gui = getattr(self.app, 'gui_instance', None)
         if gui and hasattr(gui, 'timeline_editor1'):
             return gui.timeline_editor1
         return None
+
+    def _get_timeline_editor_for_axis(self, target: str):
+        """Get timeline editor for a given target label."""
+        gui = getattr(self.app, 'gui_instance', None)
+        if not gui:
+            return None
+        if target == "T2" and hasattr(gui, 'timeline_editor2'):
+            return gui.timeline_editor2
+        if target.startswith("T") and target[1:].isdigit():
+            tnum = int(target[1:])
+            if tnum >= 3 and hasattr(gui, '_extra_timeline_editors'):
+                return gui._extra_timeline_editors.get(tnum)
+        # Default to T1 (also for "All")
+        return getattr(gui, 'timeline_editor1', None)
 
     def _preview_pipeline(self):
         """Run pipeline on a copy and show preview overlay on the timeline."""
@@ -290,19 +376,23 @@ class PluginPipelineUI:
             return
 
         funscript_obj = processor.tracker.funscript
-        original_actions = list(funscript_obj.get_axis_actions('primary') or [])
+        target = self.pipeline.target_axis
+        # Determine preview axis (for "All", preview T1)
+        preview_axis = timeline_label_to_axis("T1" if target == "All" else target, funscript_obj)
+
+        original_actions = list(funscript_obj.get_axis_actions(preview_axis) or [])
         if not original_actions:
-            self._last_errors.append("No actions on primary axis")
+            self._last_errors.append(f"No actions on {target}")
             return
 
         # Run pipeline on a deep copy
         preview_funscript = _copy.deepcopy(funscript_obj)
-        success, errors = self.pipeline.run(preview_funscript, axis='primary')
+        success, errors = self.pipeline.run_with_target(preview_funscript)
         if errors:
             self._last_errors = errors
             return
 
-        transformed_actions = list(preview_funscript.get_axis_actions('primary') or [])
+        transformed_actions = list(preview_funscript.get_axis_actions(preview_axis) or [])
 
         # Build preview data for the timeline renderer
         preview_points = []
@@ -320,8 +410,8 @@ class PluginPipelineUI:
             'plugin_name': 'Pipeline',
         }
 
-        # Send to the timeline's preview renderer
-        editor = self._get_timeline_editor()
+        # Send to the appropriate timeline's preview renderer
+        editor = self._get_timeline_editor_for_axis(target)
         if editor and editor.plugin_preview_renderer:
             editor.plugin_preview_renderer.set_preview_data('Pipeline', preview_data)
             self._previewing = True
@@ -337,7 +427,7 @@ class PluginPipelineUI:
             self._previewing = False
 
     def _apply_pipeline(self):
-        """Apply the pipeline to the active timeline's funscript."""
+        """Apply the pipeline to the targeted timeline(s)."""
         self._last_errors.clear()
         processor = getattr(self.app, 'processor', None)
         if not processor or not processor.tracker or not processor.tracker.funscript:
@@ -345,28 +435,42 @@ class PluginPipelineUI:
             return
 
         funscript_obj = processor.tracker.funscript
-
-        # Capture before for unified undo
-        actions_before = list(funscript_obj.get_axis_actions('primary') or [])
-
+        target = self.pipeline.target_axis
         fs_proc = self.app.funscript_processor
 
-        success, errors = self.pipeline.run(funscript_obj, axis='primary')
+        # Determine which timelines are affected for undo
+        if target == "All":
+            affected = list(range(1, (funscript_obj.num_axes if hasattr(funscript_obj, 'num_axes') else 2) + 1))
+        else:
+            tnum = int(target[1:]) if target.startswith("T") and target[1:].isdigit() else 1
+            affected = [tnum]
+
+        # Capture before for undo
+        before_map = {}
+        for tnum in affected:
+            axis_name = timeline_label_to_axis(f"T{tnum}", funscript_obj)
+            before_map[tnum] = list(funscript_obj.get_axis_actions(axis_name) or [])
+
+        success, errors = self.pipeline.run_with_target(funscript_obj)
 
         if errors:
             self._last_errors = errors
 
-        # Refresh UI
+        # Refresh UI for all affected timelines
         if fs_proc:
-            fs_proc._post_mutation_refresh(1, "Plugin Pipeline")
+            for tnum in affected:
+                fs_proc._post_mutation_refresh(tnum, "Plugin Pipeline")
 
         if success:
-            self.app.logger.info("Pipeline applied successfully", extra={'status_message': True})
-            # Unified undo
-            actions_after = list(funscript_obj.get_axis_actions('primary') or [])
+            label = f"Plugin Pipeline ({target})"
+            self.app.logger.info(f"Pipeline applied to {target}", extra={'status_message': True})
+            # Undo for each affected timeline
             from application.classes.undo_manager import BulkReplaceCmd
-            self.app.undo_manager.push_done(BulkReplaceCmd(
-                1, actions_before, actions_after, "Plugin Pipeline (T1)"))
+            for tnum in affected:
+                axis_name = timeline_label_to_axis(f"T{tnum}", funscript_obj)
+                actions_after = list(funscript_obj.get_axis_actions(axis_name) or [])
+                self.app.undo_manager.push_done(BulkReplaceCmd(
+                    tnum, before_map[tnum], actions_after, label))
 
     # ---- Parameter rendering (mirrors plugin_ui_renderer patterns) ----
 

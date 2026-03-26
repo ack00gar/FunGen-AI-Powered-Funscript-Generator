@@ -53,6 +53,23 @@ _DEFAULT_PRESETS = {
 }
 
 
+# Map timeline labels to funscript axis names
+AXIS_LABEL_TO_NAME = {"T1": "primary", "T2": "secondary"}
+
+
+def timeline_label_to_axis(label: str, funscript_obj=None) -> str:
+    """Convert a UI label like 'T1', 'T3' to the funscript axis name."""
+    if label in AXIS_LABEL_TO_NAME:
+        return AXIS_LABEL_TO_NAME[label]
+    # T3+ use funscript axis assignment
+    if label.startswith("T") and label[1:].isdigit():
+        tnum = int(label[1:])
+        if funscript_obj and hasattr(funscript_obj, 'get_axis_for_timeline'):
+            return funscript_obj.get_axis_for_timeline(tnum)
+        return f"axis_{tnum}"
+    return 'primary'
+
+
 class PluginPipeline:
     """Ordered pipeline of plugin steps with preset management."""
 
@@ -60,6 +77,7 @@ class PluginPipeline:
         self.app = app_instance
         self.logger = logger or logging.getLogger('PluginPipeline')
         self.steps: List[PipelineStep] = []
+        self.target_axis: str = "T1"  # "T1", "T2", "T3"..., or "All"
 
     # ------------------------------------------------------------------
     # Step management
@@ -99,7 +117,7 @@ class PluginPipeline:
         Execute all enabled steps in order on the funscript object.
 
         Returns:
-            (success, errors) — success is True if all steps succeeded.
+            (success, errors) -- success is True if all steps succeeded.
         """
         errors = []
         for i, step in enumerate(self.steps):
@@ -118,14 +136,44 @@ class PluginPipeline:
 
         return (len(errors) == 0, errors)
 
+    def run_with_target(self, funscript_obj,
+                        selected_indices: Optional[List[int]] = None) -> Tuple[bool, List[str]]:
+        """Run pipeline using self.target_axis setting. 'All' runs on every axis."""
+        if self.target_axis == "All":
+            all_axes = funscript_obj.get_all_axis_names() if hasattr(funscript_obj, 'get_all_axis_names') else ['primary', 'secondary']
+            all_ok = True
+            all_errors = []
+            for axis_name in all_axes:
+                ok, errs = self.run(funscript_obj, axis=axis_name, selected_indices=selected_indices)
+                if not ok:
+                    all_ok = False
+                all_errors.extend(errs)
+            return (all_ok, all_errors)
+        axis_name = timeline_label_to_axis(self.target_axis, funscript_obj)
+        return self.run(funscript_obj, axis=axis_name, selected_indices=selected_indices)
+
     # ------------------------------------------------------------------
     # Serialization / presets
     # ------------------------------------------------------------------
 
+    def to_dict(self) -> dict:
+        """Serialize pipeline including target axis."""
+        return {
+            'steps': [s.to_dict() for s in self.steps],
+            'target_axis': self.target_axis,
+        }
+
     def to_list(self) -> List[dict]:
+        """Legacy: serialize steps only (for backward-compatible presets)."""
         return [s.to_dict() for s in self.steps]
 
+    def load_from_dict(self, data: dict):
+        """Load pipeline from dict (new format with target_axis)."""
+        self.steps = [PipelineStep.from_dict(d) for d in data.get('steps', [])]
+        self.target_axis = data.get('target_axis', 'T1')
+
     def load_from_list(self, data: List[dict]):
+        """Legacy: load steps from list (backward compat, target_axis defaults to T1)."""
         self.steps = [PipelineStep.from_dict(d) for d in data]
 
     def get_available_presets(self) -> Dict[str, List[dict]]:
@@ -137,17 +185,24 @@ class PluginPipeline:
         return merged
 
     def load_preset(self, name: str) -> bool:
-        """Load a preset by name. Returns True if found."""
+        """Load a preset by name. Returns True if found.
+
+        Handles both old format (list of steps) and new format (dict with target_axis).
+        """
         presets = self.get_available_presets()
         if name not in presets:
             return False
-        self.load_from_list(presets[name])
+        data = presets[name]
+        if isinstance(data, dict) and 'steps' in data:
+            self.load_from_dict(data)
+        else:
+            self.load_from_list(data)
         return True
 
     def save_preset(self, name: str):
-        """Save current pipeline as a user preset."""
+        """Save current pipeline as a user preset (new format with target_axis)."""
         user_presets = self.app.app_settings.get("plugin_pipeline_presets", {})
-        user_presets[name] = self.to_list()
+        user_presets[name] = self.to_dict()
         self.app.app_settings.set("plugin_pipeline_presets", user_presets)
 
     def delete_preset(self, name: str) -> bool:

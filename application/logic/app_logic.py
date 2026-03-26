@@ -618,7 +618,7 @@ class ApplicationLogic:
             if pipeline.load_preset(pipeline_preset):
                 funscript_obj = self.funscript_processor.get_funscript_obj()
                 if funscript_obj:
-                    success, errors = pipeline.run(funscript_obj, axis='primary')
+                    success, errors = pipeline.run_with_target(funscript_obj)
                     for err in errors:
                         self.logger.warning(f"Pipeline: {err}")
                     return success
@@ -639,20 +639,42 @@ class ApplicationLogic:
             self.logger.info("Auto post-processing disabled, skipping.")
             return False
 
-        # Check if GUI pipeline has steps configured
+        funscript_obj = self.funscript_processor.get_funscript_obj()
+        if not funscript_obj:
+            return False
+
+        # Per-axis preset assignments (e.g. {"T1": "Full Enhancement", "T2": "Light Polish"})
+        assignments = self.app_settings.get("auto_pipeline_assignments", {})
+        if assignments:
+            from application.classes.plugin_pipeline import PluginPipeline, timeline_label_to_axis
+            any_applied = False
+            for axis_label, preset_name in assignments.items():
+                if not preset_name:
+                    continue
+                pipeline = PluginPipeline(self)
+                if pipeline.load_preset(preset_name):
+                    axis_name = timeline_label_to_axis(axis_label, funscript_obj)
+                    self.logger.info(f"Auto pipeline: '{preset_name}' on {axis_label} ({axis_name})")
+                    success, errors = pipeline.run(funscript_obj, axis=axis_name)
+                    for err in errors:
+                        self.logger.warning(f"Pipeline ({axis_label}): {err}")
+                    any_applied = any_applied or success
+                else:
+                    self.logger.warning(f"Auto pipeline: preset '{preset_name}' not found for {axis_label}")
+            if any_applied:
+                return True
+
+        # Check if GUI pipeline has steps configured (single pipeline with target_axis)
         gui = getattr(self, 'gui_instance', None)
         if gui and hasattr(gui, 'plugin_pipeline_ui'):
             pipeline = gui.plugin_pipeline_ui.pipeline
             enabled_steps = [s for s in pipeline.steps if s.enabled]
             if enabled_steps:
-                self.logger.info(f"Running pipeline ({len(enabled_steps)} steps) after analysis.")
-                funscript_obj = self.funscript_processor.get_funscript_obj()
-                if funscript_obj:
-                    success, errors = pipeline.run(funscript_obj, axis='primary')
-                    for err in errors:
-                        self.logger.warning(f"Pipeline: {err}")
-                    return success
-                return False
+                self.logger.info(f"Running pipeline ({len(enabled_steps)} steps, target: {pipeline.target_axis}) after analysis.")
+                success, errors = pipeline.run_with_target(funscript_obj)
+                for err in errors:
+                    self.logger.warning(f"Pipeline: {err}")
+                return success
 
         # Fallback: run Ultimate Autotune as default post-processing
         self.logger.info("Running default Ultimate Autotune after analysis.")
