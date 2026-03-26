@@ -264,66 +264,79 @@ class PluginPipelineUI:
         return choices
 
     def _render_bottom_bar(self):
-        # Axis selector
-        axis_choices = self._get_axis_choices()
-        imgui.text("Target:")
-        imgui.same_line()
-        cur_idx = axis_choices.index(self.pipeline.target_axis) if self.pipeline.target_axis in axis_choices else 0
-        imgui.set_next_item_width(80)
-        changed, new_idx = imgui.combo("##PipelineAxis", cur_idx, axis_choices)
-        if changed:
-            self.pipeline.target_axis = axis_choices[new_idx]
+        avail_w = imgui.get_content_region_available_width()
+        spacing = imgui.get_style().item_spacing[0]
+
+        # Row: [Edit] [Preview (T?)] [Apply (T?)]
+        # Buttons share width equally
+        btn_count = 3
+        btn_w = max(60, (avail_w - spacing * (btn_count - 1)) / btn_count)
+
+        target_label = self.pipeline.target_axis
+
+        if imgui.button("Edit", width=btn_w):
+            imgui.open_popup("##PipelineEditMenu")
+        if imgui.begin_popup("##PipelineEditMenu"):
+            # Axis selector inside edit menu
+            axis_choices = self._get_axis_choices()
+            cur_idx = axis_choices.index(self.pipeline.target_axis) if self.pipeline.target_axis in axis_choices else 0
+            imgui.text("Target Axis")
+            imgui.set_next_item_width(120)
+            changed, new_idx = imgui.combo("##PipelineAxis", cur_idx, axis_choices)
+            if changed:
+                self.pipeline.target_axis = axis_choices[new_idx]
+            imgui.separator()
+            if imgui.menu_item("Clear All Steps")[0]:
+                self.pipeline.clear()
+                self._last_errors.clear()
+            imgui.end_popup()
 
         imgui.same_line()
-        imgui.text(" ")
-        imgui.same_line()
 
-        btn_w = 100
-
-        if imgui.button("Preview", width=btn_w):
+        if imgui.button(f"Preview ({target_label})", width=btn_w):
             self._preview_pipeline()
         if imgui.is_item_hovered():
-            imgui.set_tooltip("Preview the pipeline result on the timeline")
-
-        imgui.same_line()
-
-        if imgui.button("Apply", width=btn_w):
-            self._clear_preview()
-            self._apply_pipeline()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Apply the pipeline to the funscript (Ctrl+Z to undo)")
+            imgui.set_tooltip(f"Preview pipeline result on {target_label}")
 
         imgui.same_line()
 
         if self._previewing:
-            if imgui.button("Cancel", width=btn_w):
+            if imgui.button("Cancel Preview", width=btn_w):
                 self._clear_preview()
         else:
-            if imgui.button("Clear All", width=btn_w):
-                self.pipeline.clear()
-                self._last_errors.clear()
+            if imgui.button(f"Apply ({target_label})", width=btn_w):
+                self._clear_preview()
+                self._apply_pipeline()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"Apply pipeline to {target_label} (Ctrl+Z to undo)")
 
     def _render_auto_assignments(self):
         """Render per-axis preset assignment for auto post-processing."""
         imgui.spacing()
-        if not imgui.tree_node("Auto Post-Processing (per axis)##AutoAssign"):
-            return
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.7, 0.8, 1.0)
+        imgui.text("Auto Post-Processing")
+        imgui.pop_style_color()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Assign a preset to each axis.\nThese run automatically after tracking completes.")
 
         presets = self.pipeline.get_available_presets()
-        preset_names = ["(none)"] + sorted(presets.keys())
+        preset_names = ["--"] + sorted(presets.keys())
         assignments = self.app.app_settings.get("auto_pipeline_assignments", {})
         changed = False
 
         axis_labels = self._get_axis_choices()
-        # Remove "All" from assignable axes
         axis_labels = [a for a in axis_labels if a != "All"]
 
+        label_w = 24
         for axis_label in axis_labels:
             current_preset = assignments.get(axis_label, "")
             cur_idx = preset_names.index(current_preset) if current_preset in preset_names else 0
 
-            imgui.text(f"{axis_label}:")
-            imgui.same_line(40)
+            imgui.text(axis_label)
+            imgui.same_line(label_w + imgui.get_style().item_spacing[0])
             imgui.set_next_item_width(-1)
             ch, new_idx = imgui.combo(f"##AutoAssign_{axis_label}", cur_idx, preset_names)
             if ch:
@@ -336,14 +349,6 @@ class PluginPipelineUI:
 
         if changed:
             self.app.app_settings.set("auto_pipeline_assignments", assignments)
-
-        if assignments:
-            imgui.spacing()
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.7, 0.5, 1.0)
-            imgui.text_wrapped("These presets run automatically after tracking completes.")
-            imgui.pop_style_color()
-
-        imgui.tree_pop()
 
     def _get_timeline_editor(self):
         """Get the active timeline editor (T1)."""
