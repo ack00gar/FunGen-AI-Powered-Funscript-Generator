@@ -924,21 +924,26 @@ class StageExecutorMixin:
                 return {"success": False, "error": "Aborted by user"}
 
             if result and result.success and result.output_data:
-                funscript = result.output_data.get('funscript', {})
+                funscript_obj = result.output_data.get('funscript')
                 chapters = result.output_data.get('chapters', [])
 
-                # Build Stage 2-compatible output data with funscript actions
+                # Ensure we have a proper funscript object (create one if tracker
+                # only produced chapters, e.g. Chapter Maker)
+                if not funscript_obj or isinstance(funscript_obj, dict):
+                    from funscript.multi_axis_funscript import MultiAxisFunscript
+                    fps = (self.app.processor.video_info.get('fps', 30.0)
+                           if self.app.processor and self.app.processor.video_info else 30.0)
+                    funscript_obj = MultiAxisFunscript(fps=fps)
+
+                # Set chapters on the funscript object from tracker chapter data
+                if chapters and hasattr(funscript_obj, 'set_chapters_from_segments'):
+                    segment_dicts = [self._chapter_to_segment_dict(ch) for ch in chapters]
+                    fps = getattr(funscript_obj, 'fps', 30.0) or 30.0
+                    funscript_obj.set_chapters_from_segments(segment_dicts, fps)
+
                 output_data = {
-                    'funscript': funscript,
+                    'funscript': funscript_obj,
                     'chapters': chapters,
-                    'video_segments': [
-                        {
-                            'label': ch.get('position', 'Unknown'),
-                            'start_frame': ch.get('start_frame', 0),
-                            'end_frame': ch.get('end_frame', 0),
-                        }
-                        for ch in chapters
-                    ],
                 }
 
                 # Manage preprocessed video file
@@ -976,6 +981,41 @@ class StageExecutorMixin:
         # Check if it's an offline tracker with process_stage (not the legacy perform_stage3_analysis)
         return (hasattr(tracker_class, 'process_stage')
                 and hasattr(tracker_class, 'processing_stages'))
+
+    # ------------------------------------------------------------------
+    # Chapter helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _chapter_to_segment_dict(ch: Dict) -> Dict:
+        """Convert a tracker chapter dict to a VideoSegment-compatible dict.
+
+        Maps long position names (e.g. 'Cowgirl / Missionary') to the short
+        names used by the chapter bar color system (e.g. 'CG/Miss.').
+        """
+        from config.constants import POSITION_INFO_MAPPING
+
+        # Build reverse lookup: long_name -> short_name (cached on function object)
+        if not hasattr(StageExecutorMixin._chapter_to_segment_dict, '_long_to_short'):
+            mapping = {}
+            for short_name, info in POSITION_INFO_MAPPING.items():
+                mapping[info['long_name']] = short_name
+            StageExecutorMixin._chapter_to_segment_dict._long_to_short = mapping
+
+        long_to_short = StageExecutorMixin._chapter_to_segment_dict._long_to_short
+        position = ch.get('position', 'Unknown')
+        short_name = long_to_short.get(position, position)
+
+        return {
+            'start_frame_id': ch.get('start_frame', 0),
+            'end_frame_id': ch.get('end_frame', 0),
+            'class_name': position,
+            'class_id': short_name,
+            'segment_type': 'SexAct',
+            'position_short_name': short_name,
+            'position_long_name': position,
+            'source': 'chapter_detection',
+        }
 
     # ------------------------------------------------------------------
     # Artifact validation

@@ -199,6 +199,14 @@ class ControlPanelUI(
     def _is_hybrid_tracker(self, tracker_name: str) -> bool:
         return self._check_tracker_ui('is_hybrid_tracker', tracker_name)
 
+    def _tracker_produces_funscript(self, tracker_name: str) -> bool:
+        """Check if any of the tracker's stages produce a funscript."""
+        info = self.tracker_ui.discovery.get_tracker_info(tracker_name) if self.tracker_ui else None
+        if info and info.stages:
+            return any(s.produces_funscript for s in info.stages)
+        # Live trackers always produce funscript; default True for safety
+        return True
+
     def _get_tracker_display_name(self, tracker_name: str) -> str:
         return self.tracker_ui.get_tracker_display_name(tracker_name)
 
@@ -968,12 +976,13 @@ class ControlPanelUI(
                     imgui.text_wrapped(" - ".join(info_parts))
                     imgui.pop_style_color()
 
-                # Axis mode
-                imgui.spacing()
-                imgui.separator()
-                imgui.spacing()
-                imgui.text("Tracking Axes")
-                self._render_tracking_axes_mode(stage_proc)
+                # Axis mode (only show if tracker produces funscript)
+                if self._tracker_produces_funscript(app_state.selected_tracker_name):
+                    imgui.spacing()
+                    imgui.separator()
+                    imgui.spacing()
+                    imgui.text("Tracking Axes")
+                    self._render_tracking_axes_mode(stage_proc)
 
                 # Clear All Chapters (inside the card, only when chapters exist)
                 chapters = getattr(app.funscript_processor, "video_chapters", [])
