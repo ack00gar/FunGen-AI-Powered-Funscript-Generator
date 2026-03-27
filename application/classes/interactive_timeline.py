@@ -708,8 +708,13 @@ class InteractiveFunscriptTimeline:
         if check_shortcut("nudge_selection_pos_up", "SHIFT+UP_ARROW"): nudge_val = 1
         if check_shortcut("nudge_selection_pos_down", "SHIFT+DOWN_ARROW"): nudge_val = -1
         
-        if nudge_val != 0 and self.multi_selected_action_indices:
-            self._nudge_selection_value(nudge_val)
+        if nudge_val != 0:
+            if not self.multi_selected_action_indices:
+                nearest = self._snap_nearest_to_playhead()
+                if nearest is not None and nearest >= 0:
+                    self.multi_selected_action_indices = {nearest}
+            if self.multi_selected_action_indices:
+                self._nudge_selection_value(nudge_val)
 
         # 6. Nudge Time (Shift+Arrows)
         nudge_t = 0

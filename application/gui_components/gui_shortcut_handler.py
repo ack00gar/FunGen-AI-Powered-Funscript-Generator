@@ -516,6 +516,35 @@ class ShortcutHandlerMixin:
             timeline = None
 
         if timeline:
+            # Check if a point already exists at this time — move it instead of adding
+            actions = timeline._get_actions()
+            if actions:
+                from bisect import bisect_left
+                timestamps = [a['at'] for a in actions]
+                # Snap tolerance: half a frame in ms
+                tol_ms = max(1, int(500 / fps))
+                idx = bisect_left(timestamps, current_time_ms)
+                existing_idx = None
+                for candidate in (idx - 1, idx):
+                    if 0 <= candidate < len(actions):
+                        if abs(actions[candidate]['at'] - current_time_ms) <= tol_ms:
+                            existing_idx = candidate
+                            break
+
+                if existing_idx is not None:
+                    old_value = actions[existing_idx]['pos']
+                    actions[existing_idx]['pos'] = value
+                    from application.classes.undo_manager import MovePointCmd
+                    self.app.undo_manager.push_done(MovePointCmd(
+                        timeline.timeline_num,
+                        existing_idx,
+                        actions[existing_idx]['at'], old_value,
+                        actions[existing_idx]['at'], value
+                    ))
+                    timeline._post_mutation_refresh()
+                    self.app.logger.info(f"Moved point: {old_value}% -> {value}% at {current_time_ms}ms (Timeline {timeline_num})", extra={'status_message': True})
+                    return
+
             timeline._add_point(current_time_ms, value)
             self.app.logger.info(f"Added point: {value}% at {current_time_ms}ms (Timeline {timeline_num})", extra={'status_message': True})
         else:
