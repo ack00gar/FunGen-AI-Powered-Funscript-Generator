@@ -733,9 +733,10 @@ class InteractiveFunscriptTimeline:
 
         # 7. Bookmark at playhead (B key)
         if check_shortcut("add_bookmark", "B"):
-            center_x = (app_state.window_width or 800) / 2
-            playhead_time = getattr(app_state, 'timeline_pan_offset_ms', 0) + (center_x * getattr(app_state, 'timeline_zoom_factor_ms_per_px', 1.0))
-            self._bookmark_manager.add(playhead_time)
+            proc = self.app.processor
+            if proc and proc.fps > 0:
+                playhead_time = int(round((proc.current_frame_index / proc.fps) * 1000.0))
+                self._bookmark_manager.add(playhead_time)
 
     def _hit_test_point(self, mouse_pos, actions, tf: TimelineTransformer) -> int:
         """Optimized hit testing using binary search."""

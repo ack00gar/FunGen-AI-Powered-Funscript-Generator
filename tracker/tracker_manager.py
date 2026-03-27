@@ -35,6 +35,7 @@ class TrackerManager:
         
         # Create funscript instance for accumulating tracking data
         self.funscript = MultiAxisFunscript(logger=self.logger)
+        self._apply_axis_settings(app_logic_instance)
 
         # Preserve full TrackerResult for multi-axis extraction
         self._last_tracker_result = None
@@ -353,6 +354,7 @@ class TrackerManager:
         video_fps = getattr(getattr(self.app, 'processor', None), 'fps', 0) if self.app else 0
         self.funscript = MultiAxisFunscript(logger=self.logger,
                                             fps=video_fps if video_fps > 0 else None)
+        self._apply_axis_settings(self.app)
 
         # Reapply point simplification setting
         if self.app and hasattr(self.app, 'app_settings'):
@@ -361,6 +363,13 @@ class TrackerManager:
 
         self.tracking_active = False
     
+    def _apply_axis_settings(self, app_instance):
+        """Apply user's default_secondary_axis setting to the funscript."""
+        if app_instance and hasattr(app_instance, 'app_settings'):
+            sec_axis = app_instance.app_settings.get("default_secondary_axis")
+            if sec_axis:
+                self.funscript.assign_axis(2, sec_axis)
+
     def update_tracker_settings(self, **kwargs) -> bool:
         """Update current tracker settings dynamically."""
         if not self._current_tracker:
