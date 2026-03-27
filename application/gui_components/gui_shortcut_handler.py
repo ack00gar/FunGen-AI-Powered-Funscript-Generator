@@ -541,7 +541,8 @@ class ShortcutHandlerMixin:
                         actions[existing_idx]['at'], old_value,
                         actions[existing_idx]['at'], value
                     ))
-                    timeline._post_mutation_refresh()
+                    self.app.funscript_processor._post_mutation_refresh(timeline_num, "Move Point")
+                    timeline.invalidate_cache()
                     self.app.logger.info(f"Moved point: {old_value}% -> {value}% at {current_time_ms}ms (Timeline {timeline_num})", extra={'status_message': True})
                     return
 
