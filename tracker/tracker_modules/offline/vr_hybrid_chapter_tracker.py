@@ -807,9 +807,12 @@ class VRHybridChapterTracker(BaseOfflineTracker):
             self.logger.error(f"  Cannot open preprocessed video")
             return None
 
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        cv2_fps = cap.get(cv2.CAP_PROP_FPS)
+        fps = cv2_fps if cv2_fps and cv2_fps > 0 else (self._preprocessed_fps or 30.0)
         total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_ms = 1000.0 / fps
+        if not cv2_fps or cv2_fps <= 0:
+            self.logger.warning(f"  Preprocessed video reports fps=0, using stored fps={fps:.2f}")
 
         # Seek to chapter start
         if start_frame > 0:
@@ -1236,11 +1239,16 @@ class VRHybridChapterTracker(BaseOfflineTracker):
         except ImportError:
             from funscript.multi_axis_funscript import MultiAxisFunscript
 
-        # Get video FPS for time calculations
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
+        # Use FPS from Pass 1 (stored during sparse detection) — avoids re-reading
+        # the source video with OpenCV which can report wrong FPS for some VR files
+        fps = getattr(self, '_preprocessed_fps', None)
+        if not fps or fps <= 0:
+            # Fallback: re-read from source
+            cap = cv2.VideoCapture(video_path)
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            cap.release()
+            self.logger.warning(f"Merge: _preprocessed_fps not set, fell back to cv2 fps={fps:.2f}")
+        self.logger.info(f"Merge: using fps={fps:.4f} for chapter time conversion")
 
         all_primary = []
         all_secondary = []
