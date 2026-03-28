@@ -16,29 +16,6 @@ class ExecutionMixin:
         app_state = app.app_state_ui
         mode = app_state.selected_tracker_name
 
-        # Batch progress bar (when batch processing is active)
-        if app.is_batch_processing_active and app.batch_video_paths:
-            total = len(app.batch_video_paths)
-            current = app.current_batch_video_index + 1
-            if current < 1:
-                current = 1
-            progress = current / max(1, total)
-
-            video_name = ""
-            if 0 <= app.current_batch_video_index < total:
-                import os
-                video_name = os.path.basename(app.batch_video_paths[app.current_batch_video_index].get("path", ""))
-
-            imgui.text_colored(f"Batch: {current} / {total}", 0.4, 0.8, 1.0, 1.0)
-            if video_name:
-                imgui.text_wrapped(video_name)
-            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 0.3, 0.65, 1.0, 1.0)
-            imgui.progress_bar(progress, size=(-1, 0), overlay=f"{current}/{total}")
-            imgui.pop_style_color()
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
         if self._is_offline_tracker(mode):
             self._render_stage_progress_ui(stage_proc)
             return
