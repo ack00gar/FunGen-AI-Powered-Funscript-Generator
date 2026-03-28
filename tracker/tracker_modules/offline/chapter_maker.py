@@ -157,7 +157,9 @@ class ChapterMaker(BaseOfflineTracker):
         try:
             cap = cv2.VideoCapture(video_path)
             if cap.isOpened():
-                fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                if not fps or fps <= 0:
+                    fps = 30.0
                 total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
                 cap.release()
                 duration_s = total / fps

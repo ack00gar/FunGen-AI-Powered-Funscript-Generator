@@ -736,8 +736,7 @@ class StageExecutorMixin:
             "yolo_det_model_path": self.app.yolo_det_model_path,
             "yolo_pose_model_path": self.app.yolo_pose_model_path,
             "yolo_input_size": self.app.yolo_input_size,
-            "video_fps": (self.app.processor.video_info.get('fps', 30.0)
-                          if self.app.processor and self.app.processor.video_info else 30.0),
+            "video_fps": self._resolve_video_fps(),
         }
         try:
             self.logger.info(f"Stage 2 data available for mixed mode: {s2_output_data is not None}")

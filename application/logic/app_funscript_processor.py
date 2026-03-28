@@ -266,12 +266,6 @@ class AppFunscriptProcessor:
         except Exception as e:
             self.logger.error(f"Error syncing chapters from funscript: {e}", exc_info=True)
 
-    def _get_current_fps(self) -> float:
-        """Get current video FPS for chapter conversions."""
-        if self.app.processor:
-            return self.app.processor.fps
-        return 30.0  # Fallback
-
     def get_actions(self, axis: str) -> List[dict]:
         funscript_obj = self.get_funscript_obj()
         if funscript_obj:
@@ -301,14 +295,18 @@ class AppFunscriptProcessor:
                 return funscript_obj, axis_name
         return None, None
 
-    def _get_current_fps(self) -> float:  # Duplicated for internal use, could centralize in app_logic
-        fps = 30.0
+    def _get_current_fps(self) -> float:
+        """Get current video FPS. Prefers video_info (ffprobe-based), warns on 30fps fallback."""
         if self.app.processor and hasattr(self.app.processor, 'video_info') and \
                 self.app.processor.video_info and self.app.processor.video_info.get('fps', 0) > 0:
-            fps = self.app.processor.video_info['fps']
-        elif self.app.processor and hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:  # Fallback
-            fps = self.app.processor.fps
-        return fps
+            return self.app.processor.video_info['fps']
+        if self.app.processor and hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:
+            return self.app.processor.fps
+        self.logger.warning(
+            "Video FPS not available, using fallback 30.0 — "
+            "chapter frame indices may be wrong for 60fps videos!"
+        )
+        return 30.0
 
     @staticmethod
     def _update_last_timestamp(funscript_obj, axis_name: str, actions_list: list):

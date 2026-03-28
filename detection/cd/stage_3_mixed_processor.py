@@ -892,14 +892,18 @@ def perform_mixed_stage_analysis(
         if not cap.isOpened():
             raise RuntimeError(f"Could not open video: {video_path}")
         
-        video_fps = cap.get(cv2.CAP_PROP_FPS) or common_app_config.get('video_fps', 30.0)
-        try:
-            video_fps = float(video_fps)
-            if video_fps <= 0:
-                video_fps = 30.0
-        except (ValueError, TypeError):
-            logger.error(f"Invalid video_fps value: {video_fps}, using default 30.0")
+        # Prefer fps from common_app_config (ffprobe-based, set by _resolve_video_fps)
+        # over cv2.CAP_PROP_FPS which is unreliable for VR SBS videos
+        config_fps = common_app_config.get('video_fps', 0)
+        cv2_fps = cap.get(cv2.CAP_PROP_FPS)
+        if config_fps and config_fps > 0:
+            video_fps = float(config_fps)
+        elif cv2_fps and cv2_fps > 0:
+            video_fps = float(cv2_fps)
+            logger.warning(f"Using cv2 fps={video_fps:.2f} (config video_fps not set)")
+        else:
             video_fps = 30.0
+            logger.warning("No reliable FPS source, using fallback 30.0")
         
         # Create a mapping of frame_id -> segment for efficient lookup
         frame_to_segment = {}
