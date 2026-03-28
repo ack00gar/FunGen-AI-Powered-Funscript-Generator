@@ -1015,6 +1015,27 @@ class ControlPanelUI(
 
         mode = app_state.selected_tracker_name
 
+        # Batch progress card (always visible during batch processing)
+        if app.is_batch_processing_active and getattr(app, 'batch_video_paths', None):
+            imgui.spacing()
+            total = len(app.batch_video_paths)
+            current = getattr(app, 'current_batch_video_index', 0) + 1
+            if current < 1:
+                current = 1
+            with section_card(f"Batch Processing ({current}/{total})##BatchProgress", tier="secondary") as batch_open:
+                if batch_open:
+                    import os as _os
+                    video_name = ""
+                    idx = getattr(app, 'current_batch_video_index', 0)
+                    if 0 <= idx < total:
+                        video_name = _os.path.basename(app.batch_video_paths[idx].get("path", ""))
+                    if video_name:
+                        imgui.text_wrapped(video_name)
+                    progress = current / max(1, total)
+                    imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 0.3, 0.65, 1.0, 1.0)
+                    imgui.progress_bar(progress, size=(-1, 0), overlay=f"{current}/{total}")
+                    imgui.pop_style_color()
+
         # Progress card (only during analysis)
         if self._is_offline_tracker(mode) and stage_proc.full_analysis_active:
             imgui.spacing()
