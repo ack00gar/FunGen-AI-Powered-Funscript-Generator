@@ -301,8 +301,17 @@ class StageGuiEventsMixin:
 
     def _apply_chapters_from_funscript(self, funscript_obj, fs_proc, overwrite_chapters, stage_label):
         """Apply chapter data from a funscript object to the chapter list."""
-        fps = (self.app.processor.video_info.get('fps', 30.0)
-               if self.app.processor and self.app.processor.video_info else 30.0)
+        fps = 30.0
+        if self.app.processor and self.app.processor.video_info and \
+                self.app.processor.video_info.get('fps', 0) > 0:
+            fps = self.app.processor.video_info['fps']
+        elif self.app.processor and hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:
+            fps = self.app.processor.fps
+        else:
+            self.logger.warning(
+                f"[{stage_label}] Video FPS not available, using fallback 30.0 — "
+                "chapter frame indices may be wrong for 60fps videos!"
+            )
 
         if overwrite_chapters or len(fs_proc.video_chapters) == 0:
             if overwrite_chapters:
