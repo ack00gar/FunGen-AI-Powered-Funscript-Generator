@@ -1036,6 +1036,12 @@ class ControlPanelUI(
                     imgui.progress_bar(progress, size=(-1, 0), overlay=f"{current}/{total}")
                     imgui.pop_style_color()
 
+        # ROI controls for live trackers that require user intervention (e.g., User ROI)
+        if self._is_live_tracker(mode):
+            tracker_info = app.tracker.get_tracker_info() if app.tracker else None
+            if tracker_info and getattr(tracker_info, 'requires_intervention', False):
+                self._render_user_roi_controls_for_run_tab()
+
         # Progress card (only during analysis)
         if self._is_offline_tracker(mode) and stage_proc.full_analysis_active:
             imgui.spacing()
