@@ -299,6 +299,27 @@ class StageGuiEventsMixin:
     # Shared helpers for results handling
     # ------------------------------------------------------------------
 
+    # Reverse lookup: long position name → short name for VideoSegment color mapping.
+    # Chapter detection produces long names ("Blowjob", "Cowgirl / Missionary") but
+    # VideoSegment._POSITION_COLOR_MAP uses short names ("BJ", "CG/Miss.").
+    _LONG_TO_SHORT_POSITION = None
+
+    @classmethod
+    def _get_position_short_name(cls, long_name: str) -> str:
+        """Map a long position name to its short form for color/display."""
+        if cls._LONG_TO_SHORT_POSITION is None:
+            from config.constants import POSITION_INFO_MAPPING
+            cls._LONG_TO_SHORT_POSITION = {}
+            for short, info in POSITION_INFO_MAPPING.items():
+                ln = info.get('long_name', '')
+                if ln:
+                    cls._LONG_TO_SHORT_POSITION[ln] = short
+                    cls._LONG_TO_SHORT_POSITION[ln.lower()] = short
+            # Handle the detection module's case variant
+            cls._LONG_TO_SHORT_POSITION['Close up'] = 'C-Up'
+        return cls._LONG_TO_SHORT_POSITION.get(long_name,
+               cls._LONG_TO_SHORT_POSITION.get(long_name.lower() if long_name else '', long_name))
+
     def _apply_chapters_from_funscript(self, funscript_obj, fs_proc, overwrite_chapters, stage_label):
         """Apply chapter data from a funscript object to the chapter list."""
         fps = 30.0
@@ -323,14 +344,16 @@ class StageGuiEventsMixin:
             for chapter in funscript_obj.chapters:
                 start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
                 end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
+                raw_name = chapter.get('name', 'Unknown')
+                short_name = self._get_position_short_name(raw_name)
                 video_segment = VideoSegment(
                     start_frame_id=start_frame,
                     end_frame_id=end_frame,
                     class_id=None,
-                    class_name=chapter.get('name', 'Unknown'),
+                    class_name=raw_name,
                     segment_type="SexAct",
-                    position_short_name=chapter.get('name', ''),
-                    position_long_name=chapter.get('description', chapter.get('name', 'Unknown')),
+                    position_short_name=short_name,
+                    position_long_name=raw_name,
                     source=f"{stage_label.lower().replace(' ', '')}_funscript"
                 )
                 fs_proc.video_chapters.append(video_segment)
