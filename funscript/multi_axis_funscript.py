@@ -1155,6 +1155,7 @@ class MultiAxisFunscript:
                 num_to_clear = e_idx - s_idx + 1
                 del actions_list_ref[s_idx: e_idx + 1]
                 total_cleared_count += num_to_clear
+                self._invalidate_cache(axis_name)
                 self.logger.debug(
                     f"Cleared {num_to_clear} points from {axis_name} axis between {start_time_ms}ms and {end_time_ms}ms.")
 
