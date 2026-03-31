@@ -934,11 +934,14 @@ class StageExecutorMixin:
                            if self.app.processor and self.app.processor.video_info else 30.0)
                     funscript_obj = MultiAxisFunscript(fps=fps)
 
-                # Set chapters on the funscript object from tracker chapter data
+                # Set chapters on the funscript object from tracker chapter data.
+                # If tracker already populated chapters (e.g. VR Hybrid), keep them.
                 if chapters and hasattr(funscript_obj, 'set_chapters_from_segments'):
-                    segment_dicts = [self._chapter_to_segment_dict(ch) for ch in chapters]
-                    fps = getattr(funscript_obj, 'fps', 30.0) or 30.0
-                    funscript_obj.set_chapters_from_segments(segment_dicts, fps)
+                    has_existing_chapters = bool(getattr(funscript_obj, 'chapters', None))
+                    if not has_existing_chapters:
+                        segment_dicts = [self._chapter_to_segment_dict(ch) for ch in chapters]
+                        fps = self._resolve_video_fps()
+                        funscript_obj.set_chapters_from_segments(segment_dicts, fps)
 
                 output_data = {
                     'funscript': funscript_obj,

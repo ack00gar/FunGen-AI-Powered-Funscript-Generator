@@ -1285,7 +1285,7 @@ class VRHybridChapterTracker(BaseOfflineTracker):
         all_secondary = self._deduplicate_actions(all_secondary)
 
         # Build funscript
-        funscript = MultiAxisFunscript(logger=self.logger)
+        funscript = MultiAxisFunscript(logger=self.logger, fps=fps)
         funscript.set_axis_actions('primary', all_primary)
         if all_secondary:
             funscript.set_axis_actions('secondary', all_secondary)
