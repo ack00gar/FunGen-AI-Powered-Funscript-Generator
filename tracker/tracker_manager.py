@@ -423,6 +423,22 @@ class TrackerManager:
             self.logger.info(f"Stored pending user ROI: {roi_abs_coords}, {point_abs_coords_in_frame}")
             return True
 
+    def reconfigure_for_chapter(self, chapter) -> bool:
+        """Apply a chapter's per-chapter ROI and point to the current tracker.
+        Called during live playback when entering a chapter with user_roi_fixed."""
+        roi = getattr(chapter, 'user_roi_fixed', None)
+        point_rel = getattr(chapter, 'user_roi_initial_point_relative', None)
+        if not roi:
+            return False
+        # Convert relative point back to absolute frame coords
+        if point_rel:
+            point_abs = (int(roi[0] + point_rel[0]), int(roi[1] + point_rel[1]))
+        else:
+            # Default to center of ROI if no point stored
+            point_abs = (roi[0] + roi[2] // 2, roi[1] + roi[3] // 2)
+        self.logger.info(f"Reconfiguring tracker for chapter ROI={roi}, point={point_abs}")
+        return self.set_user_defined_roi_and_point(roi, point_abs)
+
     def set_axis(self, point_a: Tuple[int, int], point_b: Tuple[int, int]) -> bool:
         """Set axis points with direct tracker call."""
         if self._current_tracker and hasattr(self._current_tracker, 'set_axis'):
