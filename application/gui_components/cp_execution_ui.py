@@ -15,9 +15,11 @@ class ExecutionMixin:
         stage_proc = app.stage_processor
         app_state = app.app_state_ui
         mode = app_state.selected_tracker_name
+        if app.is_batch_processing_active and getattr(app, 'batch_tracker_name', None):
+            mode = app.batch_tracker_name
 
         if self._is_offline_tracker(mode):
-            self._render_stage_progress_ui(stage_proc)
+            self._render_stage_progress_ui(stage_proc, mode)
             return
 
         if self._is_live_tracker(mode):
@@ -28,9 +30,12 @@ class ExecutionMixin:
                 self._render_user_roi_controls_for_run_tab()
             return
 
-    def _render_stage_progress_ui(self, stage_proc):
+    def _render_stage_progress_ui(self, stage_proc, selected_mode=None):
         is_analysis_running = stage_proc.full_analysis_active
-        selected_mode = self.app.app_state_ui.selected_tracker_name
+        if selected_mode is None:
+            selected_mode = self.app.app_state_ui.selected_tracker_name
+            if self.app.is_batch_processing_active and getattr(self.app, 'batch_tracker_name', None):
+                selected_mode = self.app.batch_tracker_name
 
         active_progress_color = self.ControlPanelColors.ACTIVE_PROGRESS # Vibrant blue for active
         completed_progress_color = self.ControlPanelColors.COMPLETED_PROGRESS # Vibrant green for completed
