@@ -45,6 +45,26 @@ FLOW_HISTORY_SIZE = 300  # ~10s at 30fps
 # EMA smoothing alpha for position output
 POSITION_SMOOTHING_ALPHA = 0.4
 
+# Ignore very small flow values to avoid integrating optical-flow noise
+FLOW_DEADZONE = 0.03
+
+# Drift removal / normalization windows (in frames)
+DRIFT_REMOVAL_WINDOW = 90
+NORMALIZATION_WINDOW = 180
+
+# If ROI shifts by more than this many pixels, reinitialize flow reference
+ROI_SHIFT_RESET_THRESHOLD = 6
+
+# Output normalization target: map recent p10-p90 spread to this amplitude span around 50
+TARGET_HALF_RANGE = 41.0
+
+# Slow baseline tracking for high-pass filtering cumulative displacement
+BASELINE_ALPHA = 0.003
+
+# Soft limiter to avoid hard clipping flat peaks at 0/100
+SOFT_LIMIT_HALF_RANGE = 50.0
+SOFT_LIMIT_SHARPNESS = 0.9
+
 # Minimum ROI size in pixels
 MIN_ROI_SIZE = 16
 
@@ -72,6 +92,7 @@ class HybridFlowTracker(BaseTracker):
         # DIS optical flow
         self._dis = None
         self._prev_gray_roi = None
+        self._prev_roi_for_flow = None
 
         # ROI state
         self._current_roi = None  # (x1, y1, x2, y2) in pixel coords
@@ -82,24 +103,31 @@ class HybridFlowTracker(BaseTracker):
 
         # Signal processing
         self._flow_history = deque(maxlen=FLOW_HISTORY_SIZE)
+        self._flow_raw_history = deque(maxlen=FLOW_HISTORY_SIZE)
         self._cumulative_pos = 0.0
         self._drift_buffer = deque(maxlen=FLOW_HISTORY_SIZE)
         self._smoothed_primary = 50.0
         self._smoothed_secondary = 50.0
         self._frame_count = 0
+        self._roi_refreshed_this_frame = False
 
         # Normalization
         self._pos_min = 0.0
         self._pos_max = 0.0
         self._pos_range_ema = 1.0
+        self._pos_center_ema = 0.0
+        self._pos_baseline = 0.0
 
         # Horizontal flow for secondary axis
         self._dx_history = deque(maxlen=FLOW_HISTORY_SIZE)
+        self._dx_raw_history = deque(maxlen=FLOW_HISTORY_SIZE)
         self._cumulative_dx = 0.0
         self._drift_buffer_dx = deque(maxlen=FLOW_HISTORY_SIZE)
         self._dx_min = 0.0
         self._dx_max = 0.0
         self._dx_range_ema = 1.0
+        self._dx_center_ema = 0.0
+        self._dx_baseline = 0.0
 
         # FPS tracking
         self.current_fps = 30.0
@@ -196,26 +224,34 @@ class HybridFlowTracker(BaseTracker):
     def _reset_state(self):
         """Reset all per-session state."""
         self._prev_gray_roi = None
+        self._prev_roi_for_flow = None
         self._current_roi = None
         self._last_penis_box = None
         self._last_contact_box = None
         self._frames_since_yolo = self._yolo_interval  # Force YOLO on first frame
         self._yolo_miss_count = 0
         self._flow_history.clear()
+        self._flow_raw_history.clear()
         self._cumulative_pos = 0.0
         self._drift_buffer.clear()
         self._smoothed_primary = 50.0
         self._smoothed_secondary = 50.0
         self._frame_count = 0
+        self._roi_refreshed_this_frame = False
         self._pos_min = 0.0
         self._pos_max = 0.0
         self._pos_range_ema = 1.0
+        self._pos_center_ema = 0.0
+        self._pos_baseline = 0.0
         self._dx_history.clear()
+        self._dx_raw_history.clear()
         self._cumulative_dx = 0.0
         self._drift_buffer_dx.clear()
         self._dx_min = 0.0
         self._dx_max = 0.0
         self._dx_range_ema = 1.0
+        self._dx_center_ema = 0.0
+        self._dx_baseline = 0.0
         self._last_primary_pos = 50
         self._last_secondary_pos = 50
 
@@ -243,18 +279,25 @@ class HybridFlowTracker(BaseTracker):
         if self._frames_since_yolo >= self._yolo_interval:
             roi, penis_box, contact_box = self._run_yolo(frame, h, w)
             self._frames_since_yolo = 0
+            self._roi_refreshed_this_frame = False
 
             if roi is not None:
+                old_roi = self._current_roi
                 self._current_roi = roi
                 self._last_penis_box = penis_box
                 self._last_contact_box = contact_box
                 self._yolo_miss_count = 0
+                if old_roi != roi:
+                    self._roi_refreshed_this_frame = True
             else:
                 self._yolo_miss_count += 1
                 if self._yolo_miss_count > 10 and self._current_roi is None:
                     margin_x = int(w * 0.2)
                     margin_y = int(h * 0.2)
                     self._current_roi = (margin_x, margin_y, w - margin_x, h - margin_y)
+                    self._roi_refreshed_this_frame = True
+        else:
+            self._roi_refreshed_this_frame = False
 
         # --- Step 2: Optical flow in ROI ---
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -264,6 +307,11 @@ class HybridFlowTracker(BaseTracker):
             rx1, ry1, rx2, ry2 = self._current_roi
             rx1, ry1 = max(0, rx1), max(0, ry1)
             rx2, ry2 = min(w, rx2), min(h, ry2)
+            current_roi = (rx1, ry1, rx2, ry2)
+
+            # Reinitialize previous patch when ROI shifts to avoid synthetic flow from crop motion.
+            if self._roi_shifted_for_flow(current_roi):
+                self._prev_gray_roi = None
 
             roi_w = rx2 - rx1
             roi_h = ry2 - ry1
@@ -271,6 +319,8 @@ class HybridFlowTracker(BaseTracker):
             if roi_w > MIN_ROI_SIZE and roi_h > MIN_ROI_SIZE:
                 curr_patch = gray[ry1:ry2, rx1:rx2]
 
+                if self._roi_refreshed_this_frame:
+                    self._prev_gray_roi = None
                 if self._prev_gray_roi is not None and self._prev_gray_roi.shape == curr_patch.shape:
                     try:
                         flow = self._dis.calc(
@@ -284,8 +334,13 @@ class HybridFlowTracker(BaseTracker):
                         pass
 
                 self._prev_gray_roi = curr_patch.copy()
+                self._prev_roi_for_flow = current_roi
             else:
                 self._prev_gray_roi = None
+                self._prev_roi_for_flow = None
+        else:
+            self._prev_gray_roi = None
+            self._prev_roi_for_flow = None
 
         # --- Step 3: Convert flow to positions ---
         primary_pos = self._flow_to_position(dy, 'primary')
@@ -442,52 +497,66 @@ class HybridFlowTracker(BaseTracker):
 
     def _flow_to_position(self, flow_val: float, axis: str) -> float:
         """Convert a flow component to 0-100 position with drift removal and normalization."""
+        if abs(flow_val) < FLOW_DEADZONE:
+            flow_val = 0.0
+
         if axis == 'primary':
-            self._cumulative_pos -= flow_val  # negate: down motion = insertion
-            self._drift_buffer.append(self._cumulative_pos)
-            cum = self._cumulative_pos
-            drift_buf = self._drift_buffer
+            raw_history = self._flow_raw_history
             history = self._flow_history
+            sign = -1.0  # down motion = insertion
         else:
-            self._cumulative_dx += flow_val
-            self._drift_buffer_dx.append(self._cumulative_dx)
-            cum = self._cumulative_dx
-            drift_buf = self._drift_buffer_dx
+            raw_history = self._dx_raw_history
             history = self._dx_history
+            sign = 1.0
 
-        # Drift removal
-        if len(drift_buf) > 10:
-            drift = np.mean(drift_buf)
-            detrended = cum - drift
+        # Use direct flow (velocity-like) with median denoising + slow baseline removal.
+        # This avoids cumulative-position drift that can appear as a slow sinusoidal center wander.
+        signed_flow = sign * flow_val
+        raw_history.append(signed_flow)
+        recent_raw = np.array(list(raw_history)[-7:])
+        flow_med = float(np.median(recent_raw))
+
+        if axis == 'primary':
+            self._pos_baseline = (1.0 - BASELINE_ALPHA) * self._pos_baseline + BASELINE_ALPHA * flow_med
+            signal = flow_med - self._pos_baseline
         else:
-            detrended = cum
+            self._dx_baseline = (1.0 - BASELINE_ALPHA) * self._dx_baseline + BASELINE_ALPHA * flow_med
+            signal = flow_med - self._dx_baseline
 
-        history.append(detrended)
+        history.append(signal)
 
         # Adaptive normalization
         if len(history) > 20:
-            recent = np.array(history)
-            p5 = np.percentile(recent, 5)
-            p95 = np.percentile(recent, 95)
-            current_range = max(p95 - p5, 0.1)
+            recent = np.array(list(history)[-NORMALIZATION_WINDOW:])
+            p10 = np.percentile(recent, 10)
+            p50 = np.percentile(recent, 50)
+            p90 = np.percentile(recent, 90)
+            current_range = max(p90 - p10, 0.1)
 
-            alpha = 0.02
+            alpha = 0.015
             if axis == 'primary':
                 self._pos_range_ema = (1 - alpha) * self._pos_range_ema + alpha * current_range
-                self._pos_min = (1 - alpha) * self._pos_min + alpha * p5
-                self._pos_max = (1 - alpha) * self._pos_max + alpha * p95
-                center = (self._pos_min + self._pos_max) / 2
-                effective_range = max(self._pos_range_ema, 0.1)
+                self._pos_min = (1 - alpha) * self._pos_min + alpha * p10
+                self._pos_max = (1 - alpha) * self._pos_max + alpha * p90
+                self._pos_center_ema = (1 - alpha) * self._pos_center_ema + alpha * p50
+                center = self._pos_center_ema
+                half_range = max(self._pos_range_ema * 0.5, 0.05)
             else:
                 self._dx_range_ema = (1 - alpha) * self._dx_range_ema + alpha * current_range
-                self._dx_min = (1 - alpha) * self._dx_min + alpha * p5
-                self._dx_max = (1 - alpha) * self._dx_max + alpha * p95
-                center = (self._dx_min + self._dx_max) / 2
-                effective_range = max(self._dx_range_ema, 0.1)
+                self._dx_min = (1 - alpha) * self._dx_min + alpha * p10
+                self._dx_max = (1 - alpha) * self._dx_max + alpha * p90
+                self._dx_center_ema = (1 - alpha) * self._dx_center_ema + alpha * p50
+                center = self._dx_center_ema
+                half_range = max(self._dx_range_ema * 0.5, 0.05)
 
-            normalized = (detrended - center) / effective_range * 80 + 50
+            normalized = 50.0 + ((signal - center) / half_range) * TARGET_HALF_RANGE
         else:
-            normalized = 50.0 + detrended * 10
+            normalized = 50.0 + signal * 200
+
+        # Soft-limit extremes so peaks remain rounded instead of hard-clipped flat.
+        normalized = 50.0 + SOFT_LIMIT_HALF_RANGE * np.tanh(
+            ((normalized - 50.0) / SOFT_LIMIT_HALF_RANGE) * SOFT_LIMIT_SHARPNESS
+        )
 
         # EMA smoothing
         if axis == 'primary':
@@ -496,6 +565,19 @@ class HybridFlowTracker(BaseTracker):
         else:
             self._smoothed_secondary = (1 - POSITION_SMOOTHING_ALPHA) * self._smoothed_secondary + POSITION_SMOOTHING_ALPHA * normalized
             return self._smoothed_secondary
+
+    def _roi_shifted_for_flow(self, current_roi: Tuple[int, int, int, int]) -> bool:
+        """Return True when ROI moved enough to invalidate prev ROI patch for optical flow."""
+        prev = self._prev_roi_for_flow
+        if prev is None:
+            return False
+
+        return (
+            abs(current_roi[0] - prev[0]) > ROI_SHIFT_RESET_THRESHOLD or
+            abs(current_roi[1] - prev[1]) > ROI_SHIFT_RESET_THRESHOLD or
+            abs(current_roi[2] - prev[2]) > ROI_SHIFT_RESET_THRESHOLD or
+            abs(current_roi[3] - prev[3]) > ROI_SHIFT_RESET_THRESHOLD
+        )
 
     # -------------------------------------------------------------------------
     # Helpers
