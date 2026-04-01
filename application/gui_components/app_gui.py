@@ -428,6 +428,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
+        # Tracker debug overlay texture (community trackers can set tracker.debug_frame)
+        self._debug_frame_texture_id = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self._debug_frame_texture_id)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        self._show_debug_frame_window = False
+
         # Initialize heatmap with a dummy texture
         self.heatmap_texture_id = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.heatmap_texture_id)
@@ -1152,6 +1160,39 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         self._render_go_to_frame_popup()
         self.app.addon_checker.tick_status_ads()
+        self._render_tracker_debug_frame()
+
+    def _render_tracker_debug_frame(self):
+        """Render a debug overlay window if the current tracker provides a debug_frame."""
+        tracker = self.app.tracker
+        if not tracker:
+            return
+        debug_frame = getattr(tracker, 'debug_frame', None)
+
+        # Toggle visibility: show window when debug_frame exists, hide when it doesn't
+        if debug_frame is None:
+            self._show_debug_frame_window = False
+            return
+        self._show_debug_frame_window = True
+
+        h, w = debug_frame.shape[:2]
+        if w == 0 or h == 0:
+            return
+
+        imgui.set_next_window_size(min(w + 16, 520), min(h + 40, 520), imgui.FIRST_USE_EVER)
+        expanded, opened = imgui.begin("Tracker Debug##DebugFrame", True)
+        if not opened:
+            self._show_debug_frame_window = False
+            # Tracker can check this to skip expensive debug frame generation
+            tracker.debug_frame = None
+            imgui.end()
+            return
+        if expanded:
+            self.update_texture(self._debug_frame_texture_id, debug_frame)
+            avail_w = imgui.get_content_region_available_width()
+            scale = avail_w / w if w > 0 else 1.0
+            imgui.image(self._debug_frame_texture_id, avail_w, int(h * scale))
+        imgui.end()
 
     def _render_status_strip(self, strip_h):
         """Render a unified status strip at the very bottom of the window."""

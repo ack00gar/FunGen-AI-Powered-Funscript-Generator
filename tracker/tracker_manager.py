@@ -74,6 +74,8 @@ class TrackerManager:
 
         # Live overlay data (proxied from inner tracker for ImGui rendering)
         self.live_overlay = {}
+        # Debug frame: optional numpy array (BGR) for a separate debug window
+        self.debug_frame = None
         
         # Additional GUI compatibility attributes that were in the old bridge
         self.oscillation_area_fixed = None  # Should be None or (x, y, w, h) tuple
@@ -1042,8 +1044,9 @@ class TrackerManager:
         if not self._current_tracker:
             return
 
-        # Proxy live_overlay from inner tracker for ImGui rendering
+        # Proxy live_overlay and debug_frame from inner tracker for ImGui rendering
         self.live_overlay = getattr(self._current_tracker, 'live_overlay', {})
+        self.debug_frame = getattr(self._current_tracker, 'debug_frame', None)
 
         # Update ROI for visualization overlay
         if hasattr(self._current_tracker, 'roi'):
