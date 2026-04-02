@@ -1014,6 +1014,8 @@ class ControlPanelUI(
                         imgui.end_popup()
 
         mode = app_state.selected_tracker_name
+        if app.is_batch_processing_active and getattr(app, 'batch_tracker_name', None):
+            mode = app.batch_tracker_name
 
         # Batch progress card (always visible during batch processing)
         if app.is_batch_processing_active and getattr(app, 'batch_video_paths', None):
