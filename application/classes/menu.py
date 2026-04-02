@@ -1106,12 +1106,7 @@ class MainMenu:
                 if _menu_item_simple("Select Update Commit..."):
                     app.app_state_ui.show_update_settings_dialog = True
                 if imgui.is_item_hovered():
-                    token = updater.token_manager.get_token()
-                    imgui.set_tooltip(
-                        "GitHub token and version selection."
-                        if token
-                        else "GitHub token and version selection.\nNo token set."
-                    )
+                    imgui.set_tooltip("Browse and select a specific version to update to.")
 
                 can_apply = updater.update_available and not updater.update_in_progress
                 if _menu_item_simple("Apply Pending Update...", enabled=can_apply):
