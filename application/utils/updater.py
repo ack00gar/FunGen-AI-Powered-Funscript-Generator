@@ -10,30 +10,25 @@ import re
 import json
 from typing import List, Dict, Optional
 from datetime import datetime
-from application.utils import GitHubTokenManager, format_github_date, check_internet_connection
+from application.utils import format_github_date, check_internet_connection
 from config.constants import DEFAULT_COMMIT_FETCH_COUNT
 from config.element_group_colors import AppGUIColors, UpdateSettingsColors
 
 class GitHubAPIClient:
     """Centralized GitHub API client to reduce code duplication."""
     
-    def __init__(self, repo_owner: str, repo_name: str, token_manager: GitHubTokenManager, logger=None):
+    def __init__(self, repo_owner: str, repo_name: str, logger=None):
         self.repo_owner = repo_owner
         self.repo_name = repo_name
-        self.token_manager = token_manager
         self.base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
         self.logger = logger
-        
+
     def _get_headers(self) -> Dict[str, str]:
         """Get common headers for GitHub API requests."""
-        headers = {
+        return {
             'User-Agent': 'FunGen-Updater/1.0',
             'Accept': 'application/vnd.github.v3+json'
         }
-        github_token = self.token_manager.get_token()
-        if github_token:
-            headers['Authorization'] = f'token {github_token}'
-        return headers
     
     def _make_request(self, endpoint: str, timeout: int = 10) -> Optional[Dict]:
         """Make a GitHub API request with common error handling."""
@@ -148,8 +143,7 @@ class AutoUpdater:
         self.skip_updates_file = "skip_updates.json"
         self.test_mode_enabled = False  # Manual test mode toggle
         
-        self.token_manager = GitHubTokenManager()
-        self.github_api = GitHubAPIClient(self.REPO_OWNER, self.REPO_NAME, self.token_manager, self.logger)
+        self.github_api = GitHubAPIClient(self.REPO_OWNER, self.REPO_NAME, self.logger)
         
         # Multi-branch migration support
         self.active_branch = self.FALLBACK_BRANCH  # Start with v0.5.0
@@ -500,7 +494,7 @@ class AutoUpdater:
                 self.update_error_message = "No internet connection available. Please check your network connection."
             else:
                 self.logger.error("Could not determine remote commit hash")
-                self.update_error_message = "Could not connect to GitHub. Please check your GitHub token."
+                self.update_error_message = "Could not connect to GitHub. Please check your network connection."
             self.show_update_error_dialog = True
             self.update_check_complete = True
             return
@@ -1141,7 +1135,7 @@ class AutoUpdater:
                 
                 if commits_data is None:
                     self.logger.error("Failed to fetch commits from GitHub API")
-                    return [{'name': 'Failed to fetch commits. Check network connection or GitHub token.', 'commit_hash': 'error', 'type': 'error', 'date': '', 'full_message': ''}]
+                    return [{'name': 'Failed to fetch commits. Check network connection.', 'commit_hash': 'error', 'type': 'error', 'date': '', 'full_message': ''}]
                 
                 if not commits_data:
                     break
@@ -1227,7 +1221,7 @@ class AutoUpdater:
         commit_data = self.github_api.get_commit_details(target_hash)
         
         if commit_data is None:
-            return ["Failed to fetch commit details. Check network connection or GitHub token."]
+            return ["Failed to fetch commit details. Check network connection."]
 
         # Get author info - prefer GitHub username, fallback to commit author name
         author_data = commit_data.get('author')
@@ -1309,7 +1303,7 @@ class AutoUpdater:
     def render_update_settings_dialog(self):
         """Renders the combined update commit & GitHub token dialog with tabs."""
         if self.app.app_state_ui.show_update_settings_dialog:
-            imgui.open_popup("Updates & GitHub Token")
+            imgui.open_popup("Updates")
             self.app.app_state_ui.show_update_settings_dialog = False
             # Load updates only if not already loaded or if cache is stale
             if not hasattr(self, '_updates_last_loaded') or time.time() - self._updates_last_loaded > 300.0:  # 5 minute cache
@@ -1319,14 +1313,11 @@ class AutoUpdater:
                 self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
 
         # Early return if no dialog to show - avoid expensive operations
-        if not imgui.is_popup_open("Updates & GitHub Token"):
+        if not imgui.is_popup_open("Updates"):
             return
 
-        # Initialize buffers if needed
-        if not hasattr(self, '_github_token_buffer'):
-            self._github_token_buffer = self.token_manager.get_token()
         if not hasattr(self, '_updates_active_tab'):
-            self._updates_active_tab = 0  # 0 = Update, 1 = Token
+            self._updates_active_tab = 0
 
         # Set initial size and make resizable
         if not hasattr(self, '_update_settings_window_size'):
@@ -1344,7 +1335,7 @@ class AutoUpdater:
         imgui.set_next_window_position(*self._update_settings_window_pos, condition=imgui.ONCE)
 
         # Track if popup is open
-        popup_open = imgui.begin_popup_modal("Updates & GitHub Token", True)[0]
+        popup_open = imgui.begin_popup_modal("Updates", True)[0]
         
         if popup_open:
             # Save window size and position for persistence
@@ -1355,27 +1346,7 @@ class AutoUpdater:
             if window_pos[0] > 0 and window_pos[1] > 0:
                 self._update_settings_window_pos = window_pos
             
-            # Tab bar
-            if imgui.begin_tab_bar("Updates & GitHub Token Tabs"):
-                # Update Selection Tab
-                if imgui.begin_tab_item("Choose FunGen Update")[0]:
-                    self._updates_active_tab = 0
-                    imgui.end_tab_item()
-                
-                # GitHub Token Tab
-                if imgui.begin_tab_item("GitHub Token")[0]:
-                    self._updates_active_tab = 1
-                    imgui.end_tab_item()
-                
-                imgui.end_tab_bar()
-
-            # Tab content
-            if self._updates_active_tab == 0:
-                # Update Selection Tab
-                self._render_update_picker_content()
-            else:
-                # GitHub Token Tab
-                self._render_github_token_content()
+            self._render_update_picker_content()
 
             imgui.separator()
             
@@ -1625,66 +1596,3 @@ class AutoUpdater:
                 except ValueError:
                     self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
 
-    def _render_github_token_content(self):
-        """Renders the GitHub token content within the tabbed dialog."""
-        imgui.text("GitHub Personal Access Token")
-        imgui.text_wrapped("A GitHub token increases the API rate limit from 60 to 5000 requests per hour.")
-        imgui.separator()
-
-        current_token = self.token_manager.get_token()
-
-        if current_token:
-            masked_token = self.token_manager.get_masked_token()
-            imgui.text(f"Current token: {masked_token}")
-            imgui.text_colored("Token is set", *UpdateSettingsColors.TOKEN_SET)
-        else:
-            imgui.text_colored("No token set", *UpdateSettingsColors.TOKEN_NOT_SET)
-
-        imgui.separator()
-        imgui.text("Enter GitHub Personal Access Token:")
-        imgui.text_wrapped("Get a token from: GitHub > Settings > Developer settings > Personal access tokens")
-        imgui.text_wrapped("Required scope: public_repo (for public repositories)")
-        changed, self._github_token_buffer = imgui.input_text("Token", self._github_token_buffer, 100, imgui.INPUT_TEXT_PASSWORD)
-
-        imgui.separator()
-        if imgui.button("Save Token", width=120):
-            self.token_manager.set_token(self._github_token_buffer)
-
-        imgui.same_line()
-        if imgui.button("Test Token", width=120):
-            # Test the current token in the buffer
-            test_token = self._github_token_buffer if self._github_token_buffer else self.token_manager.get_token()
-            validation_result = self.token_manager.validate_token(test_token)
-            
-            if validation_result['valid']:
-                imgui.open_popup("Token Validation")
-                self._token_validation_result = validation_result
-            else:
-                imgui.open_popup("Token Validation")
-                self._token_validation_result = validation_result
-
-        imgui.same_line()
-        if imgui.button("Remove Token", width=120):
-            self.token_manager.remove_token()
-            self._github_token_buffer = ""
-
-        # Token validation result popup
-        if hasattr(self, '_token_validation_result'):
-            if imgui.begin_popup_modal("Token Validation", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
-                result = self._token_validation_result
-
-                if result['valid']:
-                    imgui.text_colored("Token is valid!", *UpdateSettingsColors.TOKEN_VALID)
-                    if result['user_info']:
-                        imgui.text(f"Username: {result['user_info'].get('login', 'Unknown')}")
-                else:
-                    imgui.text_colored("X Token validation failed", *UpdateSettingsColors.TOKEN_INVALID)
-                    imgui.text(result['message'])
-
-                imgui.separator()
-
-                if imgui.button("OK", width=100):
-                    imgui.close_current_popup()
-                    delattr(self, '_token_validation_result')
-
-                imgui.end_popup()
