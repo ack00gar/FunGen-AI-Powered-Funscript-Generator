@@ -553,6 +553,18 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
+    def _get_active_preview_axis(self) -> str:
+        """Return the axis name for the currently focused timeline (for heatmap/preview)."""
+        tl_num = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
+        if tl_num == 1:
+            return 'primary'
+        elif tl_num == 2:
+            return 'secondary'
+        else:
+            fs_proc = self.app.funscript_processor
+            fs, axis = fs_proc._get_target_funscript_object_and_axis(tl_num)
+            return axis or 'primary'
+
     # --- This function now submits a task to the worker thread ---
     def render_funscript_timeline_preview(self, total_duration_s: float, graph_height: int):
         app_state = self.app.app_state_ui
@@ -566,11 +578,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             imgui.dummy(current_bar_width_float if current_bar_width_float > 0 else 1, graph_height + 5)
             return
 
-        current_action_count = len(self.app.funscript_processor.get_actions('primary'))
+        preview_axis = self._get_active_preview_axis()
+        current_action_count = len(self.app.funscript_processor.get_actions(preview_axis))
         is_live_tracking = self.app.processor and self.app.processor.tracker and self.app.processor.tracker.tracking_active
 
-        # Determine if a redraw is needed
-        full_redraw_needed = (app_state.funscript_preview_dirty
+        # Determine if a redraw is needed (also dirty when active timeline changes)
+        axis_changed = getattr(self, '_last_preview_axis', 'primary') != preview_axis
+        self._last_preview_axis = preview_axis
+        full_redraw_needed = (app_state.funscript_preview_dirty or axis_changed
             or current_bar_width_int != app_state.last_funscript_preview_bar_width
             or abs(total_duration_s - app_state.last_funscript_preview_duration_s) > 0.01)
 
@@ -585,7 +600,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         # Non-blocking submit: try_put; if queue full, skip this frame without blocking UI
         if needs_regen:
-            actions_copy = self.app.funscript_processor.get_actions('primary').copy()
+            actions_copy = self.app.funscript_processor.get_actions(preview_axis).copy()
             task = {
                 'type': 'timeline',
                 'target_width': current_bar_width_int,
@@ -788,11 +803,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             imgui.dummy(bar_width_float, bar_height_float)
             return
 
-        current_action_count = len(self.app.funscript_processor.get_actions('primary'))
+        heatmap_axis = self._get_active_preview_axis()
+        current_action_count = len(self.app.funscript_processor.get_actions(heatmap_axis))
         is_live_tracking = self.app.processor and self.app.processor.tracker and self.app.processor.tracker.tracking_active
 
+        axis_changed = getattr(self, '_last_heatmap_axis', 'primary') != heatmap_axis
+        self._last_heatmap_axis = heatmap_axis
         full_redraw_needed = (
-            app_state.heatmap_dirty
+            app_state.heatmap_dirty or axis_changed
             or current_bar_width_int != app_state.last_heatmap_bar_width
             or abs(total_video_duration_s - app_state.last_heatmap_video_duration_s) > 0.01)
 
@@ -801,7 +819,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (time.time() - self.last_preview_update_time_heatmap >= self.preview_update_interval_seconds)))
 
         if needs_regen:
-            actions_copy = self.app.funscript_processor.get_actions('primary').copy()
+            actions_copy = self.app.funscript_processor.get_actions(heatmap_axis).copy()
             task = {
                 'type': 'heatmap',
                 'target_width': current_bar_width_int,
