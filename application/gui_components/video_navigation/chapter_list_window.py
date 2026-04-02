@@ -84,11 +84,13 @@ class ChapterListWindow:
 
             imgui.separator()
 
-            # --- RENDER TABLE ---
+            # --- RENDER TABLE (in scrollable child so buttons stay pinned) ---
             if not fs_proc.video_chapters:
                 imgui.text("No chapters loaded.")
                 imgui.end()
                 return
+
+            imgui.begin_child("##ChapterListScroll", width=0, height=0)
 
             table_flags = (imgui.TABLE_BORDERS |
                            imgui.TABLE_RESIZABLE |
@@ -227,6 +229,7 @@ class ChapterListWindow:
                         self.list_context_selected_chapters.remove(chap)
 
                 imgui.end_table()
+            imgui.end_child()
         imgui.end()
 
     def _get_gap_info(self, fs_proc):
