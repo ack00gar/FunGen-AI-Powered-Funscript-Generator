@@ -223,3 +223,7 @@ checkpoints/
 *.zip
 *.bak*
 *_backup.py
+# Private model tracker — never distribute
+tracker/tracker_modules/offline/peak_model_tracker.py
+*.pt
+tracker/tracker_modules/offline/vr_hybrid_chapter_tracker_v1_archived.py
