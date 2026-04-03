@@ -175,10 +175,16 @@ class FeatureDetector:
             if not feature_path.exists() or not feature_path.is_dir():
                 return False
             
-            # Check required files
+            # Check required files (accept .py or compiled .so/.pyd)
             for required_file in feature_info.required_files:
                 file_path = self.app_root / required_file
-                if not file_path.exists():
+                if file_path.exists():
+                    continue
+                # Check for Cython-compiled variants (.so on Mac/Linux, .pyd on Windows)
+                stem = file_path.stem  # e.g. "translator"
+                parent = file_path.parent
+                compiled = list(parent.glob(f"{stem}.cpython-*.so")) + list(parent.glob(f"{stem}.*.pyd"))
+                if not compiled:
                     self.logger.debug(f"Missing required file for {feature_info.name}: {required_file}")
                     return False
             
