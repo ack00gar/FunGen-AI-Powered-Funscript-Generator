@@ -780,6 +780,14 @@ class MainMenu:
                     setattr(app_state, attr, val)
                     pm.project_dirty = True
 
+            # Subtitle timeline
+            if _is_feature_available("subtitle_translation"):
+                sub_tl = getattr(app_state, 'show_subtitle_timeline', False)
+                clicked, val = imgui.menu_item("Subtitle Timeline", selected=sub_tl)
+                if clicked:
+                    app_state.show_subtitle_timeline = val
+                    pm.project_dirty = True
+
             # Extra timelines (T3+) — supporter only
             if self._feat_supporter:
                 for t_num in EXTRA_TIMELINE_RANGE:
@@ -1056,6 +1064,32 @@ class MainMenu:
             )
             if clicked:
                 app.toggle_file_manager_window()
+
+            imgui.separator()
+
+            # Subtitles — navigate to control panel tab + toggle editor
+            if _is_feature_available("subtitle_translation"):
+                gui = getattr(app, 'gui_instance', None)
+                cp = gui.control_panel_ui if gui else None
+                tool = getattr(cp, '_subtitle_tool', None) if cp else None
+                is_active = (tool and tool.is_open) if tool else False
+                clicked, _ = imgui.menu_item("Subtitles...", selected=is_active)
+                if clicked and cp:
+                    cp._active_section = "subtitle"
+                    cp._ensure_subtitle_tool()
+                    tool = getattr(cp, '_subtitle_tool', None)
+                    if tool:
+                        tool.is_open = not tool.is_open
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Subtitle editor window\n(Japanese/Spanish/English)")
+
+                # Subtitle timeline toggle
+                tl_vis = getattr(app_state, 'show_subtitle_timeline', False)
+                clicked_tl, tl_val = imgui.menu_item("Subtitle Timeline", selected=tl_vis)
+                if clicked_tl:
+                    app_state.show_subtitle_timeline = tl_val
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Full-width waveform timeline for precise subtitle timing\n(shows at the bottom alongside funscript timelines)")
 
             imgui.separator()
 

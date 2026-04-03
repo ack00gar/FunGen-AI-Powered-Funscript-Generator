@@ -10,6 +10,7 @@ import config
 from application.utils import destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
 from application.utils.section_card import section_card
+from application.utils.feature_detection import is_feature_available as _is_feature_available
 from funscript.axis_registry import FunscriptAxis, file_suffix_for_axis, tcode_for_axis
 
 _logger = logging.getLogger(__name__)
@@ -183,6 +184,10 @@ class SettingsRenderer:
 
         # --- Energy & Performance ---
         filtered("Energy & Performance##SettingsEnergy", ["energy"], self._render_energy_perf)
+
+        # --- Subtitles (optional add-on) ---
+        if _is_feature_available("subtitle_translation"):
+            filtered("Subtitles##SettingsSubtitles", ["subtitle", "translation"], self._render_subtitle_settings)
 
         # --- Logging ---
         filtered("Logging##SettingsLogging", ["logging"], self._render_logging)
@@ -425,6 +430,27 @@ class SettingsRenderer:
 
     # ================================================================ #
     #  Logging                                                         #
+    # ================================================================ #
+
+    def _render_subtitle_settings(self):
+        settings = self.app.app_settings
+
+        _begin_settings_columns("sub_cols")
+
+        # LLM model size
+        _row_label("Translation Quality", "LLM model size for translation.\nLarger = better quality but more RAM.")
+        sizes = ["Good (3B LLM, ~2GB)", "Best (7B Uncensored, ~4GB)"]
+        cur_size = settings.get("subtitle_llm_size", "large")
+        cur_idx = {"medium": 0, "large": 1}.get(cur_size, 1)
+        imgui.push_item_width(-1)
+        ch, new_idx = imgui.combo("##SubQuality", cur_idx, sizes)
+        imgui.pop_item_width()
+        if ch:
+            settings.set("subtitle_llm_size", ["medium", "large"][new_idx])
+        _row_end()
+
+        _end_settings_columns()
+
     # ================================================================ #
 
     def _render_logging(self):

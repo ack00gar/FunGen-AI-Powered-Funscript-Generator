@@ -560,18 +560,113 @@ class VideoOverlaysMixin:
     
 
     def _render_component_overlays(self, app_state):
-        """Render 3D simulator overlay on video display."""
+        """Render 3D simulator overlay and subtitle overlay on video display."""
         simulator_3d_overlay = self.app.app_settings.get('simulator_3d_overlay_mode', False)
-        if not simulator_3d_overlay or not app_state.show_simulator_3d:
+        if simulator_3d_overlay and app_state.show_simulator_3d:
+            img_rect = self._actual_video_image_rect_on_screen
+            if img_rect:
+                self._render_simulator_3d_overlay(
+                    app_state, img_rect['min_x'], img_rect['min_y'],
+                    img_rect['max_x'], img_rect['max_y'])
+
+        # Subtitle overlay (optional add-on)
+        if getattr(self.app, 'subtitle_track', None):
+            self._render_subtitle_overlay()
+
+    def _render_subtitle_overlay(self):
+        """Render current subtitle text on the video display."""
+        track = getattr(self.app, 'subtitle_track', None)
+        if not track:
+            return
+
+        proc = self.app.processor
+        if not proc or not proc.video_info or proc.fps <= 0:
+            return
+
+        current_ms = int(proc.current_frame_index / proc.fps * 1000)
+        seg = track.get_at_ms(current_ms)
+        if not seg or not seg.is_speech:
             return
 
         img_rect = self._actual_video_image_rect_on_screen
-        if not img_rect:
+        if img_rect['w'] <= 0 or img_rect['h'] <= 0:
             return
 
-        self._render_simulator_3d_overlay(
-            app_state, img_rect['min_x'], img_rect['min_y'],
-            img_rect['max_x'], img_rect['max_y'])
+        draw_list = imgui.get_window_draw_list()
+
+        # Calculate text area at bottom of video
+        padding_x = 16
+        padding_y = 8
+        margin_bottom = 12
+        max_text_w = img_rect['w'] - padding_x * 4
+
+        # Translated text (main, larger)
+        main_text = seg.text_translated or seg.text_original
+        orig_text = seg.text_original if seg.text_translated else ""
+
+        if not main_text.strip():
+            return
+
+        # Skip CJK-only text if no CJK font is loaded
+        _cjk_ok = getattr(getattr(self.app, 'gui_instance', None), '_cjk_font_loaded', False)
+        if not _cjk_ok and any(ord(c) > 0x3000 for c in main_text) and not any(c.isascii() and c.isalpha() for c in main_text):
+            return
+
+        # Wrap long text to fit video width (use actual text measurement)
+        if imgui.calc_text_size(main_text).x > max_text_w:
+            words = main_text.split()
+            line1, line2 = [], []
+            for w in words:
+                test = ' '.join(line1 + [w])
+                if imgui.calc_text_size(test).x <= max_text_w:
+                    line1.append(w)
+                else:
+                    line2.append(w)
+            main_text = ' '.join(line1) + '\n' + ' '.join(line2) if line2 else main_text
+
+        # Truncate original if too long
+        if orig_text and imgui.calc_text_size(orig_text).x > max_text_w:
+            while len(orig_text) > 10 and imgui.calc_text_size(orig_text + "...").x > max_text_w:
+                orig_text = orig_text[:-1]
+            orig_text = orig_text + "..."
+
+        # Measure text lines
+        main_lines = main_text.split('\n')
+        line_h = imgui.calc_text_size("Ay").y
+        main_total_h = line_h * len(main_lines)
+        main_max_w = max(imgui.calc_text_size(line).x for line in main_lines)
+        orig_size_x = imgui.calc_text_size(orig_text).x if orig_text else 0
+
+        # Total pill dimensions
+        total_h = padding_y * 2 + main_total_h
+        if orig_text:
+            total_h += line_h + 4
+
+        pill_w = min(max(main_max_w, orig_size_x) + padding_x * 2, img_rect['w'] - 20)
+        pill_x = img_rect['min_x'] + (img_rect['w'] - pill_w) / 2
+        pill_y = img_rect['max_y'] - total_h - margin_bottom
+
+        # Draw pill background
+        draw_list.add_rect_filled(
+            pill_x, pill_y, pill_x + pill_w, pill_y + total_h,
+            imgui.get_color_u32_rgba(0.0, 0.0, 0.0, 0.75),
+            rounding=10.0,
+        )
+
+        # Draw original text (dimmed, top)
+        text_y = pill_y + padding_y
+        _show_orig = orig_text and (_cjk_ok or not any(ord(c) > 0x3000 for c in orig_text))
+        if _show_orig:
+            ox = pill_x + (pill_w - orig_size_x) / 2
+            draw_list.add_text(ox, text_y, imgui.get_color_u32_rgba(0.65, 0.65, 0.70, 0.55), orig_text)
+            text_y += line_h + 4
+
+        # Draw translated text lines (white, centered per line)
+        for line in main_lines:
+            lw = imgui.calc_text_size(line).x
+            lx = pill_x + (pill_w - lw) / 2
+            draw_list.add_text(lx, text_y, imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.95), line)
+            text_y += line_h
 
 
     def _render_simulator_3d_overlay(self, app_state, video_min_x, video_min_y, video_max_x, video_max_y):

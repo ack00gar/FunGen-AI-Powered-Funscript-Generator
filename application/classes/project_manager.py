@@ -6,6 +6,7 @@ from typing import Optional, Dict, Tuple
 
 from config.constants import AUTOSAVE_FILE, PROJECT_FILE_EXTENSION, APP_VERSION
 from application.utils import check_write_access
+from application.utils.feature_detection import is_feature_available as _is_feature_available
 
 
 # Add a handler to convert NumPy types to standard Python types for JSON serialization
@@ -343,6 +344,13 @@ class ProjectManager:
         }
         if self.app.audio_waveform_data is not None:
             project_data["audio_waveform_data"] = self.app.audio_waveform_data
+
+        # Subtitle track (optional add-on)
+        if _is_feature_available("subtitle_translation"):
+            subtitle_track = getattr(self.app, 'subtitle_track', None)
+            if subtitle_track and len(subtitle_track) > 0:
+                project_data["subtitle_track"] = subtitle_track.to_dict()
+
         return project_data
 
     def _get_bookmarks_data(self):
@@ -453,6 +461,20 @@ class ProjectManager:
                 f"Loaded audio waveform data ({len(self.app.audio_waveform_data)} samples) from project.")
         else:
             self.app.audio_waveform_data = None
+
+        # Subtitle track (optional add-on)
+        if _is_feature_available("subtitle_translation"):
+            subtitle_data = project_data.get("subtitle_track")
+            if subtitle_data and isinstance(subtitle_data, dict):
+                try:
+                    from subtitle_translation.subtitle_track import SubtitleTrack
+                    self.app.subtitle_track = SubtitleTrack.from_dict(subtitle_data)
+                    self.app.logger.info(f"Loaded {len(self.app.subtitle_track)} subtitles from project.")
+                except Exception as e:
+                    self.app.logger.warning(f"Failed to load subtitles from project: {e}")
+                    self.app.subtitle_track = None
+            else:
+                self.app.subtitle_track = None
 
         # Data for StageProcessor
         stage_proc = self.app.stage_processor

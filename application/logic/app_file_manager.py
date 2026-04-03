@@ -5,6 +5,7 @@ import orjson
 import msgpack
 import time
 from typing import List, Optional, Dict, Tuple, Any
+from application.utils.feature_detection import is_feature_available as _is_feature_available
 
 
 def _safe_makedirs(path: str, logger=None) -> str:
@@ -1381,6 +1382,11 @@ class AppFileManager:
             self.app.funscript_processor.update_funscript_stats_for_timeline(1, "Video Loaded")
             self.app.funscript_processor.update_funscript_stats_for_timeline(2, "Video Loaded")
 
+            # Clear existing subtitles, then auto-load .srt if one exists next to the video
+            if _is_feature_available("subtitle_translation"):
+                self.app.subtitle_track = None
+                self._auto_load_subtitles(file_path)
+
             # Notify audio player of new video
             if self.app._audio_player:
                 has_audio = self.app.processor.video_info.get("has_audio", False)
@@ -1394,6 +1400,37 @@ class AppFileManager:
             self.app.logger.error(f"Failed to open video file: {os.path.basename(file_path)}", extra={'status_message': True})
 
         return success
+
+    def _auto_load_subtitles(self, video_path: str):
+        """Auto-load .srt file if one exists with the same base name as the video."""
+        try:
+            import glob
+            base = os.path.splitext(video_path)[0]
+            # Look for any .srt file matching the video name
+            candidates = glob.glob(f"{base}*.srt")
+            if candidates:
+                # Pick the first match (prefer .en.srt or .bilingual.srt)
+                srt_path = candidates[0]
+                for c in candidates:
+                    if '.en.' in c or '.bilingual.' in c:
+                        srt_path = c
+                        break
+
+                from subtitle_translation.srt_importer import import_srt
+                track = import_srt(srt_path)
+                if track and len(track) > 0:
+                    self.app.subtitle_track = track
+                    self.app.logger.info(
+                        f"Auto-loaded {len(track)} subtitles from {os.path.basename(srt_path)}")
+                    # Update control panel subtitle tab if initialized
+                    gui = getattr(self.app, 'gui_instance', None)
+                    cp = gui.control_panel_ui if gui else None
+                    tool = getattr(cp, '_subtitle_tool', None) if cp else None
+                    if tool:
+                        tool.track = track
+                        tool.state = tool.STATE_EDITING
+        except Exception as e:
+            self.app.logger.debug(f"No subtitles auto-loaded: {e}")
 
     def _scan_folder_for_videos(self, folder_path: str) -> List[str]:
         """Recursively scans a folder for video files."""
