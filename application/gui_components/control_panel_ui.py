@@ -33,6 +33,7 @@ from .cp_device_control_ui import DeviceControlMixin
 from .cp_streamer_ui import StreamerMixin
 from .cp_batch_ui import BatchMixin
 from .cp_metadata_ui import MetadataEditorMixin
+from .cp_subtitle_ui import SubtitleMixin
 
 def _readonly_input(label_id, value, width=-1):
     if width is not None and width >= 0:
@@ -51,6 +52,7 @@ class ControlPanelUI(
     StreamerMixin,
     BatchMixin,
     MetadataEditorMixin,
+    SubtitleMixin,
 ):
     def __init__(self, app):
         self.app = app
@@ -307,11 +309,13 @@ class ControlPanelUI(
         ("device_control", "D", "Device Control", "_feat_device"),
         ("native_sync", "S", "Streamer", "_feat_streamer"),
         ("supporter_batch", "B", "Batch Processing", "_feat_supporter"),
+        ("subtitle", "CC", "Subtitles", "_feat_subtitle"),
     ]
     # Map section keys to icon asset filenames for sidebar PNG icons
     _SIDEBAR_ICON_MAP = {
         "run": "sidebar-run.png",
         "post": "sidebar-postproc.png",
+        "subtitle": "sidebar-subtitle.png",
         "device_control": "sidebar-device.png",
         "native_sync": "sidebar-stream.png",
         "supporter_batch": "sidebar-batch.png",
@@ -369,6 +373,7 @@ class ControlPanelUI(
 
     # Sidebar feature key → feature_detection name (for locked tooltip)
     _SIDEBAR_FEATURE_MAP = {
+        "subtitle": "subtitle_translation",
         "device_control": "device_control",
         "native_sync": "streamer",
         "supporter_batch": "patreon_features",
@@ -567,6 +572,7 @@ class ControlPanelUI(
         self._feat_supporter = _is_feature_available("patreon_features")
         self._feat_device = _is_feature_available("device_control")
         self._feat_streamer = _is_feature_available("streamer")
+        self._feat_subtitle = _is_feature_available("subtitle_translation")
 
         floating = (app_state.ui_layout_mode == "floating")
         if floating:
@@ -608,6 +614,11 @@ class ControlPanelUI(
             self._render_run_control_tab()
         elif tab_selected == "post":
             self._render_post_processing_tab()
+        elif tab_selected == "subtitle":
+            if self._feat_subtitle:
+                self._render_subtitle_tab()
+            else:
+                self._render_subtitle_preview()
         elif tab_selected == "device_control":
             if self._feat_device:
                 self._render_device_control_tab()

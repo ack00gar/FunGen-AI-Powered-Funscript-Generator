@@ -116,6 +116,13 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Extra timelines (supporter feature, created lazily)
         self._extra_timeline_editors: Dict[int, InteractiveFunscriptTimeline] = {}
 
+        # Subtitle timeline (optional addon)
+        try:
+            from subtitle_translation.interactive_timeline import InteractiveSubtitleTimeline
+            self._subtitle_timeline = InteractiveSubtitleTimeline(app)
+        except ImportError:
+            pass
+
         # Modularized UI Panel Components
         self.control_panel_ui = ControlPanelUI(app)
         self.video_display_ui = VideoDisplayUI(app, self)  # Pass self for texture updates
@@ -410,6 +417,30 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         glfw.set_window_close_callback(self.window, self.handle_window_close)
 
         imgui.create_context()
+
+        # Load fonts: default Latin + optional CJK merge for subtitle support
+        io = imgui.get_io()
+        self._cjk_font_loaded = False
+        io.fonts.add_font_default()
+        if _is_feature_available("subtitle_translation"):
+            try:
+                from subtitle_translation.model_downloader import get_cjk_font_path, ensure_cjk_font
+                cjk_font_path = get_cjk_font_path() or ensure_cjk_font()
+            except Exception:
+                cjk_font_path = ""
+            if cjk_font_path:
+                try:
+                    merge_cfg = imgui.FontConfig(merge_mode=True)
+                    io.fonts.add_font_from_file_ttf(
+                        cjk_font_path, 14.0,
+                        font_config=merge_cfg,
+                        glyph_ranges=io.fonts.get_glyph_ranges_japanese(),
+                    )
+                    self._cjk_font_loaded = True
+                    self.app.logger.info(f"CJK font loaded: {os.path.basename(cjk_font_path)}")
+                except Exception as e:
+                    self.app.logger.debug(f"CJK font load failed: {e}")
+
         self.impl = GlfwRenderer(self.window)
         style = imgui.get_style()
         style.window_rounding = 6.0
@@ -999,7 +1030,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         timeline1_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline else 0
         timeline2_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline2 else 0
         extra_timelines_total_height = len(self._visible_extra_timelines) * app_state.timeline_base_height
-        interactive_timelines_total_height = timeline1_render_h + timeline2_render_h + extra_timelines_total_height
+        sub_timeline_h = 65 if getattr(app_state, 'show_subtitle_timeline', False) else 0
+        interactive_timelines_total_height = timeline1_render_h + timeline2_render_h + extra_timelines_total_height + sub_timeline_h
         max_timeline_area_h = int(self.window_height * 0.45)
         capped_timelines_h = min(interactive_timelines_total_height, max_timeline_area_h)
         timelines_need_scroll = interactive_timelines_total_height > max_timeline_area_h
@@ -1100,6 +1132,10 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             container_flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE |
                                imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
             if imgui.begin("##TimelineScrollContainer", True, container_flags):
+                # Subtitle timeline first (above funscript timelines)
+                if getattr(app_state, 'show_subtitle_timeline', False) and hasattr(self, '_subtitle_timeline'):
+                    self._time_render("SubtitleTimeline", self._subtitle_timeline.render,
+                                      0, 65, container_mode=True)
                 if app_state.show_funscript_interactive_timeline:
                     self._time_render("TimelineEditor1", self.timeline_editor1.render,
                                       0, per_tl_h, container_mode=True)
@@ -1115,6 +1151,11 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 'pos': (0, timeline_area_y), 'size': (self.window_width, capped_timelines_h)}
         else:
             timeline_current_y_start = timeline_area_y
+            # Subtitle timeline first (above funscript timelines)
+            if getattr(app_state, 'show_subtitle_timeline', False) and hasattr(self, '_subtitle_timeline'):
+                app_state.fixed_layout_geometry['SubtitleTimeline'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, sub_timeline_h)}
+                self._time_render("SubtitleTimeline", self._subtitle_timeline.render, timeline_current_y_start, sub_timeline_h)
+                timeline_current_y_start += sub_timeline_h
             if app_state.show_funscript_interactive_timeline:
                 app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline1_render_h)}
                 self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h)
@@ -1169,6 +1210,13 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         if hasattr(self.app, 'tensorrt_compiler_window') and self.app.tensorrt_compiler_window:
             self._time_render("TensorRTCompiler", self.app.tensorrt_compiler_window.render)
+
+        # Subtitle editor floating window (opened from control panel tab)
+        if _is_feature_available("subtitle_translation"):
+            cp = self.control_panel_ui
+            tool = getattr(cp, '_subtitle_tool', None)
+            if tool and tool.is_open:
+                self._time_render("SubtitleEditor", tool.render)
 
         if self.app.app_state_ui.show_generated_file_manager:
             self._time_render("GeneratedFileManager", self.generated_file_manager_ui.render)

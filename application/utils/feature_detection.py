@@ -98,6 +98,23 @@ class FeatureDetector:
             tier="supporter"
         )
 
+        # Subtitle Translation (Supporter)
+        features["subtitle_translation"] = FeatureInfo(
+            name="subtitle_translation",
+            display_name="Subtitle Translation",
+            description="Local speech-to-text transcription and translation for video subtitles",
+            folder_path="subtitle_translation",
+            required_files=[
+                "subtitle_translation/__init__.py",
+                "subtitle_translation/pipeline.py",
+                "subtitle_translation/transcriber.py",
+                "subtitle_translation/translator.py",
+                "subtitle_translation/subtitle_track.py",
+            ],
+            dependencies=[],
+            tier="supporter"
+        )
+
         # Developer Tools (Dev only)
         features["dev_tools"] = FeatureInfo(
             name="dev_tools",

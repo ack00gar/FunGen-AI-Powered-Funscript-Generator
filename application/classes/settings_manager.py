@@ -253,6 +253,14 @@ class AppSettings:
             "audio_volume": 0.8,
             "audio_muted": False,
         }
+
+        # Merge optional module defaults (subtitle translation, etc.)
+        try:
+            from subtitle_translation.subtitle_settings_definitions import SUBTITLE_SETTING_DEFAULTS
+            defaults.update(SUBTITLE_SETTING_DEFAULTS)
+        except ImportError:
+            pass
+
         return defaults
 
     def load_settings(self):

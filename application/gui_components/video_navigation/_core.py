@@ -185,3 +185,4 @@ class VideoNavigationCoreMixin:
 
         imgui.end()
 
+

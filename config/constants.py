@@ -198,7 +198,15 @@ DEFAULT_SHORTCUTS = {
     # Tracking Tools
     "set_oscillation_area": "X",     # Toggle oscillation area drawing mode
     "set_user_roi": "U",             # Toggle User ROI drawing mode
+
 }
+
+# Merge subtitle shortcuts if module is available
+try:
+    from subtitle_translation import SUBTITLE_SHORTCUTS
+    DEFAULT_SHORTCUTS.update(SUBTITLE_SHORTCUTS)
+except ImportError:
+    pass
 
 
 ####################################################################################################
@@ -636,6 +644,7 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/sidebar-batch.png': 'https://em-content.zobj.net/source/apple/391/crown_1f451.png',  # 👑 crown (Patreon Exclusive)
     'ui/icons/sidebar-metadata.png': 'https://em-content.zobj.net/source/apple/391/label_1f3f7-fe0f.png',  # 🏷️ label (Metadata)
     'ui/icons/sidebar-configure.png': 'https://em-content.zobj.net/source/apple/391/wrench_1f527.png',  # 🔧 wrench (Configure)
+    'ui/icons/sidebar-subtitle.png': 'https://em-content.zobj.net/source/apple/391/speech-balloon_1f4ac.png',  # 💬 speech balloon (Subtitles)
 }
 
 ####################################################################################################

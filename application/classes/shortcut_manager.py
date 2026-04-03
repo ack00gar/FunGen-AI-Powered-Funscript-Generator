@@ -45,10 +45,6 @@ class ShortcutManager:
         if self.is_recording_shortcut_for:
             return False
 
-        # Allow shortcuts when combo boxes, sliders, or other non-text widgets are active
-        # Only block if we're actually editing text (covered by want_text_input above)
-        # This makes navigation and playback shortcuts work application-wide
-
         return True
 
     def _initialize_reverse_key_map(self):

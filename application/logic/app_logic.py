@@ -697,7 +697,31 @@ class ApplicationLogic:
 
         def _generate_waveform_thread():
             self.logger.info("Generating audio waveform...", extra={'status_message': True})
-            waveform_data = self.processor.get_audio_waveform(num_samples=2000)
+
+            # If subtitle audio cache exists, read it directly instead of re-extracting from video
+            # (avoids the slow USB extraction that times out at 60s)
+            waveform_data = None
+            try:
+                import os, numpy as np
+                video_path = getattr(self.file_manager, 'video_path', '') or ''
+                cached_audio = os.path.splitext(video_path)[0] + ".sub_audio.wav" if video_path else ''
+                if cached_audio and os.path.exists(cached_audio) and os.path.getsize(cached_audio) > 10000:
+                    import wave
+                    with wave.open(cached_audio, 'rb') as wf:
+                        sr = wf.getframerate()
+                        raw = wf.readframes(wf.getnframes())
+                    samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                    # Downsample to 2000 points
+                    chunk_size = max(1, len(samples) // 2000)
+                    n = (len(samples) // chunk_size) * chunk_size
+                    blocks = np.abs(samples[:n].reshape(-1, chunk_size))
+                    waveform_data = np.max(blocks, axis=1).astype(np.float32)
+                    self.logger.info(f"Waveform from cached subtitle audio ({len(waveform_data)} samples)")
+            except Exception as e:
+                self.logger.debug(f"Cached audio waveform failed: {e}")
+
+            if waveform_data is None:
+                waveform_data = self.processor.get_audio_waveform(num_samples=2000)
 
             with self._waveform_lock:
                 self.audio_waveform_data = waveform_data
