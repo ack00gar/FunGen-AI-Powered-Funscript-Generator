@@ -883,7 +883,7 @@ class DeviceControlUI:
             imgui.dummy(0, 10)
             imgui.text_colored("How to activate:", 0.0, 0.8, 1.0)
             imgui.text_wrapped(
-                "Purchase from ko-fi.com/k00gar, then use the !device_control "
+                "Purchase from paypal.me/k00gar, then use the !device_control "
                 "command in Discord to receive the add-on files. "
                 "Copy the device_control folder to your FunGen directory "
                 "and restart to activate."
@@ -896,8 +896,8 @@ class DeviceControlUI:
         try:
             import webbrowser
             # This would be the actual support URL
-            webbrowser.open("https://ko-fi.com/k00gar")
-            self.logger.info("Opened ko-fi page in browser")
+            webbrowser.open("https://paypal.me/k00gar")
+            self.logger.info("Opened PayPal page in browser")
         except Exception as e:
             self.logger.error(f"Failed to open support page: {e}")
 

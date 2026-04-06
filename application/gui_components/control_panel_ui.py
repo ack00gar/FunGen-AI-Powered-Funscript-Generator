@@ -431,7 +431,7 @@ class ControlPanelUI(
                     info = get_feature_detector().get_feature_info(feat_name)
                     if info:
                         desc = f"\n{info.description}"
-                imgui.set_tooltip(f"{tooltip}{desc}\n(Add-on available at ko-fi.com/k00gar)")
+                imgui.set_tooltip(f"{tooltip}{desc}\n(Add-on available at paypal.me/k00gar)")
             # Hover bg (drawn before text so text stays on top)
             hover_bg = imgui.get_color_u32_rgba(*SidebarColors.HOVER_BG)
             draw_list.add_rect_filled(
@@ -650,12 +650,12 @@ class ControlPanelUI(
             imgui.pop_style_color()
             imgui.spacing()
             imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.3, 1.0)
-            imgui.text("Add-on available at ko-fi.com/k00gar")
+            imgui.text("Add-on available at paypal.me/k00gar")
             imgui.pop_style_color()
             imgui.spacing()
 
     def _render_addon_promo_banner(self, feature_name, description):
-        """Gold add-on banner with feature description and ko-fi link."""
+        """Gold add-on banner with feature description and PayPal link."""
         imgui.spacing()
         # Gold accent bar
         draw_list = imgui.get_window_draw_list()
@@ -666,7 +666,7 @@ class ControlPanelUI(
         imgui.dummy(0, 6)
 
         imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.3, 1.0)
-        imgui.text(f"{feature_name} — Add-on at ko-fi.com/k00gar")
+        imgui.text(f"{feature_name} — Add-on at paypal.me/k00gar")
         imgui.pop_style_color()
         imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
         imgui.text_wrapped(description)

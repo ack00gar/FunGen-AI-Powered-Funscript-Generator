@@ -169,7 +169,7 @@ class BatchMixin:
             )
 
     def _render_supporter_batch_tab(self):
-        """Render the Batch Processing tab (monthly ko-fi donors).
+        """Render the Batch Processing tab (add-on holders).
 
         When addon is available -> full interactive UI.
         When addon is missing -> grayed-out preview with promo banner.

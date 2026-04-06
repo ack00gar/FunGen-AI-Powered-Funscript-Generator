@@ -85,7 +85,7 @@ class AddonUpdateChecker:
 
         # Show available addons as info toasts (one per addon, once)
         for addon in unowned:
-            msg = f"{addon['display_name']} v{addon['remote_version']} available at ko-fi.com/k00gar"
+            msg = f"{addon['display_name']} v{addon['remote_version']} available at paypal.me/k00gar"
             if hasattr(self.app, 'notify'):
                 self.app.notify(msg, "info", 6.0)
 
