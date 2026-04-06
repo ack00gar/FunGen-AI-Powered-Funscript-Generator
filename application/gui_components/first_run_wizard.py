@@ -299,7 +299,7 @@ class FirstRunWizard:
         imgui.bullet_text("Streaming (stream video to browser with funscript support)")
         imgui.bullet_text("Batch Processing + Early Access (monthly Ko-fi subscription)")
         imgui.dummy(0, 10)
-        imgui.text("ko-fi.com/k00gar")
+        imgui.text("paypal.me/k00gar")
 
     # ------------------------------------------------------------------
     # Nav buttons

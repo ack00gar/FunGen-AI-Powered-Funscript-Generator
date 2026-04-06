@@ -437,7 +437,7 @@ class VideoControlsMixin:
             imgui.begin_tooltip()
             if not is_supporter:
                 imgui.text("Fullscreen playback (mpv)")
-                imgui.text_disabled("Patreon Exclusive - ko-fi monthly supporters")
+                imgui.text_disabled("Patreon Exclusive - add-on supporters")
             elif mpv is None and mpv_missing:
                 imgui.text("mpv not installed")
                 if sys.platform == "darwin":

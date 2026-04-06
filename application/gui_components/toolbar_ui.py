@@ -628,7 +628,7 @@ class ToolbarUI:
         """Render add-on feature toggles (streamer, device control, batch).
 
         Always renders all 3 tool buttons. Unavailable features show as grayed-out
-        with ko-fi tooltips for feature discovery.
+        with PayPal tooltips for feature discovery.
         """
         has_streamer = self._feat_streamer
         has_device_control = self._feat_device
@@ -642,7 +642,7 @@ class ToolbarUI:
         else:
             self._toolbar_button_disabled(
                 icon_mgr, 'satellite.png', btn_size,
-                "Streamer - Stream from XBVR & Stash.\nAdd-on available at ko-fi.com/k00gar"
+                "Streamer - Stream from XBVR & Stash.\nAdd-on available at paypal.me/k00gar"
             )
             rendered_any = True
 
@@ -653,7 +653,7 @@ class ToolbarUI:
         else:
             self._toolbar_button_disabled(
                 icon_mgr, 'flashlight.png', btn_size,
-                "Device Control - Control OSR2, Handy & more.\nAdd-on available at ko-fi.com/k00gar"
+                "Device Control - Control OSR2, Handy & more.\nAdd-on available at paypal.me/k00gar"
             )
 
         # --- Batch Processing button ---
@@ -666,7 +666,7 @@ class ToolbarUI:
         else:
             self._toolbar_button_disabled(
                 icon_mgr, 'sidebar-batch.png', btn_size,
-                "Batch Processing - Early access trackers, batch queue.\nMonthly ko-fi.com/k00gar subscription."
+                "Batch Processing - Early access trackers, batch queue.\nMonthly paypal.me/k00gar subscription."
             )
 
     def _render_streamer_button_active(self, icon_mgr, btn_size, is_first=False):

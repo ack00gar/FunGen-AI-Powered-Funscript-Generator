@@ -20,7 +20,7 @@ def _radio_line(label, is_selected):
 
 class MainMenu:
     __slots__ = ("app", "gui", "FRAME_OFFSET", "_last_menu_log_time", "_show_about_dialog",
-                 "_kofi_texture_id", "_kofi_width", "_kofi_height", "_is_macos",
+                 "_support_texture_id", "_support_width", "_support_height", "_is_macos",
                  "_feat_supporter", "_feat_device", "_feat_streamer")
 
     def __init__(self, app_instance, gui_instance=None):
@@ -29,9 +29,9 @@ class MainMenu:
         self.FRAME_OFFSET = MenuColors.FRAME_OFFSET
         self._last_menu_log_time = 0
         self._show_about_dialog = False
-        self._kofi_texture_id = None
-        self._kofi_width = 0
-        self._kofi_height = 0
+        self._support_texture_id = None
+        self._support_width = 0
+        self._support_height = 0
         self._is_macos = platform.system() == "Darwin"
 
     # ------------------------- HELPER METHODS -------------------------
@@ -141,39 +141,39 @@ class MainMenu:
 
     # ------------------------- POPUPS -------------------------
 
-    def _load_kofi_texture(self):
-        """Load Ko-fi support image as OpenGL texture (once)."""
-        if self._kofi_texture_id is not None:
-            return self._kofi_texture_id
+    def _load_support_texture(self):
+        """Load PayPal support image as OpenGL texture (once)."""
+        if self._support_texture_id is not None:
+            return self._support_texture_id
 
         try:
             import cv2
             import numpy as np
             import OpenGL.GL as gl
 
-            kofi_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'branding', 'kofi_support.png')
+            support_img_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'branding', 'support_badge.png')
 
-            if not os.path.exists(kofi_path):
+            if not os.path.exists(support_img_path):
                 return None
 
             # Load image
-            kofi_img = cv2.imread(kofi_path, cv2.IMREAD_UNCHANGED)
-            if kofi_img is None:
+            support_img = cv2.imread(support_img_path, cv2.IMREAD_UNCHANGED)
+            if support_img is None:
                 return None
 
             # Convert BGR(A) to RGB(A)
-            if kofi_img.shape[2] == 4:
-                kofi_rgb = cv2.cvtColor(kofi_img, cv2.COLOR_BGRA2RGBA)
+            if support_img.shape[2] == 4:
+                support_rgb = cv2.cvtColor(support_img, cv2.COLOR_BGRA2RGBA)
             else:
-                kofi_rgb = cv2.cvtColor(kofi_img, cv2.COLOR_BGR2RGB)
-                alpha = np.full((kofi_rgb.shape[0], kofi_rgb.shape[1], 1), 255, dtype=np.uint8)
-                kofi_rgb = np.concatenate([kofi_rgb, alpha], axis=2)
+                support_rgb = cv2.cvtColor(support_img, cv2.COLOR_BGR2RGB)
+                alpha = np.full((support_rgb.shape[0], support_rgb.shape[1], 1), 255, dtype=np.uint8)
+                support_rgb = np.concatenate([support_rgb, alpha], axis=2)
 
-            self._kofi_height, self._kofi_width = kofi_rgb.shape[:2]
+            self._support_height, self._support_width = support_rgb.shape[:2]
 
             # Create OpenGL texture
-            self._kofi_texture_id = gl.glGenTextures(1)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, self._kofi_texture_id)
+            self._support_texture_id = gl.glGenTextures(1)
+            gl.glBindTexture(gl.GL_TEXTURE_2D, self._support_texture_id)
             gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
             gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
             gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
@@ -181,16 +181,16 @@ class MainMenu:
 
             gl.glTexImage2D(
                 gl.GL_TEXTURE_2D, 0, gl.GL_RGBA,
-                self._kofi_width, self._kofi_height, 0,
-                gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, kofi_rgb
+                self._support_width, self._support_height, 0,
+                gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, support_rgb
             )
 
             gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-            return self._kofi_texture_id
+            return self._support_texture_id
 
         except Exception as e:
             if hasattr(self.app, 'logger') and self.app.logger:
-                self.app.logger.debug(f"Failed to load Ko-fi texture: {e}")
+                self.app.logger.debug(f"Failed to load PayPal texture: {e}")
             return None
 
     def _render_timeline_selection_popup(self):
@@ -304,7 +304,7 @@ class MainMenu:
             imgui.end_popup()
 
     def _render_about_dialog(self):
-        """Render About FunGen dialog with logo and Ko-fi support."""
+        """Render About FunGen dialog with logo and PayPal support."""
         if not self._show_about_dialog:
             return
 
@@ -352,12 +352,12 @@ class MainMenu:
             # Donate button
             from application.utils import primary_button_style
             with primary_button_style():
-                if imgui.button("Donate on Ko-fi", width=-1):
+                if imgui.button("Support on PayPal", width=-1):
                     try:
-                        webbrowser.open("https://ko-fi.com/k00gar")
+                        webbrowser.open("https://paypal.me/k00gar")
                     except Exception as e:
                         if hasattr(self.app, 'logger') and self.app.logger:
-                            self.app.logger.warning(f"Could not open Ko-fi link: {e}")
+                            self.app.logger.warning(f"Could not open PayPal link: {e}")
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Donate, become a supporter, unlock features!")
 
@@ -1265,7 +1265,7 @@ class MainMenu:
             imgui.small_button("Patreon: OFF")
             imgui.pop_style_color(3)
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Patreon features not activated\nMonthly subscription at ko-fi.com/k00gar")
+                imgui.set_tooltip("Patreon features not activated\nMonthly subscription at paypal.me/k00gar")
 
     def _render_device_control_indicator(self):
         """Render simple device control status indicator button."""
@@ -1340,7 +1340,7 @@ class MainMenu:
                     if self._feat_device:
                         imgui.set_tooltip("Device control not initialized\nCheck Device Control tab in Control Panel")
                     else:
-                        imgui.set_tooltip("Add-on available at ko-fi.com/k00gar")
+                        imgui.set_tooltip("Add-on available at paypal.me/k00gar")
 
     def _render_native_sync_indicator(self):
         """Render Streamer status indicator button."""
@@ -1407,7 +1407,7 @@ class MainMenu:
                     if self._feat_streamer:
                         imgui.set_tooltip("Streamer not initialized\nCheck Streamer tab in Control Panel")
                     else:
-                        imgui.set_tooltip("Add-on available at ko-fi.com/k00gar")
+                        imgui.set_tooltip("Add-on available at paypal.me/k00gar")
 
     # ==================== CHAPTER FILE OPERATION CALLBACKS ====================
 

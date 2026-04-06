@@ -19,7 +19,7 @@ This project is still at the early stages of development. It is not intended for
 - **Ultimate Autotune Popup** - Opens with parameter sliders and live preview overlay. Adjust settings and see the result before applying
 - **Streamlined Menus** - Flattened View menu, added shortcut hints throughout, removed unused gauges and movement bar. All display toggles show their keyboard shortcuts
 - **Cleaner Tracker Settings** - Stripped broken/dead settings from live trackers. Only working, user-relevant controls exposed
-- **Add-on Terminology** - Updated from "Supporter" to ko-fi add-on language with correct purchase URLs
+- **Add-on Terminology** - Updated from "Supporter" to PayPal add-on language with correct purchase URLs
 - **First-run Wizard** - Reduced from 6 to 5 steps (no mode selection needed)
 - **Model Download Button** - Re-download AI models anytime from Settings > AI Models
 - **Auto-populated Metadata** - Creator and Title fields auto-fill from FunGen version and video filename
@@ -34,8 +34,8 @@ This project is still at the early stages of development. It is not intended for
 
 - **Multi-Axis Funscript Support** - OFS-compatible axis system (stroke, roll, pitch, surge, sway, twist)
 - **14+ Built-in Filter Plugins** - Ultimate Autotune, RDP Simplify, Savitzky-Golay, and more
-- **Device Control and VR Streaming Add-ons** - OSR/Buttplug hardware control, HereSphere/Quest 3 streaming (available at ko-fi.com/k00gar)
-- **Batch Processing** - Process entire folders (available as monthly Ko-fi add-on)
+- **Device Control and VR Streaming Add-ons** - OSR/Buttplug hardware control, Quest 3 streaming (available at paypal.me/k00gar)
+- **Batch Processing** - Process entire folders (available as monthly PayPal add-on)
 
 ---
 
@@ -411,6 +411,6 @@ If you encounter any issues or have questions, please open an issue on GitHub.
 Join the **Discord community** for discussions and support:
 [Discord Community](https://discord.gg/WYkjMbtCZA)
 
-Support the project on **Ko-fi** (one-time add-on purchases or monthly subscription).
+Support the project on **PayPal** (one-time add-on purchases or monthly subscription).
 
 ---

@@ -865,7 +865,7 @@ class StandaloneSplashWindow:
                 cursor_y += ver_size[1] + 6
 
                 # 2. Support text
-                support_text = "Support the project at ko-fi.com/k00gar"
+                support_text = "Support the project at paypal.me/k00gar"
                 imgui.set_window_font_scale(1.1)
                 sup_size = imgui.calc_text_size(support_text)
                 sup_x = (window_width - sup_size[0]) / 2
