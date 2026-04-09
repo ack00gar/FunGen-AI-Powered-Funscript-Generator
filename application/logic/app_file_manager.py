@@ -1476,39 +1476,53 @@ class AppFileManager:
             self.app.logger.info("No video files found in dropped items.")
             return
 
-        if len(unique_videos) == 1:
-            self.app.logger.info(f"Single video dropped. Opening directly: {os.path.basename(unique_videos[0])}")
-            self.open_video_from_path(unique_videos[0])
-            return
-
-        # elif other_files:
-        #     # If no videos were found, fall back to the original logic for handling other file types
-        #     self.app.logger.info("No videos found for batching, handling as single file drop.")
-        #     path = other_files[0]
-        #     ext = os.path.splitext(path)[1].lower()
-        #     if ext == '.funscript':
-        #         self.load_funscript_to_timeline(path, 1)
-        #     elif ext == PROJECT_FILE_EXTENSION:
-        #         self.app.project_manager.load_project(path)
-        #     elif ext == '.msgpack':
-        #         self.load_stage2_overlay_data(path)
-        #     else:
-        #         self.last_dropped_files = other_files
-        #         self.app.logger.warning(f"Unrecognized file type dropped: {os.path.basename(path)}", extra={'status_message': True})
-
-        self.app.logger.info(f"Found {len(unique_videos)} videos. Preparing batch dialog...")
         gui = self.app.gui_instance
         if not gui:
             self.app.logger.error("GUI instance not available to show batch dialog.")
             return
 
-        gui.batch_videos_data.clear()
-        for video_path in unique_videos:
+        batch_dialog_active = self.app.show_batch_confirmation_dialog or bool(gui.batch_videos_data)
+
+        # Keep historical behavior: a single dropped video opens directly,
+        # unless we are already building a batch list.
+        if len(unique_videos) == 1 and not batch_dialog_active:
+            self.app.logger.info(f"Single video dropped. Opening directly: {os.path.basename(unique_videos[0])}")
+            self.open_video_from_path(unique_videos[0])
+            return
+
+        # Append mode: allow dropping more files/folders multiple times into the same batch setup.
+        existing_paths = {item.get("path") for item in gui.batch_videos_data if isinstance(item, dict)}
+        videos_to_add = [video_path for video_path in unique_videos if video_path not in existing_paths]
+
+        if batch_dialog_active:
+            if not videos_to_add:
+                self.app.logger.info("Dropped videos are already in the batch list. Nothing new to append.")
+                self.app.show_batch_confirmation_dialog = True
+                return
+            self.app.logger.info(
+                f"Appending {len(videos_to_add)} videos to existing batch list "
+                f"({len(gui.batch_videos_data)} -> {len(gui.batch_videos_data) + len(videos_to_add)})."
+            )
+        else:
+            self.app.logger.info(f"Found {len(unique_videos)} videos. Preparing batch dialog...")
+            gui.batch_videos_data.clear()
+            videos_to_add = unique_videos
+
+        def _default_selected_for_status(status: str) -> bool:
+            mode = gui.batch_overwrite_mode_ui
+            if mode == 0:
+                return status != 'fungen'
+            if mode == 1:
+                return status is None
+            return True
+
+        for video_path in videos_to_add:
             fs_metadata = ImGuiFileDialog.get_funscript_metadata(video_path, self.app.logger)
+            funscript_status = ImGuiFileDialog.get_funscript_status(video_path, self.app.logger)
             gui.batch_videos_data.append({
                 "path": video_path,
-                "selected": False,
-                "funscript_status": ImGuiFileDialog.get_funscript_status(video_path, self.app.logger),
+                "selected": _default_selected_for_status(funscript_status),
+                "funscript_status": funscript_status,
                 "detected_format": VideoProcessor.get_video_type_heuristic(video_path),
                 "override_format_idx": 0, # Index for 'Auto'
                 "creation_date": fs_metadata.get("creation_date", ""),
@@ -1517,7 +1531,9 @@ class AppFileManager:
                 "fungen_version": fs_metadata.get("fungen_version", ""),
             })
 
-        gui.last_overwrite_mode_ui = -1
+        # Fresh batch list still uses existing auto-selection flow.
+        if not batch_dialog_active:
+            gui.last_overwrite_mode_ui = -1
         self.app.show_batch_confirmation_dialog = True
 
     def update_settings_from_app(self):
