@@ -42,10 +42,10 @@ ACTIVE_POSITIONS = {
 
 # Chapter building parameters
 VOTE_WINDOW_S = 20.0       # Centered smoothing window (seconds)
-MIN_ACTIVE_PCT = 0.20      # 20% non-NR frames → classify as active
+MIN_ACTIVE_PCT = 0.12      # Lower threshold to keep weak-motion sections from collapsing to NR
 MIN_CHAPTER_S = 20.0       # Minimum chapter duration (seconds)
-MERGE_GAP_S = 60.0         # Merge same-type chapters within this gap
-NR_ABSORB_MAX_S = 120.0    # Absorb NR gaps shorter than this
+MERGE_GAP_S = 20.0         # More conservative merge to preserve short transitions
+NR_ABSORB_MAX_S = 30.0     # Keep longer NR/close-up spans as explicit chapters
 TRIM_TOLERANCE_S = 5.0     # Tolerance when trimming to active frames
 
 
