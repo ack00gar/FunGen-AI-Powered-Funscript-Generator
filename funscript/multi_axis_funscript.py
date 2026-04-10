@@ -1619,8 +1619,9 @@ class MultiAxisFunscript:
             start_time_ms = int((start_frame_id / video_fps) * 1000)
             end_time_ms = int((end_frame_id / video_fps) * 1000)
             
+            chapter_name = position_long or position_short or "Unknown"
             chapter = {
-                "name": position_short,  # Use short name for UI display
+                "name": chapter_name,
                 "start": start_time_ms,
                 "end": end_time_ms,
                 "startTime": start_time_ms,  # Keep both for compatibility
@@ -1661,4 +1662,3 @@ class MultiAxisFunscript:
         }
         self.chapters.append(chapter)
         self.logger.debug(f"Added chapter '{name}' ({start_time_ms}-{end_time_ms}ms)")
-

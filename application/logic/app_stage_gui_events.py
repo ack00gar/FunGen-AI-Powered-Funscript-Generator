@@ -344,7 +344,7 @@ class StageGuiEventsMixin:
             for chapter in funscript_obj.chapters:
                 start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
                 end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
-                raw_name = chapter.get('name', 'Unknown')
+                raw_name = chapter.get('name') or chapter.get('position_long') or "Unknown"
                 short_name = self._get_position_short_name(raw_name)
                 video_segment = VideoSegment(
                     start_frame_id=start_frame,
