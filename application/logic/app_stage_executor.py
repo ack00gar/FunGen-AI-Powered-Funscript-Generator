@@ -332,6 +332,9 @@ class StageExecutorMixin:
                 fps = (self.app.processor.video_info.get('fps', 30.0)
                        if self.app.processor and self.app.processor.video_info else 30.0)
                 for chapter in funscript_obj.chapters:
+                    chapter_name = chapter.get('name') or chapter.get('position_long') or "Unknown"
+                    chapter_short = chapter.get('position_short') or chapter_name
+                    chapter_long = chapter.get('position_long') or chapter.get('description') or chapter_name
                     start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
                     end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
                     from application.utils.video_segment import VideoSegment as VS
@@ -339,10 +342,10 @@ class StageExecutorMixin:
                         start_frame_id=start_frame,
                         end_frame_id=end_frame,
                         class_id=chapter.get('class_id'),
-                        class_name=chapter.get('name', 'Unknown'),
+                        class_name=chapter_name,
                         segment_type="SexAct",
-                        position_short_name=chapter.get('position_short', chapter.get('name', '')),
-                        position_long_name=chapter.get('position_long', chapter.get('description', chapter.get('name', 'Unknown'))),
+                        position_short_name=chapter_short,
+                        position_long_name=chapter_long,
                         source="stage2_funscript"
                     )
                     fs_proc.video_chapters.append(video_segment)
