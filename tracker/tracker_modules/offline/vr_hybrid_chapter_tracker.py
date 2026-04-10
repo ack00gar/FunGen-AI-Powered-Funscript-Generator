@@ -423,7 +423,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                                 'penis': penis_box['box'],
                                 'contacts': [ob['box'] for ob in other_boxes],
                             }
-                        elif len(other_boxes) >= 2:
+                        elif len(other_boxes) >= 1:
                             position = classify_no_penis(other_boxes, self.yolo_input_size)
                         else:
                             position = 'Not Relevant'

@@ -123,6 +123,15 @@ def classify_frame_position(penis_box: Dict, other_boxes: List[Dict]) -> str:
                 contacts.append(other)
 
     if not contacts:
+        # Weak fallback: if genital contact classes are visible but IoU/proximity
+        # was too strict this frame, prefer a plausible position over "Close up".
+        genital_candidates = [b for b in other_boxes if b.get('class') in ('butt', 'anus')]
+        if genital_candidates:
+            best = max(genital_candidates, key=lambda b: (
+                CONTACT_PRIORITY.get(b.get('class'), 0),
+                (b['box'][2] - b['box'][0]) * (b['box'][3] - b['box'][1])
+            ))
+            return CONTACT_TO_POSITION.get(best.get('class'), 'Close up')
         return 'Close up'
 
     best_contact = max(contacts, key=lambda c: CONTACT_PRIORITY.get(c['class'], 0))
