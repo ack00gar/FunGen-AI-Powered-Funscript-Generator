@@ -224,11 +224,17 @@ class PluginUIManager:
         if not context or not context.plugin_instance:
             self.logger.warning(f"Plugin '{plugin_name}' not available for preview")
             return False
-        
+
+        # Skip preview silently if no actions to process (avoids log flooding)
+        actions = funscript_obj.primary_actions if axis in ('primary', 'both') else funscript_obj.secondary_actions
+        if not actions:
+            context.error_message = "No points to preview"
+            return False
+
         try:
             # Clear any previous error
             context.error_message = None
-            
+
             # Validate parameters and add selection info if applicable
             validated_params = context.plugin_instance.validate_parameters(context.parameters)
             if selected_indices:
@@ -252,7 +258,7 @@ class PluginUIManager:
                 else:
                     error_msg = preview_data.get('error', 'Failed to generate preview') if preview_data else 'Failed to generate preview'
                     context.error_message = error_msg
-                    self.logger.warning(f"Plugin '{plugin_name}' preview generation failed: {error_msg}")
+                    self.logger.debug(f"Plugin '{plugin_name}' preview generation failed: {error_msg}")
                     return False
             
             else:
@@ -302,7 +308,7 @@ class PluginUIManager:
                     return True
                 else:
                     context.error_message = "Plugin failed to generate result"
-                    self.logger.warning(f"Plugin '{plugin_name}' failed to generate preview")
+                    self.logger.debug(f"Plugin '{plugin_name}' failed to generate preview")
                     return False
                 
         except Exception as e:
