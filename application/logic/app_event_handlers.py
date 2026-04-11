@@ -87,6 +87,14 @@ class AppEventHandlers:
             if total_frames > 0:
                 target_frame = min(target_frame, total_frames - 1)
 
+            # Clear selection so the previous nudge target doesn't carry over
+            gui = self.app.gui_instance
+            if gui:
+                for tl in [getattr(gui, 'timeline_editor1', None),
+                           getattr(gui, 'timeline_editor2', None)]:
+                    if tl and hasattr(tl, 'multi_selected_action_indices') and tl.multi_selected_action_indices:
+                        tl.multi_selected_action_indices.clear()
+
             self.seek_video_with_sync(target_frame)
             self.app.energy_saver.reset_activity_timer()
 
