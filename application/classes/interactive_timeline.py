@@ -711,7 +711,7 @@ class InteractiveFunscriptTimeline:
         
         if nudge_val != 0:
             if not self.multi_selected_action_indices:
-                nearest = self._snap_nearest_to_playhead()
+                nearest = self._find_nearest_point_index()
                 if nearest is not None and nearest >= 0:
                     self.multi_selected_action_indices = {nearest}
             if self.multi_selected_action_indices:
@@ -957,6 +957,32 @@ class InteractiveFunscriptTimeline:
         from application.classes.undo_manager import NudgeTimesCmd
         self.app.undo_manager.push_done(NudgeTimesCmd(
             self.timeline_num, list(self.multi_selected_action_indices), delta_ms))
+
+    def _find_nearest_point_index(self) -> Optional[int]:
+        """Find the index of the action nearest to the current playhead, without moving it."""
+        from bisect import bisect_left
+
+        actions = self._get_actions()
+        if not actions:
+            return None
+
+        processor = self.app.processor
+        if not processor or processor.fps <= 0:
+            return None
+        playhead_ms = (processor.current_frame_index / processor.fps) * 1000.0
+
+        timestamps = [a['at'] for a in actions]
+        idx = bisect_left(timestamps, playhead_ms)
+
+        best_idx = None
+        best_dist = float('inf')
+        for candidate in (idx - 1, idx):
+            if 0 <= candidate < len(actions):
+                dist = abs(actions[candidate]['at'] - playhead_ms)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = candidate
+        return best_idx
 
     def _snap_nearest_to_playhead(self):
         """Snap the nearest action point to the current playhead (video) position."""

@@ -310,6 +310,14 @@ class ShortcutHandlerMixin:
                     # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
 
             if should_navigate:
+                # Clear point selection on frame navigation so nudge state doesn't carry over
+                gui = self.app.gui_instance
+                if gui:
+                    for tl in [getattr(gui, 'timeline_editor1', None),
+                               getattr(gui, 'timeline_editor2', None)]:
+                        if tl and hasattr(tl, 'multi_selected_action_indices') and tl.multi_selected_action_indices:
+                            tl.multi_selected_action_indices.clear()
+
                 if frames_this_tick <= 1:
                     self._perform_frame_seek(seek_direction)
                 else:
