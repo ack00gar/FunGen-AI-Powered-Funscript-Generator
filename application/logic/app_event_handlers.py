@@ -76,13 +76,14 @@ class AppEventHandlers:
         current_frame = self.app.processor.current_frame_index
         fps = self.app.processor.fps
 
-        target_frame = None
+        result = None
         if direction == 'next':
-            target_frame = fs.find_next_jump_frame(current_frame, fps, 'primary')
+            result = fs.find_next_action_position(current_frame, fps, 'primary')
         elif direction == 'prev':
-            target_frame = fs.find_prev_jump_frame(current_frame, fps, 'primary')
+            result = fs.find_prev_action_position(current_frame, fps, 'primary')
 
-        if target_frame is not None:
+        if result is not None:
+            target_frame, action_ms = result
             total_frames = self.app.processor.total_frames
             if total_frames > 0:
                 target_frame = min(target_frame, total_frames - 1)
@@ -95,6 +96,8 @@ class AppEventHandlers:
                     if tl and hasattr(tl, 'multi_selected_action_indices') and tl.multi_selected_action_indices:
                         tl.multi_selected_action_indices.clear()
 
+            # Seek to nearest frame, but store the action's exact ms for playhead display
+            self.app.processor.playhead_override_ms = action_ms
             self.seek_video_with_sync(target_frame)
             self.app.energy_saver.reset_activity_timer()
 

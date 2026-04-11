@@ -2031,7 +2031,9 @@ class InteractiveFunscriptTimeline:
             processor = self.app.processor
             if not processor or processor.fps <= 0:
                 return
-            current_ms = frame_to_ms(processor.current_frame_index, processor.fps)
+            current_ms = getattr(processor, 'playhead_override_ms', None)
+            if current_ms is None:
+                current_ms = frame_to_ms(processor.current_frame_index, processor.fps)
 
             # --- Gamepad input (priority when connected) ---
             if self._gamepad_input and self._gamepad_connected:
@@ -3284,8 +3286,10 @@ class InteractiveFunscriptTimeline:
             if not processor.fps or processor.fps <= 0:
                 return
 
-            # If seeking, we might want to wait, but if we sync, we sync to current reported frame
-            current_ms = frame_to_ms(processor.current_frame_index, processor.fps)
+            # Use exact action time if we just jumped to a point, otherwise compute from frame
+            current_ms = getattr(processor, 'playhead_override_ms', None)
+            if current_ms is None:
+                current_ms = frame_to_ms(processor.current_frame_index, processor.fps)
 
             # Center the playhead
             center_offset = (tf.width * tf.zoom) / 2

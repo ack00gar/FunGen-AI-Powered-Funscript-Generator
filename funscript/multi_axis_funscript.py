@@ -666,38 +666,44 @@ class MultiAxisFunscript:
         Finds the frame index of the first action that occurs on a frame
         strictly after the current frame.
         """
-        if not fps > 0: return None
-        timestamps = self._get_timestamps_for_axis(axis)
-        if not timestamps: return None
-
-        current_time_ms = current_frame * (1000.0 / fps)
-
-        # O(log n) bisect to find first action after current time
-        idx = bisect.bisect_right(timestamps, current_time_ms)
-        while idx < len(timestamps):
-            target_frame = ms_to_frame(timestamps[idx], fps)
-            if target_frame > current_frame:
-                return target_frame
-            idx += 1
-        return None
+        result = self.find_next_action_position(current_frame, fps, axis)
+        return result[0] if result else None
 
     def find_prev_jump_frame(self, current_frame: int, fps: float, axis: str = 'primary') -> Optional[int]:
         """
         Finds the frame index of the last action that occurs on a frame
         strictly before the current frame.
         """
+        result = self.find_prev_action_position(current_frame, fps, axis)
+        return result[0] if result else None
+
+    def find_next_action_position(self, current_frame: int, fps: float, axis: str = 'primary') -> Optional[Tuple[int, int]]:
+        """Find the next action after current_frame. Returns (frame, action_ms) or None."""
         if not fps > 0: return None
         timestamps = self._get_timestamps_for_axis(axis)
         if not timestamps: return None
 
         current_time_ms = current_frame * (1000.0 / fps)
+        idx = bisect.bisect_right(timestamps, current_time_ms)
+        while idx < len(timestamps):
+            target_frame = ms_to_frame(timestamps[idx], fps)
+            if target_frame > current_frame:
+                return (target_frame, timestamps[idx])
+            idx += 1
+        return None
 
-        # O(log n) bisect to find last action before current time
+    def find_prev_action_position(self, current_frame: int, fps: float, axis: str = 'primary') -> Optional[Tuple[int, int]]:
+        """Find the previous action before current_frame. Returns (frame, action_ms) or None."""
+        if not fps > 0: return None
+        timestamps = self._get_timestamps_for_axis(axis)
+        if not timestamps: return None
+
+        current_time_ms = current_frame * (1000.0 / fps)
         idx = bisect.bisect_left(timestamps, current_time_ms) - 1
         while idx >= 0:
             target_frame = ms_to_frame(timestamps[idx], fps)
             if target_frame < current_frame:
-                return target_frame
+                return (target_frame, timestamps[idx])
             idx -= 1
         return None
 

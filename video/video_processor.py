@@ -89,6 +89,7 @@ class VideoProcessor(
         self.current_frame = None
         self._frame_version = 0  # Incremented each time current_frame is replaced
         self.fps = 0.0
+        self.playhead_override_ms = None  # Set by point-jump to display at exact action time
         self.target_fps = 30
         self.actual_fps = 0
         self.last_fps_update_time = time.time()
@@ -1403,6 +1404,7 @@ class VideoProcessor(
             return
 
         target_frame = max(0, min(frame_index, self.total_frames - 1))
+        self.playhead_override_ms = None  # Clear on any non-point seek
         self.logger.debug(f"Seek to frame {target_frame} (from {self.current_frame_index})")
 
         # Update frame index immediately so the timeline doesn't snap back
