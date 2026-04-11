@@ -701,7 +701,7 @@ class InteractiveFunscriptTimeline:
             # Paste at current playhead position (video time), not stale mouse position
             paste_time_ms = 0
             if self.app.processor and self.app.processor.fps > 0:
-                paste_time_ms = (self.app.processor.current_frame_index / self.app.processor.fps) * 1000.0
+                paste_time_ms = frame_to_ms(self.app.processor.current_frame_index, self.app.processor.fps)
             self._handle_paste_actions(paste_time_ms)
 
         # 5. Nudge Selection (Arrows)
@@ -969,7 +969,7 @@ class InteractiveFunscriptTimeline:
         processor = self.app.processor
         if not processor or processor.fps <= 0:
             return None
-        playhead_ms = (processor.current_frame_index / processor.fps) * 1000.0
+        playhead_ms = frame_to_ms(processor.current_frame_index, processor.fps)
 
         timestamps = [a['at'] for a in actions]
         idx = bisect_left(timestamps, playhead_ms)
@@ -996,7 +996,7 @@ class InteractiveFunscriptTimeline:
         processor = self.app.processor
         if not processor or processor.fps <= 0:
             return
-        playhead_ms = (processor.current_frame_index / processor.fps) * 1000.0
+        playhead_ms = frame_to_ms(processor.current_frame_index, processor.fps)
 
         # Find nearest point using binary search
         timestamps = [a['at'] for a in actions]
@@ -2031,7 +2031,7 @@ class InteractiveFunscriptTimeline:
             processor = self.app.processor
             if not processor or processor.fps <= 0:
                 return
-            current_ms = (processor.current_frame_index / processor.fps) * 1000.0
+            current_ms = frame_to_ms(processor.current_frame_index, processor.fps)
 
             # --- Gamepad input (priority when connected) ---
             if self._gamepad_input and self._gamepad_connected:
@@ -3285,7 +3285,7 @@ class InteractiveFunscriptTimeline:
                 return
 
             # If seeking, we might want to wait, but if we sync, we sync to current reported frame
-            current_ms = (processor.current_frame_index / processor.fps) * 1000.0
+            current_ms = frame_to_ms(processor.current_frame_index, processor.fps)
 
             # Center the playhead
             center_offset = (tf.width * tf.zoom) / 2
