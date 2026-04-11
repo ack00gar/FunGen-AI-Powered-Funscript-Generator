@@ -12,6 +12,7 @@ from funscript import MultiAxisFunscript
 from video import VideoProcessor
 from detection.cd.data_structures import Segment, FrameObject
 from config import constants
+from common.frame_utils import frame_to_ms
 
 
 
@@ -251,7 +252,7 @@ def stage3_worker_proc(
                 if stop_event.is_set(): break
                 if frame_image is None: continue
 
-                frame_time_ms = int(round((frame_id / common_app_config.get('video_fps', 30.0)) * 1000.0))
+                frame_time_ms = frame_to_ms(frame_id, common_app_config.get('video_fps', 30.0))
 
                 # Process frame using oscillation detector (full-frame processing)
                 processed_frame, action_log = roi_tracker_instance.process_frame_for_oscillation(frame_image, frame_time_ms, frame_id)
@@ -265,8 +266,8 @@ def stage3_worker_proc(
             
             # Extract actions from the oscillation detector's funscript, filtering to output range
             chunk_funscript = roi_tracker_instance.funscript
-            output_start_ms = int(round((output_start / common_app_config.get('video_fps', 30.0)) * 1000.0))
-            output_end_ms = int(round((output_end / common_app_config.get('video_fps', 30.0)) * 1000.0))
+            output_start_ms = frame_to_ms(output_start, common_app_config.get('video_fps', 30.0))
+            output_end_ms = frame_to_ms(output_end, common_app_config.get('video_fps', 30.0))
             
             # Filter actions using bisect on sorted timestamps (O(log n) vs O(n) scan)
             p_ts = chunk_funscript._get_timestamps_for_axis('primary')

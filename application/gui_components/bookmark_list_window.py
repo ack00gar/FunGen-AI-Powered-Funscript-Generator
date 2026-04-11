@@ -6,6 +6,8 @@ opened from Edit > Bookmark List menu item.
 import imgui
 from typing import Optional
 
+from common.frame_utils import frame_to_ms
+
 
 class BookmarkListWindow:
     """Standalone window for managing timeline bookmarks."""
@@ -89,7 +91,7 @@ class BookmarkListWindow:
         if imgui.button("Add Bookmark at Playhead"):
             proc = self.app.processor
             if proc and proc.is_video_open() and proc.fps > 0:
-                current_time_ms = int(round((proc.current_frame_index / proc.fps) * 1000.0))
+                current_time_ms = frame_to_ms(proc.current_frame_index, proc.fps)
                 managers = self._get_all_bookmark_managers()
                 if managers:
                     _, mgr = managers[0]  # Add to timeline 1

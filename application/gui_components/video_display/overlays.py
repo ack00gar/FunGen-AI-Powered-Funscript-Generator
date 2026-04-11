@@ -8,6 +8,7 @@ from config.element_group_colors import VideoDisplayColors
 from application.utils import get_logo_texture_manager, get_icon_texture_manager
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.feature_detection import is_feature_available as _is_feature_available
+from common.frame_utils import frame_to_ms
 
 # Module-level logger for Handy debug output (disabled by default)
 _handy_debug_logger = logging.getLogger(__name__ + '.handy')
@@ -583,7 +584,7 @@ class VideoOverlaysMixin:
         if not proc or not proc.video_info or proc.fps <= 0:
             return
 
-        current_ms = int(proc.current_frame_index / proc.fps * 1000)
+        current_ms = frame_to_ms(proc.current_frame_index, proc.fps)
         seg = track.get_at_ms(current_ms)
         if not seg or not seg.is_speech:
             return

@@ -9,6 +9,8 @@ from bisect import bisect_left, bisect_right
 import multiprocessing
 import gc
 
+from common.frame_utils import frame_to_ms
+
 from application.utils.checkpoint_manager import (
     ProcessingStage, CheckpointData,
     get_checkpoint_manager,
@@ -150,7 +152,7 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
                 for frame_id, box_dict in refined_track.items():
                     if box := box_dict.get('bbox'):
                         distance = 100 - (box[3] / self.app.yolo_input_size) * 100
-                        timestamp_ms = int(round((frame_id / fps) * 1000))
+                        timestamp_ms = frame_to_ms(frame_id, fps)
                         raw_actions.append({"at": timestamp_ms, "pos": int(np.clip(distance, 0, 100))})
 
             # --- 4. DYNAMIC AMPLIFICATION (Rolling Window with Percentiles) ---

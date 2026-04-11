@@ -10,6 +10,7 @@ from application.utils import VideoSegment, _format_time
 from funscript import MultiAxisFunscript
 from config import constants
 from config.constants import ChapterSource
+from common.frame_utils import ms_to_frame as _ms_to_frame, frame_to_ms as _frame_to_ms
 
 
 class AppFunscriptProcessor:
@@ -208,8 +209,8 @@ class AppFunscriptProcessor:
                 
             for segment in self.video_chapters:
                 if hasattr(segment, 'start_frame_id') and hasattr(segment, 'end_frame_id'):
-                    start_time_ms = int((segment.start_frame_id / fps) * 1000)
-                    end_time_ms = int((segment.end_frame_id / fps) * 1000)
+                    start_time_ms = _frame_to_ms(segment.start_frame_id, fps)
+                    end_time_ms = _frame_to_ms(segment.end_frame_id, fps)
                     funscript_obj.add_chapter(
                         start_time_ms,
                         end_time_ms,
@@ -246,8 +247,8 @@ class AppFunscriptProcessor:
             for chapter in funscript_obj.chapters:
                 try:
                     # Convert timestamps back to frame IDs
-                    start_frame_id = int((chapter.get('start', 0) / 1000) * fps)
-                    end_frame_id = int((chapter.get('end', 0) / 1000) * fps)
+                    start_frame_id = _ms_to_frame(chapter.get('start', 0), fps)
+                    end_frame_id = _ms_to_frame(chapter.get('end', 0), fps)
                     segment = VideoSegment(
                         start_frame_id=start_frame_id,
                         end_frame_id=end_frame_id,
@@ -945,14 +946,15 @@ class AppFunscriptProcessor:
 
         return True, start_f, end_f
 
-    def frame_to_ms(self, frame_id: int) -> int:
-        fps = self._get_current_fps()
+    def frame_to_ms(self, frame_id: int, fps=None) -> int:
+        if fps is None:
+            fps = self._get_current_fps()
         if fps > 0:
-            return int(round((frame_id / fps) * 1000))
+            return _frame_to_ms(frame_id, fps)
         # Try to get from Chapters FPS if video not loaded but chapters are
         if self.video_chapters and hasattr(self.video_chapters[0], 'source_fps') and self.video_chapters[
             0].source_fps > 0:
-            return int(round((frame_id / self.video_chapters[0].source_fps) * 1000))
+            return _frame_to_ms(frame_id, self.video_chapters[0].source_fps)
         return 0  # Fallback
 
     def get_script_end_time_ms(self, axis_name: str) -> int:
@@ -1226,8 +1228,8 @@ class AppFunscriptProcessor:
 
         cleared_any_points = False
         for chapter in selected_chapters:
-            start_ms = int(round((chapter.start_frame_id / fps) * 1000.0))
-            end_ms = int(round((chapter.end_frame_id / fps) * 1000.0))
+            start_ms = _frame_to_ms(chapter.start_frame_id, fps)
+            end_ms = _frame_to_ms(chapter.end_frame_id, fps)
 
             if start_ms >= end_ms:
                 self.logger.warning(
@@ -1601,8 +1603,8 @@ class AppFunscriptProcessor:
             newly_selected_indices_for_timeline = set()
 
             for chapter in chapters_to_select_in:
-                start_ms = int(round((chapter.start_frame_id / fps) * 1000.0))
-                end_ms = int(round((chapter.end_frame_id / fps) * 1000.0))
+                start_ms = _frame_to_ms(chapter.start_frame_id, fps)
+                end_ms = _frame_to_ms(chapter.end_frame_id, fps)
 
                 start_idx = bisect_left(action_timestamps, start_ms)
                 end_idx = bisect_right(action_timestamps, end_ms)

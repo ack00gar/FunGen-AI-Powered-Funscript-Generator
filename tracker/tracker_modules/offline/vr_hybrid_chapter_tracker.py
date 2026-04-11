@@ -13,6 +13,8 @@ peak/valley keyframe extraction) and chapter detection (build_chapters).
 
 import copy
 import os
+
+from common.frame_utils import frame_to_ms
 import time
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -693,8 +695,8 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
         all_secondary = []
 
         for i, ch in enumerate(chapters):
-            start_ms = int(ch['start_frame'] / fps * 1000)
-            end_ms = int(ch['end_frame'] / fps * 1000)
+            start_ms = frame_to_ms(ch['start_frame'], fps)
+            end_ms = frame_to_ms(ch['end_frame'], fps)
 
             if ch.get('dense') and i in chapter_results:
                 result = chapter_results[i]
@@ -727,8 +729,8 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
         # Set chapters
         funscript_chapters = []
         for ch in chapters:
-            start_ms = int(ch['start_frame'] / fps * 1000)
-            end_ms = int(ch['end_frame'] / fps * 1000)
+            start_ms = frame_to_ms(ch['start_frame'], fps)
+            end_ms = frame_to_ms(ch['end_frame'], fps)
             funscript_chapters.append({
                 'name': ch['position'],
                 'start': start_ms,

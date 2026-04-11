@@ -2,8 +2,12 @@
 
 import subprocess
 import sys
+import threading
 import numpy as np
 from typing import Optional
+
+# How many frames to prefetch before/after the target when jumping to a point
+POINT_NAV_PREFETCH_MARGIN = 15
 
 
 class NavBufferMixin:
@@ -241,3 +245,51 @@ class NavBufferMixin:
             self.logger.warning(f"Backward nav pipe restart failed at frame {target_frame}")
 
         return None
+
+    def prefetch_around(self, center_frame: int, margin: int = POINT_NAV_PREFETCH_MARGIN):
+        """Extend the nav buffer toward *center_frame + margin* using the existing pipe.
+
+        Called after jumping to a funscript point so that subsequent left/right
+        arrow presses have zero decode latency.  Never starts a new FFmpeg pipe
+        -- only reads ahead on the existing one if it is positioned correctly.
+        """
+        total = getattr(self, 'total_frames', 0) or 0
+        if total <= 0 or not self.video_path:
+            return
+
+        target_end = min(total - 1, center_frame + margin)
+
+        # Skip if buffer already covers the target range
+        with self._frame_buffer_lock:
+            if self._frame_buffer:
+                buf_end = self._frame_buffer[-1][0]
+                if buf_end >= target_end:
+                    return
+
+        # Only extend if pipe is alive and positioned right after the buffer end
+        if (self._ffmpeg_pipe is None
+                or self._ffmpeg_pipe.poll() is not None):
+            return
+
+        def _fill():
+            with self._frame_buffer_lock:
+                buf_end = self._frame_buffer[-1][0] if self._frame_buffer else -1
+            if self._ffmpeg_read_position != buf_end + 1:
+                return  # pipe is not contiguous with buffer, don't touch it
+            frames_needed = target_end - buf_end
+            if frames_needed <= 0:
+                return
+            read = 0
+            for i in range(frames_needed):
+                frame = self._pipe_read_one()
+                if frame is None:
+                    break
+                self._buffer_append(buf_end + 1 + i, frame)
+                read += 1
+            if read > 0:
+                self.logger.debug(
+                    f"Prefetch: extended buffer by {read} frames toward {target_end}"
+                )
+
+        t = threading.Thread(target=_fill, daemon=True, name="PointNavPrefetch")
+        t.start()

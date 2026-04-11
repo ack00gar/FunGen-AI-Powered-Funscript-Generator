@@ -13,6 +13,8 @@ import time
 import logging
 import cv2
 import os
+
+from common.frame_utils import ms_to_frame, frame_to_ms
 import numpy as np
 from typing import Optional, List, Dict, Any, Tuple
 from multiprocessing import Event
@@ -838,7 +840,7 @@ def perform_mixed_stage_analysis(
             # Convert funscript actions to frame-based signal map
             video_fps = common_app_config.get('video_fps', 30.0)
             for action in stage2_funscript.primary_actions:
-                frame_id = int((action['at'] / 1000.0) * video_fps)
+                frame_id = ms_to_frame(action['at'], video_fps)
                 stage2_signal_map[frame_id] = action['pos'] / 100.0  # Convert 0-100 to 0.0-1.0
             
             total_frames = max(stage2_signal_map.keys()) + 1 if stage2_signal_map else 0
@@ -945,7 +947,7 @@ def perform_mixed_stage_analysis(
                     position = processor.get_stage2_signal(frame_id)
                 else:
                     try:
-                        frame_time_ms = int((frame_id / video_fps) * 1000.0)
+                        frame_time_ms = frame_to_ms(frame_id, video_fps)
                         position, debug_info = processor.process_frame_mixed(
                             frame_id, frame, tracker_config, common_app_config, frame_time_ms
                         )
@@ -961,7 +963,7 @@ def perform_mixed_stage_analysis(
             
             # Convert to funscript action
             try:
-                timestamp_ms = int((frame_id / video_fps) * 1000)
+                timestamp_ms = frame_to_ms(frame_id, video_fps)
                 pos_0_100 = int(position * 100)
                 primary_actions.append({
                     'at': timestamp_ms,
@@ -1014,8 +1016,8 @@ def perform_mixed_stage_analysis(
                     else:
                         start_frame = segment.start_frame_id
                         end_frame = segment.end_frame_id
-                    start_time_ms = int((start_frame / video_fps) * 1000)
-                    end_time_ms = int((end_frame / video_fps) * 1000)
+                    start_time_ms = frame_to_ms(start_frame, video_fps)
+                    end_time_ms = frame_to_ms(end_frame, video_fps)
                     bj_hj_time_ranges.append((start_time_ms, end_time_ms))
             
             logger.info(f"Removing Stage 2 signal from {len(bj_hj_time_ranges)} BJ/HJ chapters")

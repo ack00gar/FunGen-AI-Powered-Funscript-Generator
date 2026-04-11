@@ -2,6 +2,8 @@
 import imgui
 import time
 
+from common.frame_utils import frame_to_ms
+
 # Arrow key forward hold: ramp from real-time to max decode speed over this duration
 _ARROW_ACCEL_RAMP_S = 3.0
 _ARROW_TICK_BUDGET_S = 0.006  # max time to spend reading frames per GUI tick (6ms)
@@ -499,7 +501,7 @@ class ShortcutHandlerMixin:
         if fps <= 0:
             return
 
-        current_time_ms = int((current_frame / fps) * 1000)
+        current_time_ms = frame_to_ms(current_frame, fps)
 
         # Get the active timeline and add the point
         app_state = self.app.app_state_ui

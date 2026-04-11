@@ -7,6 +7,7 @@ from application.utils import get_logo_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 from application.utils.imgui_helpers import begin_modal_centered
+from common.frame_utils import ms_to_frame
 
 def _menu_item_simple(label, enabled=True):
     clicked, _ = imgui.menu_item(label, enabled=enabled)
@@ -252,8 +253,7 @@ class MainMenu:
                 if processor:
                     fps = processor.fps
                     if fps > 0:
-                        # Use int conversion instead of round+format for speed
-                        frames = int((offset_ms / 1000.0) * fps + 0.5)
+                        frames = ms_to_frame(offset_ms, fps)
                         frame_suffix = " (approx. %d frames)" % frames
                     else:
                         frame_suffix = ""

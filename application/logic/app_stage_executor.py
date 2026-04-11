@@ -13,6 +13,7 @@ import pickle
 from typing import Optional, List, Dict, Any, Tuple
 
 from config import constants
+from common.frame_utils import ms_to_frame, frame_to_ms
 from config.constants import ChapterSource, ChapterSegmentType
 from application.utils import VideoSegment
 
@@ -297,7 +298,7 @@ class StageExecutorMixin:
                 for frame_obj in loaded_data["all_s2_frame_objects_list"]:
                     if hasattr(frame_obj, 'atr_funscript_distance') and hasattr(frame_obj, 'frame_id'):
                         try:
-                            timestamp_ms = int((frame_obj.frame_id / fps) * 1000)
+                            timestamp_ms = frame_to_ms(frame_obj.frame_id, fps)
                             pos_0_100 = max(0, min(100, int(frame_obj.atr_funscript_distance)))
                             funscript_obj.add_action(timestamp_ms, pos_0_100)
                             actions_generated += 1
@@ -335,8 +336,8 @@ class StageExecutorMixin:
                     chapter_name = chapter.get('name') or chapter.get('position_long') or "Unknown"
                     chapter_short = chapter.get('position_short') or chapter_name
                     chapter_long = chapter.get('position_long') or chapter.get('description') or chapter_name
-                    start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
-                    end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
+                    start_frame = ms_to_frame(chapter.get('start', 0), fps)
+                    end_frame = ms_to_frame(chapter.get('end', 0), fps)
                     from application.utils.video_segment import VideoSegment as VS
                     video_segment = VS(
                         start_frame_id=start_frame,

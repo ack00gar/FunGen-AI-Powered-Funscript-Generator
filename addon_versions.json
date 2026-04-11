@@ -1,14 +1,14 @@
 {
   "addons": {
     "device_control": {
-      "version": "5.7.3",
+      "version": "5.7.4",
       "display_name": "Device Control",
-      "changelog": "Fix HDSP position range and dual command dispatch (courtesy of Discord @walton)"
+      "changelog": "Frame-perfect time conversions (round instead of truncate)"
     },
     "streamer": {
-      "version": "3.6.2",
+      "version": "3.6.3",
       "display_name": "Video Streamer",
-      "changelog": "Keyframe-based device dispatch for pre-loaded funscripts (real inter-keyframe duration)"
+      "changelog": "Frame-perfect time conversions (round instead of truncate)"
     },
     "patreon_features": {
       "version": "1.1.4",

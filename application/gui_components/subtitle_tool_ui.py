@@ -19,6 +19,7 @@ from typing import Optional
 from application.utils import primary_button_style, destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card
+from common.frame_utils import frame_to_ms
 
 logger = logging.getLogger(__name__)
 
@@ -1043,7 +1044,7 @@ class SubtitleToolUI:
             vms = None
             if self.app.processor and self.app.processor.video_info:
                 fps = self.app.processor.fps or 30
-                vms = int((self.app.processor.total_frames or 0) / fps * 1000) if fps > 0 else None
+                vms = frame_to_ms(self.app.processor.total_frames or 0, fps) if fps > 0 else None
             self.track = import_srt(path, vms)
             if self.track and len(self.track) > 0:
                 self.state = self.STATE_EDITING

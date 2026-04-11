@@ -24,6 +24,7 @@ from collections import deque
 from typing import Dict, Any, Optional, List, Tuple, Callable
 from multiprocessing import Event
 
+from common.frame_utils import frame_to_ms
 from scipy.signal import savgol_filter
 
 try:
@@ -610,7 +611,7 @@ class ChapterProcessor:
         # Convert to funscript actions
         primary_actions = []
         for i, fid in enumerate(frame_ids):
-            ts_ms = int(round((fid / self.fps) * 1000.0))
+            ts_ms = frame_to_ms(fid, self.fps)
             primary_actions.append({'at': ts_ms, 'pos': int(round(smoothed[i]))})
 
         # Secondary axis
@@ -618,7 +619,7 @@ class ChapterProcessor:
         if self.secondary_positions:
             sec_positions = np.array([p[1] for p in self.secondary_positions])
             for i, fid in enumerate(frame_ids):
-                ts_ms = int(round((fid / self.fps) * 1000.0))
+                ts_ms = frame_to_ms(fid, self.fps)
                 secondary_actions.append({'at': ts_ms, 'pos': int(round(sec_positions[i]))})
 
         return primary_actions, secondary_actions

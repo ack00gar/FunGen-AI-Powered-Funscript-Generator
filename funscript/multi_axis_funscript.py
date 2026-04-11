@@ -4,6 +4,8 @@ import logging
 import bisect
 import copy
 
+from common.frame_utils import ms_to_frame, frame_to_ms
+
 # Attempt to import optional libraries for processing
 try:
     from scipy.signal import savgol_filter, find_peaks
@@ -78,8 +80,7 @@ class MultiAxisFunscript:
         Ensures max 1 action per frame. When fps is not set, returns as-is."""
         if self._fps is None:
             return timestamp_ms
-        frame_idx = round(timestamp_ms * self._fps / 1000.0)
-        return round(frame_idx * 1000.0 / self._fps)
+        return frame_to_ms(ms_to_frame(timestamp_ms, self._fps), self._fps)
 
     def _invalidate_cache(self, axis: str = 'both'):
         """Marks the timestamp cache(s) as dirty."""
@@ -674,7 +675,7 @@ class MultiAxisFunscript:
         # O(log n) bisect to find first action after current time
         idx = bisect.bisect_right(timestamps, current_time_ms)
         while idx < len(timestamps):
-            target_frame = int(timestamps[idx] * (fps / 1000.0))
+            target_frame = ms_to_frame(timestamps[idx], fps)
             if target_frame > current_frame:
                 return target_frame
             idx += 1
@@ -694,7 +695,7 @@ class MultiAxisFunscript:
         # O(log n) bisect to find last action before current time
         idx = bisect.bisect_left(timestamps, current_time_ms) - 1
         while idx >= 0:
-            target_frame = int(timestamps[idx] * (fps / 1000.0))
+            target_frame = ms_to_frame(timestamps[idx], fps)
             if target_frame < current_frame:
                 return target_frame
             idx -= 1

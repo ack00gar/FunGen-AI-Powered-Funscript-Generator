@@ -22,6 +22,7 @@ from application.utils.timeline_modes import TimelineMode, TimelineInteractionSt
 from application.utils.bpm_analyzer import BPMOverlayConfig, TapTempo, SUBDIVISION_LABELS, SUBDIVISION_VALUES
 from application.classes.bookmark_manager import BookmarkManager
 from application.classes.recording_capture import RecordingCapture
+from common.frame_utils import ms_to_frame, frame_to_ms
 
 class TimelineTransformer:
     """
@@ -677,7 +678,7 @@ class InteractiveFunscriptTimeline:
                 tl_width_px = max(200, app_state.window_width - 50)
                 visible_width_ms = tl_width_px * app_state.timeline_zoom_factor_ms_per_px
                 center_ms = app_state.timeline_pan_offset_ms + visible_width_ms / 2
-                target_frame = max(0, int(center_ms * self.app.processor.fps / 1000.0))
+                target_frame = max(0, ms_to_frame(center_ms, self.app.processor.fps))
                 if self.app.processor.total_frames > 0:
                     target_frame = min(target_frame, self.app.processor.total_frames - 1)
                 self.app.event_handlers.seek_video_with_sync(target_frame)
@@ -735,7 +736,7 @@ class InteractiveFunscriptTimeline:
         if check_shortcut("add_bookmark", "B"):
             proc = self.app.processor
             if proc and proc.fps > 0:
-                playhead_time = int(round((proc.current_frame_index / proc.fps) * 1000.0))
+                playhead_time = frame_to_ms(proc.current_frame_index, proc.fps)
                 self._bookmark_manager.add(playhead_time)
 
     def _hit_test_point(self, mouse_pos, actions, tf: TimelineTransformer) -> int:
@@ -879,7 +880,7 @@ class InteractiveFunscriptTimeline:
         if self.app.processor and self.app.processor.video_info:
             fps = self.app.processor.fps
             if fps > 0:
-                frame = int(round((time_ms / 1000.0) * fps))
+                frame = ms_to_frame(time_ms, fps)
                 self.app.processor.seek_video(frame)
                 self.app.app_state_ui.force_timeline_pan_to_current_frame = True
 
@@ -907,7 +908,7 @@ class InteractiveFunscriptTimeline:
         if self.app.processor and self.app.processor.video_info:
             fps = self.app.processor.fps
             if fps > 0:
-                frame = int(round((time_ms / 1000.0) * fps))
+                frame = ms_to_frame(time_ms, fps)
                 self.app.processor.seek_video(frame)
 
     # --- Nudge Helpers ---
@@ -1030,7 +1031,7 @@ class InteractiveFunscriptTimeline:
         actions_before = list(self._get_actions() or [])
 
         # Convert frames to milliseconds
-        delta_ms = int((frames / fps) * 1000.0)
+        delta_ms = frame_to_ms(frames, fps)
 
         # Nudge all points by the same amount
         for action in actions:
@@ -1073,14 +1074,14 @@ class InteractiveFunscriptTimeline:
         actions_before = list(self._get_actions() or [])
 
         # Convert frames to milliseconds
-        delta_ms = int((frames / fps) * 1000.0)
+        delta_ms = frame_to_ms(frames, fps)
 
         # Process each selected chapter
         total_nudged = 0
         for chapter in selected_chapters:
             # Get chapter time range
-            start_ms = int(round((chapter.start_frame_id / fps) * 1000.0))
-            end_ms = int(round((chapter.end_frame_id / fps) * 1000.0))
+            start_ms = frame_to_ms(chapter.start_frame_id, fps)
+            end_ms = frame_to_ms(chapter.end_frame_id, fps)
 
             # Find points within chapter using binary search on cached timestamps
             action_timestamps = self._get_cached_timestamps()
@@ -1137,8 +1138,8 @@ class InteractiveFunscriptTimeline:
 
         new_selection = set()
         for chapter in selected_chapters:
-            start_ms = int(round((chapter.start_frame_id / fps) * 1000.0))
-            end_ms = int(round((chapter.end_frame_id / fps) * 1000.0))
+            start_ms = frame_to_ms(chapter.start_frame_id, fps)
+            end_ms = frame_to_ms(chapter.end_frame_id, fps)
 
             action_timestamps = self._get_cached_timestamps()
             if not action_timestamps or len(action_timestamps) != len(actions):
@@ -1840,8 +1841,8 @@ class InteractiveFunscriptTimeline:
 
         created = 0
         for i, sec in enumerate(self._reference_problem_sections):
-            start_frame = int(sec['start_ms'] / 1000.0 * fps)
-            end_frame = int(sec['end_ms'] / 1000.0 * fps)
+            start_frame = ms_to_frame(sec['start_ms'], fps)
+            end_frame = ms_to_frame(sec['end_ms'], fps)
             self.app.funscript_processor.create_new_chapter_from_data(
                 data={
                     'start_frame_str': str(start_frame),
@@ -2226,7 +2227,7 @@ class InteractiveFunscriptTimeline:
         txt = _format_time(self.app, time_ms/1000.0)
         proc = self.app.processor
         if proc and proc.fps and proc.fps > 0:
-            frame_num = int(round((time_ms / 1000.0) * proc.fps))
+            frame_num = ms_to_frame(time_ms, proc.fps)
             txt = f"{txt}  ({frame_num})"
         dl.add_text(center_x + 6, tf.y_offset + 6, imgui.get_color_u32_rgba(*TimelineColors.TIME_DISPLAY_TEXT), txt)
         
@@ -3167,7 +3168,7 @@ class InteractiveFunscriptTimeline:
             if getattr(plugin_instance, 'requires_cursor', False):
                 fps = self.app.processor.video_info.get('fps', 30) if self.app.processor and self.app.processor.video_info else 30
                 frame_idx = getattr(self.app, 'current_frame_index', 0)
-                params['current_time_ms'] = int((frame_idx / fps) * 1000)
+                params['current_time_ms'] = frame_to_ms(frame_idx, fps)
 
             # Capture actions before plugin for unified undo
             actions_before = list(fs.get_axis_actions(axis) or [])

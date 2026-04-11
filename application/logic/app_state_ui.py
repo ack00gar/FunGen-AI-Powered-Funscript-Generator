@@ -2,6 +2,7 @@ import numpy as np
 from typing import Tuple, Optional
 from config.constants import ProcessingSpeedMode, DEFAULT_TRACKER_NAME
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
+from common.frame_utils import frame_to_ms
 
 
 class AppStateUI:
@@ -421,7 +422,7 @@ class AppStateUI:
             fps = self.app.processor.video_info.get('fps', 30.0)
             if fps <= 0: fps = 30.0  # Avoid division by zero or negative FPS
 
-            current_time_ms = int(round((self.app.processor.current_frame_index / fps) * 1000.0))
+            current_time_ms = frame_to_ms(self.app.processor.current_frame_index, fps)
 
             script_val_primary = self.app.processor.tracker.funscript.get_value(current_time_ms, axis='primary')
             self.script_position_t1 = float(script_val_primary)

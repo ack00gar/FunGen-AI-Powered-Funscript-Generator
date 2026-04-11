@@ -6,6 +6,7 @@ Used as a mixin — all methods operate on the AppStageProcessor instance.
 import math
 import os
 from application.utils import VideoSegment
+from common.frame_utils import ms_to_frame
 
 
 class StageGuiEventsMixin:
@@ -342,8 +343,8 @@ class StageGuiEventsMixin:
 
             fs_proc.video_chapters.clear()
             for chapter in funscript_obj.chapters:
-                start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
-                end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
+                start_frame = ms_to_frame(chapter.get('start', 0), fps)
+                end_frame = ms_to_frame(chapter.get('end', 0), fps)
                 raw_name = chapter.get('name') or chapter.get('position_long') or "Unknown"
                 short_name = self._get_position_short_name(raw_name)
                 video_segment = VideoSegment(

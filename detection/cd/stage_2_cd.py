@@ -18,6 +18,7 @@ from config import constants
 from funscript.multi_axis_funscript import MultiAxisFunscript
 from application.utils.rts_smoother import RTSSmoother
 from application.utils.stage2_signal_enhancer import Stage2SignalEnhancer
+from common.frame_utils import frame_to_ms
 
 # Import data structures from new modular files
 from .data_structures import (
@@ -2500,7 +2501,7 @@ def perform_contact_analysis(
             for fid, pos_primary, pos_secondary in zip(final_funscript_frames, final_funscript_distances,
                                                        final_funscript_distances_lr):
                 if stop_event.is_set(): break
-                timestamp_ms = int(round((fid / current_video_fps) * 1000))
+                timestamp_ms = frame_to_ms(fid, current_video_fps)
                 funscript_obj.add_action(timestamp_ms, int(pos_primary), int(pos_secondary))
             
             # log the final video segments

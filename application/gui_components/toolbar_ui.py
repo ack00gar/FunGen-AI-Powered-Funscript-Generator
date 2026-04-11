@@ -23,6 +23,7 @@ import imgui
 from application.utils import get_icon_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from config.element_group_colors import ToolbarColors
+from common.frame_utils import frame_to_ms
 
 try:
     from video.audio_player import SOUNDDEVICE_AVAILABLE
@@ -1087,7 +1088,7 @@ class ToolbarUI:
             if self.app.processor and hasattr(self.app.processor, 'current_frame_index'):
                 fps = self.app.processor.fps
                 if fps > 0:
-                    video_position_ms = int((self.app.processor.current_frame_index / fps) * 1000)
+                    video_position_ms = frame_to_ms(self.app.processor.current_frame_index, fps)
 
             # Get sync offset from settings
             sync_offset_ms = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
