@@ -51,17 +51,10 @@ set "TEMP_DIR=%TEMP%\FunGen_Install"
 set "INSTALL_DIR=%~dp0"
 set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe"
 set "MINICONDA_INSTALLER=%TEMP_DIR%\Miniconda3-latest.exe"
-set "MINICONDA_PATH=%USERPROFILE%\miniconda3"
-
-REM Miniconda silent install /D= cannot handle spaces in path.
-REM If USERPROFILE contains spaces (e.g. "C:\Users\John Doe"), fall back to C:\miniconda3
-echo "!MINICONDA_PATH!" | findstr /C:" " >nul 2>&1
-if !errorlevel! equ 0 (
-    echo [NOTE] User profile path contains spaces: %USERPROFILE%
-    echo        Miniconda cannot install to paths with spaces.
-    echo        Installing to C:\miniconda3 instead.
-    set "MINICONDA_PATH=C:\miniconda3"
-)
+REM Miniconda silent install /D= cannot handle spaces or non-ASCII chars in path.
+REM Use the 8.3 short path of USERPROFILE — guaranteed space-free and user-writable,
+REM avoiding the old C:\miniconda3 fallback which is not writable without admin.
+for %%I in ("%USERPROFILE%") do set "MINICONDA_PATH=%%~sI\miniconda3"
 
 set "CONDA_EXE=!MINICONDA_PATH!\Scripts\conda.exe"
 set "ENV_NAME=FunGen"
