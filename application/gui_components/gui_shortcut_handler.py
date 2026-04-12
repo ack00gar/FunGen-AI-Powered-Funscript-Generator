@@ -509,7 +509,9 @@ class ShortcutHandlerMixin:
         if fps <= 0:
             return
 
-        current_time_ms = frame_to_ms(current_frame, fps)
+        current_time_ms = getattr(self.app.processor, 'playhead_override_ms', None)
+        if current_time_ms is None:
+            current_time_ms = frame_to_ms(current_frame, fps)
 
         # Get the active timeline and add the point
         app_state = self.app.app_state_ui
