@@ -719,8 +719,11 @@ class InteractiveFunscriptTimeline:
         if check_shortcut("paste_selection", "CTRL+V"):
             # Paste at current playhead position (video time), not stale mouse position
             paste_time_ms = 0
-            if self.app.processor and self.app.processor.fps > 0:
-                paste_time_ms = frame_to_ms(self.app.processor.current_frame_index, self.app.processor.fps)
+            proc = self.app.processor
+            if proc and proc.fps > 0:
+                paste_time_ms = getattr(proc, 'playhead_override_ms', None)
+                if paste_time_ms is None:
+                    paste_time_ms = frame_to_ms(proc.current_frame_index, proc.fps)
             self._handle_paste_actions(paste_time_ms)
 
         # 5. Nudge Selection (Arrows)
@@ -757,7 +760,9 @@ class InteractiveFunscriptTimeline:
         if check_shortcut("add_bookmark", "B"):
             proc = self.app.processor
             if proc and proc.fps > 0:
-                playhead_time = frame_to_ms(proc.current_frame_index, proc.fps)
+                playhead_time = getattr(proc, 'playhead_override_ms', None)
+                if playhead_time is None:
+                    playhead_time = frame_to_ms(proc.current_frame_index, proc.fps)
                 self._bookmark_manager.add(playhead_time)
 
     def _hit_test_point(self, mouse_pos, actions, tf: TimelineTransformer) -> int:
