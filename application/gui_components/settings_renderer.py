@@ -154,6 +154,7 @@ class SettingsRenderer:
             "logging": "logging autosave log debug verbose interval",
             "output": "file output save export path format funscript axis assignment tcode ofs batch overwrite simplification",
             "processing": "analysis stage rerun force preprocessed video database cache output delay workers producers consumers",
+            "api": "api websocket ws external tools control port",
             "trackers": "tracker settings detection optical flow confidence class filtering",
         }
 
@@ -194,6 +195,9 @@ class SettingsRenderer:
 
         # --- Output ---
         filtered("Output##SettingsOutput", ["output"], self._render_output)
+
+        # --- WebSocket API ---
+        filtered("WebSocket API##SettingsWSAPI", ["api", "websocket", "ws"], self._render_ws_api)
 
         # --- Processing ---
         filtered("Processing##SettingsProcessing", ["processing"],
@@ -493,6 +497,53 @@ class SettingsRenderer:
             imgui.same_line()
             imgui.text_disabled(" sec")
             _row_end()
+
+        _end_settings_columns()
+
+    # ================================================================ #
+    #  WebSocket API                                                   #
+    # ================================================================ #
+
+    def _render_ws_api(self):
+        settings = self.app.app_settings
+        _begin_settings_columns("wsapi_cols")
+
+        _row_label("WebSocket API", "Allow external tools to control FunGen via WebSocket (localhost only).")
+        ch, v = imgui.checkbox("Enabled##WSAPI", settings.get("ws_api_enabled", False))
+        if ch:
+            settings.set("ws_api_enabled", v)
+            if v and not getattr(self.app, '_ws_api', None):
+                try:
+                    from common.ws_api import FunGenWSAPI
+                    port = settings.get("ws_api_port", 8769)
+                    self.app._ws_api = FunGenWSAPI(self.app, port=port)
+                    self.app._ws_api.start()
+                except Exception as e:
+                    self.app.logger.warning(f"WS API start failed: {e}")
+            elif not v and getattr(self.app, '_ws_api', None):
+                self.app._ws_api.stop()
+                self.app._ws_api = None
+        _row_end()
+
+        if settings.get("ws_api_enabled", False):
+            _row_label("  Port", "WebSocket port (requires restart to change).")
+            imgui.push_item_width(80)
+            port = settings.get("ws_api_port", 8769)
+            ch, np_ = imgui.input_int("##WSPort", port)
+            if ch:
+                nv = max(1024, min(65535, np_))
+                if nv != port:
+                    settings.set("ws_api_port", nv)
+            imgui.pop_item_width()
+            _row_end()
+
+            api = getattr(self.app, '_ws_api', None)
+            if api and api._running:
+                _row_label("  Status", "")
+                imgui.text_colored("Active", 0.3, 0.9, 0.3, 1.0)
+                imgui.same_line()
+                imgui.text_disabled(f"ws://127.0.0.1:{settings.get('ws_api_port', 8769)}")
+                _row_end()
 
         _end_settings_columns()
 

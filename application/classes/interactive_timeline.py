@@ -79,8 +79,8 @@ class InteractiveFunscriptTimeline:
 
         # --- Selection & Interaction State ---
         self.selected_action_idx: int = -1
-        self.multi_selected_action_indices: Set[int] = set()
-        
+        self.multi_selected_action_indices: Set[Tuple[int, int]] = set()  # (at, pos) identity tuples
+
         self.dragging_action_idx: int = -1
         self.drag_start_pos: Optional[Tuple[float, float]] = None
         self.is_dragging_active: bool = False  # True only after exceeding drag threshold
@@ -212,6 +212,21 @@ class InteractiveFunscriptTimeline:
         if fs and axis:
             return fs._get_numpy_arrays_for_axis(axis)
         return None, None
+
+    def _action_key(self, action: dict) -> Tuple[int, int]:
+        """Return the identity tuple for a funscript action."""
+        return (action['at'], action['pos'])
+
+    def _resolve_selected_indices(self) -> List[int]:
+        """Convert selection tuples to current valid indices in the action list."""
+        actions = self._get_actions()
+        if not actions or not self.multi_selected_action_indices:
+            return []
+        indices = []
+        for i, a in enumerate(actions):
+            if (a['at'], a['pos']) in self.multi_selected_action_indices:
+                indices.append(i)
+        return sorted(indices)
 
     def invalidate_cache(self):
         """Forces updates on next frame"""
@@ -457,7 +472,7 @@ class InteractiveFunscriptTimeline:
             hit_idx = self._hit_test_point(mouse_pos, actions, tf)
             if hit_idx != -1:
                 # Double-click on point: select and seek
-                self.multi_selected_action_indices = {hit_idx}
+                self.multi_selected_action_indices = {self._action_key(actions[hit_idx])}
                 self.selected_action_idx = hit_idx
                 self._seek_video(actions[hit_idx]['at'])
             else:
@@ -490,15 +505,17 @@ class InteractiveFunscriptTimeline:
 
                 # Multi-select toggle: create-modifier or marquee-modifier on a point
                 if self._is_create_modifier_held(io) or self._is_marquee_modifier_held(io):
-                    if hit_idx in self.multi_selected_action_indices:
-                        self.multi_selected_action_indices.remove(hit_idx)
+                    key = self._action_key(actions[hit_idx])
+                    if key in self.multi_selected_action_indices:
+                        self.multi_selected_action_indices.discard(key)
                     else:
-                        self.multi_selected_action_indices.add(hit_idx)
+                        self.multi_selected_action_indices.add(key)
                 else:
                     # Plain click: select only this point (keep if already in multi-sel for drag)
-                    if hit_idx not in self.multi_selected_action_indices:
+                    key = self._action_key(actions[hit_idx])
+                    if key not in self.multi_selected_action_indices:
                         self.multi_selected_action_indices.clear()
-                        self.multi_selected_action_indices.add(hit_idx)
+                        self.multi_selected_action_indices.add(key)
 
                 self.selected_action_idx = hit_idx
 
@@ -585,9 +602,11 @@ class InteractiveFunscriptTimeline:
             self.context_menu_target_idx = hit_idx
             
             # Auto-select target if not already selected
-            if hit_idx != -1 and hit_idx not in self.multi_selected_action_indices:
-                self.multi_selected_action_indices = {hit_idx}
-                self.selected_action_idx = hit_idx
+            if hit_idx != -1:
+                key = self._action_key(actions[hit_idx])
+                if key not in self.multi_selected_action_indices:
+                    self.multi_selected_action_indices = {key}
+                    self.selected_action_idx = hit_idx
             
             # Store coords for "Add Point Here"
             self.new_point_candidate = (tf.x_to_time(mouse_pos[0]), tf.y_to_val(mouse_pos[1]))
@@ -686,7 +705,7 @@ class InteractiveFunscriptTimeline:
         # 2. Select All / Deselect All
         if check_shortcut("select_all_points", "CTRL+A"):
             actions = self._get_actions()
-            self.multi_selected_action_indices = set(range(len(actions)))
+            self.multi_selected_action_indices = {self._action_key(a) for a in actions}
         if check_shortcut("deselect_all_points", "SUPER+D"):
             self.multi_selected_action_indices.clear()
 
@@ -713,7 +732,9 @@ class InteractiveFunscriptTimeline:
             if not self.multi_selected_action_indices:
                 nearest = self._find_nearest_point_index()
                 if nearest is not None and nearest >= 0:
-                    self.multi_selected_action_indices = {nearest}
+                    actions = self._get_actions()
+                    if 0 <= nearest < len(actions):
+                        self.multi_selected_action_indices = {self._action_key(actions[nearest])}
             if self.multi_selected_action_indices:
                 self._nudge_selection_value(nudge_val)
 
@@ -854,7 +875,7 @@ class InteractiveFunscriptTimeline:
             act = actions[i]
             py = tf.val_to_y(act['pos'])
             if y1 <= py <= y2:
-                new_selection.add(i)
+                new_selection.add(self._action_key(act))
 
         if append:
             self.multi_selected_action_indices.update(new_selection)
@@ -870,7 +891,7 @@ class InteractiveFunscriptTimeline:
         s_idx = bisect_left(timestamps, t1)
         e_idx = bisect_right(timestamps, t2)
         
-        new_set = set(range(s_idx, e_idx))
+        new_set = {self._action_key(actions[i]) for i in range(s_idx, e_idx)}
         if append:
             self.multi_selected_action_indices.update(new_set)
         else:
@@ -919,9 +940,11 @@ class InteractiveFunscriptTimeline:
         snap = self.app.app_state_ui.snap_to_grid_pos
         actual_delta = delta * (snap if snap > 0 else 1)
 
-        for idx in self.multi_selected_action_indices:
-            if idx < len(actions):
-                actions[idx]['pos'] = max(0, min(100, actions[idx]['pos'] + actual_delta))
+        resolved = self._resolve_selected_indices()
+        for idx in resolved:
+            actions[idx]['pos'] = max(0, min(100, actions[idx]['pos'] + actual_delta))
+        # Rebuild selection to reflect new pos values
+        self.multi_selected_action_indices = {self._action_key(actions[idx]) for idx in resolved}
         fs, axis = self._get_target_funscript_details()
         if fs:
             fs._invalidate_cache(axis or 'both')
@@ -930,14 +953,15 @@ class InteractiveFunscriptTimeline:
 
         from application.classes.undo_manager import NudgeValuesCmd
         self.app.undo_manager.push_done(NudgeValuesCmd(
-            self.timeline_num, list(self.multi_selected_action_indices), actual_delta))
+            self.timeline_num, resolved, actual_delta))
 
     def _nudge_selection_time(self, delta_ms: int):
         actions = self._get_actions()
         if not actions: return
 
         # Sort indices to avoid collision logic issues
-        indices = sorted(list(self.multi_selected_action_indices), reverse=(delta_ms > 0))
+        resolved = self._resolve_selected_indices()
+        indices = sorted(resolved, reverse=(delta_ms > 0))
 
         for idx in indices:
             if idx < len(actions):
@@ -948,6 +972,8 @@ class InteractiveFunscriptTimeline:
                 new_at = actions[idx]['at'] + delta_ms
                 actions[idx]['at'] = int(max(prev_limit, min(next_limit, new_at)))
 
+        # Rebuild selection to reflect new at values
+        self.multi_selected_action_indices = {self._action_key(actions[idx]) for idx in resolved}
         fs, axis = self._get_target_funscript_details()
         if fs:
             fs._invalidate_cache(axis or 'both')
@@ -956,7 +982,7 @@ class InteractiveFunscriptTimeline:
 
         from application.classes.undo_manager import NudgeTimesCmd
         self.app.undo_manager.push_done(NudgeTimesCmd(
-            self.timeline_num, list(self.multi_selected_action_indices), delta_ms))
+            self.timeline_num, resolved, delta_ms))
 
     def _find_nearest_point_index(self) -> Optional[int]:
         """Find the index of the action nearest to the current playhead, without moving it."""
@@ -1174,7 +1200,7 @@ class InteractiveFunscriptTimeline:
             end_idx = bisect_right(action_timestamps, end_ms)
 
             for i in range(start_idx, end_idx):
-                new_selection.add(i)
+                new_selection.add(self._action_key(actions[i]))
 
         self.multi_selected_action_indices = new_selection
 
@@ -1188,8 +1214,8 @@ class InteractiveFunscriptTimeline:
     def _handle_copy_selection(self):
         actions = self._get_actions()
         if not self.multi_selected_action_indices: return
-        
-        indices = sorted(list(self.multi_selected_action_indices))
+
+        indices = self._resolve_selected_indices()
         selection = [actions[i] for i in indices]
         
         if not selection: return
@@ -1244,7 +1270,7 @@ class InteractiveFunscriptTimeline:
 
         other_actions_before = list(fs_other.get_axis_actions(axis_other) or [])
 
-        indices = sorted(list(self.multi_selected_action_indices))
+        indices = self._resolve_selected_indices()
         points_to_copy = [actions[i] for i in indices]
 
         if axis_other in ('primary', 'secondary'):
@@ -1273,27 +1299,28 @@ class InteractiveFunscriptTimeline:
         """Filter selection: 'top', 'bottom', 'mid'"""
         actions = self._get_actions()
         if len(self.multi_selected_action_indices) < 3: return
-        
-        indices = sorted(list(self.multi_selected_action_indices))
+
+        indices = self._resolve_selected_indices()
+        if len(indices) < 3: return
         subset = [actions[i] for i in indices]
-        
+
         # Simple peak detection logic within selection
-        keep_indices = set()
-        
+        keep_keys = set()
+
         for k, idx in enumerate(indices):
             current = actions[idx]['pos']
             # Check neighbors within the selection list, not global list
             prev_val = subset[k-1]['pos'] if k > 0 else -1
             next_val = subset[k+1]['pos'] if k < len(subset)-1 else -1
-            
+
             is_peak = (current > prev_val) and (current >= next_val)
             is_valley = (current < prev_val) and (current <= next_val)
-            
-            if mode == 'top' and is_peak: keep_indices.add(idx)
-            elif mode == 'bottom' and is_valley: keep_indices.add(idx)
-            elif mode == 'mid' and not is_peak and not is_valley: keep_indices.add(idx)
-            
-        self.multi_selected_action_indices = keep_indices
+
+            if mode == 'top' and is_peak: keep_keys.add(self._action_key(actions[idx]))
+            elif mode == 'bottom' and is_valley: keep_keys.add(self._action_key(actions[idx]))
+            elif mode == 'mid' and not is_peak and not is_valley: keep_keys.add(self._action_key(actions[idx]))
+
+        self.multi_selected_action_indices = keep_keys
 
     # ==================================================================================
     # VISUAL DRAWING
@@ -1511,7 +1538,7 @@ class InteractiveFunscriptTimeline:
             for i in range(len(visible_actions)):
                 real_idx = s_idx + i
 
-                is_sel = real_idx in _sel_set
+                is_sel = (visible_actions[i]['at'], visible_actions[i]['pos']) in _sel_set
                 is_drag = (real_idx == _drag_idx)
                 is_hover = (real_idx == _hover_idx)
 
@@ -1617,7 +1644,7 @@ class InteractiveFunscriptTimeline:
 
             for i in range(len(visible_actions)):
                 real_idx = s_idx + i
-                is_sel = real_idx in _sel_set
+                is_sel = (visible_actions[i]['at'], visible_actions[i]['pos']) in _sel_set
                 is_drag = (real_idx == _drag_idx)
                 is_hover = (real_idx == _hover_idx)
 
@@ -2697,7 +2724,7 @@ class InteractiveFunscriptTimeline:
             
             if imgui.menu_item("Select All")[0]:
                 actions = self._get_actions()
-                self.multi_selected_action_indices = set(range(len(actions)))
+                self.multi_selected_action_indices = {self._action_key(a) for a in actions}
                 imgui.close_current_popup()
 
             imgui.separator()
@@ -2828,8 +2855,7 @@ class InteractiveFunscriptTimeline:
                 if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2:
                     if imgui.menu_item("Save Selection as Pattern")[0]:
                         actions = self._get_actions()
-                        sel_actions = [actions[i] for i in sorted(self.multi_selected_action_indices)
-                                       if i < len(actions)]
+                        sel_actions = [actions[i] for i in self._resolve_selected_indices()]
                         if len(sel_actions) >= 2:
                             pattern_lib = getattr(self.app, 'pattern_library', None)
                             if pattern_lib:
@@ -3028,12 +3054,12 @@ class InteractiveFunscriptTimeline:
 
         # Capture deleted points for unified undo before mutation
         actions = self._get_actions()
+        resolved = self._resolve_selected_indices()
         deleted_info = []
-        for idx in sorted(self.multi_selected_action_indices):
-            if idx < len(actions):
-                deleted_info.append({'index': idx, 'action': actions[idx]})
+        for idx in resolved:
+            deleted_info.append({'index': idx, 'action': actions[idx]})
 
-        fs.clear_points(axis=axis, selected_indices=list(self.multi_selected_action_indices))
+        fs.clear_points(axis=axis, selected_indices=resolved)
         self.multi_selected_action_indices.clear()
         self.selected_action_idx = -1
         self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Delete Points")
@@ -3189,7 +3215,7 @@ class InteractiveFunscriptTimeline:
             # Handle selection if apply_to_selection is enabled
             selected_indices = None
             if context.apply_to_selection and self.multi_selected_action_indices:
-                selected_indices = list(self.multi_selected_action_indices)
+                selected_indices = self._resolve_selected_indices()
                 params['selected_indices'] = selected_indices
 
             # Auto-inject current_time_ms for cursor-dependent plugins

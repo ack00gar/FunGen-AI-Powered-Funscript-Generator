@@ -450,10 +450,24 @@ class MultiAxisFunscript:
     def reset_to_neutral(self, timestamp_ms: int):
         self.add_action(timestamp_ms, 100, 50, is_from_live_tracker=True)
 
-    def get_value(self, time_ms: int, axis: str = 'primary') -> int:
+    @staticmethod
+    def _catmull_rom(p0: float, p1: float, p2: float, p3: float, t: float) -> float:
+        """Catmull-Rom spline interpolation between p1 and p2 with t in [0,1]."""
+        return 0.5 * (
+            2.0 * p1
+            + (-p0 + p2) * t
+            + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
+            + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t * t * t
+        )
+
+    def get_value(self, time_ms: int, axis: str = 'primary',
+                  interpolation: str = 'linear') -> int:
         """
         Returns the interpolated position value at a given timestamp.
         Uses the cached timestamp list for O(1) amortised bisect lookups.
+
+        Args:
+            interpolation: 'linear' (default) or 'spline' (catmull-rom, smoother at peaks)
         """
         if axis == 'primary':
             actions_list = self.primary_actions
@@ -465,7 +479,7 @@ class MultiAxisFunscript:
         if not actions_list:
             return 50  # Default neutral position
 
-        # Use the cached timestamp list — rebuilt only when dirty.
+        # Use the cached timestamp list, rebuilt only when dirty.
         action_timestamps = self._get_timestamps_for_axis(axis)
         idx = bisect.bisect_left(action_timestamps, time_ms)
 
@@ -484,8 +498,23 @@ class MultiAxisFunscript:
         if time_diff == 0:
             return p1["pos"]
 
-        t_ratio = (time_ms - p1["at"]) / time_diff
-        val = p1["pos"] + t_ratio * (p2["pos"] - p1["pos"])
+        t = (time_ms - p1["at"]) / time_diff
+
+        if interpolation == 'spline' and len(actions_list) >= 3:
+            # Catmull-rom needs 4 control points: p0, p1, p2, p3
+            # Clamp at boundaries (duplicate endpoints)
+            i0 = max(0, idx - 2)
+            i3 = min(len(actions_list) - 1, idx + 1)
+            val = self._catmull_rom(
+                actions_list[i0]["pos"],
+                p1["pos"],
+                p2["pos"],
+                actions_list[i3]["pos"],
+                t
+            )
+        else:
+            val = p1["pos"] + t * (p2["pos"] - p1["pos"])
+
         return int(round(np.clip(val, 0, 100)))
 
     def get_latest_value(self, axis: str = 'primary') -> int:

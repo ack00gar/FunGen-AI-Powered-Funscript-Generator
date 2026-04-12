@@ -332,6 +332,17 @@ class ApplicationLogic:
             self.updater.check_for_updates_async()
             self.addon_checker.check_for_updates_async()
 
+        # Start WebSocket API server if enabled (opt-in)
+        self._ws_api = None
+        if not self.is_cli_mode and self.app_settings.get("ws_api_enabled", False):
+            try:
+                from common.ws_api import FunGenWSAPI
+                api_port = self.app_settings.get("ws_api_port", 8769)
+                self._ws_api = FunGenWSAPI(self, port=api_port)
+                self._ws_api.start()
+            except Exception as e:
+                self.logger.warning(f"WebSocket API failed to start: {e}")
+
         # First-run model download is now handled by the FirstRunWizard (step 5).
         # The wizard calls trigger_first_run_setup() when the user reaches that step.
 
