@@ -546,6 +546,9 @@ class ShortcutHandlerMixin:
                 if existing_idx is not None:
                     old_value = actions[existing_idx]['pos']
                     actions[existing_idx]['pos'] = value
+                    fs, axis = timeline._get_target_funscript_details()
+                    if fs:
+                        fs._invalidate_cache(axis or 'both')
                     from application.classes.undo_manager import MovePointCmd
                     self.app.undo_manager.push_done(MovePointCmd(
                         timeline.timeline_num,
