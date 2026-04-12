@@ -195,15 +195,16 @@ if !errorlevel! neq 0 (
 )
 
 REM Remove trailing backslash from INSTALL_DIR to avoid quote escaping issues
-REM BUT: Keep it if we're at drive root (C:\, D:\, etc.)
+REM (a quoted path ending in \" escapes the closing quote on Windows cmdline,
+REM  so e.g. "A:\" is parsed as A:" by argparse).
+REM For drive roots we must keep a path component, so append "." -> A:\.
 set "INSTALL_DIR_CLEAN=%INSTALL_DIR%"
 if "%INSTALL_DIR:~-1%"=="\" (
-    REM Has trailing backslash - check if it's a drive root
     if "%INSTALL_DIR:~-2,1%"==":" (
-        REM It's a drive root like C:\ - keep the backslash
-        set "INSTALL_DIR_CLEAN=%INSTALL_DIR%"
+        REM Drive root like A:\ - append "." so quoting is safe
+        set "INSTALL_DIR_CLEAN=%INSTALL_DIR%."
     ) else (
-        REM It's a regular path like C:\foo\ - remove trailing backslash
+        REM Regular path like C:\foo\ - strip trailing backslash
         set "INSTALL_DIR_CLEAN=%INSTALL_DIR:~0,-1%"
     )
 )
