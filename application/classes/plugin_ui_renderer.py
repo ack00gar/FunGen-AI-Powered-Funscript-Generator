@@ -409,7 +409,10 @@ class PluginUIRenderer:
         context = self.plugin_manager.plugin_contexts.get(plugin_name)
         selected_indices = None
         if context and context.apply_to_selection and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
-            selected_indices = list(self.timeline_reference.multi_selected_action_indices) if self.timeline_reference.multi_selected_action_indices else None
+            if self.timeline_reference.multi_selected_action_indices:
+                selected_indices = self.timeline_reference._resolve_selected_indices() or None
+            else:
+                selected_indices = None
         
         # Generate preview through the plugin manager
         success = self.plugin_manager.generate_preview(plugin_name, funscript_instance, axis_name, selected_indices)

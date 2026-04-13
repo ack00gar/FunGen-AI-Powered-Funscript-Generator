@@ -96,7 +96,7 @@ class ChapterPluginsMixin:
                 return
                 
             # Step 2: Get the selected indices from the timeline
-            selected_indices = list(timeline_instance.multi_selected_action_indices) if timeline_instance.multi_selected_action_indices else []
+            selected_indices = timeline_instance._resolve_selected_indices() if timeline_instance.multi_selected_action_indices else []
             
             if len(selected_indices) < 2:
                 chapter_names = [ch.position_short_name for ch in self.context_selected_chapters]
