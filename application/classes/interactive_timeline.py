@@ -131,8 +131,11 @@ class InteractiveFunscriptTimeline:
 
         # --- Visualization Features ---
 
-        # Heatmap coloring — speed-based segment colors enabled by default
+        # Heatmap coloring - speed-based segment colors enabled by default
         self._show_heatmap_coloring = True
+        # Smooth curve rendering (catmull-rom spline between points)
+        self._show_smooth_curve = False
+        self._smooth_samples_per_segment = 12
         self._heatmap_mapper = HeatmapColorMapper(max_speed=400.0)
         self._heatmap_speeds_cache: Optional[np.ndarray] = None   # full-script speeds
         self._heatmap_colors_cache: Optional[np.ndarray] = None   # full-script u32 colors
@@ -1450,7 +1453,32 @@ class InteractiveFunscriptTimeline:
             dl.add_polyline(pts_top, col, False, 1.0)
             dl.add_polyline(pts_bot, col, False, 1.0)
 
-    def _draw_curve(self, dl, tf: TimelineTransformer, actions: List[Dict], 
+    def _expand_catmull(self, ats: np.ndarray, poss: np.ndarray, k: int):
+        """Subsample each segment with catmull-rom spline. Returns (xs_a, ys_p, seg_idx).
+        seg_idx maps each dense sample (excluding the appended final point) to its
+        source segment index in [0, n-2]."""
+        n = len(ats)
+        if n < 2 or k < 2:
+            return ats, poss, np.arange(max(0, n - 1), dtype=np.int32)
+        i = np.arange(n - 1)
+        i0 = np.maximum(0, i - 1)
+        i3 = np.minimum(n - 1, i + 2)
+        p0 = poss[i0]; p1 = poss[i]; p2 = poss[i + 1]; p3 = poss[i3]
+        a1 = ats[i]; a2 = ats[i + 1]
+        t = np.linspace(0.0, 1.0, k, endpoint=False, dtype=np.float32)
+        T = t[None, :]
+        P0 = p0[:, None]; P1 = p1[:, None]; P2 = p2[:, None]; P3 = p3[:, None]
+        P = 0.5 * (2.0 * P1 + (-P0 + P2) * T
+                   + (2.0 * P0 - 5.0 * P1 + 4.0 * P2 - P3) * T * T
+                   + (-P0 + 3.0 * P1 - 3.0 * P2 + P3) * T * T * T)
+        A = a1[:, None] + T * (a2[:, None] - a1[:, None])
+        P = np.clip(P, 0.0, 100.0)
+        out_a = np.concatenate([A.reshape(-1), ats[-1:]])
+        out_p = np.concatenate([P.reshape(-1), poss[-1:]])
+        seg_idx = np.repeat(i, k)
+        return out_a.astype(np.float32), out_p.astype(np.float32), seg_idx.astype(np.int32)
+
+    def _draw_curve(self, dl, tf: TimelineTransformer, actions: List[Dict],
                     is_preview=False, color_override=None, force_lines_only=False, alpha=1.0):
         if not actions or len(actions) < 2: return
 
@@ -1511,8 +1539,14 @@ class InteractiveFunscriptTimeline:
         base_col = color_override or (TimelineColors.PREVIEW_LINES if is_preview else (0.8, 0.8, 0.8, 1.0))
         col_u32 = imgui.get_color_u32_rgba(base_col[0], base_col[1], base_col[2], base_col[3] * alpha)
         thick = 1.5 if is_preview else 2.0
-        
-        pts = np.column_stack((xs, ys)).tolist()
+
+        if self._show_smooth_curve and not is_preview and len(ats) >= 2:
+            d_ats, d_poss, _ = self._expand_catmull(ats, poss, self._smooth_samples_per_segment)
+            d_xs = np.clip(tf.vec_time_to_x(d_ats), safe_min_x, safe_max_x)
+            d_ys = tf.vec_val_to_y(d_poss)
+            pts = np.column_stack((d_xs, d_ys)).tolist()
+        else:
+            pts = np.column_stack((xs, ys)).tolist()
         dl.add_polyline(pts, col_u32, False, thick)
 
         # -- LOD C: Points (Zoomed In) --
@@ -1622,15 +1656,30 @@ class InteractiveFunscriptTimeline:
         seg_end = min(len(self._heatmap_colors_cache), e_idx - 1)
         colors_u32 = self._heatmap_colors_cache[seg_start:seg_end]
 
-        # Draw per-segment colored lines — pre-convert to Python lists to avoid
-        # per-element numpy indexing overhead in the loop
+        # Draw per-segment colored lines. Pre-convert to Python lists to avoid
+        # per-element numpy indexing overhead in the loop.
         n_segs = len(colors_u32)
         xs_list = xs.tolist()
         ys_list = ys.tolist()
-        colors_list = colors_u32.tolist()
-        _add_line = dl.add_line
-        for i in range(n_segs):
-            _add_line(xs_list[i], ys_list[i], xs_list[i + 1], ys_list[i + 1], colors_list[i], 2.0)
+        if self._show_smooth_curve and len(ats) >= 2 and n_segs > 0:
+            k = self._smooth_samples_per_segment
+            d_ats, d_poss, seg_idx = self._expand_catmull(ats, poss, k)
+            d_xs = np.clip(tf.vec_time_to_x(d_ats), safe_min_x, safe_max_x).tolist()
+            d_ys = tf.vec_val_to_y(d_poss).tolist()
+            colors_list = colors_u32.tolist()
+            _add_line = dl.add_line
+            n_dense = len(d_xs) - 1
+            seg_idx_list = seg_idx.tolist()
+            for i in range(n_dense):
+                si = seg_idx_list[i] if i < len(seg_idx_list) else n_segs - 1
+                if si >= n_segs:
+                    si = n_segs - 1
+                _add_line(d_xs[i], d_ys[i], d_xs[i + 1], d_ys[i + 1], colors_list[si], 2.0)
+        else:
+            colors_list = colors_u32.tolist()
+            _add_line = dl.add_line
+            for i in range(n_segs):
+                _add_line(xs_list[i], ys_list[i], xs_list[i + 1], ys_list[i + 1], colors_list[i], 2.0)
 
         # Draw points (same logic as standard _draw_curve)
         radius = self.app.app_state_ui.timeline_point_radius
@@ -2514,6 +2563,12 @@ class InteractiveFunscriptTimeline:
         _, self._show_heatmap_coloring = imgui.checkbox(f"Heat##{self.timeline_num}", self._show_heatmap_coloring)
         if imgui.is_item_hovered():
             imgui.set_tooltip("Speed-based heatmap coloring for line segments")
+        imgui.same_line()
+
+        # Smooth curve toggle (catmull-rom spline rendering)
+        _, self._show_smooth_curve = imgui.checkbox(f"Smooth##{self.timeline_num}", self._show_smooth_curve)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Render points as a smooth spline instead of straight lines")
         imgui.same_line()
 
         # Speed warnings toggle
