@@ -181,6 +181,14 @@ class VideoProcessor(
         self.frame_cache_lock = threading.Lock()
         self.batch_fetch_size = 600  # For explicit batch fetches only
 
+        # Scrub-prefill: after each scrub seek, pre-decode a small window of
+        # neighbouring frames into frame_cache via the thumbnail extractor.
+        # Subsequent scrub ticks then hit the cache instead of triggering a
+        # new decode, so dragging the playhead feels closer to live playback.
+        self._scrub_prefill_thread: Optional[threading.Thread] = None
+        self._scrub_prefill_stop = threading.Event()
+        self._scrub_prefill_radius = 18  # +/- frames around the latest target
+
         # Unified frame buffer for arrow key navigation (deque for efficient FIFO)
         # Populated by BOTH arrow-nav pipe reads AND the processing loop,
         # so backward nav works seamlessly regardless of how frames were produced.
@@ -1407,6 +1415,10 @@ class VideoProcessor(
         self.playhead_override_ms = None  # Clear on any non-point seek
         self.logger.debug(f"Seek to frame {target_frame} (from {self.current_frame_index})")
 
+        # Cancel any in-flight scrub prefill - a new seek means the previous
+        # window is no longer the right place to be warming the cache.
+        self._scrub_prefill_stop.set()
+
         # Update frame index immediately so the timeline doesn't snap back
         # to the old position while the async decode is in progress
         self.current_frame_index = target_frame
@@ -1490,10 +1502,16 @@ class VideoProcessor(
 
                 # Only update frame index for the FINAL decoded frame.
                 # During the loop, seek_video() already set current_frame_index
-                # immediately for each new seek request — overwriting here with
+                # immediately for each new seek request - overwriting here with
                 # an intermediate (stale) target would snap the timeline back.
                 self.current_frame_index = target_frame
                 break  # No pending request, we're done
+
+            # Pre-warm a window of neighbouring frames so the next scrub tick
+            # within +/- N frames is a cache hit. Only when paused (live
+            # playback already streams frames sequentially).
+            if not was_processing or was_paused:
+                self._schedule_scrub_prefill(target_frame)
 
             if was_processing and not was_paused:
                 self.start_processing(start_frame=self.current_frame_index, end_frame=stored_end_limit)
@@ -1506,6 +1524,61 @@ class VideoProcessor(
         finally:
             self.seek_in_progress = False
             self.seek_request_frame_index = None
+
+    def _schedule_scrub_prefill(self, center_frame: int):
+        """Background-decode a window of frames around `center_frame` into the
+        frame_cache so subsequent scrub seeks land on cache hits."""
+        if self.thumbnail_extractor is None or self.total_frames <= 0:
+            return
+        # If a prior prefill is still alive, ask it to stop; we'll start a new
+        # one centered on the latest target.
+        self._scrub_prefill_stop.set()
+        prev = self._scrub_prefill_thread
+        if prev is not None and prev.is_alive():
+            prev.join(timeout=0.05)
+
+        self._scrub_prefill_stop = threading.Event()
+        stop_event = self._scrub_prefill_stop
+
+        def _worker():
+            try:
+                radius = self._scrub_prefill_radius
+                # Interleave outward (1, -1, 2, -2, ...) so the closest frames
+                # warm first - those are the ones a continued drag will hit.
+                for off in range(1, radius + 1):
+                    for delta in (off, -off):
+                        if stop_event.is_set():
+                            return
+                        idx = center_frame + delta
+                        if idx < 0 or idx >= self.total_frames:
+                            continue
+                        with self.frame_cache_lock:
+                            if idx in self.frame_cache:
+                                continue
+                        # Bail if a real seek arrived while we were warming.
+                        if self.seek_in_progress:
+                            return
+                        try:
+                            frame = self.thumbnail_extractor.get_frame(idx, use_gpu_unwarp=False)
+                        except Exception:
+                            frame = None
+                        if frame is None:
+                            continue
+                        with self.frame_cache_lock:
+                            if idx in self.frame_cache:
+                                continue
+                            if len(self.frame_cache) >= self.frame_cache_max_size:
+                                try:
+                                    self.frame_cache.popitem(last=False)
+                                except KeyError:
+                                    pass
+                            self.frame_cache[idx] = frame
+            except Exception as e:
+                self.logger.debug(f"Scrub prefill worker stopped: {e}")
+
+        self._scrub_prefill_thread = threading.Thread(
+            target=_worker, daemon=True, name=f"ScrubPrefill-{center_frame}")
+        self._scrub_prefill_thread.start()
 
     def is_vr_active_or_potential(self) -> bool:
         if self.video_type_setting == 'VR':
