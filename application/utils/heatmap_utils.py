@@ -13,13 +13,17 @@ from typing import Tuple, List, Dict
 # Lowest stop uses a visible steel-blue instead of black so flat/slow
 # segments remain clearly visible on the dark canvas background.
 _SPEED_GRADIENT = [
-    (0.00, (0.30, 0.35, 0.50, 1.0)),     # Steel-blue — stationary / flat
-    (0.05, (0.20, 0.45, 0.90, 1.0)),     # DodgerBlue — slow
-    (0.20, (0.0, 0.9, 0.9, 1.0)),        # Cyan — moderate
-    (0.40, (0.0, 0.8, 0.2, 1.0)),        # Green — medium
-    (0.65, (0.9, 0.9, 0.1, 1.0)),        # Yellow — fast
-    (1.00, (0.9, 0.1, 0.1, 1.0)),        # Red — device limit
+    (0.00, (0.30, 0.35, 0.50, 1.0)),     # Steel-blue: stationary / flat
+    (0.05, (0.20, 0.45, 0.90, 1.0)),     # DodgerBlue: slow
+    (0.20, (0.0, 0.9, 0.9, 1.0)),        # Cyan: moderate
+    (0.40, (0.0, 0.8, 0.2, 1.0)),        # Green: medium
+    (0.65, (0.9, 0.9, 0.1, 1.0)),        # Yellow: fast
+    (1.00, (0.9, 0.1, 0.1, 1.0)),        # Red: device limit
 ]
+
+# Overspeed color (segments faster than max_speed). Lilac/violet stands out
+# clearly against the red->yellow heat ramp.
+_OVERSPEED_COLOR = (0.78, 0.45, 0.95, 1.0)
 
 
 def _lerp_color(c1: Tuple, c2: Tuple, t: float) -> Tuple[float, float, float, float]:
@@ -47,6 +51,8 @@ class HeatmapColorMapper:
 
     def speed_to_color_rgba(self, speed: float) -> Tuple[float, float, float, float]:
         """Convert a single speed value (units/sec) to an RGBA color tuple."""
+        if abs(speed) > self.max_speed:
+            return _OVERSPEED_COLOR
         t = min(1.0, max(0.0, abs(speed) / self.max_speed))
 
         # Find the two gradient stops that bracket t
@@ -75,7 +81,12 @@ class HeatmapColorMapper:
             for ch in range(4):
                 result[mask, ch] = col0[ch] + (col1[ch] - col0[ch]) * seg_t
 
-        # Handle values at exactly 1.0 (already covered by last segment)
+        # Overspeed: segments faster than max_speed get a distinct lilac
+        over_mask = np.abs(speeds) > self.max_speed
+        if np.any(over_mask):
+            for ch in range(4):
+                result[over_mask, ch] = _OVERSPEED_COLOR[ch]
+
         return result
 
     def speeds_to_colors_u32(self, speeds: np.ndarray) -> np.ndarray:
