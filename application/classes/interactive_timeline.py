@@ -754,8 +754,15 @@ class InteractiveFunscriptTimeline:
         if check_shortcut("nudge_selection_time_prev", "SHIFT+LEFT_ARROW"): nudge_t = -snap_t
         if check_shortcut("nudge_selection_time_next", "SHIFT+RIGHT_ARROW"): nudge_t = snap_t
 
-        if nudge_t != 0 and self.multi_selected_action_indices:
-            self._nudge_selection_time(nudge_t)
+        if nudge_t != 0:
+            if not self.multi_selected_action_indices:
+                nearest = self._find_nearest_point_index()
+                if nearest is not None and nearest >= 0:
+                    actions = self._get_actions()
+                    if 0 <= nearest < len(actions):
+                        self.multi_selected_action_indices = {self._action_key(actions[nearest])}
+            if self.multi_selected_action_indices:
+                self._nudge_selection_time(nudge_t)
 
         # 6b. Snap nearest to playhead — handled by global shortcut handler
 
