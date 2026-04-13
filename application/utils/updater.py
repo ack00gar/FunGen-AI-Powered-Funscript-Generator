@@ -504,6 +504,7 @@ class AutoUpdater:
             # Same hash - no update needed
             self.logger.info("Application is up to date.")
             self.status_message = "You are on the latest update."
+            self.app.set_status_message("Up to date - no update available", duration=4.0)
             self.update_available = False
             self.update_changelog = []
             self.update_check_complete = True
@@ -513,6 +514,7 @@ class AutoUpdater:
         if self.remote_commit_hash in self.skipped_commits:
             self.logger.info(f"Update {self.remote_commit_hash[:7]} is marked as skipped, ignoring.")
             self.status_message = "You are on the latest update (skipped updates ignored)."
+            self.app.set_status_message("Up to date (skipped updates ignored)", duration=4.0)
             self.update_available = False
             self.update_changelog = []
             self.update_check_complete = True
@@ -529,12 +531,14 @@ class AutoUpdater:
         if self._is_remote_commit_newer():
             self.logger.info("Update available.")
             self.status_message = "A new update is available!"
+            self.app.set_status_message(
+                f"Update available ({self.remote_commit_hash[:7]})", duration=5.0)
             self.update_available = True
             # Always show popup when startup checking is enabled and update is available
             self.show_update_dialog = True
         else:
             self.logger.info("Remote commit is same or older than local commit.")
-            # self.status_message = "You are on the latest update."
+            self.app.set_status_message("Up to date - no update available", duration=4.0)
             self.update_available = False
             self.update_changelog = []
 

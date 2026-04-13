@@ -397,6 +397,7 @@ class MainMenu:
             self._render_markers_menu(app_state)
             self._render_view_menu(app_state, stage_proc)
             self._render_tools_menu(app_state, file_mgr)
+            self._render_update_menu()
             self._render_help_menu()
             self._render_support_menu()
 
@@ -1067,8 +1068,13 @@ class MainMenu:
 
             imgui.separator()
 
-            # Subtitles — navigate to control panel tab + toggle editor
+            # Subtitles - navigate to control panel tab + toggle editor.
+            # The trailing separator is only drawn when this section actually
+            # rendered; otherwise it would appear right after the previous one
+            # and produce a double divider.
+            _subtitles_rendered = False
             if _is_feature_available("subtitle_translation"):
+                _subtitles_rendered = True
                 gui = getattr(app, 'gui_instance', None)
                 cp = gui.control_panel_ui if gui else None
                 tool = getattr(cp, '_subtitle_tool', None) if cp else None
@@ -1091,7 +1097,8 @@ class MainMenu:
                 if imgui.is_item_hovered():
                     imgui.set_tooltip("Full-width waveform timeline for precise subtitle timing\n(shows at the bottom alongside funscript timelines)")
 
-            imgui.separator()
+            if _subtitles_rendered:
+                imgui.separator()
 
             # Setup Wizard
             if _menu_item_simple("Setup Wizard..."):
@@ -1101,6 +1108,55 @@ class MainMenu:
                     app.logger.info("Setup Wizard triggered from menu")
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Re-run the first-time setup wizard (display scale, mode, models)")
+
+            imgui.end_menu()
+
+    def _render_update_menu(self):
+        app = self.app
+        settings = app.app_settings
+        updater = app.updater
+
+        if imgui.begin_menu("Update", True):
+            in_progress = getattr(updater, "update_in_progress", False)
+            checked = getattr(updater, "last_check_time", 0) > 0
+            if in_progress:
+                _menu_item_simple("Update in progress...", enabled=False)
+            elif updater.update_available:
+                if _menu_item_simple("Update to Latest Version"):
+                    updater.show_update_dialog = True
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Apply the available update.")
+            elif checked:
+                _menu_item_simple("Up to Date", enabled=False)
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("You are running the latest version.")
+                if _menu_item_simple("Check Again"):
+                    updater.check_for_updates_async()
+                    app.set_status_message("Checking for updates...", duration=3.0)
+            else:
+                if _menu_item_simple("Check for Updates"):
+                    updater.check_for_updates_async()
+                    app.set_status_message("Checking for updates...", duration=3.0)
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Check the remote for a newer version.")
+
+            imgui.separator()
+
+            for key, label, default in (
+                ("updater_check_on_startup", "Check for Updates on Startup", True),
+                ("updater_check_periodically", "Check Periodically (Hourly)", True),
+            ):
+                cur = settings.get(key, default)
+                clicked, new_val = imgui.menu_item(label, selected=cur)
+                if clicked and new_val != cur:
+                    settings.set(key, new_val)
+
+            imgui.separator()
+
+            if _menu_item_simple("Select Update Commit..."):
+                app.app_state_ui.show_update_settings_dialog = True
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Browse and select a specific version to update to.")
 
             imgui.end_menu()
 
@@ -1124,37 +1180,7 @@ class MainMenu:
 
             imgui.separator()
 
-            # Updates submenu
-            if imgui.begin_menu("Updates"):
-                # Settings toggles
-                for key, label, default in (
-                    ("updater_check_on_startup", "Check for Updates on Startup", True),
-                    ("updater_check_periodically", "Check Periodically (Hourly)", True),
-                ):
-                    cur = settings.get(key, default)
-                    clicked, new_val = imgui.menu_item(label, selected=cur)
-                    if clicked and new_val != cur:
-                        settings.set(key, new_val)
-                imgui.separator()
-
-                if _menu_item_simple("Select Update Commit..."):
-                    app.app_state_ui.show_update_settings_dialog = True
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Browse and select a specific version to update to.")
-
-                can_apply = updater.update_available and not updater.update_in_progress
-                if _menu_item_simple("Apply Pending Update...", enabled=can_apply):
-                    updater.show_update_dialog = True
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "Shows the update dialog if an update has been detected."
-                    )
-
-                imgui.end_menu()
-
-            imgui.separator()
-
-            # System Report — copy to clipboard
+            # System Report - copy to clipboard
             if _menu_item_simple("Copy System Report"):
                 try:
                     from application.utils.system_report import generate_report
