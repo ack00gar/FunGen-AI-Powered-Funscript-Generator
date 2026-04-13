@@ -528,7 +528,42 @@ class ShortcutHandlerMixin:
             timeline = None
 
         if timeline:
-            # Check if a point already exists at this time — move it instead of adding
+            # If the user has manually selected points, move those instead of
+            # adding/moving at the playhead. Playhead acts only as a fallback.
+            selected_idxs = []
+            if getattr(timeline, 'multi_selected_action_indices', None):
+                try:
+                    selected_idxs = timeline._resolve_selected_indices() or []
+                except Exception:
+                    selected_idxs = []
+            if selected_idxs:
+                actions = timeline._get_actions()
+                from application.classes.undo_manager import MovePointCmd
+                changed = 0
+                for sidx in selected_idxs:
+                    if 0 <= sidx < len(actions):
+                        old_value = actions[sidx]['pos']
+                        if old_value == value:
+                            continue
+                        actions[sidx]['pos'] = value
+                        self.app.undo_manager.push_done(MovePointCmd(
+                            timeline.timeline_num, sidx,
+                            actions[sidx]['at'], old_value,
+                            actions[sidx]['at'], value))
+                        changed += 1
+                if changed:
+                    fs, axis = timeline._get_target_funscript_details()
+                    if fs:
+                        fs._invalidate_cache(axis or 'both')
+                    timeline.multi_selected_action_indices = {
+                        timeline._action_key(actions[i]) for i in selected_idxs if 0 <= i < len(actions)
+                    }
+                    self.app.funscript_processor._post_mutation_refresh(timeline_num, "Move Point")
+                    timeline.invalidate_cache()
+                    self.app.logger.info(f"Moved {changed} selected point(s) to {value}% (Timeline {timeline_num})", extra={'status_message': True})
+                return
+
+            # Check if a point already exists at this time - move it instead of adding
             actions = timeline._get_actions()
             if actions:
                 from bisect import bisect_left
