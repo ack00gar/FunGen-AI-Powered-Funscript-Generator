@@ -115,6 +115,9 @@ class KeyboardShortcutsDialog:
                 ("nudge_selection_time_prev", "Nudge Selection Time Back"),
                 ("nudge_selection_time_next", "Nudge Selection Time Forward"),
                 ("snap_nearest_to_playhead", "Snap Nearest Point to Playhead"),
+                ("select_left_of_playhead", "Select All Points Left of Playhead"),
+                ("select_right_of_playhead", "Select All Points Right of Playhead"),
+                ("repeat_last_stroke", "Repeat Last Stroke at Playhead"),
             ],
             "Chapters": [
                 ("set_chapter_start", "Set Chapter Start (In-point)"),

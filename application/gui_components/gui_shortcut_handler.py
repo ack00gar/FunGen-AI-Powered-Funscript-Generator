@@ -25,7 +25,7 @@ class ShortcutHandlerMixin:
         fs_proc = self.app.funscript_processor
         video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
 
-        def check_and_run_shortcut(shortcut_name, action_func, *action_args):
+        def check_and_run_shortcut(shortcut_name, action_func, *action_args, repeat=False):
             shortcut_str = current_shortcuts.get(shortcut_name)
             if not shortcut_str:
                 return False
@@ -36,8 +36,12 @@ class ShortcutHandlerMixin:
 
             mapped_key, mapped_mods_from_string = map_result
 
-            # Check key press state ONCE and reuse (calling is_key_pressed multiple times can consume the event)
-            key_pressed = imgui.is_key_pressed(mapped_key)
+            # Check key press state ONCE and reuse (calling is_key_pressed multiple times can consume the event).
+            # Allow auto-repeat so held keys (jump to next/prev point, etc.) fire continuously.
+            try:
+                key_pressed = imgui.is_key_pressed(mapped_key, repeat)
+            except TypeError:
+                key_pressed = imgui.is_key_pressed(mapped_key)
 
             if key_pressed:
                 mods_match = (mapped_mods_from_string['ctrl'] == io.key_ctrl
@@ -90,13 +94,13 @@ class ShortcutHandlerMixin:
         # Playback & Navigation
         elif check_and_run_shortcut("toggle_playback", self.app.event_handlers.handle_playback_control, "play_pause"):
             pass
-        elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next'):
+        elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next', repeat=True):
             pass
-        elif check_and_run_shortcut("jump_to_next_point_alt", self.app.event_handlers.handle_jump_to_point, 'next'):
+        elif check_and_run_shortcut("jump_to_next_point_alt", self.app.event_handlers.handle_jump_to_point, 'next', repeat=True):
             pass
-        elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
+        elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev', repeat=True):
             pass
-        elif check_and_run_shortcut("jump_to_prev_point_alt", self.app.event_handlers.handle_jump_to_point, 'prev'):
+        elif check_and_run_shortcut("jump_to_prev_point_alt", self.app.event_handlers.handle_jump_to_point, 'prev', repeat=True):
             pass
         elif video_loaded and check_and_run_shortcut("jump_to_start", self._handle_jump_to_start_shortcut):
             pass

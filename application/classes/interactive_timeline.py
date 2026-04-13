@@ -652,14 +652,19 @@ class InteractiveFunscriptTimeline:
             return
         shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
         
-        # Helper to map shortcuts (for single-press actions)
-        def check_shortcut(name, default):
+        # Helper to map shortcuts (for single-press actions). Pass repeat=True
+        # to fire continuously while the key is held (matches the standard
+        # editor behaviour for nudge / step actions).
+        def check_shortcut(name, default, repeat=False):
             key_str = shortcuts.get(name, default)
             tuple_key = self.app._map_shortcut_to_glfw_key(key_str)
             if not tuple_key: return False
             key_code, mods = tuple_key
 
-            pressed = imgui.is_key_pressed(key_code)
+            try:
+                pressed = imgui.is_key_pressed(key_code, repeat)
+            except TypeError:
+                pressed = imgui.is_key_pressed(key_code)
             match = (mods["ctrl"] == io.key_ctrl and
                      mods["alt"] == io.key_alt and
                      mods["shift"] == io.key_shift and
@@ -731,8 +736,8 @@ class InteractiveFunscriptTimeline:
 
         # 5. Nudge Selection (Arrows)
         nudge_val = 0
-        if check_shortcut("nudge_selection_pos_up", "SHIFT+UP_ARROW"): nudge_val = 1
-        if check_shortcut("nudge_selection_pos_down", "SHIFT+DOWN_ARROW"): nudge_val = -1
+        if check_shortcut("nudge_selection_pos_up", "SHIFT+UP_ARROW", repeat=True): nudge_val = 1
+        if check_shortcut("nudge_selection_pos_down", "SHIFT+DOWN_ARROW", repeat=True): nudge_val = -1
         
         if nudge_val != 0:
             if not self.multi_selected_action_indices:
@@ -751,8 +756,8 @@ class InteractiveFunscriptTimeline:
             snap_t = cfg.beat_interval_ms
         else:
             snap_t = app_state.snap_to_grid_time_ms if app_state.snap_to_grid_time_ms > 0 else 20
-        if check_shortcut("nudge_selection_time_prev", "SHIFT+LEFT_ARROW"): nudge_t = -snap_t
-        if check_shortcut("nudge_selection_time_next", "SHIFT+RIGHT_ARROW"): nudge_t = snap_t
+        if check_shortcut("nudge_selection_time_prev", "SHIFT+LEFT_ARROW", repeat=True): nudge_t = -snap_t
+        if check_shortcut("nudge_selection_time_next", "SHIFT+RIGHT_ARROW", repeat=True): nudge_t = snap_t
 
         if nudge_t != 0:
             if not self.multi_selected_action_indices:
@@ -764,7 +769,17 @@ class InteractiveFunscriptTimeline:
             if self.multi_selected_action_indices:
                 self._nudge_selection_time(nudge_t)
 
-        # 6b. Snap nearest to playhead — handled by global shortcut handler
+        # 6b. Snap nearest to playhead - handled by global shortcut handler
+
+        # 6c. Select all left / right of playhead
+        if check_shortcut("select_left_of_playhead", "CTRL+ALT+LEFT_ARROW"):
+            self._select_relative_to_playhead(before=True)
+        if check_shortcut("select_right_of_playhead", "CTRL+ALT+RIGHT_ARROW"):
+            self._select_relative_to_playhead(before=False)
+
+        # 6d. Repeat last stroke at playhead (Home)
+        if check_shortcut("repeat_last_stroke", "HOME"):
+            self._repeat_last_stroke()
 
         # 7. Bookmark at playhead (B key)
         if check_shortcut("add_bookmark", "B"):
@@ -998,6 +1013,86 @@ class InteractiveFunscriptTimeline:
         from application.classes.undo_manager import NudgeTimesCmd
         self.app.undo_manager.push_done(NudgeTimesCmd(
             self.timeline_num, resolved, delta_ms))
+
+    def _playhead_ms(self) -> Optional[int]:
+        proc = self.app.processor
+        if not proc or proc.fps <= 0:
+            return None
+        ms = getattr(proc, 'playhead_override_ms', None)
+        if ms is None:
+            ms = frame_to_ms(proc.current_frame_index, proc.fps)
+        return ms
+
+    def _select_relative_to_playhead(self, before: bool):
+        actions = self._get_actions()
+        if not actions:
+            return
+        ph = self._playhead_ms()
+        if ph is None:
+            return
+        if before:
+            keys = {self._action_key(a) for a in actions if a['at'] <= ph}
+            label = "left of playhead"
+        else:
+            keys = {self._action_key(a) for a in actions if a['at'] >= ph}
+            label = "right of playhead"
+        self.multi_selected_action_indices = keys
+        self.app.logger.info(
+            f"Selected {len(keys)} point(s) {label} (Timeline {self.timeline_num})",
+            extra={'status_message': True})
+
+    def _repeat_last_stroke(self):
+        """Append a copy of the most recent stroke (last two actions) starting
+        at the current playhead. Mirrors the standard 'repeat stroke' action."""
+        actions = self._get_actions()
+        if len(actions) < 2:
+            self.app.logger.info("Repeat stroke needs at least two prior points",
+                                 extra={'status_message': True})
+            return
+        ph = self._playhead_ms()
+        if ph is None:
+            return
+
+        from bisect import bisect_left
+        timestamps = [a['at'] for a in actions]
+        idx = bisect_left(timestamps, ph)
+        # Take the last two actions strictly at or before the playhead
+        last_idx = min(idx, len(actions)) - 1
+        if last_idx < 1:
+            self.app.logger.info("Repeat stroke needs two points before the playhead",
+                                 extra={'status_message': True})
+            return
+        a1 = actions[last_idx - 1]
+        a2 = actions[last_idx]
+        dt = a2['at'] - a1['at']
+        if dt <= 0:
+            return
+
+        # Anchor the repeated stroke on the last point. New points appear at
+        # last.at + dt and last.at + 2*dt with positions a1.pos and a2.pos.
+        new1_at = a2['at'] + dt
+        new2_at = new1_at + dt
+        # Ensure no collision with existing points within a tiny tolerance
+        fps = self.app.processor.fps if self.app.processor else 30.0
+        tol = max(1, int(500 / max(1.0, fps)))
+
+        def _has_neighbor(ts):
+            j = bisect_left(timestamps, ts)
+            for c in (j - 1, j):
+                if 0 <= c < len(actions) and abs(actions[c]['at'] - ts) <= tol:
+                    return True
+            return False
+
+        if _has_neighbor(new1_at) or _has_neighbor(new2_at):
+            self.app.logger.info("Repeat stroke would overlap existing points",
+                                 extra={'status_message': True})
+            return
+
+        self._add_point(new1_at, a1['pos'])
+        self._add_point(new2_at, a2['pos'])
+        self.app.logger.info(
+            f"Repeated stroke at {new1_at}ms / {new2_at}ms (Timeline {self.timeline_num})",
+            extra={'status_message': True})
 
     def _find_nearest_point_index(self) -> Optional[int]:
         """Find the index of the action nearest to the current playhead, without moving it."""
@@ -1551,7 +1646,8 @@ class InteractiveFunscriptTimeline:
         # -- LOD B: Lines Only --
         base_col = color_override or (TimelineColors.PREVIEW_LINES if is_preview else (0.8, 0.8, 0.8, 1.0))
         col_u32 = imgui.get_color_u32_rgba(base_col[0], base_col[1], base_col[2], base_col[3] * alpha)
-        thick = 1.5 if is_preview else 2.0
+        base_thick = float(getattr(self.app.app_state_ui, 'timeline_line_thickness', 2.5))
+        thick = max(1.0, base_thick - 0.5) if is_preview else base_thick
 
         if self._show_smooth_curve and not is_preview and len(ats) >= 2:
             d_ats, d_poss, _ = self._expand_catmull(ats, poss, self._smooth_samples_per_segment)
@@ -1674,6 +1770,7 @@ class InteractiveFunscriptTimeline:
         n_segs = len(colors_u32)
         xs_list = xs.tolist()
         ys_list = ys.tolist()
+        hm_thick = float(getattr(self.app.app_state_ui, 'timeline_line_thickness', 2.5))
         if self._show_smooth_curve and len(ats) >= 2 and n_segs > 0:
             k = self._smooth_samples_per_segment
             d_ats, d_poss, seg_idx = self._expand_catmull(ats, poss, k)
@@ -1687,12 +1784,12 @@ class InteractiveFunscriptTimeline:
                 si = seg_idx_list[i] if i < len(seg_idx_list) else n_segs - 1
                 if si >= n_segs:
                     si = n_segs - 1
-                _add_line(d_xs[i], d_ys[i], d_xs[i + 1], d_ys[i + 1], colors_list[si], 2.0)
+                _add_line(d_xs[i], d_ys[i], d_xs[i + 1], d_ys[i + 1], colors_list[si], hm_thick)
         else:
             colors_list = colors_u32.tolist()
             _add_line = dl.add_line
             for i in range(n_segs):
-                _add_line(xs_list[i], ys_list[i], xs_list[i + 1], ys_list[i + 1], colors_list[i], 2.0)
+                _add_line(xs_list[i], ys_list[i], xs_list[i + 1], ys_list[i + 1], colors_list[i], hm_thick)
 
         # Draw points (same logic as standard _draw_curve)
         radius = self.app.app_state_ui.timeline_point_radius
@@ -2589,6 +2686,21 @@ class InteractiveFunscriptTimeline:
         if imgui.is_item_hovered():
             imgui.set_tooltip(f"Highlight speed limit violations (>{self._speed_limit_threshold:.0f} u/s)")
 
+        # Line thickness slider (shared across all timelines)
+        imgui.same_line()
+        imgui.push_item_width(70)
+        cur_thick = float(getattr(self.app.app_state_ui, 'timeline_line_thickness', 2.5))
+        changed, new_thick = imgui.slider_float(f"Line##{self.timeline_num}", cur_thick, 1.0, 4.0, "%.1f")
+        if changed:
+            self.app.app_state_ui.timeline_line_thickness = new_thick
+            try:
+                self.app.app_settings.set("timeline_line_thickness", new_thick)
+            except Exception:
+                pass
+        imgui.pop_item_width()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Timeline curve line thickness")
+
         # --- Mode Selector ---
         imgui.same_line()
         imgui.text("|")
@@ -2783,199 +2895,240 @@ class InteractiveFunscriptTimeline:
 
     def _render_context_menu(self, tf):
         if imgui.begin_popup(f"TimelineContext{self.timeline_num}"):
-            # Add Point
-            if imgui.menu_item("Add Point Here")[0]:
-                t, v = getattr(self, 'new_point_candidate', (0, 0))
-                self._add_point(t, v)
-                imgui.close_current_popup()
-            
-            imgui.separator()
-            
-            if imgui.menu_item("Delete Selected")[0]:
-                self._delete_selected()
-                imgui.close_current_popup()
-            
-            if imgui.menu_item("Select All")[0]:
-                actions = self._get_actions()
-                self.multi_selected_action_indices = {self._action_key(a) for a in actions}
-                imgui.close_current_popup()
+            has_sel = bool(self.multi_selected_action_indices)
+            n_sel = len(self.multi_selected_action_indices) if has_sel else 0
 
-            imgui.separator()
-            
-            # Selection Filters
-            if imgui.begin_menu("Filters"):
-                if imgui.menu_item("Keep Top Points")[0]: self._filter_selection('top')
-                if imgui.menu_item("Keep Bottom Points")[0]: self._filter_selection('bottom')
-                if imgui.menu_item("Keep Mid Points")[0]: self._filter_selection('mid')
-                imgui.end_menu()
-
-            # Timeline Ops
-            imgui.separator()
-            other_num = 2 if self.timeline_num == 1 else 1
-
-            if imgui.menu_item("Copy Selected to Clipboard")[0]:
-                self._handle_copy_selection()
-                imgui.close_current_popup()
-
-            if imgui.menu_item("Paste from Clipboard")[0]:
-                t, v = getattr(self, 'new_point_candidate', (0, 0))
-                self._handle_paste_actions(t)
-                imgui.close_current_popup()
-
-            # Build list of visible target timelines
-            _copy_swap_targets = []
-            _copy_swap_targets.append(other_num)  # Always include the default other (T1<->T2)
-            app_state = self.app.app_state_ui
-            if _is_feature_available("patreon_features"):
-                for t_num in EXTRA_TIMELINE_RANGE:
-                    if t_num == self.timeline_num:
-                        continue
-                    vis_attr = f"show_funscript_interactive_timeline{t_num}"
-                    if getattr(app_state, vis_attr, False):
-                        _copy_swap_targets.append(t_num)
-
-            if imgui.begin_menu("Copy Selection to..."):
-                for t_num in _copy_swap_targets:
-                    if imgui.menu_item(self._tl_label(t_num))[0]:
-                        self._handle_copy_to_other(t_num)
-                        imgui.close_current_popup()
-                imgui.end_menu()
-            if imgui.begin_menu("Swap with..."):
-                for t_num in _copy_swap_targets:
-                    if imgui.menu_item(self._tl_label(t_num))[0]:
-                        self._handle_swap_timeline(t_num)
-                        imgui.close_current_popup()
-                imgui.end_menu()
-                
-            imgui.separator()
-
-            # Axis Assignment submenu
-            if imgui.begin_menu("Assign Axis"):
-                current_axis = self._get_axis_label()
-                for fa in FunscriptAxis:
-                    is_selected = (fa.value == current_axis)
-                    tcode = AXIS_TCODE.get(fa, "")
-                    label = f"{fa.value.capitalize()} ({tcode})" if tcode else fa.value.capitalize()
-                    if imgui.menu_item(label, selected=is_selected)[0]:
-                        self._set_axis_assignment(fa.value)
-                        imgui.close_current_popup()
-                imgui.end_menu()
-
-            # --- Reference Comparison ---
-            imgui.separator()
-            if imgui.menu_item("Load Reference Funscript...")[0]:
-                self._load_reference_funscript()
-                imgui.close_current_popup()
-            if self.reference_overlay_actions:
-                if imgui.menu_item("Clear Reference Overlay")[0]:
-                    self._clear_reference_overlay()
-                    imgui.close_current_popup()
-                if self._reference_problem_sections:
-                    n = len(self._reference_problem_sections)
-                    if imgui.menu_item(f"Create Chapters from {n} Problem Section{'s' if n != 1 else ''}")[0]:
-                        self._create_chapters_from_problem_sections()
-                        imgui.close_current_popup()
-
-            # --- Bookmarks ---
-            imgui.separator()
-            if imgui.menu_item("Add Bookmark Here", "B")[0]:
-                t, _ = getattr(self, 'new_point_candidate', (0, 0))
-                self._bookmark_manager.add(t)
-                imgui.close_current_popup()
-
-            if imgui.begin_menu("Go to Bookmark"):
-                for bm in self._bookmark_manager.bookmarks:
-                    time_str = _format_time(self.app, bm.time_ms / 1000.0)
-                    label = f"{bm.name or 'Bookmark'} ({time_str})"
-                    if imgui.menu_item(label)[0]:
-                        self._seek_video(bm.time_ms)
-                        imgui.close_current_popup()
-                if not self._bookmark_manager.bookmarks:
-                    imgui.menu_item("(no bookmarks)", enabled=False)
-                imgui.end_menu()
-
-            if imgui.begin_menu("Rename Bookmark"):
-                for bm in self._bookmark_manager.bookmarks:
-                    time_str = _format_time(self.app, bm.time_ms / 1000.0)
-                    label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}"
-                    if imgui.menu_item(label)[0]:
-                        self._bookmark_rename_id = bm.id
-                        self._bookmark_rename_buf = bm.name
-                        imgui.close_current_popup()
-                if not self._bookmark_manager.bookmarks:
-                    imgui.menu_item("(no bookmarks)", enabled=False)
-                imgui.end_menu()
-
-            if imgui.begin_menu("Delete Bookmark"):
-                for bm in list(self._bookmark_manager.bookmarks):
-                    time_str = _format_time(self.app, bm.time_ms / 1000.0)
-                    label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}_del"
-                    if imgui.menu_item(label)[0]:
-                        self._bookmark_manager.remove(bm.id)
-                        imgui.close_current_popup()
-                if not self._bookmark_manager.bookmarks:
-                    imgui.menu_item("(no bookmarks)", enabled=False)
-                imgui.end_menu()
-
-            if self._bookmark_manager.bookmarks:
-                if imgui.menu_item("Clear All Bookmarks")[0]:
-                    self._bookmark_manager.clear()
-                    imgui.close_current_popup()
-
-            # --- Pattern Library (Patreon) ---
-            if _is_feature_available("patreon_features"):
+            if has_sel:
+                imgui.text_disabled(f"{n_sel} point{'s' if n_sel != 1 else ''} selected")
                 imgui.separator()
-                if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2:
-                    if imgui.menu_item("Save Selection as Pattern")[0]:
-                        actions = self._get_actions()
-                        sel_actions = [actions[i] for i in self._resolve_selected_indices()]
-                        if len(sel_actions) >= 2:
-                            pattern_lib = getattr(self.app, 'pattern_library', None)
-                            if pattern_lib:
-                                pattern_lib.save_pattern(f"pattern_{int(time.time())}", sel_actions)
-                        imgui.close_current_popup()
-
-                if imgui.begin_menu("Apply Pattern"):
-                    pattern_lib = getattr(self.app, 'pattern_library', None)
-                    if pattern_lib:
-                        for p_name in pattern_lib.list_patterns():
-                            if imgui.menu_item(p_name)[0]:
-                                pattern = pattern_lib.load_pattern(p_name)
-                                if pattern:
-                                    t, _ = getattr(self, 'new_point_candidate', (0, 0))
-                                    new_actions = pattern_lib.apply_pattern(pattern, t)
-                                    if new_actions:
-                                        actions_before = list(self._get_actions() or [])
-                                        actions = self._get_actions()
-                                        merged = list(actions) + new_actions
-                                        merged.sort(key=lambda a: a['at'])
-                                        fs, axis = self._get_target_funscript_details()
-                                        if fs and axis:
-                                            fs.set_axis_actions(axis, merged)
-                                            self._post_mutation_refresh()
-
-                                            actions_after = list(self._get_actions() or [])
-                                            from application.classes.undo_manager import BulkReplaceCmd
-                                            self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Apply Pattern (T{self.timeline_num})"))
-                                imgui.close_current_popup()
-                    else:
-                        imgui.menu_item("(library not loaded)", enabled=False)
+                if imgui.menu_item("Delete Selected", "Del")[0]:
+                    self._delete_selected()
+                    imgui.close_current_popup()
+                if imgui.menu_item("Copy Selection", "Ctrl+C")[0]:
+                    self._handle_copy_selection()
+                    imgui.close_current_popup()
+                if imgui.begin_menu("Keep Only..."):
+                    if imgui.menu_item("Top Points")[0]: self._filter_selection('top')
+                    if imgui.menu_item("Bottom Points")[0]: self._filter_selection('bottom')
+                    if imgui.menu_item("Mid Points")[0]: self._filter_selection('mid')
                     imgui.end_menu()
+                imgui.separator()
+                self._render_quickfix_flat(cursor_only=False)
+            else:
+                if imgui.menu_item("Add Point Here")[0]:
+                    t, v = getattr(self, 'new_point_candidate', (0, 0))
+                    self._add_point(t, v)
+                    imgui.close_current_popup()
+                if imgui.menu_item("Paste from Clipboard", "Ctrl+V")[0]:
+                    t, v = getattr(self, 'new_point_candidate', (0, 0))
+                    self._handle_paste_actions(t)
+                    imgui.close_current_popup()
+                if imgui.menu_item("Select All", "Ctrl+A")[0]:
+                    actions = self._get_actions()
+                    self.multi_selected_action_indices = {self._action_key(a) for a in actions}
+                    imgui.close_current_popup()
+                imgui.separator()
+                self._render_quickfix_flat(cursor_only=True)
 
-                # Generate Axis submenu
-                if imgui.begin_menu("Generate Axis"):
-                    for axis_name in ['roll', 'pitch', 'twist', 'sway', 'surge']:
-                        if imgui.menu_item(axis_name.capitalize())[0]:
-                            self._trigger_multi_axis_generation(axis_name)
+            imgui.separator()
+
+            # Timeline ops (cross-timeline copy / swap / axis)
+            if imgui.begin_menu("Timeline Ops"):
+                other_num = 2 if self.timeline_num == 1 else 1
+                _copy_swap_targets = [other_num]
+                app_state = self.app.app_state_ui
+                if _is_feature_available("patreon_features"):
+                    for t_num in EXTRA_TIMELINE_RANGE:
+                        if t_num == self.timeline_num:
+                            continue
+                        vis_attr = f"show_funscript_interactive_timeline{t_num}"
+                        if getattr(app_state, vis_attr, False):
+                            _copy_swap_targets.append(t_num)
+                if imgui.begin_menu("Copy Selection to..."):
+                    for t_num in _copy_swap_targets:
+                        if imgui.menu_item(self._tl_label(t_num))[0]:
+                            self._handle_copy_to_other(t_num)
                             imgui.close_current_popup()
                     imgui.end_menu()
+                if imgui.begin_menu("Swap with..."):
+                    for t_num in _copy_swap_targets:
+                        if imgui.menu_item(self._tl_label(t_num))[0]:
+                            self._handle_swap_timeline(t_num)
+                            imgui.close_current_popup()
+                    imgui.end_menu()
+                if imgui.begin_menu("Assign Axis"):
+                    current_axis = self._get_axis_label()
+                    for fa in FunscriptAxis:
+                        is_selected = (fa.value == current_axis)
+                        tcode = AXIS_TCODE.get(fa, "")
+                        label = f"{fa.value.capitalize()} ({tcode})" if tcode else fa.value.capitalize()
+                        if imgui.menu_item(label, selected=is_selected)[0]:
+                            self._set_axis_assignment(fa.value)
+                            imgui.close_current_popup()
+                    imgui.end_menu()
+                imgui.end_menu()
 
-            # Allow plugins to inject menu items via plugin_renderer
-            self._render_plugin_selection_menu()
+            # Reference comparison
+            if imgui.begin_menu("Reference"):
+                if imgui.menu_item("Load Reference Funscript...")[0]:
+                    self._load_reference_funscript()
+                    imgui.close_current_popup()
+                if self.reference_overlay_actions:
+                    if imgui.menu_item("Clear Reference Overlay")[0]:
+                        self._clear_reference_overlay()
+                        imgui.close_current_popup()
+                    if self._reference_problem_sections:
+                        n = len(self._reference_problem_sections)
+                        if imgui.menu_item(f"Create Chapters from {n} Problem Section{'s' if n != 1 else ''}")[0]:
+                            self._create_chapters_from_problem_sections()
+                            imgui.close_current_popup()
+                imgui.end_menu()
+
+            # Bookmarks (collapsed under one submenu)
+            if imgui.begin_menu("Bookmarks"):
+                if imgui.menu_item("Add Bookmark Here", "B")[0]:
+                    t, _ = getattr(self, 'new_point_candidate', (0, 0))
+                    self._bookmark_manager.add(t)
+                    imgui.close_current_popup()
+                if imgui.begin_menu("Go to..."):
+                    for bm in self._bookmark_manager.bookmarks:
+                        time_str = _format_time(self.app, bm.time_ms / 1000.0)
+                        label = f"{bm.name or 'Bookmark'} ({time_str})"
+                        if imgui.menu_item(label)[0]:
+                            self._seek_video(bm.time_ms)
+                            imgui.close_current_popup()
+                    if not self._bookmark_manager.bookmarks:
+                        imgui.menu_item("(no bookmarks)", enabled=False)
+                    imgui.end_menu()
+                if imgui.begin_menu("Rename..."):
+                    for bm in self._bookmark_manager.bookmarks:
+                        time_str = _format_time(self.app, bm.time_ms / 1000.0)
+                        label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}"
+                        if imgui.menu_item(label)[0]:
+                            self._bookmark_rename_id = bm.id
+                            self._bookmark_rename_buf = bm.name
+                            imgui.close_current_popup()
+                    if not self._bookmark_manager.bookmarks:
+                        imgui.menu_item("(no bookmarks)", enabled=False)
+                    imgui.end_menu()
+                if imgui.begin_menu("Delete..."):
+                    for bm in list(self._bookmark_manager.bookmarks):
+                        time_str = _format_time(self.app, bm.time_ms / 1000.0)
+                        label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}_del"
+                        if imgui.menu_item(label)[0]:
+                            self._bookmark_manager.remove(bm.id)
+                            imgui.close_current_popup()
+                    if not self._bookmark_manager.bookmarks:
+                        imgui.menu_item("(no bookmarks)", enabled=False)
+                    imgui.end_menu()
+                if self._bookmark_manager.bookmarks:
+                    if imgui.menu_item("Clear All")[0]:
+                        self._bookmark_manager.clear()
+                        imgui.close_current_popup()
+                imgui.end_menu()
+
+            # Patreon-only: patterns + multi-axis generation
+            if _is_feature_available("patreon_features"):
+                if imgui.begin_menu("Patterns"):
+                    if has_sel and n_sel >= 2:
+                        if imgui.menu_item("Save Selection as Pattern")[0]:
+                            actions = self._get_actions()
+                            sel_actions = [actions[i] for i in self._resolve_selected_indices()]
+                            if len(sel_actions) >= 2:
+                                pattern_lib = getattr(self.app, 'pattern_library', None)
+                                if pattern_lib:
+                                    pattern_lib.save_pattern(f"pattern_{int(time.time())}", sel_actions)
+                            imgui.close_current_popup()
+                    if imgui.begin_menu("Apply Pattern"):
+                        pattern_lib = getattr(self.app, 'pattern_library', None)
+                        if pattern_lib:
+                            for p_name in pattern_lib.list_patterns():
+                                if imgui.menu_item(p_name)[0]:
+                                    pattern = pattern_lib.load_pattern(p_name)
+                                    if pattern:
+                                        t, _ = getattr(self, 'new_point_candidate', (0, 0))
+                                        new_actions = pattern_lib.apply_pattern(pattern, t)
+                                        if new_actions:
+                                            actions_before = list(self._get_actions() or [])
+                                            actions = self._get_actions()
+                                            merged = list(actions) + new_actions
+                                            merged.sort(key=lambda a: a['at'])
+                                            fs, axis = self._get_target_funscript_details()
+                                            if fs and axis:
+                                                fs.set_axis_actions(axis, merged)
+                                                self._post_mutation_refresh()
+                                                actions_after = list(self._get_actions() or [])
+                                                from application.classes.undo_manager import BulkReplaceCmd
+                                                self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Apply Pattern (T{self.timeline_num})"))
+                                    imgui.close_current_popup()
+                        else:
+                            imgui.menu_item("(library not loaded)", enabled=False)
+                        imgui.end_menu()
+                    if imgui.begin_menu("Generate Axis"):
+                        for axis_name in ['roll', 'pitch', 'twist', 'sway', 'surge']:
+                            if imgui.menu_item(axis_name.capitalize())[0]:
+                                self._trigger_multi_axis_generation(axis_name)
+                                imgui.close_current_popup()
+                        imgui.end_menu()
+                    imgui.end_menu()
+
+            # Other (non-Quickfix) plugin categories stay under "Run Plugin"
+            self._render_plugin_selection_menu(skip_categories={"Quickfix Tools"})
 
             imgui.end_popup()
+
+    def _activate_plugin(self, plugin_name: str, apply_to_selection: bool):
+        """Open or directly-apply a plugin from the context menu."""
+        pm = self.plugin_renderer.plugin_manager
+        ui_data = pm.get_plugin_ui_data(plugin_name)
+        if not ui_data:
+            return
+        ctx = pm.plugin_contexts.get(plugin_name)
+        if ctx:
+            ctx.apply_to_selection = apply_to_selection
+        # If the plugin opts into direct-apply (no required params), run it now.
+        if self.plugin_renderer._should_apply_directly(plugin_name, ui_data):
+            if ctx:
+                ctx.apply_requested = True
+        else:
+            pm.set_plugin_state(plugin_name, PluginUIState.OPEN)
+        self.logger.info(
+            f"Plugin invoked: {plugin_name} (sel={apply_to_selection}) on T{self.timeline_num}")
+
+    def _render_quickfix_flat(self, cursor_only: bool):
+        """Surface Quickfix Tools at the top level of the context menu instead
+        of forcing the user through Run Plugin -> Quickfix Tools."""
+        pm = self.plugin_renderer.plugin_manager
+        names = []
+        for p_name in pm.get_available_plugins():
+            ctx = pm.plugin_contexts.get(p_name)
+            if not ctx or not ctx.plugin_instance:
+                continue
+            cat = getattr(ctx.plugin_instance, 'category', 'General')
+            if cat != 'Quickfix Tools':
+                continue
+            requires_cursor = bool(getattr(ctx.plugin_instance, 'requires_cursor', False))
+            if cursor_only and not requires_cursor:
+                continue
+            if not cursor_only and requires_cursor:
+                continue
+            names.append(p_name)
+
+        if not names:
+            return
+
+        header = "Quickfix at Cursor" if cursor_only else "Quickfix on Selection"
+        imgui.text_disabled(header)
+        for n in sorted(names):
+            if imgui.menu_item(n)[0]:
+                self._activate_plugin(n, apply_to_selection=not cursor_only)
+                imgui.close_current_popup()
+            ui_data = pm.get_plugin_ui_data(n)
+            if ui_data and ui_data.get('description') and imgui.is_item_hovered():
+                imgui.set_tooltip(ui_data['description'])
             
-    def _render_plugin_selection_menu(self):
+    def _render_plugin_selection_menu(self, skip_categories: Optional[set] = None):
+        skip_categories = skip_categories or set()
         imgui.separator()
         if imgui.begin_menu("Run Plugin"):
              fs, axis = self._get_target_funscript_details()
@@ -2991,6 +3144,8 @@ class InteractiveFunscriptTimeline:
                  cat = "General"
                  if ctx and ctx.plugin_instance:
                      cat = getattr(ctx.plugin_instance, 'category', 'General')
+                 if cat in skip_categories:
+                     continue
                  if cat not in categorized:
                      categorized[cat] = []
                  categorized[cat].append(p_name)

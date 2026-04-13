@@ -132,6 +132,9 @@ DEFAULT_SHORTCUTS = {
     "nudge_selection_time_prev": "SHIFT+LEFT_ARROW",  # Shift+Left to nudge selection backward in time
     "nudge_selection_time_next": "SHIFT+RIGHT_ARROW", # Shift+Right to nudge selection forward in time
     "snap_nearest_to_playhead": "M",                 # Snap nearest point to current playhead position
+    "select_left_of_playhead": "CTRL+ALT+LEFT_ARROW",   # Select all points before playhead
+    "select_right_of_playhead": "CTRL+ALT+RIGHT_ARROW", # Select all points after playhead
+    "repeat_last_stroke": "HOME",                       # Repeat the previous stroke at the playhead
 
     # Bookmarks
     "add_bookmark": "B",                              # Add bookmark at playhead position

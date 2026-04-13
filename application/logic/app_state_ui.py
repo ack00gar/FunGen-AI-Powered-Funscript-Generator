@@ -150,6 +150,7 @@ class AppStateUI:
         self.timeline_pan_offset_ms = self.app_settings.get("timeline_pan_offset_ms",
                                                             defaults.get("timeline_pan_offset_ms", 0.0))
         self.timeline_point_radius = 4.0  # Constant for timeline drawing
+        self.timeline_line_thickness = float(self.app_settings.get("timeline_line_thickness", 2.5))
         self.snap_to_grid_time_ms = 20  # ms for time snapping
         self.snap_to_grid_pos = 5  # pos units for position snapping
         self.is_manual_panning = False  # Shared by timelines via app
