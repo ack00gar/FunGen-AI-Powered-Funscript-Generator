@@ -1027,9 +1027,19 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
     def _render_fixed_layout(self, app_state, font_scale, toolbar_height, status_strip_h):
         """Render fixed-position layout with calculated panel geometry."""
         panel_y_start = self.main_menu_bar_height + toolbar_height
-        timeline1_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline else 0
-        timeline2_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline2 else 0
-        extra_timelines_total_height = len(self._visible_extra_timelines) * app_state.timeline_base_height
+        # Give the single visible interactive timeline more vertical room so
+        # short strokes are easier to edit. With multiple timelines we keep the
+        # compact base height so they all fit.
+        single_tl_visible = (
+            app_state.show_funscript_interactive_timeline
+            and not app_state.show_funscript_interactive_timeline2
+            and not self._visible_extra_timelines
+        )
+        base_h = app_state.timeline_base_height
+        single_h = int(base_h * 1.7)
+        timeline1_render_h = (single_h if single_tl_visible else base_h) if app_state.show_funscript_interactive_timeline else 0
+        timeline2_render_h = base_h if app_state.show_funscript_interactive_timeline2 else 0
+        extra_timelines_total_height = len(self._visible_extra_timelines) * base_h
         sub_timeline_h = 65 if getattr(app_state, 'show_subtitle_timeline', False) else 0
         interactive_timelines_total_height = timeline1_render_h + timeline2_render_h + extra_timelines_total_height + sub_timeline_h
         max_timeline_area_h = int(self.window_height * 0.45)

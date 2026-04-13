@@ -1353,10 +1353,16 @@ class InteractiveFunscriptTimeline:
         grid_labels_u32 = imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS)
         canvas_bg_u32 = imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND)
 
+        # Distinct midline color so the 50% reference is clearly visible
+        midline_u32 = imgui.get_color_u32_rgba(0.75, 0.75, 0.78, 0.55)
         for val in [0, 25, 50, 75, 100]:
             y = tf.val_to_y(val)
-            col_u32 = grid_major_u32 if val == 50 else grid_minor_u32
-            thick = 1.5 if val == 50 else 1.0
+            if val == 50:
+                col_u32 = midline_u32
+                thick = 1.5
+            else:
+                col_u32 = grid_major_u32
+                thick = 1.0
             dl.add_line(tf.x_offset, y, tf.x_offset + tf.width, y, col_u32, thick)
 
             # Position labels
