@@ -277,10 +277,17 @@ def detect_hevc_encoder(logger: Optional[logging.Logger] = None) -> str:
 
 
 def _decode_hwaccel_args() -> list:
-    """Pick a safe decode hwaccel for the source read. `auto` lets ffmpeg
-    pick whatever the build supports; if that causes trouble on a specific
-    platform we can add overrides here later."""
-    return ["-hwaccel", "auto"]
+    """Decode hwaccel args for the source read.
+
+    We deliberately run the decode on CPU. The output filter chain uses
+    CPU-side filters (v360, split, fps, scale, format), so any hwaccel that
+    leaves frames in GPU memory (e.g. cuda with the default
+    ``hwaccel_output_format``) would force a silent GPU->CPU download, and
+    some builds (notably Windows + nvenc) fail that round-trip with
+    ``Could not open encoder before EOF``. CPU decode is cheap enough for
+    a one-shot proxy re-encode and keeps the path portable.
+    """
+    return []
 
 
 # ----------------------------------------------------------------- job type
@@ -329,11 +336,10 @@ class ProxyBuilder:
                        f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}"
                        f":(ow-iw)/2:(oh-ih)/2:black")
 
-        # On Darwin+videotoolbox, -hwaccel videotoolbox on decode can clash
-        # with v360 which wants frames in CPU memory. Force CPU decode path
-        # for correctness; the encoder still runs on GPU.
-        is_videotoolbox = encoder == "hevc_videotoolbox"
-        decode_args = [] if is_videotoolbox else _decode_hwaccel_args()
+        # Decode stays on CPU regardless of target encoder (see
+        # _decode_hwaccel_args docstring). The encoder itself runs on GPU
+        # when available (videotoolbox / nvenc / qsv / vaapi / amf).
+        decode_args = _decode_hwaccel_args()
 
         # All-I-frame args. `-g 1` forces a keyframe every frame on most
         # encoders; some HW encoders also need explicit keyint params.
@@ -373,19 +379,27 @@ class ProxyBuilder:
             "-y",
             *decode_args,
             "-i", job.source_path,
+            # Global output: progress pipe applies to the whole run.
+            "-progress", "pipe:1",
             *video_in,
+            # --- Main output (proxy MP4) -----------------------------------
+            # All flags below apply only to the next output file.
             "-c:v", encoder,
             "-b:v", VIDEO_BITRATE,
             "-pix_fmt", "yuv420p",
             *iframe_args,
             "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2",
             "-movflags", "+faststart",
+            # passthrough + copyts preserve frame timing for funscript parity.
+            # Scoped here (before the file) so they DON'T leak into the
+            # preview output, whose fps=1/7 filter emits sparse timestamps
+            # that break image2 with -copyts.
             "-fps_mode", "passthrough", "-copyts",
-            "-progress", "pipe:1",
             # Explicit muxer: filename ends in ".partial" so ffmpeg can't
             # infer the format. Always MP4.
             "-f", "mp4",
             job.target_path + ".partial",
+            # --- Preview output (sparse JPEGs) -----------------------------
             *preview_out,
         ]
         return cmd
