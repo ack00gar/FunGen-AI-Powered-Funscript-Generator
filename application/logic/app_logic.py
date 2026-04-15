@@ -116,16 +116,6 @@ class ApplicationLogic:
         self.first_run_error = False
         self.first_run_thread: Optional[threading.Thread] = None
 
-        # --- Autotuner State ---
-        self.is_autotuning_active: bool = False
-        self.autotuner_thread: Optional[threading.Thread] = None
-        self.autotuner_status_message: str = "Idle"
-        self.autotuner_results: Dict[Tuple[int, int, str], Tuple[float, str]] = {}
-        self.autotuner_best_combination: Optional[Tuple[int, int, str]] = None
-        self.autotuner_best_fps: float = 0.0
-        self.autotuner_forced_hwaccel: Optional[str] = None
-        self._autotuner_lock = threading.Lock()  # Protects autotuner_results, _best_combination, _best_fps, _status_message
-
         # --- Hardware Acceleration ---
         # Load cached hwaccel list from settings so validation works immediately;
         # background thread refreshes the cache from ffmpeg
@@ -589,14 +579,6 @@ class ApplicationLogic:
         else:
             self.logger.error("Funscript comparison returned no results.", extra={'status_message': True})
 
-    def start_autotuner(self, force_hwaccel: Optional[str] = None):
-        """Initiates the autotuning process in a background thread."""
-        self.autotuner.start_autotuner(force_hwaccel)
-
-    def _run_autotuner_thread(self):
-        """The actual logic for the autotuning process."""
-        self.autotuner._run_autotuner_thread()
-
     def notify(self, message: str, type: str = "info", duration: float = 4.0):
         """Send a toast notification to the GUI. type: 'success', 'error', 'warning', 'info'."""
         gui = getattr(self, 'gui_instance', None)
@@ -607,10 +589,6 @@ class ApplicationLogic:
         """Thread-safe access to audio waveform data."""
         with self._waveform_lock:
             return self.audio_waveform_data
-
-    def get_autotuner_snapshot(self) -> Dict:
-        """Thread-safe snapshot of autotuner state for GUI rendering."""
-        return self.autotuner.get_autotuner_snapshot()
 
     def trigger_ultimate_autotune_with_defaults(self, timeline_num: int):
         """

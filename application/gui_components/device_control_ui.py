@@ -9,6 +9,7 @@ Only visible when device_control folder is present (supporter feature).
 """
 
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import asyncio
 import time
 import logging
@@ -148,6 +149,7 @@ class DeviceControlUI:
         
         # Main device control window with flags to ensure visibility
         window_flags = imgui.WINDOW_NO_COLLAPSE
+        center_next_window_pivot()
         expanded, opened = imgui.begin("Device Control", True, window_flags)
         
         self.app.logger.debug(f"Device Control: imgui.begin returned expanded={expanded}, opened={opened}")

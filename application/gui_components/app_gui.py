@@ -139,6 +139,12 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
         self.keyboard_shortcuts_dialog = KeyboardShortcutsDialog(app)
 
+        # Proxy (edit-time transcode) controller. Owns suggestion + progress
+        # modals; exposed on app.proxy_controller so the file manager hook
+        # and the Tools menu entry can drive it.
+        from application.gui_components.proxy_dialog import ProxyController
+        app.proxy_controller = ProxyController(app)
+
         # First-run wizard (full-window overlay, replaces old popup)
         self._first_run_wizard = (
             FirstRunWizard(app)
@@ -1405,6 +1411,11 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         if self.app.app_state_ui.show_generated_file_manager:
             self._time_render("GeneratedFileManager", self.generated_file_manager_ui.render)
+
+        # Proxy (iframe transcode) suggestion + progress modals
+        pc = getattr(self.app, "proxy_controller", None)
+        if pc is not None:
+            self._time_render("ProxyDialogs", pc.render)
 
         if hasattr(app_state, 'show_ai_models_dialog') and app_state.show_ai_models_dialog:
             self._time_render("AIModelsDialog", self._render_ai_models_dialog)

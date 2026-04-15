@@ -4,6 +4,7 @@ Owns all application settings UI and the Tracker tab rendering.
 Not a mixin — takes `app` as constructor argument and owns its own state.
 """
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import time
 import logging
 import config
@@ -196,6 +197,11 @@ class SettingsRenderer:
         # --- Output ---
         filtered("Output##SettingsOutput", ["output"], self._render_output)
 
+        # --- Proxies (edit-time iframe transcode) ---
+        filtered("Proxies##SettingsProxies",
+                 ["proxy", "proxies", "iframe", "transcode"],
+                 self._render_proxy_settings)
+
         # --- WebSocket API ---
         filtered("WebSocket API##SettingsWSAPI", ["api", "websocket", "ws"], self._render_ws_api)
 
@@ -217,6 +223,7 @@ class SettingsRenderer:
             if imgui.button("Reset All Settings to Default##ResetAllSettings", width=-1):
                 imgui.open_popup("Confirm Reset##ResetSettingsPopup")
 
+        center_next_window_pivot()
         if imgui.begin_popup_modal("Confirm Reset##ResetSettingsPopup", True,
                                    imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
             imgui.text("This will reset all application settings to their defaults.\n"
@@ -277,6 +284,7 @@ class SettingsRenderer:
                         if sel_name:
                             imgui.open_popup("Confirm Delete Profile##DPP")
 
+                center_next_window_pivot()
                 if imgui.begin_popup_modal("Confirm Delete Profile##DPP", True,
                                            imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
                     imgui.text("Delete profile '%s'?" % sel_name)
@@ -497,6 +505,109 @@ class SettingsRenderer:
             imgui.same_line()
             imgui.text_disabled(" sec")
             _row_end()
+
+        _end_settings_columns()
+
+    # ================================================================ #
+    #  Proxies (edit-time iframe transcode)                            #
+    # ================================================================ #
+
+    def _render_proxy_settings(self):
+        settings = self.app.app_settings
+        _begin_settings_columns("proxy_cols")
+
+        _row_label(
+            "Suggest on open",
+            "Offer to build a 1080p iframe proxy when opening large VR or "
+            "4K+ 2D videos, for faster scripting."
+        )
+        ch, v = imgui.checkbox("##ProxSuggest",
+                                settings.get("video_proxy_suggest_on_open", True))
+        if ch: settings.set("video_proxy_suggest_on_open", v)
+        _row_end()
+
+        _row_label(
+            "Minimum file size",
+            "Don't suggest a proxy for sources smaller than this."
+        )
+        imgui.push_item_width(80)
+        cur = float(settings.get("video_proxy_min_size_gb", 1.5))
+        ch, nv = imgui.input_float("##ProxMinGB", cur, 0.5, 1.0, "%.1f")
+        if ch:
+            settings.set("video_proxy_min_size_gb", max(0.1, float(nv)))
+        imgui.pop_item_width()
+        imgui.same_line()
+        imgui.text_disabled(" GB")
+        _row_end()
+
+        _row_label(
+            "Auto-switch on completion",
+            "When a proxy finishes encoding, reopen the editor against it "
+            "automatically. Original is untouched; switch back anytime by "
+            "deleting the proxy."
+        )
+        ch, v = imgui.checkbox("##ProxAutoSwitch",
+                                settings.get("video_proxy_autoswitch_on_complete", True))
+        if ch: settings.set("video_proxy_autoswitch_on_complete", v)
+        _row_end()
+
+        _row_label(
+            "Output location",
+            "Where to save the encoded proxy. The sidecar stays next to the "
+            "source either way, so re-opening the source still finds the "
+            "proxy wherever it lives."
+        )
+        mode = settings.get("video_proxy_output_mode", "next_to_source")
+        modes = [
+            ("next_to_source", "Next to original"),
+            ("output_folder",  "FunGen output folder"),
+            ("custom",         "Custom folder"),
+        ]
+        for value, label in modes:
+            if imgui.radio_button(f"{label}##ProxOut_{value}", mode == value):
+                settings.set("video_proxy_output_mode", value)
+                mode = value
+            imgui.same_line()
+        imgui.dummy(1, 1)  # close the radio row
+        if mode == "output_folder":
+            import os as _os
+            imgui.text_disabled(
+                f"  -> {_os.path.abspath(settings.get('output_folder_path', 'output') or 'output')}"
+            )
+        elif mode == "custom":
+            import os as _os
+            cur_path = settings.get("video_proxy_custom_folder", "") or ""
+            imgui.push_item_width(380)
+            ch_cp, np_ = imgui.input_text("##ProxCustomFolder", cur_path, 1024)
+            imgui.pop_item_width()
+            if ch_cp:
+                settings.set("video_proxy_custom_folder", np_)
+            imgui.same_line()
+            if imgui.small_button("Browse...##ProxCustomBrowse"):
+                try:
+                    from tkinter import Tk, filedialog
+                    root = Tk(); root.withdraw(); root.attributes("-topmost", True)
+                    picked = filedialog.askdirectory(
+                        title="Proxy output folder",
+                        initialdir=cur_path or _os.path.expanduser("~"))
+                    root.destroy()
+                    if picked:
+                        settings.set("video_proxy_custom_folder", picked)
+                except Exception as e:
+                    self.app.logger.warning(f"Folder picker failed: {e}")
+        _row_end()
+
+        _row_label(
+            "Re-enable proxy suggestions",
+            "Undo a previous 'Don't ask me again' choice."
+        )
+        dismissed = settings.get("video_proxy_ask_dismissed", False)
+        if dismissed:
+            if imgui.button("Re-enable##ProxReEnable"):
+                settings.set("video_proxy_ask_dismissed", False)
+        else:
+            imgui.text_disabled("(suggestions already enabled)")
+        _row_end()
 
         _end_settings_columns()
 

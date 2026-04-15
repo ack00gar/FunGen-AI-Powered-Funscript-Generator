@@ -14,6 +14,7 @@ Version: 1.0.0
 """
 
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import logging
 from typing import Optional, Tuple, Dict, Any
 
@@ -66,6 +67,7 @@ class ChapterTypeManagerUI:
         # Set window size on first open
         imgui.set_next_window_size(700, 500, imgui.FIRST_USE_EVER)
 
+        center_next_window_pivot()
         expanded, opened = imgui.begin("Chapter Type Manager", closable=True, flags=window_flags)
 
         if not opened:

@@ -1,4 +1,5 @@
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import logging
 import os
 import time
@@ -185,6 +186,7 @@ class TensorRTCompilerWindow:
         imgui.set_next_window_size(700, 500, condition=imgui.ONCE)
         
         # Begin window
+        center_next_window_pivot()
         is_open, should_show = imgui.begin("YOLO to TensorRT Compiler", True)
         if not should_show:
             self._close_window()

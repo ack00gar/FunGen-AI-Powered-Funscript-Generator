@@ -987,19 +987,11 @@ class AutoUpdater:
         if not imgui.is_popup_open("Update Available"):
             return
 
-        if not hasattr(self, '_update_dialog_pos'):
-            main_viewport = imgui.get_main_viewport()
-            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-            self._update_dialog_pos = (popup_pos[0] - 250, popup_pos[1] - 150)  # Center the window
-
+        from application.utils.imgui_helpers import center_next_window_pivot
         imgui.set_next_window_size_constraints((500, 0), (float("inf"), float("inf")))
-        imgui.set_next_window_position(*self._update_dialog_pos, condition=imgui.ONCE)
+        center_next_window_pivot()
 
         if imgui.begin_popup_modal("Update Available", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
-            window_pos = imgui.get_window_position()
-            if window_pos[0] > 0 and window_pos[1] > 0:
-                self._update_dialog_pos = window_pos
             
             if self.update_in_progress:
                 imgui.text(self.status_message)
@@ -1057,19 +1049,11 @@ class AutoUpdater:
         if not imgui.is_popup_open("Update Check Failed"):
             return
 
-        if not hasattr(self, '_update_error_dialog_pos'):
-            main_viewport = imgui.get_main_viewport()
-            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-            self._update_error_dialog_pos = (popup_pos[0] - 200, popup_pos[1] - 100)  # Center the window
-
+        from application.utils.imgui_helpers import center_next_window_pivot
         imgui.set_next_window_size(400, 150, condition=imgui.ONCE)
-        imgui.set_next_window_position(*self._update_error_dialog_pos, condition=imgui.ONCE)
+        center_next_window_pivot()
 
         if imgui.begin_popup_modal("Update Check Failed", True)[0]:
-            window_pos = imgui.get_window_position()
-            if window_pos[0] > 0 and window_pos[1] > 0:
-                self._update_error_dialog_pos = window_pos
 
             imgui.text_wrapped(self.update_error_message)
             
@@ -1323,33 +1307,14 @@ class AutoUpdater:
         if not hasattr(self, '_updates_active_tab'):
             self._updates_active_tab = 0
 
-        # Set initial size and make resizable
-        if not hasattr(self, '_update_settings_window_size'):
-            self._update_settings_window_size = (815, 665)
-        
-        # Set initial position for first time
-        if not hasattr(self, '_update_settings_window_pos'):
-            main_viewport = imgui.get_main_viewport()
-            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-            self._update_settings_window_pos = (popup_pos[0] - 400, popup_pos[1] - 300)  # Center the window
-        
-        imgui.set_next_window_size(*self._update_settings_window_size, condition=imgui.ONCE)
+        from application.utils.imgui_helpers import center_next_window_pivot
+        imgui.set_next_window_size(815, 665, condition=imgui.ONCE)
         imgui.set_next_window_size_constraints((600, 400), (1200, 800))
-        imgui.set_next_window_position(*self._update_settings_window_pos, condition=imgui.ONCE)
+        center_next_window_pivot()
 
-        # Track if popup is open
         popup_open = imgui.begin_popup_modal("Updates", True)[0]
-        
+
         if popup_open:
-            # Save window size and position for persistence
-            window_size = imgui.get_window_size()
-            window_pos = imgui.get_window_position()
-            if window_size[0] > 0 and window_size[1] > 0:
-                self._update_settings_window_size = window_size
-            if window_pos[0] > 0 and window_pos[1] > 0:
-                self._update_settings_window_pos = window_pos
-            
             self._render_update_picker_content()
 
             imgui.separator()

@@ -1,4 +1,5 @@
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import config
 from config.constants_colors import CurrentTheme
 from config.element_group_colors import SidebarColors as _SidebarColors
@@ -988,6 +989,7 @@ class ControlPanelUI(
                         if imgui.button("Clear All Chapters##RunTab", width=-1):
                             imgui.open_popup("Clear All Chapters?###ConfirmClearChaptersRun")
                     imgui.set_next_window_size(380, 0)
+                    center_next_window_pivot()
                     opened, _ = imgui.begin_popup_modal("Clear All Chapters?###ConfirmClearChaptersRun")
                     if opened:
                         imgui.text_wrapped("Are you sure you want to clear all chapters?\nThis cannot be undone.")
@@ -1100,6 +1102,7 @@ class ControlPanelUI(
                         if imgui.button("Clear All Chapters", width=-1):
                             imgui.open_popup("Clear All Chapters?###ConfirmClearChapters")
                     imgui.set_next_window_size(380, 0)
+                    center_next_window_pivot()
                     opened, _ = imgui.begin_popup_modal("Clear All Chapters?###ConfirmClearChapters")
                     if opened:
                         imgui.text_wrapped("Are you sure you want to clear all chapters?\nThis cannot be undone.")

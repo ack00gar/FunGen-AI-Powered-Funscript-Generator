@@ -1042,6 +1042,26 @@ class MainMenu:
 
             imgui.separator()
 
+            # Build iframe proxy for the current video
+            pc = getattr(app, "proxy_controller", None)
+            can_proxy = (
+                pc is not None
+                and app.processor is not None
+                and app.processor.video_info
+                and getattr(app.processor, "determined_video_type", None) in ("VR", "2D")
+            )
+            if _menu_item_simple("Build iframe Proxy (1080p)...",
+                                  enabled=bool(can_proxy)):
+                pc.open_suggest_manual()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Transcode the current video to a 1080p all-I-frame\n"
+                    "(scripter 'iframe') proxy. VR is flattened; 2D is downscaled.\n"
+                    "Instant scrub in every direction. Original file is untouched."
+                )
+
+            imgui.separator()
+
             # Compare Timelines
             fs_proc = getattr(app, "funscript_processor", None)
             can_compare = (

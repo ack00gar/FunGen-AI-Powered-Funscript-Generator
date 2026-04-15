@@ -3,6 +3,7 @@ import json
 import orjson
 from typing import Callable, Optional
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import platform
 import logging
 import string
@@ -466,6 +467,7 @@ class ImGuiFileDialog:
     def _draw_overwrite_confirm(self) -> None:
         if self.show_overwrite_confirm:
             imgui.open_popup("Confirm Overwrite")
+            center_next_window_pivot()
             if imgui.begin_popup_modal("Confirm Overwrite", flags=imgui.WINDOW_NO_RESIZE)[0]:
                 imgui.text(f"The file '{os.path.basename(self.overwrite_file_path)}' already exists.")
                 imgui.text("Are you sure you want to overwrite it?")

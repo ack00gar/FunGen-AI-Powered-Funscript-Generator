@@ -14,6 +14,7 @@ Access via:
 """
 
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import glfw
 import platform
 from application.utils.keyboard_layout_detector import get_layout_detector, KeyboardLayout
@@ -535,6 +536,7 @@ class KeyboardShortcutsDialog:
         """Render the keyboard shortcuts cheat sheet window"""
         imgui.set_next_window_size(600, 700, imgui.ONCE)
 
+        center_next_window_pivot()
         expanded, opened = imgui.begin("Keyboard Shortcuts Cheat Sheet", True)
 
         if not opened:
@@ -583,6 +585,7 @@ class KeyboardShortcutsDialog:
         imgui.end()
     def _render_reset_confirmation_popup(self):
         """Confirmation dialog for resetting all shortcuts"""
+        center_next_window_pivot()
         if imgui.begin_popup_modal(
             "ConfirmResetShortcuts",
             True,

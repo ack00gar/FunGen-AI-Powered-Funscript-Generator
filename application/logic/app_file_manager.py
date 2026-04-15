@@ -1370,6 +1370,25 @@ class AppFileManager:
         # Reset relevant states before loading a new video
         self.close_video_action(clear_funscript_unconditionally=True)
 
+        # Transparent proxy auto-load: if the user opened Foo.mp4 and a valid
+        # Foo.fungen-proxy.mp4 has been registered for it (next to source,
+        # in the output folder, or in a custom dir), open the proxy instead.
+        if not is_remote:
+            try:
+                from video.proxy_builder import (
+                    is_proxy_filename, proxy_path_from_sidecar,
+                )
+                if not is_proxy_filename(file_path):
+                    proxy = proxy_path_from_sidecar(file_path)
+                    if proxy:
+                        self.app.logger.info(
+                            f"Using existing proxy: {os.path.basename(proxy)}",
+                            extra={'status_message': True})
+                        self._original_source_for_proxy = file_path
+                        file_path = proxy
+            except Exception:
+                pass
+
         # Call the core video opening logic in the VideoProcessor
         success = self.app.processor.open_video(file_path)
 
@@ -1385,6 +1404,23 @@ class AppFileManager:
             self.app.app_state_ui.force_timeline_pan_to_current_frame = True
             self.app.funscript_processor.update_funscript_stats_for_timeline(1, "Video Loaded")
             self.app.funscript_processor.update_funscript_stats_for_timeline(2, "Video Loaded")
+
+            # Suggest building an iframe proxy if this is a large VR or
+            # 4K+ 2D source that isn't already a proxy or covered by one.
+            try:
+                pc = getattr(self.app, "proxy_controller", None)
+                proc = self.app.processor
+                if pc and proc and proc.determined_video_type in ("VR", "2D"):
+                    vr_format = (proc.vr_input_format
+                                 if proc.determined_video_type == "VR"
+                                 else "2d")
+                    pc.open_suggest_if_needed(
+                        file_path, proc.video_info,
+                        proc.determined_video_type,
+                        vr_format,
+                    )
+            except Exception as e:
+                self.app.logger.debug(f"Proxy suggest hook failed: {e}")
 
             # Clear existing subtitles, then auto-load .srt if one exists next to the video
             if _is_feature_available("subtitle_translation"):

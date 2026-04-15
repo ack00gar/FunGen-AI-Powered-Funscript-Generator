@@ -23,6 +23,19 @@ def center_next_window(width, height=0):
     imgui.set_next_window_size(width, height, condition=imgui.APPEARING)
 
 
+def center_next_window_pivot():
+    """Center the next window on the main viewport without needing to know
+    its size in advance. Uses pivot=(0.5, 0.5) so imgui places the window's
+    center at the viewport's center. Applies only on first appearance, so
+    subsequent user drags are preserved.
+    """
+    mv = imgui.get_main_viewport()
+    cx = mv.pos[0] + mv.size[0] * 0.5
+    cy = mv.pos[1] + mv.size[1] * 0.5
+    imgui.set_next_window_position(cx, cy, condition=imgui.APPEARING,
+                                    pivot_x=0.5, pivot_y=0.5)
+
+
 def begin_modal_centered(name, width, height=0):
     """Open and begin a centered modal popup with auto-resize.
 

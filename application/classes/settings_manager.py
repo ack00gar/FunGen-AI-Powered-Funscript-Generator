@@ -154,6 +154,15 @@ class AppSettings:
             "autosave_enabled": True,
             "autosave_interval_seconds": 120,
             "autosave_on_exit": True,
+
+            # Proxy (edit-time transcode) settings
+            "video_proxy_suggest_on_open": True,
+            "video_proxy_autoswitch_on_complete": True,
+            "video_proxy_min_size_gb": 1.5,
+            "video_proxy_ask_dismissed": False,  # "don't ask again" flag
+            # Output location: "next_to_source" | "output_folder" | "custom"
+            "video_proxy_output_mode": "next_to_source",
+            "video_proxy_custom_folder": "",
             "energy_saver_enabled": True,
             "energy_saver_threshold_seconds": 30.0,
             "energy_saver_fps": 1,

@@ -10,6 +10,7 @@ Layout:
 """
 
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import logging
 import os
 import queue
@@ -252,6 +253,7 @@ class SubtitleToolUI:
         imgui.pop_style_color()
 
         # Clear confirmation popup
+        center_next_window_pivot()
         if imgui.begin_popup_modal("Clear Subtitles?##SubClearConfirm", flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
             imgui.text("Remove all subtitles? This cannot be undone.")
             imgui.spacing()
@@ -771,6 +773,7 @@ class SubtitleToolUI:
     def _render_shift_dialog(self):
         """Modal dialog for shifting all subtitle timings by an offset."""
         imgui.open_popup("Shift All Timings##ShiftDlg")
+        center_next_window_pivot()
         if imgui.begin_popup_modal("Shift All Timings##ShiftDlg",
                                     flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
             imgui.text("Shift all subtitles by milliseconds:")
@@ -813,6 +816,7 @@ class SubtitleToolUI:
     def _render_export_dialog(self):
         """Export options dialog with format choice, validation, and preview."""
         imgui.open_popup("Export Subtitles##ExportDlg")
+        center_next_window_pivot()
         if imgui.begin_popup_modal("Export Subtitles##ExportDlg",
                                     flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
             # Format choice

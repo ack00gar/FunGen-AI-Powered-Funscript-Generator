@@ -1,4 +1,5 @@
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import os
 import logging
 from application.utils import GeneratedFileManager, destructive_button_style
@@ -25,6 +26,7 @@ class GeneratedFileManagerWindow:
         # Set window size constraints for better auto-resize behavior
         imgui.set_next_window_size_constraints((600, 300), (1200, 800))
 
+        center_next_window_pivot()
         is_open, new_visibility = imgui.begin("Generated File Manager", closable=True, flags=imgui.WINDOW_NO_COLLAPSE)
         if new_visibility != app_state.show_generated_file_manager:
             app_state.show_generated_file_manager = new_visibility
@@ -46,11 +48,47 @@ class GeneratedFileManagerWindow:
             content_height = min(max(estimated_rows * row_height, 200), 600)
 
             imgui.begin_child("FileListRegion", width=0, height=content_height, border=True)
+            self._render_proxy_section()
             self._render_file_tree()
             imgui.end_child()
             # Render popups/modals
             self._render_delete_all_popup()
         imgui.end()
+
+    def _render_proxy_section(self):
+        """Render a collapsible 'Proxies' section listing all iframe proxies
+        tracked in the global registry (they live next to source videos, not
+        in the output folder, so they need a separate scan)."""
+        try:
+            from video.proxy_builder import registry_list, delete_proxy
+        except Exception:
+            return
+        entries = registry_list()
+        total_gb = sum(e.get("proxy_size_bytes", 0) for e in entries) / (1024 ** 3)
+        label = f"Proxies ({len(entries)}, {total_gb:.1f} GB)##proxies_section"
+        if not imgui.tree_node(label, imgui.TREE_NODE_DEFAULT_OPEN if entries else 0):
+            return
+        try:
+            if not entries:
+                imgui.text_disabled("  No proxies built yet.")
+                return
+            for e in entries:
+                src = e.get("source_path", "")
+                pp = e.get("proxy_path", "")
+                size_gb = e.get("proxy_size_bytes", 0) / (1024 ** 3)
+                src_missing = not e.get("source_exists", True)
+                tag = " (source missing)" if src_missing else ""
+                imgui.text(f"  {os.path.basename(pp)}  - {size_gb:.2f} GB{tag}")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        f"Proxy: {pp}\n"
+                        f"Source: {src}"
+                    )
+                imgui.same_line()
+                if imgui.small_button(f"Delete##proxy_{pp}"):
+                    delete_proxy(pp)
+        finally:
+            imgui.tree_pop()
 
     def _render_header_controls(self):
         """Renders the header and control buttons for the file manager window."""
@@ -172,6 +210,7 @@ class GeneratedFileManagerWindow:
         if not imgui.is_popup_open("Delete All Files?###ConfirmDeleteAll"):
             return
         imgui.set_next_window_size(480, 0)
+        center_next_window_pivot()
         opened, visible = imgui.begin_popup_modal("Delete All Files?###ConfirmDeleteAll")
         if opened:
             imgui.text_wrapped("WARNING: This will delete ALL subfolders and files in the output directory!")

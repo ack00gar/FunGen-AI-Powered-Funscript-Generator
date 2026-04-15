@@ -854,6 +854,32 @@ class ToolbarUI:
             app_state.show_simulator_3d = not active
             self.app.project_manager.project_dirty = True
 
+    _BOOT_INTRO_S = 3.5
+    _BOOT_FADE_S = 0.8
+    _BOOT_HUE_SPEED = 0.6       # full hue cycles per second
+    _BOOT_WAVELENGTH_PX = 220.0  # horizontal distance for a full hue sweep
+
+    def _boot_rainbow_tint(self):
+        """Return an (r,g,b,a) tint for the current toolbar icon based on
+        its horizontal screen position and the wall-clock since launch.
+        Returns white once the intro finishes."""
+        import time as _t
+        if not hasattr(self, "_boot_start_ts"):
+            self._boot_start_ts = _t.time()
+        elapsed = _t.time() - self._boot_start_ts
+        if elapsed >= self._BOOT_INTRO_S:
+            return (1.0, 1.0, 1.0, 1.0)
+        import colorsys
+        fade_start = self._BOOT_INTRO_S - self._BOOT_FADE_S
+        mix = 1.0 if elapsed < fade_start else max(0.0, 1.0 - (elapsed - fade_start) / self._BOOT_FADE_S)
+        screen_x = imgui.get_cursor_screen_pos()[0]
+        hue = ((screen_x / self._BOOT_WAVELENGTH_PX) + elapsed * self._BOOT_HUE_SPEED) % 1.0
+        r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+        return (r * mix + (1.0 - mix),
+                g * mix + (1.0 - mix),
+                b * mix + (1.0 - mix),
+                1.0)
+
     def _toolbar_button(self, icon_mgr, icon_name, size, tooltip):
         """
         Render a toolbar button with icon.
@@ -864,7 +890,8 @@ class ToolbarUI:
         icon_tex, _, _ = icon_mgr.get_icon_texture(icon_name)
 
         if icon_tex:
-            clicked = imgui.image_button(icon_tex, size, size)
+            tint = self._boot_rainbow_tint()
+            clicked = imgui.image_button(icon_tex, size, size, tint_color=tint)
         else:
             # Fallback to small labeled button if icon fails to load
             # Extract a short label from the icon name (e.g., "folder-open.png" -> "Open")

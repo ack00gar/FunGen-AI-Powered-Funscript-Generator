@@ -4,6 +4,7 @@ Panel tab shows: status, settings, generate/import/export actions, progress.
 Editing (subtitle list, waveform, context menus) lives in the floating editor window.
 """
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import logging
 import math
 import time
@@ -239,6 +240,7 @@ class SubtitleMixin:
                 imgui.pop_style_color()
 
                 # Clear confirmation
+                center_next_window_pivot()
                 if imgui.begin_popup_modal("Clear Subtitles?##SubClearCP",
                                             flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
                     imgui.text("Remove all subtitles?")

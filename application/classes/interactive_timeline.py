@@ -1,4 +1,5 @@
 import imgui
+from application.utils.imgui_helpers import center_next_window_pivot
 import os
 import numpy as np
 import math
@@ -677,6 +678,7 @@ class InteractiveFunscriptTimeline:
         if not imgui.is_popup_open("Rename Bookmark##popup"):
             imgui.open_popup("Rename Bookmark##popup")
 
+        center_next_window_pivot()
         if imgui.begin_popup_modal("Rename Bookmark##popup", flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
             imgui.text("Enter bookmark name:")
             changed, self._bookmark_rename_buf = imgui.input_text(
@@ -2206,6 +2208,7 @@ class InteractiveFunscriptTimeline:
         cal = self._calibration
         modal_id = f"Calibrate Input Delay##{self.timeline_num}_cal"
         imgui.open_popup(modal_id)
+        center_next_window_pivot()
         opened, _ = imgui.begin_popup_modal(modal_id, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
         if opened:
             beat_active = cal.get_current_beat_active()
