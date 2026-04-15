@@ -353,9 +353,13 @@ class ProxyBuilder:
         mirrors the Stage-1 FFmpegEncoder pattern which avoids all the
         filter_complex / hwaccel pitfalls we hit on Windows + nvenc.
         """
-        iframe_args = ["-g", "1", "-keyint_min", "1"]
+        # All-I-frame: every frame is a keyframe. -bf 0 is mandatory for
+        # nvenc (defaults to 3 B-frames, which rejects GOP<B+1) and safe
+        # for every other encoder since B-frames can't exist at GOP=1.
+        iframe_args = ["-g", "1", "-keyint_min", "1", "-bf", "0"]
         if encoder == "libx265":
-            iframe_args += ["-x265-params", "keyint=1:min-keyint=1:no-open-gop=1"]
+            iframe_args += ["-x265-params",
+                            "keyint=1:min-keyint=1:no-open-gop=1:bframes=0"]
         elif encoder == "hevc_nvenc":
             iframe_args += ["-no-scenecut", "1"]
         elif encoder == "hevc_qsv":
