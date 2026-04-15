@@ -170,9 +170,9 @@ class ProxyController:
                             f"{int(dur_s//60):02d}:{int(dur_s%60):02d}")
         imgui.spacing()
         if is_vr:
-            imgui.text("Create an iframe 1080p flat proxy for fast scripting?")
+            imgui.text("Create an iframe flat proxy (1080x1080) for fast scripting?")
         else:
-            imgui.text("Create an iframe 1080p proxy for fast scripting?")
+            imgui.text("Create an iframe 1080p proxy (1920x1080) for fast scripting?")
         imgui.text_disabled(
             "Every frame is a keyframe (scripter 'iframe' convention): instant\n"
             "forward, backward and random seek. Original stays untouched."
