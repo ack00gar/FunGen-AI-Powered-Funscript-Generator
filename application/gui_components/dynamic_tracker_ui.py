@@ -57,11 +57,16 @@ class DynamicTrackerUI:
         return list(display_names), list(internal_names)
     
     def is_live_tracker(self, tracker_name: str) -> bool:
-        """Check if tracker is a live tracker (any live or community category)."""
+        """Check if tracker runs in the real-time frame loop (live-style).
+        Includes community and tool entries since they hook into the same
+        frame dispatch path (user ROI, oscillation, beat marker, etc.)."""
         info = self.discovery.get_tracker_info(tracker_name)
         if not info:
             return False
-        return info.category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION, TrackerCategory.COMMUNITY]
+        return info.category in [TrackerCategory.LIVE,
+                                 TrackerCategory.LIVE_INTERVENTION,
+                                 TrackerCategory.COMMUNITY,
+                                 TrackerCategory.TOOL]
     
     def is_offline_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is an offline tracker."""

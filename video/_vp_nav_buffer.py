@@ -130,7 +130,13 @@ class NavBufferMixin:
     def prefetch_around(self, center_frame: int, margin: int = POINT_NAV_PREFETCH_MARGIN):
         """Warm ±margin frames around ``center_frame`` into the nav buffer
         using the PyAV source. Runs in a background thread so the caller
-        (usually a UI click) returns immediately."""
+        (usually a UI click) returns immediately.
+
+        Debounced + single-flight: if called again while a prior prefetch is
+        still running, the prior thread is signaled to stop and a new one
+        starts at the new center. Point-mashing (Up/Down repeatedly) never
+        stacks up multiple 15-frame fetch threads fighting the same decoder.
+        """
         total = getattr(self, 'total_frames', 0) or 0
         if total <= 0 or not self.video_path or self.pyav_source is None:
             return
@@ -142,21 +148,50 @@ class NavBufferMixin:
                 if buf_end >= target_end:
                     return
 
+        # Lazy-init single-flight state on first call.
+        if not hasattr(self, '_prefetch_lock'):
+            self._prefetch_lock = threading.Lock()
+            self._prefetch_stop_event = threading.Event()
+            self._prefetch_thread = None
+
+        # Cancel any in-flight prefetch and wait briefly for it to exit so
+        # we don't have two threads hammering get_frame simultaneously.
+        with self._prefetch_lock:
+            prior = self._prefetch_thread
+            if prior is not None and prior.is_alive():
+                self._prefetch_stop_event.set()
+            self._prefetch_stop_event = threading.Event()
+            stop_event = self._prefetch_stop_event
+
+        if prior is not None and prior.is_alive():
+            prior.join(timeout=0.1)  # best-effort; don't block the GUI
+
         def _fill():
             src = self.pyav_source
             if src is None: return
+            # Start at center+1: the main thread already seeked to center,
+            # so get_frame(center) would force a redundant full seek instead
+            # of hitting the +1 pump fast-path. Beginning at center+1 makes
+            # every prefetch call a cheap pump.
+            start = max(0, center_frame + 1)
             read = 0
-            for idx in range(max(0, center_frame), target_end + 1):
+            for idx in range(start, target_end + 1):
+                if stop_event.is_set():
+                    return
                 frame = self._buffer_lookup(idx)
                 if frame is not None:
                     continue
-                frame = src.get_frame(idx, timeout=2.0)
+                frame = src.get_frame(idx, timeout=2.0, accurate=False)
                 if frame is None:
                     break
+                if stop_event.is_set():
+                    return
                 self._buffer_append(idx, frame)
                 read += 1
             if read > 0:
                 self.logger.debug(f"Prefetch: warmed {read} frames near {center_frame}")
 
         t = threading.Thread(target=_fill, daemon=True, name="NavPrefetch")
+        with self._prefetch_lock:
+            self._prefetch_thread = t
         t.start()

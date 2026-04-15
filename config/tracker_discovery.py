@@ -294,8 +294,9 @@ class DynamicTrackerDiscovery:
         
         # Collect all trackers from all categories
         all_trackers = []
-        for category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION, 
-                        TrackerCategory.OFFLINE, TrackerCategory.COMMUNITY]:
+        for category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION,
+                        TrackerCategory.OFFLINE, TrackerCategory.COMMUNITY,
+                        TrackerCategory.TOOL]:
             category_trackers = self.get_trackers_by_category(category)
             all_trackers.extend(category_trackers)
         
