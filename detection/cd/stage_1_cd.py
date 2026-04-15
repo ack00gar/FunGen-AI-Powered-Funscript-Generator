@@ -115,43 +115,27 @@ def _validate_preprocessed_video_completeness(video_path: str, expected_frames: 
             logger.warning(f"Preprocessed video is suspiciously small: {file_size} bytes")
             return False
 
-        # Use ffprobe to get video info
-        import subprocess
-        import json
-
-        cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-               '-show_entries', 'stream=nb_frames,duration,r_frame_rate',
-               '-of', 'json', video_path]
-
-        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10, creationflags=creation_flags)
-        if result.returncode != 0:
-            logger.warning(f"ffprobe failed for preprocessed video: {video_path}")
+        from video.frame_source.probe import probe
+        p = probe(video_path)
+        if p is None:
+            logger.warning(f"PyAV probe failed for preprocessed video: {video_path}")
             return False
 
-        data = json.loads(result.stdout)
-        stream_info = data.get('streams', [{}])[0]
-
-        # Check frame count
-        nb_frames_str = stream_info.get('nb_frames')
-        if nb_frames_str and nb_frames_str != 'N/A':
-            actual_frames = int(nb_frames_str)
-            frame_diff = abs(actual_frames - expected_frames)
-
+        if p.total_frames > 0:
+            frame_diff = abs(p.total_frames - expected_frames)
             if frame_diff > tolerance_frames:
-                logger.warning(f"Preprocessed video frame count mismatch: expected {expected_frames}, got {actual_frames}")
+                logger.warning(
+                    f"Preprocessed video frame count mismatch: "
+                    f"expected {expected_frames}, got {p.total_frames}")
                 return False
-        else:
-            # Fallback: check duration
-            duration_str = stream_info.get('duration')
-            if duration_str:
-                duration = float(duration_str)
-                expected_duration = expected_frames / expected_fps
-                duration_diff = abs(duration - expected_duration)
-
-                if duration_diff > (tolerance_frames / expected_fps):
-                    logger.warning(f"Preprocessed video duration mismatch: expected {expected_duration:.2f}s, got {duration:.2f}s")
-                    return False
+        elif p.duration_sec > 0:
+            expected_duration = expected_frames / expected_fps
+            duration_diff = abs(p.duration_sec - expected_duration)
+            if duration_diff > (tolerance_frames / expected_fps):
+                logger.warning(
+                    f"Preprocessed video duration mismatch: "
+                    f"expected {expected_duration:.2f}s, got {p.duration_sec:.2f}s")
+                return False
 
         logger.debug(f"Preprocessed video validation passed: {video_path}")
         return True
@@ -537,28 +521,13 @@ def video_processor_producer_proc(
             effective_logger_final.addHandler(handler)
             effective_logger_final.setLevel(logging.INFO)
 
-        # Ensure FFmpeg process managed by VideoProcessor is cleaned up
-        if vp_instance and hasattr(vp_instance, 'ffmpeg_process') and vp_instance.ffmpeg_process and vp_instance.ffmpeg_process.poll() is None:
-            effective_logger_final.info(
-                f"[S1 VP Producer-{producer_idx}] Ensuring FFmpeg process from vp_instance is stopped in producer cleanup (PID: {vp_instance.ffmpeg_process.pid}).")
-            if vp_instance.ffmpeg_process.stdout: vp_instance.ffmpeg_process.stdout.close()
-            if vp_instance.ffmpeg_process.stderr: vp_instance.ffmpeg_process.stderr.close()
-            vp_instance.ffmpeg_process.terminate() # Send SIGTERM
+        # VideoProcessor teardown: close PyAV source (no subprocess to kill).
+        if vp_instance is not None:
             try:
-                vp_instance.ffmpeg_process.wait(timeout=1.0) # Wait for graceful termination
-                if vp_instance.ffmpeg_process.poll() is None: # Check if still running
-                    effective_logger_final.warning(f"[S1 VP Producer-{producer_idx}] FFmpeg process did not terminate after 1s, killing.")
-                    vp_instance.ffmpeg_process.kill() # Send SIGKILL
-                    vp_instance.ffmpeg_process.wait(timeout=0.5) # Wait for kill
-            except subprocess.TimeoutExpired: # Should be part of Python's subprocess module
-                 effective_logger_final.warning(f"[S1 VP Producer-{producer_idx}] FFmpeg process termination timed out. Killing if still alive.")
-                 if vp_instance.ffmpeg_process.poll() is None:
-                     vp_instance.ffmpeg_process.kill()
-                     vp_instance.ffmpeg_process.wait(timeout=0.5) # Wait for kill
-            except Exception as e_ffmpeg_cleanup:
-                 effective_logger_final.error(f"[S1 VP Producer-{producer_idx}] Exception during FFmpeg cleanup: {e_ffmpeg_cleanup}")
-                 if vp_instance.ffmpeg_process.poll() is None:
-                     vp_instance.ffmpeg_process.kill() # Final attempt
+                vp_instance.reset(close_video=True)
+            except Exception as e_vp_cleanup:
+                effective_logger_final.debug(
+                    f"[S1 VP Producer-{producer_idx}] vp reset: {e_vp_cleanup}")
 
         frames_count_final = frames_put_to_queue_this_producer if 'frames_put_to_queue_this_producer' in locals() else 'unknown'
         effective_logger_final.info(

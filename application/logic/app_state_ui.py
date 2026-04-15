@@ -20,6 +20,14 @@ class AppStateUI:
         self.show_video_navigation_window = self.app_settings.get("show_video_navigation_window", True)
         self.show_info_graphs_window = self.app_settings.get("show_info_graphs_window", True)
 
+        # Quad-block layout toggles (collapsible side blocks)
+        self.show_left_top_block = self.app_settings.get("show_left_top_block", True)
+        self.show_left_bottom_block = self.app_settings.get("show_left_bottom_block", True)
+        self.show_right_top_block = self.app_settings.get("show_right_top_block", True)
+        self.show_right_bottom_block = self.app_settings.get("show_right_bottom_block", True)
+        self.left_bottom_block_height_frac = float(self.app_settings.get("left_bottom_block_height_frac", 0.45))
+        self.right_bottom_block_height_frac = float(self.app_settings.get("right_bottom_block_height_frac", 0.45))
+
         # Window dimensions
         self.window_width = self.app_settings.get("window_width", defaults.get("window_width", 1800))
         self.window_height = self.app_settings.get("window_height", defaults.get("window_height", 1000))
@@ -32,6 +40,9 @@ class AppStateUI:
         # Cached content UV rects (invalidated on video load / settings change)
         self._cached_content_uv = None
         self._cached_processing_uv = None
+        # Aspect-fit base size from last calculate_video_display_dimensions,
+        # used by get_video_uv_coords to preserve texel aspect under zoom.
+        self._cached_fit_size = None
 
         # Status Message
         self.status_message: str = ""
@@ -143,14 +154,17 @@ class AppStateUI:
         self.fps_slider_max_val = 200.0
 
         # Timeline Interaction Properties
-        self.timeline_base_height = 180  # Constant for layout
+        self.timeline_base_height = int(self.app_settings.get("timeline_base_height",
+                                                              defaults.get("timeline_base_height", 180)))
         self.timeline_zoom_factor_ms_per_px = self.app_settings.get("timeline_zoom_factor_ms_per_px",
                                                                     defaults.get("timeline_zoom_factor_ms_per_px",
                                                                                  20.0))
         self.timeline_pan_offset_ms = self.app_settings.get("timeline_pan_offset_ms",
                                                             defaults.get("timeline_pan_offset_ms", 0.0))
         self.timeline_point_radius = 4.0  # Constant for timeline drawing
-        self.timeline_line_thickness = float(self.app_settings.get("timeline_line_thickness", 2.5))
+        # Line thickness is auto-computed from timeline height (see
+        # InteractiveTimeline._line_thickness_for_height). The old
+        # manual slider is gone.
         self.snap_to_grid_time_ms = 20  # ms for time snapping
         self.snap_to_grid_pos = 5  # pos units for position snapping
         self.is_manual_panning = False  # Shared by timelines via app
@@ -366,14 +380,24 @@ class AppStateUI:
 
     def calculate_video_display_dimensions(self, available_w: float, available_h: float) -> Tuple[
         float, float, float, float]:
+        """Display rect + centering offsets for the video texture.
+
+        Zoom semantics: at zoom=1 the texture is aspect-fit into the available
+        rect. At zoom>1 the fitted rect is scaled up by the zoom factor and
+        clipped to the available rect so a square VR frame progressively uses
+        more of the horizontal space as the user zooms in. The paired UV coords
+        (get_video_uv_coords) crop the texture to match while preserving
+        texel aspect (no distortion).
+        """
         if not (self.app.processor and self.app.processor.current_frame is not None and \
                 self.app.processor.current_frame.shape[0] > 0 and self.app.processor.current_frame.shape[1] > 0):
-            return 0, 0, 0, 0  # width, height, offset_x, offset_y
+            self._cached_fit_size = None
+            return 0, 0, 0, 0
 
         frame_h_orig, frame_w_orig = self.app.processor.current_frame.shape[:2]
-        if frame_h_orig == 0 or frame_w_orig == 0: return 0, 0, 0, 0
+        if frame_h_orig == 0 or frame_w_orig == 0:
+            return 0, 0, 0, 0
 
-        # Use content aspect ratio (without black padding) for display sizing
         c_left, c_top, c_right, c_bottom = self.get_content_uv_rect()
         content_w_frac = c_right - c_left
         content_h_frac = c_bottom - c_top
@@ -381,39 +405,72 @@ class AppStateUI:
             return 0, 0, 0, 0
         aspect_ratio = (frame_w_orig * content_w_frac) / (frame_h_orig * content_h_frac)
 
-        # Calculate display dimensions maintaining content aspect ratio
-        display_w = available_w
-        display_h = display_w / aspect_ratio
+        fit_w = available_w
+        fit_h = fit_w / aspect_ratio
+        if fit_h > available_h:
+            fit_h = available_h
+            fit_w = fit_h * aspect_ratio
 
-        if display_h > available_h:
-            display_h = available_h
-            display_w = display_h * aspect_ratio
+        zoom = max(1.0, float(self.video_zoom_factor))
+        scaled_w = fit_w * zoom
+        scaled_h = fit_h * zoom
+        display_w = min(scaled_w, available_w)
+        display_h = min(scaled_h, available_h)
 
-        # Calculate offsets to center the video
         offset_x = (available_w - display_w) / 2
         offset_y = (available_h - display_h) / 2
 
+        # Cache the fit size so get_video_uv_coords can derive the correct
+        # UV span without re-doing the aspect math. Refreshed every frame.
+        self._cached_fit_size = (fit_w, fit_h)
         return display_w, display_h, offset_x, offset_y
 
     def get_video_uv_coords(self) -> Tuple[float, float, float, float]:
-        """Returns (uv0_x, uv0_y, uv1_x, uv1_y) for the zoomed/panned video texture.
+        """Returns (uv0_x, uv0_y, uv1_x, uv1_y) for the zoomed/panned video.
 
-        Maps pan/zoom through the content UV rect so only actual video content
-        is displayed (black padding from 640x640 scaling is cropped out).
+        Preserves texel aspect: uv_span_w/uv_span_h is derived from the clipped
+        display rect so display pixels per texel are equal in X and Y.
         """
         c_left, c_top, c_right, c_bottom = self.get_content_uv_rect()
         c_w = c_right - c_left
         c_h = c_bottom - c_top
 
-        # Pan/zoom operate in content-relative [0,1] space
-        uv_span_x = c_w / self.video_zoom_factor
-        uv_span_y = c_h / self.video_zoom_factor
+        zoom = max(1.0, float(self.video_zoom_factor))
+        fit = getattr(self, '_cached_fit_size', None)
+        gui = getattr(self.app, 'gui_instance', None)
+        vdu = getattr(gui, 'video_display_ui', None) if gui else None
+        rect = getattr(vdu, '_actual_video_image_rect_on_screen', None)
 
+        if fit and rect and rect.get('w', 0) > 0 and rect.get('h', 0) > 0 and c_w > 0 and c_h > 0:
+            fit_w, fit_h = fit
+            display_w = rect['w']
+            display_h = rect['h']
+            # Pixel-density formula: uv_span = display_dim * content_frac / (fit_dim * zoom)
+            # At zoom=1 with display=fit, uv_span collapses to (c_w, c_h).
+            uv_span_w = min(c_w, (display_w * c_w) / max(1e-6, fit_w * zoom))
+            uv_span_h = min(c_h, (display_h * c_h) / max(1e-6, fit_h * zoom))
+
+            # pan_normalized stores the top-left of the visible UV in [0, 1-span]
+            # space, matching the legacy uv0 = c_left + pan * c_w convention.
+            pan_x = self.video_pan_normalized[0]
+            pan_y = self.video_pan_normalized[1]
+            uv0_x = c_left + pan_x * c_w
+            uv0_y = c_top + pan_y * c_h
+            uv1_x = uv0_x + uv_span_w
+            uv1_y = uv0_y + uv_span_h
+            # Clamp so the visible window stays inside the texture content.
+            if uv1_x > c_right:
+                uv0_x = max(c_left, c_right - uv_span_w); uv1_x = uv0_x + uv_span_w
+            if uv1_y > c_bottom:
+                uv0_y = max(c_top, c_bottom - uv_span_h); uv1_y = uv0_y + uv_span_h
+            return uv0_x, uv0_y, uv1_x, uv1_y
+
+        # Fallback: legacy uniform zoom (pre-fit-cache path)
+        uv_span_x = c_w / zoom
+        uv_span_y = c_h / zoom
         uv0_x = c_left + self.video_pan_normalized[0] * c_w
         uv0_y = c_top + self.video_pan_normalized[1] * c_h
-        uv1_x = uv0_x + uv_span_x
-        uv1_y = uv0_y + uv_span_y
-        return uv0_x, uv0_y, uv1_x, uv1_y
+        return uv0_x, uv0_y, uv0_x + uv_span_x, uv0_y + uv_span_y
 
     def update_current_script_display_values(self):
         """Updates gauge and L/R dial values based on current video time and funscript data."""
@@ -498,6 +555,12 @@ class AppStateUI:
         self.app_settings.set("show_video_display_window", self.show_video_display_window)
         self.app_settings.set("show_video_navigation_window", self.show_video_navigation_window)
         self.app_settings.set("show_info_graphs_window", self.show_info_graphs_window)
+        self.app_settings.set("show_left_top_block", self.show_left_top_block)
+        self.app_settings.set("show_left_bottom_block", self.show_left_bottom_block)
+        self.app_settings.set("show_right_top_block", self.show_right_top_block)
+        self.app_settings.set("show_right_bottom_block", self.show_right_bottom_block)
+        self.app_settings.set("left_bottom_block_height_frac", float(self.left_bottom_block_height_frac))
+        self.app_settings.set("right_bottom_block_height_frac", float(self.right_bottom_block_height_frac))
 
 
         self.app_settings.set("show_funscript_interactive_timeline", self.show_funscript_interactive_timeline)

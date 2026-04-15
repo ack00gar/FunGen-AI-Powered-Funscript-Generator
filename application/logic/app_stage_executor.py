@@ -583,11 +583,7 @@ class StageExecutorMixin:
             "yolo_pose_model_path": self.app.yolo_pose_model_path,
             "yolo_input_size": self.app.yolo_input_size,
             "video_fps": video_fps_s3,
-            "output_delay_frames": getattr(self.app.tracker, 'output_delay_frames',
-                                           0) if self.app.tracker else 0,
-            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames',
-                                                           10 + (getattr(self.app.tracker, 'output_delay_frames',
-                                                                         0) if self.app.tracker else 0)),
+            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10),
             "roi_narrow_factor_hjbj": self.app_settings.get("roi_narrow_factor_hjbj",
                                                              constants.DEFAULT_ROI_NARROW_FACTOR_HJBJ),
             "min_roi_dim_hjbj": self.app_settings.get("min_roi_dim_hjbj", constants.DEFAULT_MIN_ROI_DIM_HJBJ),
@@ -878,15 +874,42 @@ class StageExecutorMixin:
         is_headless = not getattr(self.app, 'gui_instance', None)
 
         def progress_wrapper(info):
-            """Route hybrid tracker progress to the Stage 2 UI (or CLI stdout)."""
+            """Route hybrid tracker progress to the Stage 2 UI (or CLI stdout).
+
+            Payload contract (uniform across trackers):
+                stage:          machine-readable phase id (e.g. 'pass1')
+                phase:          human label (e.g. 'Single-pass analysis')
+                task:           short current-step text (e.g. 'Frame N/M')
+                percentage:     0..100
+                current, total: absolute frame counters (optional)
+                avg_fps:        smoothed FPS over the run (optional)
+                eta_seconds:    estimated seconds remaining (optional)
+                elapsed_seconds: wall clock so far (optional)
+                timing:         dict with decode_ms / yolo_det_ms / flow_ms
+            """
             if isinstance(info, dict):
                 stage = info.get('stage', '')
+                phase = info.get('phase', '')
                 task = info.get('task', '')
                 pct = info.get('percentage', 0)
                 self.stage2_main_progress_value = pct / 100.0
-                self.stage2_main_progress_label = f"{stage}: {task}" if stage else task
-                self.stage2_status_text = f"{stage}: {task}"
-                self.gui_event_queue.put(("stage2_status_update", f"{task}", f"{pct}%"))
+                # Status = phase (the "what are we doing right now" label).
+                # Label  = task (just the progress units, no phase prefix).
+                self.stage2_status_text = phase or stage or "Processing"
+                self.stage2_main_progress_label = task
+
+                # Uniform perf fields every offline tracker can populate.
+                self.stage2_avg_fps = float(info.get('avg_fps', 0.0) or 0.0)
+                self.stage2_eta_seconds = float(info.get('eta_seconds', 0.0) or 0.0)
+                self.stage2_elapsed_seconds = float(info.get('elapsed_seconds', 0.0) or 0.0)
+                self.stage2_current_frame = int(info.get('current', 0) or 0)
+                self.stage2_total_frames = int(info.get('total', 0) or 0)
+
+                # Send the phase (not the task) so the GUI event handler's
+                # stage2_status_text mirror stays in sync with what the UI shows.
+                self.gui_event_queue.put(("stage2_status_update",
+                                          phase or stage or "Processing",
+                                          f"{pct}%"))
 
                 # Forward timing data for info graph / execution UI display
                 timing = info.get('timing')
@@ -895,6 +918,14 @@ class StageExecutorMixin:
                     self.stage1_yolo_det_ms = timing.get('yolo_det_ms', 0.0)
                     self.stage1_yolo_pose_ms = 0.0
                     self.stage2_flow_ms = timing.get('flow_ms', 0.0)
+                    # Also feed the Video Pipeline perf tab so offline trackers
+                    # surface timings there alongside the live playback loop.
+                    proc = getattr(self.app, 'processor', None)
+                    if proc is not None:
+                        proc._last_decode_time_ms = float(timing.get('decode_ms', 0.0))
+                        proc._last_unwarp_time_ms = float(timing.get('unwarp_ms', 0.0))
+                        proc._last_yolo_time_ms = float(timing.get('yolo_det_ms', 0.0))
+                        proc._last_flow_time_ms = float(timing.get('flow_ms', 0.0))
 
                 if is_headless:
                     import sys

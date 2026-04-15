@@ -1,5 +1,5 @@
 """
-Canonical axis registry for OFS-compatible multi-axis funscript support.
+Canonical axis registry for multi-axis funscript support.
 
 Single source of truth mapping between axis identifiers across all layers:
 funscript files, TCode protocol, timeline numbers, and device control.
@@ -10,7 +10,7 @@ from typing import Optional, Dict
 
 
 class FunscriptAxis(Enum):
-    """Canonical axis names matching OFS/community conventions."""
+    """Canonical axis names matching community conventions."""
     STROKE = "stroke"   # Primary linear (L0) — default T1
     ROLL   = "roll"     # R1 — default T2
     PITCH  = "pitch"    # R2
@@ -21,7 +21,7 @@ class FunscriptAxis(Enum):
     PUMP   = "pump"     # V1 (suction/pump)
 
 
-# OFS file suffix (inserted between basename and .funscript)
+# axis file suffix (inserted between basename and .funscript)
 AXIS_FILE_SUFFIX: Dict[FunscriptAxis, str] = {
     FunscriptAxis.STROKE: "",            # basename.funscript (no suffix for primary)
     FunscriptAxis.ROLL:   ".roll",       # basename.roll.funscript
@@ -53,13 +53,13 @@ DEFAULT_TIMELINE_AXIS: Dict[int, FunscriptAxis] = {
     2: FunscriptAxis.ROLL,
 }
 
-# All known OFS file suffixes for discovery
+# All known axis file suffixes for discovery
 _SUFFIX_TO_AXIS: Dict[str, FunscriptAxis] = {v: k for k, v in AXIS_FILE_SUFFIX.items() if v}
 _TCODE_TO_AXIS: Dict[str, FunscriptAxis] = {v: k for k, v in AXIS_TCODE.items()}
 
 
 def axis_from_file_suffix(suffix: str) -> Optional[FunscriptAxis]:
-    """Look up a FunscriptAxis from its OFS file suffix (e.g. '.roll' -> ROLL).
+    """Look up a FunscriptAxis from its axis file suffix (e.g. '.roll' -> ROLL).
 
     Returns None for unrecognized suffixes.
     """
@@ -72,7 +72,7 @@ def axis_from_tcode(tcode: str) -> Optional[FunscriptAxis]:
 
 
 def file_suffix_for_axis(axis_name: str) -> str:
-    """Return the OFS file suffix for a given axis name string.
+    """Return the axis file suffix for a given axis name string.
 
     For known FunscriptAxis values, returns the standard suffix.
     For custom/unknown axis names, returns '.{axis_name}'.
@@ -94,5 +94,5 @@ def tcode_for_axis(axis_name: str) -> Optional[str]:
 
 
 def all_known_suffixes() -> list:
-    """Return all known OFS file suffixes (excluding empty string for stroke)."""
+    """Return all known axis file suffixes (excluding empty string for stroke)."""
     return [s for s in AXIS_FILE_SUFFIX.values() if s]

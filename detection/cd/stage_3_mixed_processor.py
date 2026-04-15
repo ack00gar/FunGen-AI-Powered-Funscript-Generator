@@ -888,21 +888,27 @@ def perform_mixed_stage_analysis(
         # Track processing time
         start_time = time.time()
         
-        # Open video for frame processing
-        import cv2
-        cap = cv2.VideoCapture(preprocessed_video_path_arg or video_path)
-        if not cap.isOpened():
-            raise RuntimeError(f"Could not open video: {video_path}")
-        
-        # Prefer fps from common_app_config (ffprobe-based, set by _resolve_video_fps)
-        # over cv2.CAP_PROP_FPS which is unreliable for VR SBS videos
+        # Open video for frame processing via PyAV (in-process libav).
+        import av
+        video_source = preprocessed_video_path_arg or video_path
+        container = av.open(video_source)
+        try:
+            pyav_stream = container.streams.video[0]
+        except (IndexError, AttributeError):
+            container.close()
+            raise RuntimeError(f"No video stream in {video_source}")
+        pyav_stream.thread_type = "AUTO"
+        pyav_time_base = pyav_stream.time_base
+
+        # Prefer fps from common_app_config (probe-based, set by _resolve_video_fps)
+        # over the stream's rate which can be unreliable for VR SBS videos.
         config_fps = common_app_config.get('video_fps', 0)
-        cv2_fps = cap.get(cv2.CAP_PROP_FPS)
+        stream_fps = float(pyav_stream.average_rate or pyav_stream.guessed_rate or 0)
         if config_fps and config_fps > 0:
             video_fps = float(config_fps)
-        elif cv2_fps and cv2_fps > 0:
-            video_fps = float(cv2_fps)
-            logger.warning(f"Using cv2 fps={video_fps:.2f} (config video_fps not set)")
+        elif stream_fps and stream_fps > 0:
+            video_fps = stream_fps
+            logger.warning(f"Using PyAV stream fps={video_fps:.2f} (config video_fps not set)")
         else:
             video_fps = 30.0
             logger.warning("No reliable FPS source, using fallback 30.0")
@@ -939,10 +945,23 @@ def perform_mixed_stage_analysis(
             is_tracking_frame = frame_id in bj_hj_frames
             
             if is_tracking_frame:
-                # Use ROI tracking for BJ/HJ frames
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
-                ret, frame = cap.read()
-                if not ret:
+                # Use ROI tracking for BJ/HJ frames — random-access seek + decode.
+                frame = None
+                try:
+                    target_pts = int(frame_id / video_fps / pyav_time_base)
+                    container.seek(target_pts, backward=True, any_frame=False, stream=pyav_stream)
+                    for packet in container.demux(pyav_stream):
+                        decoded = False
+                        for av_frame in packet.decode():
+                            frame = av_frame.to_ndarray(format="bgr24")
+                            decoded = True
+                            break
+                        if decoded:
+                            break
+                except Exception as seek_err:
+                    logger.debug(f"PyAV seek for frame {frame_id} failed: {seek_err}")
+                    frame = None
+                if frame is None:
                     logger.warning(f"Could not read frame {frame_id}, falling back to Stage 2 signal")
                     position = processor.get_stage2_signal(frame_id)
                 else:
@@ -997,7 +1016,8 @@ def perform_mixed_stage_analysis(
                     processing_fps, time_elapsed, eta_seconds
                 )
         
-        cap.release()
+        try: container.close()
+        except Exception: pass
         
         # Create funscript object - start with Stage 2 funscript if available
         if stage2_funscript and hasattr(stage2_funscript, 'primary_actions'):

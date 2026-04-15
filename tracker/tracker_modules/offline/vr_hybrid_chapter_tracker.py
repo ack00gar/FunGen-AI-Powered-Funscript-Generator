@@ -157,20 +157,13 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
         return False
 
     def estimate_processing_time(self, stage, video_path, **kwargs) -> float:
-        try:
-            cap = cv2.VideoCapture(video_path)
-            if cap.isOpened():
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                if not fps or fps <= 0:
-                    fps = 30.0
-                total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-                cap.release()
-                duration_s = total / fps
-                # V2 single-pass: ~1x realtime at 30fps
-                return max(10.0, duration_s * 1.0)
-        except Exception:
-            pass
-        return 30.0
+        from video.frame_source.probe import probe
+        p = probe(video_path)
+        if p is None or p.fps <= 0:
+            return 30.0
+        duration_s = p.total_frames / p.fps
+        # V2 single-pass: ~1x realtime at 30fps
+        return max(10.0, duration_s * 1.0)
 
     def process_stage(self, stage, video_path, input_data=None, input_files=None,
                       output_directory=None, progress_callback=None,
@@ -353,14 +346,14 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
         frame_ms = 1000.0 / fps
 
         vp.vr_unwarp_method_override = 'v360'
-        vp.gpu_unwarp_enabled = False
         vp._update_video_parameters()
 
+        # stream_frames_for_segment guarantees 640x640 output by temporarily
+        # toggling HD display off when active; this tracker just consumes.
         self.logger.info(f"Single-pass: {total_frames} frames @ {fps:.1f}fps, "
                          f"chapter YOLO every {chapter_skip}th, ROI YOLO every {roi_skip}th, DIS every frame")
 
         # State
-        dis = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
         prev_gray = None
         current_roi = None
         frame_positions = {}
@@ -375,81 +368,108 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
         flow_count = 0
         t_start = time.time()
 
+        # Per-stage timing (printed once at end) to spot future regressions.
+        t_decode = t_cvt = t_yolo = t_dis = 0.0
+
+        from tracker.tracker_modules.helpers.async_yolo_worker import AsyncYoloWorker
+        from tracker.tracker_modules.helpers.async_flow_worker import AsyncDisFlowWorker
+
+        def _apply_yolo_result(f_idx, fh, fw, det_objs, is_chap):
+            nonlocal current_roi, prev_gray
+            penis_box, other_boxes = parse_detections(det_objs)
+            if penis_box:
+                contact_bboxes = [ob['box'] for ob in other_boxes]
+                new_roi = self._compute_padded_roi(penis_box['box'], contact_bboxes, fh, fw)
+                if self._roi_shifted(current_roi, new_roi):
+                    prev_gray = None
+                current_roi = new_roi
+            if is_chap:
+                frame_dets = [_yolo_det_to_dict(d) for d in det_objs]
+                sparse_detections[f_idx] = frame_dets
+                if other_boxes:
+                    frame_contact_info[f_idx] = build_contact_info(
+                        other_boxes, self.yolo_input_size)
+                if penis_box:
+                    penis_frames.add(f_idx)
+                    position = classify_frame_position(penis_box, other_boxes)
+                    frame_boxes[f_idx] = {
+                        'penis': penis_box['box'],
+                        'contacts': [ob['box'] for ob in other_boxes],
+                    }
+                elif len(other_boxes) >= 1:
+                    position = classify_no_penis(other_boxes, self.yolo_input_size)
+                else:
+                    position = 'Not Relevant'
+                frame_positions[f_idx] = position
+                if frame_dets:
+                    self._overlay_frames.append({
+                        'frame_id': f_idx,
+                        'yolo_boxes': [
+                            {'bbox': d['bbox'], 'class_name': d['class_name'],
+                             'confidence': d.get('confidence', 0.0),
+                             'track_id': None, 'status': None}
+                            for d in frame_dets
+                        ],
+                        'poses': [],
+                        'dominant_pose_id': None,
+                        'active_interaction_track_id': None,
+                        'is_occluded': False,
+                        'atr_assigned_position': position,
+                    })
+
+        yolo_worker = AsyncYoloWorker(
+            model=model,
+            conf=DEFAULT_CONFIDENCE,
+            imgsz=self.yolo_input_size,
+            device=config_constants.DEVICE,
+            on_result=_apply_yolo_result,
+            logger=self.logger,
+            input_queue_size=8,
+            batch_size=4,
+        )
+        yolo_worker.start()
+
+        def _apply_flow_result(f_idx, time_ms_val, _dy_w, _dx_w, meta):
+            nonlocal upper_motion_sum, lower_motion_sum, flow_count
+            flow = meta.get('flow')
+            if flow is None:
+                return
+            dy, dx = self._magnitude_weighted_flow(flow)
+            raw_flow[f_idx] = (time_ms_val, dy, dx)
+            flow_count += 1
+            patch_h = flow.shape[0]
+            split = patch_h // 3
+            if split > 0 and patch_h - split > 0:
+                upper_motion_sum += np.median(np.abs(flow[:patch_h - split, :, 1]))
+                lower_motion_sum += np.median(np.abs(flow[patch_h - split:, :, 1]))
+
+        flow_worker = AsyncDisFlowWorker(
+            on_result=_apply_flow_result,
+            logger=self.logger,
+            input_queue_size=16,
+        )
+        flow_worker.start()
+
         try:
             for frame_idx, frame, timing in vp.stream_frames_for_segment(
                     0, total_frames, stop_event=self.stop_event):
+                t_decode += float(timing.get('decode_ms', 0.0)) / 1000.0
 
                 if self.stop_event and self.stop_event.is_set():
                     break
 
+                _t0 = time.perf_counter()
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                t_cvt += time.perf_counter() - _t0
                 h, w = gray.shape[:2]
 
-                # ── YOLO: ROI tracking (every roi_skip) + chapter classification (every chapter_skip) ──
+                # ── YOLO: submit async (runs on worker thread) + drain results ──
                 is_chapter_frame = (frame_idx % chapter_skip == 0)
                 run_yolo = (frame_idx % roi_skip == 0) or is_chapter_frame
-
                 if run_yolo:
-                    try:
-                        det_objs = _yolo_run_detection(model, frame,
-                                                       conf=DEFAULT_CONFIDENCE,
-                                                       imgsz=self.yolo_input_size,
-                                                       device=config_constants.DEVICE)
-                    except Exception as e:
-                        self.logger.debug(f"YOLO error frame {frame_idx}: {e}")
-                        det_objs = []
-
-                    penis_box, other_boxes = parse_detections(det_objs)
-
-                    # Update ROI from every YOLO frame (tight tracking)
-                    if penis_box:
-                        contact_bboxes = [ob['box'] for ob in other_boxes]
-                        new_roi = self._compute_padded_roi(penis_box['box'], contact_bboxes, h, w)
-                        if self._roi_shifted(current_roi, new_roi):
-                            prev_gray = None  # reset flow to avoid spike
-                        current_roi = new_roi
-
-                    # Chapter classification only on sparse frames (matches Chapter Maker rate)
-                    if is_chapter_frame:
-                        frame_dets = [_yolo_det_to_dict(d) for d in det_objs]
-                        sparse_detections[frame_idx] = frame_dets
-
-                        if other_boxes:
-                            frame_contact_info[frame_idx] = build_contact_info(
-                                other_boxes, self.yolo_input_size)
-
-                        if penis_box:
-                            penis_frames.add(frame_idx)
-                            position = classify_frame_position(penis_box, other_boxes)
-                            frame_boxes[frame_idx] = {
-                                'penis': penis_box['box'],
-                                'contacts': [ob['box'] for ob in other_boxes],
-                            }
-                        elif len(other_boxes) >= 1:
-                            position = classify_no_penis(other_boxes, self.yolo_input_size)
-                        else:
-                            position = 'Not Relevant'
-
-                        frame_positions[frame_idx] = position
-
-                        # Overlay
-                        if frame_dets:
-                            self._overlay_frames.append({
-                                'frame_id': frame_idx,
-                                'yolo_boxes': [
-                                    {'bbox': d['bbox'], 'class_name': d['class_name'],
-                                     'confidence': d.get('confidence', 0.0),
-                                     'track_id': None, 'status': None}
-                                    for d in frame_dets
-                                ],
-                                'poses': [],
-                                'dominant_pose_id': None,
-                                'active_interaction_track_id': None,
-                                'is_occluded': False,
-                                'atr_assigned_position': position,
-                            })
-
-                    yolo_count += 1
+                    if yolo_worker.submit(frame_idx, frame, payload=is_chapter_frame):
+                        yolo_count += 1
+                yolo_worker.drain()
 
                 # ── DIS flow (every frame) ──
                 roi = current_roi
@@ -465,31 +485,10 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                 roi_h = ry2 - ry1
 
                 if roi_w > MIN_ROI_SIZE and roi_h > MIN_ROI_SIZE and prev_gray is not None:
-                    prev_patch = prev_gray[ry1:ry2, rx1:rx2]
-                    curr_patch = gray[ry1:ry2, rx1:rx2]
-
-                    if prev_patch.shape == curr_patch.shape and prev_patch.shape[0] > 4:
-                        try:
-                            flow = dis.calc(
-                                np.ascontiguousarray(prev_patch),
-                                np.ascontiguousarray(curr_patch),
-                                None
-                            )
-                        except cv2.error:
-                            flow = None
-
-                        if flow is not None:
-                            dy, dx = self._magnitude_weighted_flow(flow)
-                            time_ms_val = int(frame_idx * frame_ms)
-                            raw_flow[frame_idx] = (time_ms_val, dy, dx)
-                            flow_count += 1
-
-                            # Motion inversion tracking
-                            patch_h = flow.shape[0]
-                            split = patch_h // 3
-                            if split > 0 and patch_h - split > 0:
-                                upper_motion_sum += np.median(np.abs(flow[:patch_h - split, :, 1]))
-                                lower_motion_sum += np.median(np.abs(flow[patch_h - split:, :, 1]))
+                    time_ms_val = int(frame_idx * frame_ms)
+                    flow_worker.submit(
+                        frame_idx, prev_gray, gray,
+                        (rx1, ry1, rx2, ry2), time_ms_val)
 
                 prev_gray = gray
 
@@ -497,19 +496,64 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                 if progress_callback and frame_idx % 500 == 0 and total_frames > 0:
                     pct = min(75, int(75 * frame_idx / total_frames))
                     elapsed = time.time() - t_start
+                    avg_fps = frame_idx / max(0.001, elapsed)
+                    eta_s = (total_frames - frame_idx) / avg_fps if avg_fps > 0 else 0.0
+                    # Average per-frame ms for the Video Pipeline perf tab.
+                    # YOLO timing is read from the async worker's running
+                    # counters (it owns inference on a separate thread).
+                    seen = max(1, frame_idx)
+                    yolo_ms = (
+                        yolo_worker.total_inference_ms
+                        / max(1, yolo_worker.completed)
+                    ) if yolo_worker.completed else 0.0
+                    flow_ms = (
+                        flow_worker.total_flow_ms
+                        / max(1, flow_worker.completed)
+                    ) if flow_worker.completed else 0.0
+                    timing_ms = {
+                        'decode_ms': (t_decode / seen) * 1000.0,
+                        'unwarp_ms': 0.0,  # baked into decode via v360
+                        'yolo_det_ms': yolo_ms,
+                        'flow_ms': flow_ms,
+                    }
                     progress_callback({
                         'stage': 'pass1',
-                        'task': f'Frame {frame_idx}/{total_frames} '
-                                f'({yolo_count} YOLO, {flow_count} flow)',
+                        'phase': 'Single-pass analysis',
+                        'task': f'Frame {frame_idx}/{total_frames}',
                         'percentage': pct,
-                        'avg_fps': frame_idx / max(0.001, elapsed),
+                        'current': frame_idx,
+                        'total': total_frames,
+                        'avg_fps': avg_fps,
+                        'eta_seconds': eta_s,
+                        'elapsed_seconds': elapsed,
+                        'timing': timing_ms,
                     })
 
         except Exception as e:
             self.logger.error(f"Single-pass error: {e}", exc_info=True)
+        finally:
+            yolo_worker.stop()
+            flow_worker.stop()
+            t_yolo = yolo_worker.total_inference_ms / 1000.0
+            t_dis = flow_worker.total_flow_ms / 1000.0
+            if yolo_worker.dropped:
+                self.logger.info(
+                    f"YOLO worker dropped {yolo_worker.dropped} submissions "
+                    f"(queue full). Completed {yolo_worker.completed}.")
+            if flow_worker.dropped:
+                self.logger.info(
+                    f"Flow worker dropped {flow_worker.dropped} submissions "
+                    f"(queue full). Completed {flow_worker.completed}.")
 
         elapsed = time.time() - t_start
         self.logger.info(f"Single-pass complete: {flow_count} flow, {yolo_count} YOLO in {elapsed:.1f}s")
+        # Per-stage wall-clock. Decode overlaps in its own thread so t_decode
+        # is the cumulative sum of decode durations, not sequential elapsed.
+        self.logger.info(
+            f"Stage timing: decode={t_decode:.1f}s cvt={t_cvt:.1f}s "
+            f"yolo={t_yolo:.1f}s dis={t_dis:.1f}s "
+            f"other={max(0.0, elapsed - t_cvt - t_yolo - t_dis):.1f}s "
+            f"(decode runs in prefetch thread)")
 
         # Build chapters
         chapters = build_chapters(frame_positions, fps, total_frames, chapter_skip,

@@ -2,7 +2,6 @@
 Logic package initialization.
 """
 
-from .app_calibration import AppCalibration
 from .app_energy_saver import AppEnergySaver
 from .app_event_handlers import AppEventHandlers
 from .app_file_manager import AppFileManager

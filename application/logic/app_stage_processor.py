@@ -243,6 +243,13 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
             self.stage2_sub_processing_fps_str = ""
             self.stage2_sub_eta_str = ""
             self.stage2_final_elapsed_time_str = ""
+            # Uniform progress perf fields, populated by any offline tracker
+            # that reports via the standard progress_callback dict contract.
+            self.stage2_avg_fps = 0.0
+            self.stage2_eta_seconds = 0.0
+            self.stage2_elapsed_seconds = 0.0
+            self.stage2_current_frame = 0
+            self.stage2_total_frames = 0
         if "stage3" in stages:
             self.stage3_status_text = "Not run."
             self.stage3_current_segment_label = ""

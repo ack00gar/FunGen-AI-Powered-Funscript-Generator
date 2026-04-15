@@ -45,13 +45,14 @@ class HeatmapColorMapper:
         rgba = mapper.speed_to_color_rgba(250.0)  # moderate speed -> greenish
     """
 
-    def __init__(self, max_speed: float = 400.0):
+    def __init__(self, max_speed: float = 400.0, highlight_overspeed: bool = True):
         self.max_speed = max(1.0, max_speed)
+        self.highlight_overspeed = highlight_overspeed
         self._gradient = _SPEED_GRADIENT
 
     def speed_to_color_rgba(self, speed: float) -> Tuple[float, float, float, float]:
         """Convert a single speed value (units/sec) to an RGBA color tuple."""
-        if abs(speed) > self.max_speed:
+        if self.highlight_overspeed and abs(speed) > self.max_speed:
             return _OVERSPEED_COLOR
         t = min(1.0, max(0.0, abs(speed) / self.max_speed))
 
@@ -82,10 +83,11 @@ class HeatmapColorMapper:
                 result[mask, ch] = col0[ch] + (col1[ch] - col0[ch]) * seg_t
 
         # Overspeed: segments faster than max_speed get a distinct lilac
-        over_mask = np.abs(speeds) > self.max_speed
-        if np.any(over_mask):
-            for ch in range(4):
-                result[over_mask, ch] = _OVERSPEED_COLOR[ch]
+        if self.highlight_overspeed:
+            over_mask = np.abs(speeds) > self.max_speed
+            if np.any(over_mask):
+                for ch in range(4):
+                    result[over_mask, ch] = _OVERSPEED_COLOR[ch]
 
         return result
 

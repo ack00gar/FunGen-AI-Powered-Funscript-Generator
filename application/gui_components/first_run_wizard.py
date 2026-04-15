@@ -254,7 +254,7 @@ class FirstRunWizard:
             opt_note = "CUDA/DirectML acceleration if GPU available"
         else:
             opt_note = "CPU inference (GPU optional)"
-        imgui.text(f"Your system: {self._platform_name} — {opt_note}")
+        imgui.text(f"Your system: {self._platform_name} - {opt_note}")
 
         imgui.dummy(0, 15)
 

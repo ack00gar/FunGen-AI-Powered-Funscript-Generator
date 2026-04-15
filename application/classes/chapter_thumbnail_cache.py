@@ -75,48 +75,44 @@ class ChapterThumbnailCache:
                 self.logger.debug(f"Video path not available for thumbnail extraction")
                 return None
 
-            # Extract first frame of chapter
+            # Extract first frame of chapter via PyAV (in-process libav).
             start_frame = chapter.start_frame_id
+            import av
 
-            # Extract frame using OpenCV
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                self.logger.warning(f"Could not open video for thumbnail: {video_path}")
-                return None
-
-            # Get total frame count to validate
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            if start_frame >= total_frames:
-                self.logger.debug(f"Frame {start_frame} is beyond video length ({total_frames} frames)")
-                cap.release()
-                return None
-
-            # Try to seek to the frame
-            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-
-            # Verify we're at or near the requested frame
-            actual_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
-
-            # Read the frame
-            ret, frame = cap.read()
-
-            # If seeking failed, try reading sequentially from a nearby keyframe
-            if not ret or frame is None:
-                # Try seeking a bit earlier and reading forward
-                seek_frame = max(0, start_frame - 10)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, seek_frame)
-
-                # Read frames until we reach the target or fail
-                for _ in range(min(20, start_frame - seek_frame + 5)):
-                    ret, frame = cap.read()
-                    current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
-                    if ret and frame is not None and current_frame >= start_frame:
+            container = None
+            frame = None
+            total_frames = 0
+            try:
+                container = av.open(video_path)
+                stream = container.streams.video[0]
+                stream.thread_type = "AUTO"
+                fps = float(stream.average_rate or stream.guessed_rate or 30.0)
+                time_base = stream.time_base
+                total_frames = int(stream.frames or 0)
+                if total_frames and start_frame >= total_frames:
+                    self.logger.debug(
+                        f"Frame {start_frame} is beyond video length ({total_frames} frames)")
+                    return None
+                target_pts = int(start_frame / fps / time_base)
+                container.seek(target_pts, backward=True, any_frame=False, stream=stream)
+                for packet in container.demux(stream):
+                    for avframe in packet.decode():
+                        frame = avframe.to_ndarray(format="bgr24")
                         break
+                    if frame is not None:
+                        break
+            except Exception as e:
+                self.logger.debug(f"PyAV chapter thumbnail extraction failed: {e}")
+                return None
+            finally:
+                if container is not None:
+                    try: container.close()
+                    except Exception: pass
 
-            cap.release()
-
-            if not ret or frame is None:
-                self.logger.debug(f"Could not read frame {start_frame} for chapter thumbnail (total frames: {total_frames})")
+            if frame is None:
+                self.logger.debug(
+                    f"Could not read frame {start_frame} for chapter thumbnail "
+                    f"(total frames: {total_frames})")
                 return None
 
             # For VR videos, crop to show only one panel (left/right/top eye view)

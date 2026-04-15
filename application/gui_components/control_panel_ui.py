@@ -15,14 +15,6 @@ except ImportError:
     DynamicTrackerUI = None
     TrackerCategory = None
 
-# Early access tracker gating (optional add-on)
-try:
-    from patreon_features.tracker_gating.experimental_gate import is_tracker_early_access as _is_tracker_early_access, get_early_access_message as _get_early_access_message
-    _HAS_EARLY_ACCESS_GATE = True
-except ImportError:
-    _HAS_EARLY_ACCESS_GATE = False
-    _is_tracker_early_access = None
-    _get_early_access_message = None
 
 # Import mixin sub-modules
 from .cp_post_processing_ui import PostProcessingMixin
@@ -308,7 +300,7 @@ class ControlPanelUI(
     _SIDEBAR_ADDON_SECTIONS = [
         ("device_control", "D", "Device Control", "_feat_device"),
         ("native_sync", "S", "Streamer", "_feat_streamer"),
-        ("supporter_batch", "B", "Batch Processing", "_feat_supporter"),
+        ("supporter_batch", "B", "Advanced Features", "_feat_supporter"),
         ("subtitle", "CC", "Subtitles", "_feat_subtitle"),
     ]
     # Map section keys to icon asset filenames for sidebar PNG icons
@@ -666,7 +658,7 @@ class ControlPanelUI(
         imgui.dummy(0, 6)
 
         imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.3, 1.0)
-        imgui.text(f"{feature_name} — Add-on at paypal.me/k00gar")
+        imgui.text(f"{feature_name} - Add-on at paypal.me/k00gar")
         imgui.pop_style_color()
         imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
         imgui.text_wrapped(description)
@@ -850,6 +842,8 @@ class ControlPanelUI(
             _hidden_folders.add("experimental")
         if not _settings.get("tracker_show_community", True):
             _hidden_folders.add("community")
+        if not _settings.get("tracker_show_tool", False):
+            _hidden_folders.add("tool")
 
         _supporter_available = self._feat_supporter
 
@@ -863,29 +857,16 @@ class ControlPanelUI(
                 hidden_folders=_hidden_folders
             )
 
-            # Early access tracker gating — annotate gated trackers
-            _early_access_set = set()
-            if _HAS_EARLY_ACCESS_GATE:
-                _early_access_set = {name for name in modes_enum if _is_tracker_early_access(name)}
-
-            # Build display list with early access annotations
-            modes_display_gated = []
-            for i, (display, internal) in enumerate(zip(modes_display_full, modes_enum)):
-                if internal in _early_access_set and not _supporter_available:
-                    modes_display_gated.append(f"[Early Access] {display}")
-                else:
-                    modes_display_gated.append(display)
-
+            # All trackers now shipped in core — no early-access gating.
             self._cached_tracker_lists = (modes_display_full, modes_enum, discovered_trackers_full)
-            self._cached_tracker_gated = modes_display_gated
-            self._cached_tracker_early_access = _early_access_set
+            self._cached_tracker_gated = list(modes_display_full)
+            self._cached_tracker_early_access = set()
             self._cached_tracker_tooltip = self._generate_combined_tooltip(discovered_trackers_full)
             self._cached_tracker_hidden_folders = _hidden_key
             self._cached_tracker_supporter_flag = _supporter_available
 
         modes_display_full, modes_enum, discovered_trackers_full = self._cached_tracker_lists
         modes_display_gated = self._cached_tracker_gated
-        _early_access_set = getattr(self, '_cached_tracker_early_access', set())
 
         processor = app.processor
         disable_combo = (
@@ -931,8 +912,13 @@ class ControlPanelUI(
                 _chk_legacy = _settings.get("tracker_show_legacy", False)
                 _chk_exp = _settings.get("tracker_show_experimental", True)
                 _chk_comm = _settings.get("tracker_show_community", True)
+                _chk_tool = _settings.get("tracker_show_tool", False)
                 if self._tracker_filter_open:
                     imgui.text_disabled("Show:")
+                    imgui.same_line()
+                    ch_t, nv_t = imgui.checkbox("Tools##TrkFilterTool", _chk_tool)
+                    if ch_t:
+                        _settings.set("tracker_show_tool", nv_t)
                     imgui.same_line()
                     ch_l, nv_l = imgui.checkbox("Legacy##TrkFilterLeg", _chk_legacy)
                     if ch_l:
@@ -948,10 +934,7 @@ class ControlPanelUI(
 
                 if clicked and new_idx != cur_idx:
                     new_mode = modes_enum[new_idx]
-                    # Block selection of early access trackers when patreon_features not available
-                    if new_mode in _early_access_set and not _supporter_available:
-                        pass  # Selection blocked — tracker is early access only
-                    else:
+                    if True:
                         # Clear all overlays when switching to a different mode
                         if app_state.selected_tracker_name != new_mode:
                             if hasattr(app, 'logger') and app.logger:

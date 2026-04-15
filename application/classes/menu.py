@@ -388,7 +388,18 @@ class MainMenu:
         self._feat_device = _is_feature_available("device_control")
         self._feat_streamer = _is_feature_available("streamer")
 
+        # Track when the project first went dirty since last save (for pulse).
+        pm = getattr(self.app, 'project_manager', None)
+        if pm is not None:
+            if pm.project_dirty and pm.first_dirty_time is None:
+                import time as _t
+                pm.first_dirty_time = _t.time()
+            elif not pm.project_dirty:
+                pm.first_dirty_time = None
+
         if imgui.begin_main_menu_bar():
+            # Slow red pulse over the menu bar after N minutes of unsaved edits
+            self._render_unsaved_pulse(pm)
             # Render logo at the start of menu bar
             self._render_menu_bar_logo()
 
@@ -407,7 +418,7 @@ class MainMenu:
             # Render Streamer indicator
             self._render_native_sync_indicator()
 
-            # Render Supporter badge
+            # Render Supporter badge (lit only when a real supporter addon is installed)
             self._render_supporter_badge()
 
             imgui.end_main_menu_bar()
@@ -471,7 +482,7 @@ class MainMenu:
             if imgui.begin_menu("Import..."):
                 if _menu_item_simple("Multi-Axis Funscript (Single File)..."):
                     fm.import_unified_funscript()
-                if _menu_item_simple("All Axis Files (OFS naming)...", enabled=has_video):
+                if _menu_item_simple("All Axis Files (reference editor naming)...", enabled=has_video):
                     fm.import_all_axes_ofs()
                 imgui.separator()
                 if _menu_item_simple(f"Funscript to {self._tl_label(1)}..."):
@@ -486,7 +497,7 @@ class MainMenu:
             if imgui.begin_menu("Export..."):
                 if _menu_item_simple("Multi-Axis Funscript (Single File)..."):
                     fm.export_unified_funscript()
-                if _menu_item_simple("All Axis Files (OFS naming)...", enabled=has_video):
+                if _menu_item_simple("All Axis Files (reference editor naming)...", enabled=has_video):
                     fm.export_all_axes_ofs()
                 imgui.separator()
                 if _menu_item_simple(f"Funscript from {self._tl_label(1)}..."):
@@ -606,12 +617,11 @@ class MainMenu:
                 app_state.show_video_controls_overlay = val
                 self.app.project_manager.project_dirty = True
 
-            # Enter Fullscreen (mpv - supporter exclusive)
+            # Enter Fullscreen (mpv-backed). Available whenever mpv is wired up.
             mpv = getattr(self.app, '_mpv_controller', None)
             is_fs_active = mpv is not None and mpv.is_active
-            from application.utils.feature_detection import is_feature_available as _is_feature_available
-            fs_available = _is_feature_available("patreon_features") and mpv is not None
-            fs_label = "Exit Fullscreen" if is_fs_active else "Enter Fullscreen (Patreon)"
+            fs_available = mpv is not None
+            fs_label = "Exit Fullscreen" if is_fs_active else "Enter Fullscreen"
             clicked, _ = imgui.menu_item(fs_label, "F11", selected=is_fs_active, enabled=fs_available)
             if clicked and fs_available:
                 if is_fs_active:
@@ -751,6 +761,21 @@ class MainMenu:
                     pm.project_dirty = True
             imgui.end_menu()
 
+        # Quad-block toggles (fixed mode only)
+        if imgui.begin_menu("Side Blocks"):
+            for label, attr in (
+                ("Left Top: Control Panel", "show_left_top_block"),
+                ("Left Bottom: Chapters & Bookmarks", "show_left_bottom_block"),
+                ("Right Top: Info & Graphs", "show_right_top_block"),
+                ("Right Bottom: Plugins", "show_right_bottom_block"),
+            ):
+                cur = bool(getattr(app_state, attr, True))
+                clicked, val = imgui.menu_item(label, selected=cur)
+                if clicked:
+                    setattr(app_state, attr, val)
+                    pm.project_dirty = True
+            imgui.end_menu()
+
         # Tooltip only computed if hovered
         if imgui.is_item_hovered() and not is_floating:
             imgui.set_tooltip("Window toggles are for floating mode.")
@@ -789,7 +814,7 @@ class MainMenu:
                     app_state.show_subtitle_timeline = val
                     pm.project_dirty = True
 
-            # Extra timelines (T3+) — supporter only
+            # Extra timelines (T3+), supporter only
             if self._feat_supporter:
                 for t_num in EXTRA_TIMELINE_RANGE:
                     vis_attr = f"show_funscript_interactive_timeline{t_num}"
@@ -1208,20 +1233,49 @@ class MainMenu:
         """Render top-level Support FunGen menu."""
         app = self.app
         if imgui.begin_menu("Support FunGen"):
-            if _menu_item_simple("Get Add-ons (Ko-fi)"):
+            imgui.text_disabled("Scripting for money?")
+            if _menu_item_simple("Get a Lifetime Commercial License"):
                 try:
-                    webbrowser.open("https://ko-fi.com/k00gar")
+                    webbrowser.open("https://discord.com/invite/WYkjMbtCZA")
                 except Exception as e:
                     if hasattr(app, 'logger') and app.logger:
-                        app.logger.warning(f"Could not open Ko-fi link: {e}")
+                        app.logger.warning(f"Could not open Discord link: {e}")
             if imgui.is_item_hovered():
                 imgui.set_tooltip(
-                    "Add-ons available at ko-fi.com/k00gar:\n"
-                    "- Device Control (Handy, OSR2, etc.)\n"
-                    "- Video Streamer (XBVR, Stash)\n"
-                    "- Patreon (batch processing, early access)\n\n"
-                    "After purchase, use Discord bot commands to receive your files."
+                    "If you sell or publish funscripts made with FunGen,\n"
+                    "a one-time lifetime commercial license is the fair way\n"
+                    "to support ongoing development.\n\n"
+                    "Opens Discord - DM to arrange pricing."
                 )
+
+            imgui.separator()
+            imgui.text_disabled("Other ways to chip in")
+
+            if _menu_item_simple("Leave a Tip"):
+                try:
+                    webbrowser.open("https://paypal.me/k00gar")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open PayPal link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Any amount, via paypal.me/k00gar")
+
+            if _menu_item_simple("Get Streamer + Device Control Bundle"):
+                try:
+                    webbrowser.open("https://paypal.me/k00gar/17")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open PayPal link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Streamer + Device Control bundle - 17 EUR\n"
+                    "Includes:\n"
+                    "- Device Control (Handy, OSR2, Buttplug, etc.)\n"
+                    "- Video Streamer (XBVR, Stash, browser playback)\n\n"
+                    "After payment, ping me on Discord to receive your files."
+                )
+
+            imgui.separator()
 
             if _menu_item_simple("Join Discord Community"):
                 try:
@@ -1250,6 +1304,29 @@ class MainMenu:
 
             imgui.end_menu()
 
+    def _render_unsaved_pulse(self, pm):
+        """Slow red pulse across the menu bar background after N minutes of
+        unsaved edits. Non-modal nag, silent until threshold elapses.
+        Threshold + period read from settings; defaults match reference editor (300s, 2s)."""
+        if pm is None or not pm.first_dirty_time:
+            return
+        import math as _m
+        import time as _t
+        settings = getattr(self.app, 'app_settings', None)
+        threshold = float(settings.get("unsaved_pulse_threshold_s", 300.0)) if settings else 300.0
+        period = max(0.5, float(settings.get("unsaved_pulse_period_s", 2.0))) if settings else 2.0
+        elapsed = _t.time() - pm.first_dirty_time
+        if elapsed < threshold:
+            return
+        # 0..1 sin wave -> alpha
+        phase = (elapsed % period) / period
+        alpha = 0.10 + 0.20 * (0.5 + 0.5 * _m.sin(phase * 2.0 * _m.pi))
+        dl = imgui.get_window_draw_list()
+        x, y = imgui.get_window_position()
+        w, h = imgui.get_window_size()
+        dl.add_rect_filled(x, y, x + w, y + h,
+                           imgui.get_color_u32_rgba(0.95, 0.20, 0.20, alpha))
+
     def _render_menu_bar_logo(self):
         """Render FunGen logo at the start of menu bar."""
         # Load logo texture
@@ -1272,26 +1349,44 @@ class MainMenu:
             # Add spacing after logo before menus
             imgui.same_line(spacing=8)
 
+    def _is_supporter_addon_installed(self) -> bool:
+        """True only when an actual supporter addon is present on disk.
+
+        Distinct from is_feature_available('patreon_features') which is
+        hardcoded True because the original patreon_features modules (live
+        trackers, batch, live capture) now ship in core. The badge is
+        meant to highlight a real paid/supporter addon installation, so
+        we check for an explicit marker file the addon would drop in.
+        """
+        import os
+        marker = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "patreon_features", "__init__.py",
+        )
+        return os.path.exists(marker)
+
     def _render_supporter_badge(self):
-        """Render Patreon status indicator in menu bar, consistent with Device/Streamer."""
-        if self._feat_supporter:
-            # Green for active (same pattern as Device: ON / Streamer: ON)
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.7, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.5, 0.15, 1.0)
-            imgui.small_button("Patreon: ON")
+        """Muted tip-jar badge. Subtle blue-gray by default; dim green when a
+        supporter addon is detected. Click opens paypal.me/k00gar."""
+        installed = self._is_supporter_addon_installed()
+        if installed:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.22, 0.38, 0.26, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.28, 0.46, 0.32, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.18, 0.32, 0.22, 1.0)
+            clicked = imgui.small_button("Tip Jar: supporter")
             imgui.pop_style_color(3)
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Patreon features active\nBatch processing, early access trackers")
+                imgui.set_tooltip("Supporter addon detected - thanks!\nClick to open paypal.me/k00gar")
         else:
-            # Red for inactive (same pattern as Device: OFF / Streamer: OFF)
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.3, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.8, 0.4, 0.4, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.2, 0.2, 1.0)
-            imgui.small_button("Patreon: OFF")
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.26, 0.30, 0.38, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.34, 0.38, 0.48, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.20, 0.24, 0.32, 1.0)
+            clicked = imgui.small_button("Tip Jar")
             imgui.pop_style_color(3)
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Patreon features not activated\nMonthly subscription at paypal.me/k00gar")
+                imgui.set_tooltip("Leave a tip - opens paypal.me/k00gar")
+        if clicked:
+            webbrowser.open("https://paypal.me/k00gar")
 
     def _render_device_control_indicator(self):
         """Render simple device control status indicator button."""

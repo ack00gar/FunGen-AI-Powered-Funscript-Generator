@@ -26,7 +26,7 @@ class FunscriptInfoMixin:
             fs_proc = self.app.funscript_processor
             funscript_obj = fs_proc.get_funscript_obj() if fs_proc else None
 
-            # Detect funscript object swap (new project) — clear all caches, recompute immediately
+            # Detect funscript object swap (new project), clear all caches, recompute immediately
             obj_id = id(funscript_obj) if funscript_obj else None
             force = False
             if obj_id != self._quality_last_funscript_id:
@@ -79,7 +79,7 @@ class FunscriptInfoMixin:
             self._quality_reports[timeline_num] = FunscriptQualityValidator().validate(actions, duration_ms)
             self._quality_last_compute_time[timeline_num] = time.monotonic()
         except Exception:
-            pass  # Fail silently — quality score is non-critical
+            pass  # Fail silently, quality score is non-critical
 
     def _render_quality_gauge(self, report):
         """Render an 8px quality gauge bar. Called unconditionally so gauge is always visible."""
@@ -162,7 +162,7 @@ class FunscriptInfoMixin:
             header = f"{header_label}##FSInfoT{timeline_num}"
             expanded = imgui.tree_node(header)
 
-        # Gauge bar — always visible regardless of expanded/collapsed
+        # Gauge bar, always visible regardless of expanded/collapsed
         self._render_quality_gauge(report)
 
         if expanded:
@@ -215,10 +215,10 @@ class FunscriptInfoMixin:
         self.funscript_info_perf.start_timing()
         fs_proc = self.app.funscript_processor
 
-        # Get stats with caching — avoid O(N) recomputation every frame
+        # Get stats with caching, avoid O(N) recomputation every frame
         target_funscript, axis_name = fs_proc._get_target_funscript_object_and_axis(timeline_num)
         if target_funscript and axis_name:
-            # Detect funscript object swap — clear all caches
+            # Detect funscript object swap, clear all caches
             obj_id = id(target_funscript)
             if obj_id != self._stats_last_funscript_id:
                 self._stats_last_funscript_id = obj_id
@@ -230,7 +230,7 @@ class FunscriptInfoMixin:
             last_count = self._stats_last_action_counts.get(timeline_num, -1)
 
             if count != last_count or timeline_num not in self._stats_cache:
-                # Recompute — action count changed
+                # Recompute, action count changed
                 stats = target_funscript.get_actions_statistics(axis=axis_name)
                 self._stats_cache[timeline_num] = stats
                 self._stats_last_action_counts[timeline_num] = count
@@ -271,6 +271,25 @@ class FunscriptInfoMixin:
         stat_row("Total Travel:", stats.get("total_travel_dist", 0))
         stat_row("Strokes:", stats.get("num_strokes", 0))
         imgui.separator()
+
+        # Live stroke stats: the segment the playhead is currently inside.
+        proc = self.app.processor
+        if (proc and proc.fps and proc.fps > 0 and target_funscript and axis_name and actions and len(actions) >= 2):
+            ph_ms = (proc.current_frame_index / proc.fps) * 1000.0
+            try:
+                lo, _ = target_funscript.range_indices(axis_name, ph_ms, ph_ms)
+            except Exception:
+                lo = 0
+            i_after = max(1, min(len(actions) - 1, lo if lo > 0 else 1))
+            a_prev = actions[i_after - 1]
+            a_next = actions[i_after]
+            dt_ms = max(0, a_next['at'] - a_prev['at'])
+            d_pos = a_next['pos'] - a_prev['pos']
+            speed = (abs(d_pos) / (dt_ms / 1000.0)) if dt_ms > 0 else 0.0
+            stat_row("Stroke interval:", f"{dt_ms} ms")
+            stat_row("Stroke speed:", f"{speed:.0f} u/s")
+            stat_row("Stroke delta:", f"{a_prev['pos']} → {a_next['pos']} ({d_pos:+d})")
+            imgui.separator()
         imgui.next_column()
         imgui.separator()
         imgui.next_column()

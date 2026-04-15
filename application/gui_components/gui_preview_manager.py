@@ -221,45 +221,43 @@ class PreviewManagerMixin:
         return image_data
 
     # --- Extracted CPU-intensive drawing logic for heatmap ---
-    def _generate_heatmap_data(self, target_width, target_height, total_duration_s, actions):
-        """
-        Performs the numpy/cv2 operations to create the heatmap image.
-        This is called by the worker thread.
-        """
+    # Texture width is fixed and independent of display width: GPU stretches
+    # the 1-pixel-tall strip to the on-screen bar via the imgui quad. This
+    # eliminates regen on every panel resize and shrinks the texture upload
+    # from H*W*4 bytes to W*4 bytes.
+    HEATMAP_TEX_WIDTH = 4096
 
+    def _generate_heatmap_data(self, target_width, target_height, total_duration_s, actions):
+        """Build a 1xW RGBA strip whose width is independent of display size.
+
+        target_width / target_height are accepted for API compatibility but
+        ignored — the texture is always HEATMAP_TEX_WIDTH pixels wide and
+        1 pixel tall. The GPU stretches it at draw time.
+        """
+        W = self.HEATMAP_TEX_WIDTH
         colors = self.colors
-        image_data = np.full((target_height, target_width, 4), (colors.HEATMAP_BACKGROUND), dtype=np.uint8)
+        image_data = np.full((1, W, 4), colors.HEATMAP_BACKGROUND, dtype=np.uint8)
 
         if len(actions) > 1 and total_duration_s > 0.001:
             ats = np.array([a['at'] for a in actions], dtype=np.float64) / 1000.0
             poss = np.array([a['pos'] for a in actions], dtype=np.float32)
-            # Segment starts/ends in pixel space
-            x_coords = ((ats / total_duration_s) * (target_width - 1)).astype(np.int32)
-            x_coords = np.clip(x_coords, 0, target_width - 1)
-            # Compute speeds per segment
+            x_coords = ((ats / total_duration_s) * (W - 1)).astype(np.int32)
+            x_coords = np.clip(x_coords, 0, W - 1)
             dt = np.diff(ats)
             dpos = np.abs(np.diff(poss))
             speeds = np.divide(dpos, dt, out=np.zeros_like(dpos), where=dt > 1e-6)
-            # Vectorized color mapping (prebuilt cache to uint8)
             colors_u8 = self.app.utility.get_speed_colors_vectorized_u8(speeds)
-            # For each column, find its segment index via searchsorted
-            cols = np.arange(target_width, dtype=np.int32)
-            # Map columns to times then to segment indices
-            # In pixel domain we can use x_coords boundaries directly
+            cols = np.arange(W, dtype=np.int32)
             seg_idx_for_col = np.searchsorted(x_coords, cols, side='right') - 1
-            # Columns before first segment are not-yet-fixed; set fully transparent (alpha=0)
             valid_mask = seg_idx_for_col >= 0
             seg_idx_for_col = np.clip(seg_idx_for_col, 0, len(speeds) - 1)
-            col_colors = np.zeros((target_width, 4), dtype=np.uint8)
+            col_colors = np.zeros((W, 4), dtype=np.uint8)
             if np.any(valid_mask):
-                col_colors[valid_mask] = colors_u8[seg_idx_for_col[valid_mask]]  # shape (W,4)
-                # Ensure fully opaque for fixed columns
+                col_colors[valid_mask] = colors_u8[seg_idx_for_col[valid_mask]]
                 col_colors[valid_mask, 3] = 255
-            # Ensure not-yet-fixed columns remain fully transparent
             if np.any(~valid_mask):
                 col_colors[~valid_mask, 3] = 0
-            # Broadcast to image rows
-            image_data[:] = col_colors[np.newaxis, :, :]
+            image_data[0, :, :] = col_colors
 
         return image_data
 
@@ -312,7 +310,7 @@ class PreviewManagerMixin:
             # Use OpenCV-based thumbnail extractor for fast seeking (no FFmpeg process spawning!)
             # This is much faster than spawning FFmpeg for each tooltip hover
             # Note: This still blocks briefly for OpenCV seek, but much faster than FFmpeg
-            frame = self.app.processor.get_thumbnail_frame(frame_index, use_gpu_unwarp=False)
+            frame = self.app.processor.get_thumbnail_frame(frame_index)
 
             if frame is None:
                 return None, None

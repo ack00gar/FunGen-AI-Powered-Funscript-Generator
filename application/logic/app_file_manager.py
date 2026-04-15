@@ -243,7 +243,7 @@ class AppFileManager:
         return meta
 
     def _get_funscript_path_for_axis(self, video_path: str, axis_name: str) -> str:
-        """Return the OFS-convention path for a given axis next to the video file.
+        """Return the per-axis path for a given axis next to the video file.
 
         E.g. axis_name='stroke' -> '/path/to/video.funscript'
              axis_name='roll'   -> '/path/to/video.roll.funscript'
@@ -254,10 +254,10 @@ class AppFileManager:
         return f"{base}{suffix}.funscript"
 
     def discover_axis_funscripts(self, video_path: str) -> Dict[str, str]:
-        """Scan for funscript files associated with a video using OFS and legacy naming.
+        """Scan for funscript files associated with a video using per-axis and legacy naming.
 
         Returns a dict mapping axis_name -> filepath for discovered files.
-        Searches both OFS naming (video.roll.funscript) and legacy _tN naming.
+        Searches both per-axis naming (video.roll.funscript) and legacy _tN naming.
         """
         if not video_path or not os.path.exists(video_path):
             return {}
@@ -265,7 +265,7 @@ class AppFileManager:
         base, _ = os.path.splitext(video_path)
         discovered: Dict[str, str] = {}
 
-        # 1. Check OFS-style naming: basename.{suffix}.funscript
+        # 1. Check per-axis naming: basename.{suffix}.funscript
         for suffix in all_known_suffixes():
             # suffix is like '.roll', '.pitch', etc.
             candidate = f"{base}{suffix}.funscript"
@@ -290,7 +290,7 @@ class AppFileManager:
                 try:
                     tl_num = int(num_str)
                     axis_name = legacy_axis_map.get(tl_num, f"axis_{tl_num}")
-                    # Don't overwrite OFS-discovered files (OFS naming takes priority)
+                    # Don't overwrite per-axis-discovered files (per-axis naming takes priority)
                     discovered.setdefault(axis_name, pattern_file)
                 except ValueError:
                     pass
@@ -435,7 +435,7 @@ class AppFileManager:
             self._save_funscript_file(secondary_path, secondary_actions, None)
 
     def save_raw_funscripts_next_to_video(self, video_path: str):
-        """Save raw funscripts next to the video file using OFS naming conventions.
+        """Save raw funscripts next to the video file using per-axis naming conventions.
 
         Uses .raw.funscript extension by default, or .funscript if
         the 'export_raw_as_funscript' setting is enabled.
@@ -829,7 +829,7 @@ class AppFileManager:
         output_folder_base = self.app.app_settings.get("output_folder_path", "output")
         initial_path = output_folder_base
 
-        # Resolve axis name for OFS-style filename
+        # Resolve axis name for per-axis filename
         axis_name = self._resolve_axis_name_for_timeline(timeline_num)
         suffix = file_suffix_for_axis(axis_name)
 
@@ -945,7 +945,7 @@ class AppFileManager:
         )
 
     def export_all_axes_ofs(self):
-        """Export all axes as separate OFS-named funscript files (auto-save, no dialog)."""
+        """Export all axes as separate per-axis funscript files (auto-save, no dialog)."""
         funscript_obj = None
         if self.app.tracker and hasattr(self.app.tracker, 'funscript'):
             funscript_obj = self.app.tracker.funscript
@@ -998,7 +998,7 @@ class AppFileManager:
         )
 
     def import_all_axes_ofs(self):
-        """Discover and import all OFS-named funscript files for the current video."""
+        """Discover and import all per-axis funscript files for the current video."""
         if not self.video_path:
             self.logger.warning("No video loaded. Open a video first.", extra={"status_message": True})
             return
@@ -1047,7 +1047,7 @@ class AppFileManager:
 
     def save_funscripts_for_batch(self, video_path: str):
         """
-        Automatically saves funscripts for all active axes using OFS naming.
+        Automatically saves funscripts for all active axes using per-axis naming.
         For remote videos (HTTP URLs), funscripts are always saved to the output directory.
         """
         if not self.app.funscript_processor:
@@ -1378,6 +1378,10 @@ class AppFileManager:
             self.app.project_manager.project_dirty = True
             # Reset UI states for the new video
             self.app.app_state_ui.reset_video_zoom_pan()
+            # Park the timeline at t=0 explicitly; force_sync alone is gated by
+            # timeline_interaction_active, which can be stale from a prior file.
+            self.app.app_state_ui.timeline_pan_offset_ms = 0.0
+            self.app.app_state_ui.timeline_interaction_active = False
             self.app.app_state_ui.force_timeline_pan_to_current_frame = True
             self.app.funscript_processor.update_funscript_stats_for_timeline(1, "Video Loaded")
             self.app.funscript_processor.update_funscript_stats_for_timeline(2, "Video Loaded")
@@ -1589,7 +1593,7 @@ class AppFileManager:
 
         export_format = self.app.app_settings.get("funscript_export_format", "separate")
 
-        # --- Separate files (OFS) mode ---
+        # --- Separate files (per-axis) mode ---
         if export_format in ("separate", "both"):
             if primary_actions:
                 path_in_output = self.get_output_path_for_file(video_path, ".funscript")

@@ -101,8 +101,6 @@ class TrackerManager:
         self.flow_history_window_smooth = 10
         self.y_offset = 0  # Y-axis offset for positioning
         self.x_offset = 0  # X-axis offset for positioning  
-        self.output_delay_frames = 0  # Frame delay compensation
-        self.current_video_fps_for_delay = 30.0  # FPS for delay calculations
         self.internal_frame_counter = 0  # Frame counter for processing
         
         # Additional properties that modular trackers might expect

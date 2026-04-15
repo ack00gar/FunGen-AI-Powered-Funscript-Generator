@@ -19,7 +19,8 @@ import asyncio
 import json
 import logging
 import threading
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,11 @@ class FunGenWSAPI:
         self._loop = None
         self._thread = None
         self._running = False
+        # Event push state
+        self._clients: Set = set()              # Set of websocket connections
+        self._fs_change_cooldown_per_axis: Dict[str, float] = {}  # axis -> last-pushed monotonic time
+        self._fs_change_pending: Dict[str, bool] = {}             # axis -> deferred push armed
+        self._fs_debounce_ms: int = 200          # debounce window
 
     def start(self):
         if self._running:
@@ -72,9 +78,18 @@ class FunGenWSAPI:
                 await asyncio.sleep(0.5)
 
     async def _handle_client(self, websocket, path=None):
-        """Handle a connected client."""
+        """Handle a connected client. Tracks the connection in self._clients
+        so push events can broadcast to it, and sends an initial snapshot."""
         logger.info(f"WS API client connected")
+        self._clients.add(websocket)
         try:
+            # Initial snapshot, send a snapshot to clients on connect
+            try:
+                snap = self._cmd_get_state({})
+                await websocket.send(json.dumps({
+                    "type": "event", "name": "state_snapshot", "data": snap}))
+            except Exception:
+                pass
             async for message in websocket:
                 try:
                     msg = json.loads(message)
@@ -91,7 +106,78 @@ class FunGenWSAPI:
         except Exception:
             pass
         finally:
+            self._clients.discard(websocket)
             logger.info("WS API client disconnected")
+
+    # ---- Event push (called from main thread) ----
+
+    def _broadcast(self, name: str, data: dict) -> None:
+        """Thread-safe broadcast of an event envelope to all clients.
+        Schedules send into the asyncio loop without blocking the caller."""
+        if not self._clients or not self._loop:
+            return
+        envelope = {"type": "event", "name": name, "data": data}
+        payload = json.dumps(envelope)
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._broadcast_async(payload), self._loop)
+        except RuntimeError:
+            pass  # loop closed
+
+    async def _broadcast_async(self, payload: str):
+        if not self._clients:
+            return
+        dead = []
+        for ws in list(self._clients):
+            try:
+                await ws.send(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self._clients.discard(ws)
+
+    def emit_time(self, time_ms: float) -> None:
+        self._broadcast("time_change", {"time_ms": float(time_ms)})
+
+    def emit_play(self, playing: bool) -> None:
+        self._broadcast("play_change", {"playing": bool(playing)})
+
+    def emit_media(self, video_path: str) -> None:
+        self._broadcast("media_change", {"media_path": str(video_path)})
+
+    def emit_duration(self, duration_s: float) -> None:
+        self._broadcast("duration_change", {"duration_s": float(duration_s)})
+
+    def emit_chapter_change(self) -> None:
+        self._broadcast("chapter_change", {})
+
+    def emit_funscript_change(self, axis: str = "primary") -> None:
+        """200ms-debounced broadcast, protects against drag-storms."""
+        now = time.monotonic()
+        last = self._fs_change_cooldown_per_axis.get(axis, 0.0)
+        if (now - last) * 1000.0 < self._fs_debounce_ms:
+            self._fs_change_pending[axis] = True
+            # Schedule a flush after the debounce window
+            if self._loop:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self._fs_flush_after(axis,
+                                             self._fs_debounce_ms / 1000.0),
+                        self._loop)
+                except RuntimeError:
+                    pass
+            return
+        self._fs_change_cooldown_per_axis[axis] = now
+        self._fs_change_pending[axis] = False
+        self._broadcast("funscript_change", {"axis": axis})
+
+    async def _fs_flush_after(self, axis: str, delay: float):
+        await asyncio.sleep(delay)
+        if not self._fs_change_pending.get(axis, False):
+            return
+        self._fs_change_pending[axis] = False
+        self._fs_change_cooldown_per_axis[axis] = time.monotonic()
+        self._broadcast("funscript_change", {"axis": axis})
 
     def _dispatch(self, msg: dict) -> dict:
         """Route a command to its handler."""

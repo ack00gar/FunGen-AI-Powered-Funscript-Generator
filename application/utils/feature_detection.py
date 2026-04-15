@@ -81,22 +81,16 @@ class FeatureDetector:
                 "streamer/__init__.py",
                 "streamer/sync_server.py",
                 "streamer/video_http_server.py",
-                "streamer/integration_manager.py"
+                "streamer/sync_media_handlers.py",
             ],
             dependencies=[],
             tier="supporter"
         )
         
-        # Patreon Features Package (Supporter)
-        features["patreon_features"] = FeatureInfo(
-            name="patreon_features",
-            display_name="Patreon Features",
-            description="Advanced batch, tracker early access, live capture",
-            folder_path="patreon_features",
-            required_files=["patreon_features/__init__.py"],
-            dependencies=[],
-            tier="supporter"
-        )
+        # patreon_features modules (live trackers, live capture, batch queue) now
+        # ship in core. The feature key is kept for back-compat with the many
+        # is_feature_available("patreon_features") gates scattered in the UI;
+        # it always resolves to True via the override in is_feature_available().
 
         # Subtitle Translation (Supporter)
         features["subtitle_translation"] = FeatureInfo(
@@ -226,6 +220,9 @@ class FeatureDetector:
     
     def is_feature_available(self, feature_name: str) -> bool:
         """Check if a feature is available."""
+        # patreon_features modules now ship in core; legacy gates always pass.
+        if feature_name == "patreon_features":
+            return True
         return feature_name in self.available_features
     
     def is_feature_enabled(self, feature_name: str) -> bool:

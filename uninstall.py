@@ -76,15 +76,15 @@ class FunGenUninstaller:
     
     def print_success(self, message: str):
         """Print success message"""
-        print(f"{Colors.GREEN}✓ {message}{Colors.ENDC}")
+        print(f"{Colors.GREEN}[ok] {message}{Colors.ENDC}")
     
     def print_warning(self, message: str):
         """Print warning message"""
-        print(f"{Colors.YELLOW}⚠ {message}{Colors.ENDC}")
+        print(f"{Colors.YELLOW}[!] {message}{Colors.ENDC}")
     
     def print_error(self, message: str):
         """Print error message"""
-        print(f"{Colors.RED}✗ {message}{Colors.ENDC}")
+        print(f"{Colors.RED}[x] {message}{Colors.ENDC}")
     
     def print_info(self, message: str):
         """Print info message"""
@@ -115,7 +115,7 @@ class FunGenUninstaller:
     
     def discover_fungen_installations(self):
         """Discover all FunGen-related files and directories"""
-        print(f"{Colors.BLUE}🔍 Scanning for FunGen installations...{Colors.ENDC}")
+        print(f"{Colors.BLUE}[scan] Scanning for FunGen installations...{Colors.ENDC}")
         
         # Common project directory names
         project_names = ["FunGen", "FunGen-AI-Powered-Funscript-Generator", "VR-Funscript-AI-Generator"]
@@ -233,27 +233,27 @@ class FunGenUninstaller:
     
     def confirm_uninstall(self) -> bool:
         """Ask user to confirm uninstall"""
-        print(f"\n{Colors.YELLOW}⚠ UNINSTALL CONFIRMATION{Colors.ENDC}")
+        print(f"\n{Colors.YELLOW}[!] UNINSTALL CONFIRMATION{Colors.ENDC}")
         print("The following will be removed:")
         
         total_size = 0
         
         if self.project_paths:
-            print(f"\n📁 Project Directories ({len(self.project_paths)}):")
+            print(f"\n[dir] Project Directories ({len(self.project_paths)}):")
             for path in self.project_paths:
                 size = self.get_directory_size(path)
                 total_size += size
                 print(f"  • {path} ({self.format_size(size)})")
         
         if self.env_paths and self.uninstall_type in ["complete", "environments"]:
-            print(f"\n🐍 Python Environments ({len(self.env_paths)}):")
+            print(f"\n[py] Python Environments ({len(self.env_paths)}):")
             for path in self.env_paths:
                 size = self.get_directory_size(path)
                 total_size += size
                 print(f"  • {path} ({self.format_size(size)})")
         
         if self.tool_paths and self.uninstall_type in ["complete", "tools"]:
-            print(f"\n🔧 Installed Tools ({len(self.tool_paths)}):")
+            print(f"\n[tool] Installed Tools ({len(self.tool_paths)}):")
             for path in self.tool_paths:
                 if path.is_dir():
                     size = self.get_directory_size(path)
@@ -265,14 +265,14 @@ class FunGenUninstaller:
                     print(f"  • {path} ({self.format_size(size)})")
         
         if self.launcher_paths:
-            print(f"\n🚀 Launcher Scripts ({len(self.launcher_paths)}):")
+            print(f"\n[run] Launcher Scripts ({len(self.launcher_paths)}):")
             for path in self.launcher_paths:
                 print(f"  • {path}")
         
-        print(f"\n💾 Total disk space to be freed: {self.format_size(total_size)}")
+        print(f"\n[disk] Total disk space to be freed: {self.format_size(total_size)}")
         
         if self.backup:
-            print(f"📦 Backup will be created at: {self.backup_dir}")
+            print(f"[pkg] Backup will be created at: {self.backup_dir}")
         
         print(f"\n{Colors.RED}This action cannot be undone (unless backed up).{Colors.ENDC}")
         
@@ -287,7 +287,7 @@ class FunGenUninstaller:
         if not self.backup or self.dry_run:
             return
         
-        print(f"\n{Colors.BLUE}📦 Creating backup...{Colors.ENDC}")
+        print(f"\n{Colors.BLUE}[pkg] Creating backup...{Colors.ENDC}")
         
         try:
             self.backup_dir.mkdir(parents=True, exist_ok=True)
@@ -329,7 +329,7 @@ class FunGenUninstaller:
     
     def perform_uninstall(self) -> bool:
         """Perform the actual uninstall"""
-        print(f"\n{Colors.BLUE}🗑️ Starting uninstall...{Colors.ENDC}")
+        print(f"\n{Colors.BLUE}[rm] Starting uninstall...{Colors.ENDC}")
         
         try:
             # Remove project directories
@@ -385,7 +385,7 @@ class FunGenUninstaller:
             return
         
         # FunGen doesn't typically create registry entries, but check for PATH modifications
-        print(f"{Colors.BLUE}🔧 Checking Windows registry...{Colors.ENDC}")
+        print(f"{Colors.BLUE}[tool] Checking Windows registry...{Colors.ENDC}")
         self.print_info("FunGen doesn't modify registry - skipping registry cleanup")
     
     def print_completion_message(self):
@@ -402,7 +402,7 @@ class FunGenUninstaller:
             print(f"Successfully removed {self.files_removed} items")
         
         if self.backup and not self.dry_run:
-            print(f"\n{Colors.CYAN}📦 Backup Information:{Colors.ENDC}")
+            print(f"\n{Colors.CYAN}[pkg] Backup Information:{Colors.ENDC}")
             print(f"  Location: {self.backup_dir}")
             print(f"  To restore: Follow instructions in restore script")
             print(f"  Backup can be safely deleted if you don't need to restore")

@@ -100,7 +100,7 @@ class ChapterMaker(BaseOfflineTracker):
             name="OFFLINE_CHAPTER_MAKER",
             display_name="Chapter Maker (VR + 2D POV)",
             description="Fast chapter detection at 2fps — VR and 2D POV, no signal output",
-            category="offline",
+            category="tool",
             version="1.0.0",
             author="FunGen",
             tags=["offline", "chapter-detection", "lightweight", "vr", "2d", "pov"],
@@ -154,19 +154,12 @@ class ChapterMaker(BaseOfflineTracker):
         return False
 
     def estimate_processing_time(self, stage, video_path, **kwargs) -> float:
-        try:
-            cap = cv2.VideoCapture(video_path)
-            if cap.isOpened():
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                if not fps or fps <= 0:
-                    fps = 30.0
-                total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-                cap.release()
-                duration_s = total / fps
-                return max(10.0, duration_s * 0.008)
-        except Exception:
-            pass
-        return 30.0
+        from video.frame_source.probe import probe
+        p = probe(video_path)
+        if p is None or p.fps <= 0:
+            return 30.0
+        duration_s = p.total_frames / p.fps
+        return max(10.0, duration_s * 0.008)
 
     def process_stage(self,
                      stage: OfflineProcessingStage,
@@ -310,7 +303,6 @@ class ChapterMaker(BaseOfflineTracker):
 
         # Force CPU v360 for consistent output
         vp.vr_unwarp_method_override = 'v360'
-        vp.gpu_unwarp_enabled = False
         vp._update_video_parameters()
 
         self.logger.info(f"Chapter detection: {total_frames} frames @ {fps:.1f}fps, "
@@ -322,6 +314,36 @@ class ChapterMaker(BaseOfflineTracker):
         yolo_count = 0
         t_start = time.time()
 
+        from tracker.tracker_modules.helpers.async_yolo_worker import AsyncYoloWorker
+
+        def _apply_yolo(f_idx, fh, fw, det_objs, _payload):
+            nonlocal yolo_count
+            penis_box, other_boxes = parse_detections(det_objs)
+            if other_boxes:
+                frame_contact_info[f_idx] = build_contact_info(
+                    other_boxes, self.yolo_input_size)
+            if penis_box:
+                penis_frames.add(f_idx)
+                position = classify_frame_position(penis_box, other_boxes)
+            elif len(other_boxes) >= 2:
+                position = classify_no_penis(other_boxes, self.yolo_input_size)
+            else:
+                position = 'Not Relevant'
+            frame_positions[f_idx] = position
+            yolo_count += 1
+
+        yolo_worker = AsyncYoloWorker(
+            model=model,
+            conf=DEFAULT_CONFIDENCE,
+            imgsz=self.yolo_input_size,
+            device=config_constants.DEVICE,
+            on_result=_apply_yolo,
+            logger=self.logger,
+            input_queue_size=8,
+            batch_size=4,
+        )
+        yolo_worker.start()
+
         try:
             for frame_idx, frame, timing in vp.stream_frames_for_segment(
                     0, total_frames, stop_event=self.stop_event):
@@ -332,44 +354,37 @@ class ChapterMaker(BaseOfflineTracker):
                 if frame_idx % frame_skip != 0:
                     continue
 
-                try:
-                    det_objs = _yolo_run_detection(model, frame,
-                                                    conf=DEFAULT_CONFIDENCE,
-                                                    imgsz=self.yolo_input_size,
-                                                    device=config_constants.DEVICE)
-                except Exception as e:
-                    self.logger.debug(f"YOLO error frame {frame_idx}: {e}")
-                    continue
+                yolo_worker.submit(frame_idx, frame)
+                yolo_worker.drain()
 
-                penis_box, other_boxes = parse_detections(det_objs)
-
-                if other_boxes:
-                    frame_contact_info[frame_idx] = build_contact_info(
-                        other_boxes, self.yolo_input_size)
-
-                if penis_box:
-                    penis_frames.add(frame_idx)
-                    position = classify_frame_position(penis_box, other_boxes)
-                elif len(other_boxes) >= 2:
-                    position = classify_no_penis(other_boxes, self.yolo_input_size)
-                else:
-                    position = 'Not Relevant'
-
-                frame_positions[frame_idx] = position
-                yolo_count += 1
-
-                if progress_callback and yolo_count % 50 == 0:
+                if progress_callback and yolo_count > 0 and yolo_count % 50 == 0:
                     pct = min(90, int(90 * frame_idx / max(1, total_frames)))
                     elapsed = time.time() - t_start
+                    avg_fps = frame_idx / max(0.001, elapsed)
+                    eta_s = (total_frames - frame_idx) / avg_fps if avg_fps > 0 else 0.0
+                    yolo_ms = (yolo_worker.total_inference_ms /
+                               max(1, yolo_worker.completed)) if yolo_worker.completed else 0.0
                     progress_callback({
                         'stage': 'chapter_detection',
-                        'task': f'Sparse YOLO ({yolo_count} frames)',
+                        'phase': 'Chapter detection',
+                        'task': f'Frame {frame_idx}/{total_frames}',
                         'percentage': pct,
-                        'avg_fps': yolo_count / max(0.001, elapsed),
+                        'current': frame_idx,
+                        'total': total_frames,
+                        'avg_fps': avg_fps,
+                        'eta_seconds': eta_s,
+                        'elapsed_seconds': elapsed,
+                        'timing': {'yolo_det_ms': yolo_ms},
                     })
 
         except Exception as e:
             self.logger.error(f"Detection error: {e}", exc_info=True)
+        finally:
+            yolo_worker.stop()
+            if yolo_worker.dropped:
+                self.logger.info(
+                    f"YOLO worker dropped {yolo_worker.dropped} submissions "
+                    f"(queue full). Completed {yolo_worker.completed}.")
 
         elapsed = time.time() - t_start
         self.logger.info(f"Sparse detection: {yolo_count} YOLO frames in {elapsed:.1f}s "

@@ -187,29 +187,45 @@ class ExecutionMixin:
         imgui.spacing()
 
     def _render_hybrid_progress_ui(self, stage_proc, is_analysis_running, active_color, completed_color):
-        """Simplified progress display for hybrid trackers (VR Hybrid, etc.)."""
+        """Uniform progress display for hybrid / offline trackers.
+
+        Line 1: phase + current step (Frame N/M).
+        Line 2: FPS | ETA | Elapsed (right-aligned metrics).
+        Advanced: per-stage timing.
+        Progress bar.
+        """
+        def _fmt_hms(s):
+            s = max(0, int(s))
+            h, m = divmod(s, 3600)
+            m, s = divmod(m, 60)
+            return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
         if is_analysis_running:
-            # Status text from stage_proc (hybrid reports via S2 fields)
-            status = stage_proc.stage2_status_text or "Processing..."
-            imgui.text_wrapped(f"Status: {status}")
+            phase = stage_proc.stage2_status_text or "Processing"
+            task = stage_proc.stage2_main_progress_label
+            top_line = f"{phase}, {task}" if task else phase
+            imgui.text_wrapped(top_line)
 
-            main_label = stage_proc.stage2_main_progress_label
-            if main_label:
-                imgui.text_wrapped(f"Main: {main_label}")
+            fps = float(getattr(stage_proc, 'stage2_avg_fps', 0.0) or 0.0)
+            eta = float(getattr(stage_proc, 'stage2_eta_seconds', 0.0) or 0.0)
+            elapsed = float(getattr(stage_proc, 'stage2_elapsed_seconds', 0.0) or 0.0)
+            metric_parts = []
+            if fps > 0: metric_parts.append(f"FPS: {fps:.1f}")
+            if eta > 0: metric_parts.append(f"ETA: {_fmt_hms(eta)}")
+            if elapsed > 0: metric_parts.append(f"Elapsed: {_fmt_hms(elapsed)}")
+            if metric_parts:
+                imgui.text(" | ".join(metric_parts))
 
-            # Timing from S1 fields (hybrid reuses these for decode/yolo/flow timing)
-            timing_parts = []
-            decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
-            yolo_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
-            flow_ms = getattr(stage_proc, 'stage2_flow_ms', 0.0)
-            if decode_ms > 0:
-                timing_parts.append(f"Decode: {decode_ms:.1f}ms")
-            if yolo_ms > 0:
-                timing_parts.append(f"YOLO: {yolo_ms:.1f}ms")
-            if flow_ms > 0:
-                timing_parts.append(f"Flow: {flow_ms:.1f}ms")
-            if timing_parts:
-                imgui.text(" | ".join(timing_parts))
+            if self.app.app_state_ui.show_advanced_options:
+                timing_parts = []
+                decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
+                yolo_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
+                flow_ms = getattr(stage_proc, 'stage2_flow_ms', 0.0)
+                if decode_ms > 0: timing_parts.append(f"Decode: {decode_ms:.1f}ms")
+                if yolo_ms > 0: timing_parts.append(f"YOLO: {yolo_ms:.1f}ms")
+                if flow_ms > 0: timing_parts.append(f"Flow: {flow_ms:.1f}ms")
+                if timing_parts:
+                    imgui.text(" | ".join(timing_parts))
 
             progress = stage_proc.stage2_main_progress_value
             imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_color)

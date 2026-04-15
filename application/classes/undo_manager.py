@@ -470,6 +470,29 @@ class UndoManager:
         self.undo_stack.append(command)
         self.redo_stack.clear()
 
+    def match_top(self, command_type) -> bool:
+        """Return True if the top of the undo stack is an instance of
+        `command_type`. Used to coalesce live-drag operations into a single
+        undo entry: callers `undo()` the previous tick's snapshot before
+        pushing a fresh one, so the entire drag collapses to one entry."""
+        if not self.undo_stack:
+            return False
+        return isinstance(self.undo_stack[-1], command_type)
+
+    def pop_top(self, app) -> bool:
+        """Pop and undo the top entry without pushing to redo. Companion to
+        match_top, used during coalesced live-drag to discard the previous
+        intermediate snapshot before pushing the fresh one."""
+        if not self.undo_stack:
+            return False
+        cmd = self.undo_stack.pop()
+        try:
+            cmd.undo(app)
+            cmd.finalize(app)
+        except Exception:
+            pass
+        return True
+
     def undo(self, app) -> Optional[str]:
         """Undo the most recent command. Returns description or None."""
         if not self.undo_stack:
@@ -546,3 +569,11 @@ class UndoManager:
     def get_redo_history(self) -> List[str]:
         """Get descriptions for display (most recent first)."""
         return [cmd.description for cmd in reversed(self.redo_stack)]
+
+
+class LiveDragCmd(BulkReplaceCmd):
+    """Marker subclass for live-drag tool sliders. Behavior is identical to
+    BulkReplaceCmd; exists so undo_manager.match_top(LiveDragCmd) can detect
+    the previous live-drag tick and coalesce the whole drag into one undo
+    entry via pop_top + push fresh snapshot."""
+    pass

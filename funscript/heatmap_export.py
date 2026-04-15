@@ -1,7 +1,7 @@
 """Heatmap PNG export for funscript files.
 
 Generates horizontal heatmap images showing speed distribution over time,
-using the OFS-standard color gradient.
+using the standard color gradient.
 """
 import numpy as np
 from typing import List, Dict, Optional

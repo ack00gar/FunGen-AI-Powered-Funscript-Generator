@@ -42,33 +42,50 @@ class IconTextureManager:
             return self._icon_cache[icon_name]
 
         try:
-            # Construct icon path
-            icon_path = os.path.join(self._assets_dir, 'ui', 'icons', icon_name)
+            # Prefer Nerd Font glyph rendering when a mapping exists. This
+            # replaces "emoji PNG" look with monochrome iconography that
+            # inherits the app's text color.
+            icon_rgb = None
+            try:
+                from application.utils.icon_glyph_renderer import (
+                    glyph_for, render_glyph_rgba,
+                )
+                glyph = glyph_for(icon_name)
+            except Exception:
+                glyph = None
+            if glyph:
+                rendered = render_glyph_rgba(glyph, size_px=64)
+                if rendered is not None:
+                    icon_rgb = rendered
 
-            if not os.path.exists(icon_path):
-                logger.debug(f"Icon file not found: {icon_path}")
-                return (None, 0, 0)
+            if icon_rgb is None:
+                # Construct icon path
+                icon_path = os.path.join(self._assets_dir, 'ui', 'icons', icon_name)
 
-            # Load icon with cv2
-            icon_img = cv2.imread(icon_path, cv2.IMREAD_UNCHANGED)
+                if not os.path.exists(icon_path):
+                    logger.debug(f"Icon file not found: {icon_path}")
+                    return (None, 0, 0)
 
-            if icon_img is None:
-                logger.warning(f"Failed to load icon image: {icon_path}")
-                return (None, 0, 0)
+                # Load icon with cv2
+                icon_img = cv2.imread(icon_path, cv2.IMREAD_UNCHANGED)
 
-            # Convert BGR(A) to RGB(A)
-            if len(icon_img.shape) == 3 and icon_img.shape[2] == 4:  # Has alpha channel
-                icon_rgb = cv2.cvtColor(icon_img, cv2.COLOR_BGRA2RGBA)
-            elif len(icon_img.shape) == 3:  # RGB only
-                icon_rgb = cv2.cvtColor(icon_img, cv2.COLOR_BGR2RGB)
-                # Add alpha channel (fully opaque)
-                alpha = np.full((icon_rgb.shape[0], icon_rgb.shape[1], 1), 255, dtype=np.uint8)
-                icon_rgb = np.concatenate([icon_rgb, alpha], axis=2)
-            else:
-                # Grayscale - convert to RGBA
-                icon_rgb = cv2.cvtColor(icon_img, cv2.COLOR_GRAY2RGB)
-                alpha = np.full((icon_rgb.shape[0], icon_rgb.shape[1], 1), 255, dtype=np.uint8)
-                icon_rgb = np.concatenate([icon_rgb, alpha], axis=2)
+                if icon_img is None:
+                    logger.warning(f"Failed to load icon image: {icon_path}")
+                    return (None, 0, 0)
+
+                # Convert BGR(A) to RGB(A)
+                if len(icon_img.shape) == 3 and icon_img.shape[2] == 4:  # Has alpha channel
+                    icon_rgb = cv2.cvtColor(icon_img, cv2.COLOR_BGRA2RGBA)
+                elif len(icon_img.shape) == 3:  # RGB only
+                    icon_rgb = cv2.cvtColor(icon_img, cv2.COLOR_BGR2RGB)
+                    # Add alpha channel (fully opaque)
+                    alpha = np.full((icon_rgb.shape[0], icon_rgb.shape[1], 1), 255, dtype=np.uint8)
+                    icon_rgb = np.concatenate([icon_rgb, alpha], axis=2)
+                else:
+                    # Grayscale - convert to RGBA
+                    icon_rgb = cv2.cvtColor(icon_img, cv2.COLOR_GRAY2RGB)
+                    alpha = np.full((icon_rgb.shape[0], icon_rgb.shape[1], 1), 255, dtype=np.uint8)
+                    icon_rgb = np.concatenate([icon_rgb, alpha], axis=2)
 
             height, width = icon_rgb.shape[:2]
 

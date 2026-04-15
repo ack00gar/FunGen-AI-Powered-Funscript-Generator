@@ -48,7 +48,7 @@ class ComparisonMixin:
             classes = ps.get('classes', {})
             good = classes.get('gold', 0) + classes.get('green', 0)
             total = ps.get('total', 0)
-            pct = f"{good/total:.0%}" if total > 0 else "—"
+            pct = f"{good/total:.0%}" if total > 0 else "-"
 
             # Header: T1: filename — summary
             label = f"T{timeline_num}: {ref_name}"

@@ -1,4 +1,5 @@
 import imgui
+import os
 from typing import Optional
 
 from application.utils import _format_time, VideoSegment, get_icon_texture_manager, primary_button_style, destructive_button_style
@@ -59,7 +60,7 @@ class ChapterBarMixin:
             imgui.spacing()
             return
 
-        # Empty state hint when no chapters exist (non-blocking — mouse interaction still runs)
+        # Empty state hint when no chapters exist (non-blocking, mouse interaction still runs)
         if not fs_proc.video_chapters:
             hint = "No chapters - use I/O keys, drag on bar, or run chapter detection"
             hint_size = imgui.calc_text_size(hint)
@@ -306,7 +307,7 @@ class ChapterBarMixin:
                     def fetch_resize_preview():
                         try:
                             if self.app.processor:
-                                frame_data = self.app.processor.get_thumbnail_frame(new_frame, use_gpu_unwarp=False)
+                                frame_data = self.app.processor.get_thumbnail_frame(new_frame)
                                 if frame_data is not None:
                                     self.resize_preview_data = {
                                         'frame': new_frame,
@@ -384,12 +385,7 @@ class ChapterBarMixin:
                         self.resize_edge = closest_edge_type
                         action_on_segment_this_frame = True
 
-        if self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0 and total_video_frames > 0:
-            # Frame-based normalization matching segment rendering (no padding offset)
-            current_norm_pos = self.app.processor.current_frame_index / total_video_frames
-            marker_x = bar_start_x + current_norm_pos * bar_width
-            marker_col = imgui.get_color_u32_rgba(*VideoNavigationColors.MARKER)
-            draw_list.add_line(marker_x, bar_start_y, marker_x, bar_start_y + bar_height, marker_col, thickness=2.0)
+        # Playhead marker is drawn once in _core.render() spanning all nav bars.
 
         # Note: io and mouse_pos already defined above for resize logic
         full_bar_rect_min = (bar_start_x, bar_start_y)
@@ -712,7 +708,8 @@ class ChapterBarMixin:
                     active_tl = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
                     editor = self.gui_instance.timeline_editor1 if active_tl == 1 else self.gui_instance.timeline_editor2
                     if editor:
-                        editor.select_points_in_chapter()
+                        from application.classes.timeline_ops import select_points_in_chapter
+                        select_points_in_chapter(editor)
 
             # Delete Points in Chapter(s)
             if _platform.system() == "Darwin":
@@ -755,6 +752,52 @@ class ChapterBarMixin:
                     self._update_timecode_from_frame("end")
 
                     self.show_edit_chapter_dialog = True
+
+            # Export chapter as stream-copied clip + sliced funscript.
+            can_export_clip = (num_selected == 1 and self.context_selected_chapters
+                               and self.app.processor and self.app.processor.fps
+                               and self.app.processor.video_path)
+            if imgui.menu_item("Export Clip + Funscript...", enabled=can_export_clip)[0]:
+                if can_export_clip:
+                    self._export_chapter_clip(self.context_selected_chapters[0])
+                imgui.close_current_popup()
+
+            # Snap chapter edge to playhead, fast alternative to drag-resize.
+            can_snap = num_selected == 1 and self.context_selected_chapters and self.app.processor and self.app.processor.fps and self.app.processor.fps > 0
+            if imgui.begin_menu("Snap Edge to Playhead", enabled=can_snap):
+                if can_snap:
+                    chap = self.context_selected_chapters[0]
+                    proc = self.app.processor
+                    cur_frame = int(proc.current_frame_index)
+                    dist_start = abs(cur_frame - int(chap.start_frame_id))
+                    dist_end = abs(cur_frame - int(chap.end_frame_id))
+                    nearest_label = "Start" if dist_start <= dist_end else "End"
+                    if imgui.menu_item(f"Nearest edge ({nearest_label})")[0]:
+                        if dist_start <= dist_end:
+                            new_start = min(cur_frame, int(chap.end_frame_id) - 1)
+                            fs_proc.update_chapter_from_data(
+                                chap.unique_id,
+                                {"start_frame_str": str(max(0, new_start)),
+                                 "end_frame_str": str(chap.end_frame_id)})
+                        else:
+                            new_end = max(cur_frame, int(chap.start_frame_id) + 1)
+                            fs_proc.update_chapter_from_data(
+                                chap.unique_id,
+                                {"start_frame_str": str(chap.start_frame_id),
+                                 "end_frame_str": str(new_end)})
+                    if imgui.menu_item("Start to playhead")[0]:
+                        new_start = min(cur_frame, int(chap.end_frame_id) - 1)
+                        fs_proc.update_chapter_from_data(
+                            chap.unique_id,
+                            {"start_frame_str": str(max(0, new_start)),
+                             "end_frame_str": str(chap.end_frame_id)})
+                    if imgui.menu_item("End to playhead")[0]:
+                        new_end = max(cur_frame, int(chap.start_frame_id) + 1)
+                        fs_proc.update_chapter_from_data(
+                            chap.unique_id,
+                            {"start_frame_str": str(chap.start_frame_id),
+                             "end_frame_str": str(new_end)})
+                imgui.end_menu()
 
             # Split Chapter at Cursor
             can_split = False
@@ -1052,3 +1095,43 @@ class ChapterBarMixin:
         self.app.logger.info(f"Changed chapter type to {new_type_short_name}", extra={'status_message': True})
         self.app.project_manager.project_dirty = True
 
+
+
+    def _export_chapter_clip(self, chapter):
+        """Export the chapter as a stream-copied video clip + sliced funscript."""
+        proc = self.app.processor
+        fs_proc = self.app.funscript_processor
+        if not proc or not proc.video_path or not fs_proc:
+            return
+        target_fs, axis = fs_proc._get_target_funscript_object_and_axis(1)
+        actions = (target_fs.get_axis_actions(axis) if (target_fs and axis) else [])
+        # Pop a directory picker
+        dlg = getattr(self.app, 'file_dialog', None)
+        if dlg is None:
+            self.app.logger.error("No file dialog available")
+            return
+
+        def _on_pick(out_dir: str):
+            try:
+                from funscript.export import export_chapter_clip
+                v_path, fs_path = export_chapter_clip(
+                    proc.video_path, out_dir, chapter, actions, proc.fps)
+                self.app.logger.info(
+                    f"Exported clip to {v_path} (+ funscript)", extra={'status_message': True})
+                self.app.notify("Chapter clip exported", "success", 2.0)
+            except Exception as e:
+                self.app.logger.error(f"Chapter clip export failed: {e}", exc_info=True)
+                self.app.notify("Clip export failed (see log)", "error", 3.0)
+
+        try:
+            dlg.show(
+                title="Choose folder for chapter clip",
+                callback=_on_pick,
+                is_save=False,
+                pick_folder=True,
+            )
+        except Exception:
+            # Fallback: write to ~/Desktop/fungen_clips
+            home = os.path.expanduser("~")
+            out_dir = os.path.join(home, "Desktop", "fungen_clips")
+            _on_pick(out_dir)

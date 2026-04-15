@@ -24,17 +24,9 @@ class DeveloperPerfMixin:
         imgui.text("Unwarp Method:")
         imgui.next_column()
 
-        # Determine active method
-        if hasattr(processor, 'gpu_unwarp_enabled') and processor.gpu_unwarp_enabled:
-            if hasattr(processor, 'gpu_unwarp_worker') and processor.gpu_unwarp_worker:
-                backend = getattr(processor.gpu_unwarp_worker, 'backend', 'unknown')
-                method_text = f"GPU {backend.upper()}"
-                method_color = (0.2, 0.8, 0.2, 1.0)  # Green for GPU
-            else:
-                method_text = "GPU (initializing...)"
-                method_color = (1.0, 0.8, 0.2, 1.0)  # Yellow
-        elif processor.is_vr_active_or_potential():
-            method_text = "CPU (v360)"
+        # Determine active method (PyAV's libavfilter v360 for VR, scale for 2D)
+        if processor.is_vr_active_or_potential():
+            method_text = "CPU (libavfilter v360)"
             method_color = (1.0, 0.6, 0.2, 1.0)  # Orange for CPU
         else:
             method_text = "N/A (2D video)"
@@ -68,7 +60,8 @@ class DeveloperPerfMixin:
         decode_time = getattr(processor, '_last_decode_time_ms', 0.0)
         unwarp_time = getattr(processor, '_last_unwarp_time_ms', 0.0)
         yolo_time = getattr(processor, '_last_yolo_time_ms', 0.0)
-        total_time = decode_time + unwarp_time + yolo_time
+        flow_time = getattr(processor, '_last_flow_time_ms', 0.0)
+        total_time = decode_time + unwarp_time + yolo_time + flow_time
 
         def render_timing_bar(label, time_ms, color):
             """Render a timing bar with label and value."""
@@ -87,17 +80,24 @@ class DeveloperPerfMixin:
             else:
                 imgui.text_disabled("N/A")
 
-        # FFmpeg decode
-        render_timing_bar("FFmpeg Decode", decode_time, (0.4, 0.7, 1.0, 1.0))
+        # PyAV decode (v360 filter baked in when VR is active)
+        render_timing_bar("PyAV Decode", decode_time, (0.4, 0.7, 1.0, 1.0))
 
-        # GPU Unwarp / v360
-        if processor.gpu_unwarp_enabled:
-            render_timing_bar("GPU Unwarp", unwarp_time, (0.2, 0.8, 0.2, 1.0))
-        elif processor.is_vr_active_or_potential():
-            render_timing_bar("CPU v360 Unwarp", unwarp_time, (1.0, 0.6, 0.2, 1.0))
+        # v360 unwarp — in the PyAV pipeline this is part of the filter graph
+        # and rolled into decode time. Show an explanatory label instead of N/A.
+        if processor.is_vr_active_or_potential():
+            imgui.text("CPU v360 Unwarp:")
+            imgui.same_line(position=180 * imgui.get_io().font_global_scale)
+            if unwarp_time > 0:
+                imgui.text_colored(f"{unwarp_time:.2f}ms", 1.0, 0.6, 0.2, 1.0)
+            else:
+                imgui.text_disabled("(baked into decode)")
 
         # YOLO Inference
         render_timing_bar("YOLO Inference", yolo_time, (0.8, 0.4, 0.8, 1.0))
+
+        # Optical flow (DIS) — populated by offline trackers via flow_ms
+        render_timing_bar("DIS Flow", flow_time, (0.4, 0.9, 0.6, 1.0))
 
         imgui.spacing()
         imgui.separator()

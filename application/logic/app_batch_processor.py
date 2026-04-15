@@ -61,10 +61,6 @@ class AppBatchProcessor:
             ""  # Visual separator
         ]
 
-        # Add conditional warnings
-        if self.app.calibration.funscript_output_delay_frames == 0:
-            message_lines.append("-> Warning: Optical flow delay is 0. Have you calibrated it?")
-
         # Set the state to trigger the GUI dialog
         self.app.batch_confirmation_message = "\n".join(message_lines)
         self.app.batch_confirmation_videos = video_paths

@@ -594,11 +594,11 @@ class SettingsRenderer:
                 self.app.processor.tracker.funscript.enable_point_simplification = nv
         _row_end()
 
-        _row_label("Export Format", "Separate Files (OFS): one .funscript per axis\n"
+        _row_label("Export Format", "Separate Files (per-axis): one .funscript per axis\n"
                     "Unified: all axes embedded in a single file\n"
                     "Both: save both formats simultaneously")
         imgui.push_item_width(-1)
-        export_opts = ["Separate Files (OFS)", "Unified (embedded axes)", "Both"]
+        export_opts = ["Separate Files (per-axis)", "Unified (embedded axes)", "Both"]
         export_vals = ["separate", "unified", "both"]
         cur_exp = settings.get("funscript_export_format", "separate")
         try:
@@ -650,7 +650,7 @@ class SettingsRenderer:
 
         # Axis Assignments Table
         imgui.spacing()
-        imgui.text("Axis Assignments (OFS Naming)")
+        imgui.text("Axis Assignments (Per-axis Naming)")
         _tooltip_if_hovered("Maps each timeline to a semantic axis name.\n"
                             "Controls the file suffix and TCode channel.")
 
@@ -750,22 +750,6 @@ class SettingsRenderer:
                         stage_proc.num_producers_stage1 = 1
                         settings.set("num_producers_stage1", 1)
             _row_end()
-
-        # Output delay
-        _row_label("Output Delay",
-                    "Compensates latency between video and tracker output.\n"
-                    "Most users should leave this at 0.")
-        calibration = app.calibration
-        delay = calibration.funscript_output_delay_frames
-        imgui.push_item_width(-1)
-        ch, nd = imgui.slider_int("##ODelay", delay, 0, 20, format="%d frames")
-        if ch:
-            calibration.funscript_output_delay_frames = nd
-            settings.set("funscript_output_delay_frames", nd)
-            calibration.update_tracker_delay_params()
-            app.project_manager.project_dirty = True
-        imgui.pop_item_width()
-        _row_end()
 
         # Workers
         if _is_offline_tracker(tmode):
@@ -995,4 +979,4 @@ class SettingsRenderer:
                 app.project_manager.project_dirty = True
                 app.logger.info("All class filters cleared.", extra={"status_message": True})
                 app.energy_saver.reset_activity_timer()
-        _tooltip_if_hovered("Uncheck all — enable all classes for tracking/analysis.")
+        _tooltip_if_hovered("Uncheck all - enable all classes for tracking/analysis.")

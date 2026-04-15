@@ -40,6 +40,14 @@ class MultiAxisFunscript:
         self._primary_np_cache = None    # (ats_f32, poss_f32) or None
         self._secondary_np_cache = None
 
+        # Parallel int64/uint8 array caches kept in lockstep with the action
+        # lists. Built lazily on first access, invalidated whenever
+        # _invalidate_cache is called. Hot paths can avoid Python-level dict
+        # iteration by using get_arrays / bisect_at / range_indices /
+        # get_values_at_times.
+        self._pa_times: Dict[str, Optional[np.ndarray]] = {}
+        self._pa_values: Dict[str, Optional[np.ndarray]] = {}
+
         # Additional axes for multi-timeline (supporter feature)
         self.additional_axes: Dict[str, List[Dict]] = {}
         self._additional_timestamps_cache: Dict[str, List[int]] = {}
@@ -50,6 +58,14 @@ class MultiAxisFunscript:
         # Timeline-to-axis assignment mapping (timeline_num -> axis_name string)
         # Tells the file manager which suffix to use, and the device controller which TCode channel.
         self._axis_assignments: Dict[int, str] = {1: "stroke", 2: "roll"}
+
+        # get_value bracket cache: during playback time_ms advances roughly
+        # monotonically, so the bisect we'd normally do for every call is
+        # usually bracketed by the same action pair as the previous call. Cache
+        # the last (axis, idx) pair; on cache hit we skip bisect entirely.
+        self._gv_cache_axis: Optional[str] = None
+        self._gv_cache_idx: int = 0
+        self._gv_cache_n: int = 0  # len snapshot; invalidate on mismatch
 
         # Point simplification settings
         self.enable_point_simplification: bool = True  # Enable by default
@@ -86,13 +102,87 @@ class MultiAxisFunscript:
         """Marks the timestamp cache(s) as dirty."""
         if axis == 'primary' or axis == 'both':
             self._cache_dirty_primary = True
+            self._pa_times.pop('primary', None)
+            self._pa_values.pop('primary', None)
         if axis == 'secondary' or axis == 'both':
             self._cache_dirty_secondary = True
+            self._pa_times.pop('secondary', None)
+            self._pa_values.pop('secondary', None)
         if axis in self._additional_cache_dirty:
             self._additional_cache_dirty[axis] = True
+            self._pa_times.pop(axis, None)
+            self._pa_values.pop(axis, None)
         if axis == 'both':
             for ax_name in self._additional_cache_dirty:
                 self._additional_cache_dirty[ax_name] = True
+                self._pa_times.pop(ax_name, None)
+                self._pa_values.pop(ax_name, None)
+        # Clear get_value bracket cache too — stale idx after mutation is wrong.
+        self._gv_cache_n = 0
+
+    # ----- Parallel array API -----
+    # Fast-path access for hot loops. Hand back numpy arrays in lockstep with
+    # primary_actions / secondary_actions / additional_axes; mutate via the
+    # action dicts as before, the arrays rebuild lazily on next read.
+
+    def _actions_for_axis(self, axis: str) -> List[Dict]:
+        if axis == 'primary':
+            return self.primary_actions
+        if axis == 'secondary':
+            return self.secondary_actions
+        return self.additional_axes.get(axis, [])
+
+    def get_arrays(self, axis: str = 'primary'):
+        """Return (times_ms_int64, values_uint8) numpy arrays for `axis`.
+
+        Cached and rebuilt only when _invalidate_cache is called for `axis`.
+        Returned arrays are views — do NOT mutate them; mutate primary_actions
+        instead and the arrays will rebuild on next access.
+        """
+        cached_t = self._pa_times.get(axis)
+        cached_v = self._pa_values.get(axis)
+        src = self._actions_for_axis(axis)
+        n = len(src)
+        # Guard: in-place dict mutation that changes the action count without
+        # going through the helper APIs would still be detected here.
+        if cached_t is not None and cached_v is not None and len(cached_t) == n:
+            return cached_t, cached_v
+        if n == 0:
+            t = np.empty(0, dtype=np.int64)
+            v = np.empty(0, dtype=np.uint8)
+        else:
+            t = np.fromiter((a['at'] for a in src), dtype=np.int64, count=n)
+            v = np.fromiter((a['pos'] for a in src), dtype=np.uint8, count=n)
+        self._pa_times[axis] = t
+        self._pa_values[axis] = v
+        return t, v
+
+    def bisect_at(self, axis: str, time_ms, side: str = 'left') -> int:
+        """np.searchsorted wrapper. side='left' or 'right'."""
+        t, _ = self.get_arrays(axis)
+        return int(np.searchsorted(t, time_ms, side=side))
+
+    def range_indices(self, axis: str, t0_ms, t1_ms):
+        """(lo, hi) such that times[lo:hi] is the actions in [t0_ms, t1_ms]."""
+        t, _ = self.get_arrays(axis)
+        return (int(np.searchsorted(t, t0_ms, side='left')),
+                int(np.searchsorted(t, t1_ms, side='right')))
+
+    def get_values_at_times(self, times_ms, axis: str = 'primary') -> np.ndarray:
+        """Vectorized linear interpolation. Outside-range clamps to first/last."""
+        t, v = self.get_arrays(axis)
+        times_ms = np.asarray(times_ms, dtype=np.int64)
+        if t.size == 0:
+            return np.full(times_ms.shape, 50.0, dtype=np.float32)
+        if t.size == 1:
+            return np.full(times_ms.shape, float(v[0]), dtype=np.float32)
+        return np.interp(times_ms, t, v).astype(np.float32)
+
+    def mark_actions_dirty(self, axis: str = 'both'):
+        """Public hook for callers that mutated dicts in place (e.g. plugin
+        modifying actions[i]['pos'] without changing 'at'). Invalidates all
+        caches so next read sees fresh data."""
+        self._invalidate_cache(axis)
 
     def _append_to_cache(self, axis_name: str, timestamp_ms: int):
         """Append a single timestamp to the cache without rebuilding."""
@@ -108,6 +198,9 @@ class MultiAxisFunscript:
             if not self._additional_cache_dirty.get(axis_name, True):
                 self._additional_timestamps_cache[axis_name].append(timestamp_ms)
                 self._additional_np_cache.pop(axis_name, None)
+        # Parallel arrays: drop on any append; lazy rebuild on next read.
+        self._pa_times.pop(axis_name, None)
+        self._pa_values.pop(axis_name, None)
 
     def _pop_from_cache(self, axis_name: str, index: int):
         """Remove an entry from the timestamp cache at the given index."""
@@ -125,6 +218,9 @@ class MultiAxisFunscript:
                 if cache:
                     cache.pop(index)
                     self._additional_np_cache.pop(axis_name, None)
+        # Parallel arrays: drop on any pop; lazy rebuild on next read.
+        self._pa_times.pop(axis_name, None)
+        self._pa_values.pop(axis_name, None)
 
     def _maybe_log_simplification_stats(self):
         """
@@ -156,7 +252,7 @@ class MultiAxisFunscript:
                 time_window_sec = time_window_ms / 1000.0
 
                 self.logger.info(
-                    f"📊 Point Simplification (Primary): {time_window_sec:.1f}s window, "
+                    f"Point Simplification (Primary): {time_window_sec:.1f}s window, "
                     f"{stats_p['total_considered']:,} frames → {stats_p['total_removed']:,} points removed ({reduction_pct:.1f}% reduction), "
                     f"{would_have_been:,} → {current_points:,} points"
                 )
@@ -174,7 +270,7 @@ class MultiAxisFunscript:
                 time_window_sec = time_window_ms / 1000.0
 
                 self.logger.info(
-                    f"📊 Point Simplification (Secondary): {time_window_sec:.1f}s window, "
+                    f"Point Simplification (Secondary): {time_window_sec:.1f}s window, "
                     f"{stats_s['total_considered']:,} frames → {stats_s['total_removed']:,} points removed ({reduction_pct:.1f}% reduction), "
                     f"{would_have_been:,} → {current_points:,} points"
                 )
@@ -353,6 +449,8 @@ class MultiAxisFunscript:
                 # Same timestamp as last — update in place
                 if last["pos"] != clamped_pos:
                     last["pos"] = clamped_pos
+                    # Timestamp unchanged → ts cache OK, but values array stale.
+                    self._pa_values.pop(axis_name, None)
                 return timestamp_ms
         else:
             # Empty list — just append
@@ -481,7 +579,26 @@ class MultiAxisFunscript:
 
         # Use the cached timestamp list, rebuilt only when dirty.
         action_timestamps = self._get_timestamps_for_axis(axis)
-        idx = bisect.bisect_left(action_timestamps, time_ms)
+
+        # Bracket cache: during playback time_ms advances monotonically so the
+        # same bracket pair often holds between calls. A 3-point probe around
+        # the cached idx beats a full bisect for the common case. Falls back
+        # to bisect on miss (identical behavior, no correctness risk).
+        n = len(action_timestamps)
+        if (self._gv_cache_axis == axis and self._gv_cache_n == n
+                and 0 < self._gv_cache_idx < n):
+            ci = self._gv_cache_idx
+            if action_timestamps[ci - 1] <= time_ms < action_timestamps[ci]:
+                idx = ci
+            elif ci + 1 < n and action_timestamps[ci] <= time_ms < action_timestamps[ci + 1]:
+                idx = ci + 1
+            else:
+                idx = bisect.bisect_left(action_timestamps, time_ms)
+        else:
+            idx = bisect.bisect_left(action_timestamps, time_ms)
+        self._gv_cache_axis = axis
+        self._gv_cache_idx = idx
+        self._gv_cache_n = n
 
         if idx == 0:
             return actions_list[0]["pos"]

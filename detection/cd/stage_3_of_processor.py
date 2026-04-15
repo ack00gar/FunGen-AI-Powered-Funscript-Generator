@@ -90,27 +90,19 @@ def stage3_worker_proc(
             # Get frame count from original video for validation
             fps = common_app_config.get('video_fps', 30.0)
 
-            # Try to get accurate frame count from original video
             try:
-                import subprocess
-                import json
-                cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                       '-show_entries', 'stream=nb_frames,duration',
-                       '-show_entries', 'format=duration',
-                       '-of', 'json', video_path]
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
-                if result.returncode == 0:
-                    data = json.loads(result.stdout)
-                    stream_info = data.get('streams', [{}])[0]
-                    format_info = data.get('format', {})
-                    nb_frames_str = stream_info.get('nb_frames')
-                    dur_str = stream_info.get('duration', format_info.get('duration', '0'))
-                    duration = float(dur_str) if dur_str and dur_str != 'N/A' else 0.0
-                    expected_frames = int(nb_frames_str) if nb_frames_str and nb_frames_str != 'N/A' else round(duration * fps)
+                from video.frame_source.probe import probe
+                p = probe(video_path)
+                if p is None:
+                    expected_frames = 10000
+                elif p.total_frames > 0:
+                    expected_frames = p.total_frames
+                elif p.duration_sec > 0:
+                    expected_frames = round(p.duration_sec * fps)
                 else:
-                    expected_frames = 10000  # Fallback
+                    expected_frames = 10000
             except Exception:
-                expected_frames = 10000  # Fallback if ffprobe fails
+                expected_frames = 10000
 
             # Use a reasonable tolerance for Stage 3 (typically works with chunks)
             tolerance = max(100, expected_frames // 100)  # 1% tolerance, minimum 100 frames
@@ -149,8 +141,6 @@ def stage3_worker_proc(
         roi_tracker_instance.y_offset = tracker_config.get('y_offset', constants.DEFAULT_LIVE_TRACKER_Y_OFFSET)
         roi_tracker_instance.x_offset = tracker_config.get('x_offset', constants.DEFAULT_LIVE_TRACKER_X_OFFSET)
         roi_tracker_instance.sensitivity = tracker_config.get('sensitivity', constants.DEFAULT_LIVE_TRACKER_SENSITIVITY)
-        roi_tracker_instance.output_delay_frames = common_app_config.get('output_delay_frames', 0)
-        roi_tracker_instance.current_video_fps_for_delay = common_app_config.get('video_fps', 30.0)
         # Configure oscillation detector mode based on settings
         od_mode = common_app_config.get('stage3_oscillation_detector_mode', 'current')
         if od_mode == "legacy":

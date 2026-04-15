@@ -23,7 +23,6 @@ PROFILE_KEYS = [
     "live_tracker_base_amplification",
     "live_tracker_class_amp_multipliers",
     "live_tracker_flow_smoothing_window",
-    "funscript_output_delay_frames",
     "discarded_tracking_classes",
     "tracking_axis_mode",
     "single_axis_output_target",
@@ -161,7 +160,8 @@ class AppSettings:
             "main_loop_normal_fps_target": 60,
 
             # Tracking & Processing
-            "funscript_output_delay_frames": 3,
+            "funscript_output_delay_frames": 0,
+            "timeline_base_height": 180,
             "discarded_tracking_classes": constants.CLASSES_TO_DISCARD_BY_DEFAULT,
             "tracking_axis_mode": "both",
             "single_axis_output_target": "primary",

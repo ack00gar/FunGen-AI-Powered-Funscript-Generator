@@ -147,6 +147,30 @@ class VideoSettingsMixin:
         """Render VR-specific settings in harmonized layout."""
         begin_settings_columns("vr_cols")
 
+        # Display Aspect — widens the v360 stereographic output so VR content
+        # fills more of the available horizontal space. Changing this rebuilds
+        # the pipeline.
+        row_label("Display Aspect", "Output aspect ratio for the VR projection.\n"
+                                      "1.0 = square (legacy), 1.78 = 16:9, 2.0 = ultrawide.\n"
+                                      "Wider aspect widens the horizontal field of view.")
+        aspect_vals = [1.0, 1.33, 1.5, 1.78, 2.0]
+        aspect_disp = ["1:1 (square)", "4:3", "3:2", "16:9", "2:1 (ultrawide)"]
+        cur_aspect = float(self.app.app_settings.get("vr_display_aspect", 1.0))
+        try:
+            cur_aspect_idx = min(range(len(aspect_vals)),
+                                  key=lambda i: abs(aspect_vals[i] - cur_aspect))
+        except ValueError:
+            cur_aspect_idx = 3
+        imgui.push_item_width(-1)
+        changed, new_idx = imgui.combo("##vrAspect", cur_aspect_idx, aspect_disp)
+        imgui.pop_item_width()
+        if changed:
+            self.app.app_settings.set("vr_display_aspect", float(aspect_vals[new_idx]))
+            if processor.is_video_open():
+                threading.Thread(target=processor.reapply_video_settings,
+                                 daemon=True, name='VRAspectReapply').start()
+        row_end()
+
         # Input Format
         row_label("Input Format", "The stereoscopic layout of the VR video file.")
         vr_fmt_disp = [

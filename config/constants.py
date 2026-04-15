@@ -13,7 +13,7 @@ except ImportError:
 # META & VERSIONING
 ####################################################################################################
 APP_NAME = "FunGen"
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.8.5"
 APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION}"
 FUNSCRIPT_AUTHOR = "FunGen"
 
@@ -71,10 +71,11 @@ YOLO_INPUT_SIZE = 640
 # Default target height for oscillation processing/downscaling to match model input characteristics
 DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT = YOLO_INPUT_SIZE
 
-# GPU Unwarp Configuration (VR video processing optimization)
-ENABLE_GPU_UNWARP = True  # Use GPU shader unwrapping instead of CPU v360 filter
-GPU_UNWARP_BACKEND = 'auto'  # 'metal', 'opengl', 'auto'
-FALLBACK_TO_FFMPEG_V360 = True  # Use v360 if GPU unwarp unavailable
+# GPU unwarp paths were removed with the subprocess backend; v360 now runs
+# in-process via PyAV's libavfilter graph. Stubs kept for any stray imports.
+ENABLE_GPU_UNWARP = False
+GPU_UNWARP_BACKEND = 'none'
+FALLBACK_TO_FFMPEG_V360 = True
 
 # Fallback for determining producer/consumer counts if os.cpu_count() fails.
 DEFAULT_FALLBACK_CPU_CORES = 4
@@ -92,7 +93,7 @@ class ProcessingSpeedMode(Enum):
 # See config/tracker_discovery.py for the new dynamic approach
 
 # Default tracker will be resolved dynamically from available trackers
-DEFAULT_TRACKER_NAME = "LIVE_OSCILLATION"  # Internal name, resolved at runtime
+DEFAULT_TRACKER_NAME = "OFFLINE_VR_HYBRID_CHAPTER"  # Internal name, resolved at runtime
 
 ####################################################################################################
 # AI & MODELS
@@ -106,6 +107,16 @@ AI_MODEL_TOOLTIP_EXTENSIONS = ".pt, .onnx, .engine, .mlpackage"
 ####################################################################################################
 MOD_KEY = "SUPER" if platform.system() == "Darwin" else "CTRL"
 
+# --- Modifier convention (forward-looking) ---
+# CTRL/CMD+key  : file/global/standard edit ops (save, open, copy, paste, undo, zoom, go-to-frame)
+# SHIFT+key     : "act on the current selection of timeline points"
+#                 (nudge, equalize, isolate, redistribute, move-to-playhead, value-change)
+# ALT+key       : "act on the current chapter / chapter context"
+#                 (select-in, delete-in, jump-between, set-boundary-from-playhead)
+# CTRL+ALT+key  : compound range/scope ops (range select, snap)
+# Bare key      : toggles + single-letter video/chapter commands (legacy)
+# Stick to this scheme for new bindings; legacy bindings are honored as-is to
+# avoid muscle-memory churn.
 DEFAULT_SHORTCUTS = {
     # File Operations (Standard shortcuts across all platforms)
     "save_project": f"{MOD_KEY}+S",
@@ -114,6 +125,8 @@ DEFAULT_SHORTCUTS = {
     # Video Navigation (Layout-independent - work on all keyboards)
     "seek_next_frame": "RIGHT_ARROW",
     "seek_prev_frame": "LEFT_ARROW",
+    "seek_next_n_frames": f"{MOD_KEY}+RIGHT_ARROW",   # Step by seek_n_frames (default 5)
+    "seek_prev_n_frames": f"{MOD_KEY}+LEFT_ARROW",
     "pan_timeline_left": "ALT+LEFT_ARROW",
     "pan_timeline_right": "ALT+RIGHT_ARROW",
     "jump_to_start": "HOME",
@@ -169,7 +182,19 @@ DEFAULT_SHORTCUTS = {
     "undo_timeline2": f"{MOD_KEY}+ALT+Z",
     "redo_timeline2": f"{MOD_KEY}+ALT+Y",
     "copy_selection": f"{MOD_KEY}+C",
-    "paste_selection": f"{MOD_KEY}+V",
+    "paste_selection": f"{MOD_KEY}+V",                  # Relative paste at playhead
+    "paste_selection_replace": f"{MOD_KEY}+SHIFT+V",    # Relative paste, clearing target interval
+    "paste_selection_exact": f"{MOD_KEY}+ALT+V",        # Paste at original absolute timestamps
+
+    # Selection-aware ops (SHIFT+ convention).
+    # Note: moving the closest action onto the playhead is handled by M
+    # (snap_nearest_to_playhead), which honors the current selection.
+    "equalize_selection": "SHIFT+E",          # Spread selected points evenly in time
+    "isolate_selection": "SHIFT+R",           # Keep only selection in its enclosing interval
+    "filter_selection_top": "SHIFT+T",        # Keep only peaks within selection
+    "filter_selection_bottom": "SHIFT+B",     # Keep only valleys within selection
+    "filter_selection_mid": "SHIFT+M",        # Keep only non-extrema within selection
+    "toggle_selection_loop": "\\",            # A-B loop between first and last selected actions
 
     # Playback (Universal)
     "toggle_playback": "SPACE",
@@ -412,7 +437,7 @@ MOTION_INVERSION_THRESHOLD = 1.2
 STAGE1_FRAME_QUEUE_MAXSIZE = 99
 DEFAULT_S1_NUM_PRODUCERS = 1
 DEFAULT_S1_NUM_CONSUMERS = max(os.cpu_count() // 2, 1) if os.cpu_count() else 2
-# MPS (Apple Silicon) shares unified memory — each consumer loads det + pose models.
+# MPS (Apple Silicon) shares unified memory, each consumer loads det + pose models.
 # Real-world: 4 consumers on 48GB still OOM. CoreML/ANE memory is unpredictable.
 MPS_MEMORY_PER_CONSUMER_GB = 12.0  # Conservative: accounts for CoreML + PyTorch + ANE overhead
 MPS_MEMORY_HEADROOM_GB = 10.0      # Reserve for OS, app, video decode, FFmpeg, and other processes

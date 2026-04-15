@@ -259,7 +259,7 @@ class RGBColors:
     TIMELINE_HEATMAP_BACKGROUND = (20, 20, 25, 255)
     TIMELINE_COLOR_ALPHA = 0.9 # alpha value for the timeline heatmap
 
-    # OFS-standard heatmap gradient (for interactive timeline)
+    # standard heatmap gradient (for interactive timeline)
     OFS_HEATMAP = [
         (0, 0, 0),           # Black — stationary
         (30, 100, 222),      # DodgerBlue — slow

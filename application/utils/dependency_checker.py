@@ -589,8 +589,8 @@ def _check_feature_dependencies(*, non_interactive: bool = True, auto_install: b
     # Define feature modules with their metadata
     # Icons are optional but make logs nicer
     feature_metadata = {
-        'device_control': {'icon': '🎮', 'description': 'device control'},
-        'streamer': {'icon': '📡', 'description': 'video streaming'},
+        'device_control': {'icon': '', 'description': 'device control'},
+        'streamer': {'icon': '', 'description': 'video streaming'},
     }
 
     any_changed = False
@@ -611,7 +611,7 @@ def _check_feature_dependencies(*, non_interactive: bool = True, auto_install: b
             continue
 
         feature_name = feature_path.name
-        metadata = feature_metadata.get(feature_name, {'icon': '📦', 'description': feature_name})
+        metadata = feature_metadata.get(feature_name, {'icon': '', 'description': feature_name})
 
         logger.debug(f"{feature_name} feature detected - checking dependencies...")
 

@@ -24,6 +24,9 @@ from application.gui_components.gui_preview_manager import PreviewManagerMixin
 from application.gui_components.gui_shortcut_handler import ShortcutHandlerMixin
 from application.gui_components.gui_dialog_renderer import DialogRendererMixin
 from application.gui_components.plugin_pipeline_ui import PluginPipelineUI
+from application.gui_components.side_blocks import (
+    LeftBottomBlock, RightBottomBlock, render_collapsed_chevron,
+)
 from application.utils.notifications import NotificationManager
 from application.gui_components.first_run_wizard import FirstRunWizard
 
@@ -131,6 +134,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.chapter_list_window_ui = ChapterListWindow(app, nav_ui=self.video_navigation_ui)
         self.chapter_type_manager_ui = ChapterTypeManagerUI(app)
         self.bookmark_list_window_ui = BookmarkListWindow(app, gui=self)
+        self.left_bottom_block = LeftBottomBlock(app, gui=self)
+        self.right_bottom_block = RightBottomBlock(app, gui=self)
         self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
         self.keyboard_shortcuts_dialog = KeyboardShortcutsDialog(app)
 
@@ -418,10 +423,60 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         imgui.create_context()
 
-        # Load fonts: default Latin + optional CJK merge for subtitle support
+        # Load fonts: default Latin + Nerd Symbols merge + optional CJK merge
         io = imgui.get_io()
         self._cjk_font_loaded = False
+        self._icon_font_loaded = False
         io.fonts.add_font_default()
+
+        # Merge Symbols Nerd Font so icon glyphs (\ue000-\uf8ff, \uf0000+) render.
+        # Single TTF shipped under assets/fonts/, no runtime install needed.
+        try:
+            icon_font_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "assets", "fonts", "icons.ttf",
+            )
+            if os.path.exists(icon_font_path):
+                icon_cfg = imgui.FontConfig(merge_mode=True)
+                # Private-use ranges covering Font Awesome, Material, Octicons,
+                # Weather, Devicons, Codicons, Powerline, all inside the
+                # Symbols Nerd Font.
+                icon_ranges = imgui.GlyphRanges([
+                    0x23fb, 0x23fe,   # IEC power symbols
+                    0x2665, 0x2665,   # heart
+                    0x26a1, 0x26a1,   # flash
+                    0x2b58, 0x2b58,   # circle
+                    0xe000, 0xe00a,   # Pomicons
+                    0xe0a0, 0xe0a2,   # Powerline
+                    0xe0a3, 0xe0a3,   # Powerline Extra
+                    0xe0b0, 0xe0b3,   # Powerline
+                    0xe0b4, 0xe0c8,   # Powerline Extra
+                    0xe0ca, 0xe0ca,
+                    0xe0cc, 0xe0d4,
+                    0xe200, 0xe2a9,   # Font Awesome Extension
+                    0xe300, 0xe3e3,   # Weather
+                    0xe5fa, 0xe6b5,   # Seti UI + Custom
+                    0xe700, 0xe8ef,   # Devicons
+                    0xea60, 0xec1e,   # Codicons
+                    0xed00, 0xf2ff,   # Font Awesome (v6 block 1)
+                    0xf000, 0xf2e0,   # Font Awesome legacy
+                    0xf300, 0xf372,   # Font Logos
+                    0xf400, 0xf533,   # Octicons
+                    0xf0001, 0xf1af0, # Material Design
+                    0, 0,
+                ])
+                io.fonts.add_font_from_file_ttf(
+                    icon_font_path, 13.0,
+                    font_config=icon_cfg,
+                    glyph_ranges=icon_ranges,
+                )
+                self._icon_font_loaded = True
+                self.app.logger.info("Icon font merged: icons.ttf")
+            else:
+                self.app.logger.debug(f"Icon font not found at {icon_font_path}")
+        except Exception as e:
+            self.app.logger.debug(f"Icon font load failed: {e}")
+
         if _is_feature_available("subtitle_translation"):
             try:
                 from subtitle_translation.model_downloader import get_cjk_font_path, ensure_cjk_font
@@ -530,7 +585,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # 3. Handle Funscript Files
         if funscript_files:
             self.app.logger.info(f"Funscript files dropped: {len(funscript_files)} files")
-            # If timeline 1 is empty or has no AI-generated script, load the first funscript there.
+            # If timeline 1 is empty or has no loaded script, load the first funscript there.
 
             if not self.app.funscript_processor.get_actions('primary'):
                 self.app.logger.info(f"Loading '{os.path.basename(funscript_files[0])}' into Timeline 1.")
@@ -799,8 +854,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 fps = self.app.processor.fps if self.app.processor.fps > 0 else 30.0
                 current_time_s = self.app.processor.current_frame_index / fps
                 normalized_pos = current_time_s / total_duration_s if total_duration_s > 0 else 0
-                marker_x = (canvas_p1_x + style.frame_padding[0]) + (normalized_pos * (current_bar_width_float - style.frame_padding[0] * 2))
-                marker_color = imgui.get_color_u32_rgba(*colors.MARKER)
+                marker_x = canvas_p1_x + normalized_pos * current_bar_width_float
+                marker_color = imgui.get_color_u32_rgba(1.0, 0.15, 0.15, 1.0)
                 draw_list_marker = imgui.get_window_draw_list()
 
                 # Draw triangle
@@ -809,8 +864,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 triangle_p3 = (marker_x, canvas_p1_y_offset + 5)
                 draw_list_marker.add_triangle_filled(triangle_p1[0], triangle_p1[1], triangle_p2[0], triangle_p2[1], triangle_p3[0], triangle_p3[1], marker_color)
 
-                # Draw line
-                draw_list_marker.add_line(marker_x, canvas_p1_y_offset, marker_x, canvas_p1_y_offset + graph_height, marker_color, 1.0)
+                # Vertical playhead line drawn once in _core.render() spanning all nav bars.
 
                 # Draw text
                 current_frame = self.app.processor.current_frame_index
@@ -840,9 +894,10 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         axis_changed = getattr(self, '_last_heatmap_axis', 'primary') != heatmap_axis
         self._last_heatmap_axis = heatmap_axis
+        # Texture is fixed-width (1 x HEATMAP_TEX_WIDTH); display width changes
+        # are pure GPU stretching and do NOT trigger regeneration anymore.
         full_redraw_needed = (
             app_state.heatmap_dirty or axis_changed
-            or current_bar_width_int != app_state.last_heatmap_bar_width
             or abs(total_video_duration_s - app_state.last_heatmap_video_duration_s) > 0.01)
 
         incremental_update_needed = current_action_count != self.last_submitted_action_count_heatmap
@@ -853,7 +908,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             actions_copy = self.app.funscript_processor.get_actions(heatmap_axis).copy()
             task = {
                 'type': 'heatmap',
-                'target_width': current_bar_width_int,
+                'target_width': current_bar_width_int,  # ignored by worker, kept for API
                 'target_height': app_state.heatmap_texture_fixed_height,
                 'total_duration_s': total_video_duration_s,
                 'actions': actions_copy
@@ -1059,24 +1114,31 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             top_panels_h = max(50, available_height_for_main_panels - video_nav_bar_h)
             nav_y_start = panel_y_start + top_panels_h
             if True:
-                video_panel_w = self.window_width - control_panel_w - graphs_panel_w
+                CHEVRON_W = 16
+                left_show_top = bool(getattr(app_state, 'show_left_top_block', True))
+                left_show_bot = bool(getattr(app_state, 'show_left_bottom_block', True))
+                right_show_top = bool(getattr(app_state, 'show_right_top_block', True))
+                right_show_bot = bool(getattr(app_state, 'show_right_bottom_block', True))
+                left_collapsed = not (left_show_top or left_show_bot)
+                right_collapsed = not (right_show_top or right_show_bot)
+                left_col_w = CHEVRON_W if left_collapsed else control_panel_w
+                right_col_w = CHEVRON_W if right_collapsed else graphs_panel_w
+                video_panel_w = self.window_width - left_col_w - right_col_w
                 if video_panel_w < 100:
                     video_panel_w = 100
-                    graphs_panel_w = max(100, self.window_width - control_panel_w - video_panel_w)
-                video_area_x_start = control_panel_w
-                graphs_area_x_start = control_panel_w + video_panel_w
-                app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w, top_panels_h)}
-                imgui.set_next_window_position(0, panel_y_start)
-                imgui.set_next_window_size(control_panel_w, top_panels_h)
-                self._time_render("ControlPanelUI", self.control_panel_ui.render)
+                    right_col_w = max(CHEVRON_W, self.window_width - left_col_w - video_panel_w)
+                video_area_x_start = left_col_w
+                graphs_area_x_start = left_col_w + video_panel_w
+                self._render_left_column(app_state, 0, panel_y_start, left_col_w,
+                                         top_panels_h, left_show_top, left_show_bot,
+                                         left_collapsed, CHEVRON_W)
                 app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start), 'size': (video_panel_w, top_panels_h)}
                 imgui.set_next_window_position(video_area_x_start, panel_y_start)
                 imgui.set_next_window_size(video_panel_w, top_panels_h)
                 self._time_render("VideoDisplayUI", self.video_display_ui.render)
-                app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start), 'size': (graphs_panel_w, top_panels_h)}
-                imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
-                imgui.set_next_window_size(graphs_panel_w, top_panels_h)
-                self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
+                self._render_right_column(app_state, graphs_area_x_start, panel_y_start,
+                                          right_col_w, top_panels_h, right_show_top,
+                                          right_show_bot, right_collapsed, CHEVRON_W)
             else:
                 control_panel_w_no_vid = self.window_width / 2
                 graphs_panel_w_no_vid = self.window_width - control_panel_w_no_vid
@@ -1095,17 +1157,31 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             self._time_render("VideoNavigationUI", self.video_navigation_ui.render, self.window_width)
         else:
             if True:
-                video_panel_w = self.window_width - control_panel_w - graphs_panel_w
+                # Quad-block layout: left column (control panel top, chapters/bookmarks bottom),
+                # right column (info graphs top, plugins bottom). Each block independently
+                # collapsible. Collapsed columns shrink to a thin chevron strip.
+                CHEVRON_W = 16
+                left_show_top = bool(getattr(app_state, 'show_left_top_block', True))
+                left_show_bot = bool(getattr(app_state, 'show_left_bottom_block', True))
+                right_show_top = bool(getattr(app_state, 'show_right_top_block', True))
+                right_show_bot = bool(getattr(app_state, 'show_right_bottom_block', True))
+                left_collapsed = not (left_show_top or left_show_bot)
+                right_collapsed = not (right_show_top or right_show_bot)
+                left_col_w = CHEVRON_W if left_collapsed else control_panel_w
+                right_col_w = CHEVRON_W if right_collapsed else graphs_panel_w
+                video_panel_w = self.window_width - left_col_w - right_col_w
                 if video_panel_w < 100:
                     video_panel_w = 100
-                    graphs_panel_w = max(100, self.window_width - control_panel_w - video_panel_w)
+                    right_col_w = max(CHEVRON_W, self.window_width - left_col_w - video_panel_w)
                 video_render_h = max(50, available_height_for_main_panels - video_nav_bar_h)
-                video_area_x_start = control_panel_w
-                graphs_area_x_start = control_panel_w + video_panel_w
-                app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w, available_height_for_main_panels)}
-                imgui.set_next_window_position(0, panel_y_start)
-                imgui.set_next_window_size(control_panel_w, available_height_for_main_panels)
-                self._time_render("ControlPanelUI", self.control_panel_ui.render)
+                video_area_x_start = left_col_w
+                graphs_area_x_start = left_col_w + video_panel_w
+
+                self._render_left_column(app_state, 0, panel_y_start, left_col_w,
+                                         available_height_for_main_panels,
+                                         left_show_top, left_show_bot, left_collapsed, CHEVRON_W)
+
+                # ----- MIDDLE (video + nav) -----
                 app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start), 'size': (video_panel_w, video_render_h)}
                 imgui.set_next_window_position(video_area_x_start, panel_y_start)
                 imgui.set_next_window_size(video_panel_w, video_render_h)
@@ -1116,10 +1192,10 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 imgui.set_next_window_position(video_area_x_start, panel_y_start + video_render_h)
                 imgui.set_next_window_size(video_panel_w, video_nav_bar_h)
                 self._time_render("VideoNavigationUI", self.video_navigation_ui.render, video_panel_w)
-                app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start), 'size': (graphs_panel_w, available_height_for_main_panels)}
-                imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
-                imgui.set_next_window_size(graphs_panel_w, available_height_for_main_panels)
-                self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
+
+                self._render_right_column(app_state, graphs_area_x_start, panel_y_start,
+                                          right_col_w, available_height_for_main_panels,
+                                          right_show_top, right_show_bot, right_collapsed, CHEVRON_W)
             else:
                 control_panel_w_no_vid = self.window_width / 2
                 graphs_panel_w_no_vid = self.window_width - control_panel_w_no_vid
@@ -1181,6 +1257,101 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 self._time_render(f"TimelineEditor{t_num}", editor.render, timeline_current_y_start, extra_h)
                 timeline_current_y_start += extra_h
 
+    _SASH_THICKNESS = 6  # px — drag handle between top and bottom blocks
+
+    def _render_block_sash(self, side: str, x: float, y: float, w: float,
+                           h: float, total_h: float, frac_attr: str,
+                           app_state) -> float:
+        """Invisible-button sash between top/bottom blocks. Drag adjusts the
+        bottom-block height fraction. Returns the new frac (0..1)."""
+        flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE
+                 | imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_BACKGROUND
+                 | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
+        imgui.set_next_window_position(x, y)
+        imgui.set_next_window_size(w, h)
+        imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0, 0))
+        imgui.begin(f"##sash_{side}", flags=flags)
+        imgui.invisible_button(f"##sash_btn_{side}", w, h)
+        if imgui.is_item_hovered():
+            try:
+                imgui.set_mouse_cursor(imgui.MOUSE_CURSOR_RESIZE_NS)
+            except Exception:
+                pass
+        cur = float(getattr(app_state, frac_attr, 0.45))
+        if imgui.is_item_active():
+            io = imgui.get_io()
+            cur = max(0.15, min(0.85, cur - io.mouse_delta[1] / max(1.0, total_h)))
+            setattr(app_state, frac_attr, cur)
+        # Hairline separator
+        dl = imgui.get_window_draw_list()
+        col = imgui.get_color_u32_rgba(0.4, 0.4, 0.45, 0.6 if imgui.is_item_active() or imgui.is_item_hovered() else 0.25)
+        dl.add_line(x, y + h * 0.5, x + w, y + h * 0.5, col, 1.0)
+        imgui.end()
+        imgui.pop_style_var()
+        return cur
+
+    def _render_left_column(self, app_state, x, y, w, h,
+                            show_top, show_bot, collapsed, chevron_w):
+        if collapsed:
+            render_collapsed_chevron('left', x, y, chevron_w, h, app_state)
+            return
+        lb_frac = float(getattr(app_state, 'left_bottom_block_height_frac', 0.45))
+        lb_frac = max(0.15, min(0.85, lb_frac))
+        sash_h = self._SASH_THICKNESS if (show_top and show_bot) else 0
+        if show_top and show_bot:
+            usable = max(0, h - sash_h)
+            top_h = int(usable * (1.0 - lb_frac))
+            bot_h = usable - top_h
+        elif show_top:
+            top_h, bot_h = h, 0
+        else:
+            top_h, bot_h = 0, h
+        if show_top:
+            app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (x, y), 'size': (w, top_h)}
+            imgui.set_next_window_position(x, y)
+            imgui.set_next_window_size(w, top_h)
+            self._time_render("ControlPanelUI", self.control_panel_ui.render)
+        if show_top and show_bot:
+            self._render_block_sash('left', x, y + top_h, w, sash_h, h,
+                                    'left_bottom_block_height_frac', app_state)
+        if show_bot:
+            by = y + top_h + sash_h
+            app_state.fixed_layout_geometry['LeftBottomBlock'] = {'pos': (x, by), 'size': (w, bot_h)}
+            imgui.set_next_window_position(x, by)
+            imgui.set_next_window_size(w, bot_h)
+            self._time_render("LeftBottomBlock", self.left_bottom_block.render)
+
+    def _render_right_column(self, app_state, x, y, w, h,
+                             show_top, show_bot, collapsed, chevron_w):
+        if collapsed:
+            render_collapsed_chevron('right', x, y, chevron_w, h, app_state)
+            return
+        rb_frac = float(getattr(app_state, 'right_bottom_block_height_frac', 0.45))
+        rb_frac = max(0.15, min(0.85, rb_frac))
+        sash_h = self._SASH_THICKNESS if (show_top and show_bot) else 0
+        if show_top and show_bot:
+            usable = max(0, h - sash_h)
+            top_h = int(usable * (1.0 - rb_frac))
+            bot_h = usable - top_h
+        elif show_top:
+            top_h, bot_h = h, 0
+        else:
+            top_h, bot_h = 0, h
+        if show_top:
+            app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (x, y), 'size': (w, top_h)}
+            imgui.set_next_window_position(x, y)
+            imgui.set_next_window_size(w, top_h)
+            self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
+        if show_top and show_bot:
+            self._render_block_sash('right', x, y + top_h, w, sash_h, h,
+                                    'right_bottom_block_height_frac', app_state)
+        if show_bot:
+            by = y + top_h + sash_h
+            app_state.fixed_layout_geometry['RightBottomBlock'] = {'pos': (x, by), 'size': (w, bot_h)}
+            imgui.set_next_window_position(x, by)
+            imgui.set_next_window_size(w, bot_h)
+            self._time_render("RightBottomBlock", self.right_bottom_block.render)
+
     def _render_floating_layout(self, app_state):
         """Render floating-window layout."""
         if app_state.just_switched_to_floating:
@@ -1199,6 +1370,10 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self._time_render("VideoNavigationUI", self.video_navigation_ui.render)
         self._time_render("TimelineEditor1", self.timeline_editor1.render)
         self._time_render("TimelineEditor2", self.timeline_editor2.render)
+
+        # Side blocks as floating closable+resizable windows.
+        self._time_render("LeftBottomBlock", self.left_bottom_block.render, floating=True)
+        self._time_render("RightBottomBlock", self.right_bottom_block.render, floating=True)
 
         for t_num in self._visible_extra_timelines:
             editor = self._get_or_create_timeline_editor(t_num)
@@ -1655,6 +1830,17 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         else:
             self._visible_extra_timelines = []
 
+        # One-shot metadata nudge: on new project, focus the metadata tab
+        # once so the user is reminded to fill creator/tags. Cleared after.
+        pm = getattr(self.app, 'project_manager', None)
+        if pm is not None and getattr(pm, 'nudge_metadata', False):
+            try:
+                if hasattr(self, 'control_panel_ui'):
+                    self.control_panel_ui._active_section = "metadata"
+            except Exception:
+                pass
+            pm.nudge_metadata = False
+
         # Energy detection can be done before new_frame
         self._time_render("EnergyDetection", self._handle_energy_saver_interaction_detection)
 
@@ -1670,7 +1856,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             self._first_run_wizard = FirstRunWizard(self.app)
             self._show_setup_wizard = False
 
-        # First-run wizard — full-window overlay, skips all other UI
+        # First-run wizard, full-window overlay, skips all other UI
         if self._first_run_wizard is not None:
             font_scale = self.app.app_settings.get("global_font_scale", 1.0)
             imgui.get_io().font_global_scale = font_scale

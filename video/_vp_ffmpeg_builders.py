@@ -10,23 +10,6 @@ from video.thumbnail_extractor import ThumbnailExtractor
 class FFmpegBuildersMixin:
     """Mixin fragment for VideoProcessor."""
 
-    def _is_10bit_cuda_pipe_needed(self) -> bool:
-        # TODO: Add bitshift processing for 10-bit videos (fast 10-bit to 8-bit conversion).
-        # Optional: Scale to 640x640 on GPU using tensorrt. This will not use lanczos. So if Lanczos is absolutely necessary, you will have to use other solution.
-        """Checks if the special 2-pipe FFmpeg command for 10-bit CUDA should be used."""
-        if not self.video_info:
-            return False
-
-        is_high_bit_depth = self.video_info.get('bit_depth', 8) > 8
-        hwaccel_args = self._get_ffmpeg_hwaccel_args()
-        # [OPTIMIZED] Simpler check
-        is_cuda_hwaccel = 'cuda' in hwaccel_args
-
-        if is_high_bit_depth and is_cuda_hwaccel:
-            self.logger.info("Conditions for 10-bit CUDA pipe met.")
-            return True
-        return False
-
     def _is_using_preprocessed_video(self) -> bool:
         """Checks if the active video source is a preprocessed file."""
         is_using_preprocessed_by_path_diff = self._active_video_source_path != self.video_path
@@ -90,74 +73,6 @@ class FFmpegBuildersMixin:
                 f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:0:black"
             ]
 
-    def _init_gpu_unwarp_worker(self):
-        """Initialize GPU unwarp worker for VR video processing."""
-        from config.constants import ENABLE_GPU_UNWARP, GPU_UNWARP_BACKEND
-
-        # Check if user wants CPU v360 or no unwarp (crop only)
-        if self.vr_unwarp_method_override in ('v360', 'none'):
-            self.logger.debug(f"User selected {self.vr_unwarp_method_override} unwarp method - GPU unwarp disabled")
-            # Clean up existing GPU unwarp worker
-            if self.gpu_unwarp_worker:
-                self.logger.debug(f"Stopping existing GPU unwarp worker (switching to {self.vr_unwarp_method_override})")
-                self.gpu_unwarp_worker.stop()
-                self.gpu_unwarp_worker = None
-            self.gpu_unwarp_enabled = False
-            return
-
-        # Only initialize for VR videos when GPU unwarp is enabled
-        if self.determined_video_type != 'VR' or not ENABLE_GPU_UNWARP:
-            # Clean up GPU unwarp worker if it exists but shouldn't be used
-            if self.gpu_unwarp_worker:
-                self.logger.info("Stopping GPU unwarp worker (not VR or GPU unwarp disabled)")
-                self.gpu_unwarp_worker.stop()
-                self.gpu_unwarp_worker = None
-            self.gpu_unwarp_enabled = False
-            return
-
-        # If already initialized, skip (prevents duplicate workers)
-        if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
-            self.logger.debug("GPU unwarp worker already initialized, skipping")
-            return
-
-        try:
-            from video.gpu_unwarp_worker import GPUUnwarpWorker
-
-            # Get projection type from VR input format
-            projection_type = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
-            if 'fisheye' in projection_type or 'he' in projection_type:
-                # Map VR format to projection type
-                if projection_type == 'fisheye':
-                    projection_type = f'fisheye{int(self.vr_fov)}'
-                elif projection_type == 'he':
-                    projection_type = 'equirect180'
-
-            # Determine backend based on user override or default
-            if self.vr_unwarp_method_override in ['metal', 'opengl']:
-                backend = self.vr_unwarp_method_override
-            else:
-                backend = GPU_UNWARP_BACKEND  # Use default (auto)
-
-            self.gpu_unwarp_worker = GPUUnwarpWorker(
-                projection_type=projection_type,
-                output_size=self.yolo_input_size,
-                queue_size=16,  # Increased for batch processing
-                backend=backend,
-                pitch=self.vr_pitch,  # Pass directly (matches benchmark behavior)
-                yaw=0.0,
-                roll=0.0,
-                batch_size=4,  # Enable batch processing (12% faster)
-                input_format='bgr24'  # Input is BGR24 from FFmpeg, worker converts to RGBA internally
-            )
-            self.gpu_unwarp_worker.start()
-            self.gpu_unwarp_enabled = True
-            self.logger.info(f"GPU unwarp worker started (backend={backend}, projection={projection_type}, pitch={self.vr_pitch})")
-
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize GPU unwarp worker: {e}. Falling back to CPU v360.")
-            self.gpu_unwarp_worker = None
-            self.gpu_unwarp_enabled = False
-
     def _init_thumbnail_extractor(self):
         """Initialize FFmpeg-based thumbnail extractor for frame-accurate random access."""
         # Close existing extractor if present
@@ -175,9 +90,12 @@ class FFmpegBuildersMixin:
             if self.determined_video_type == 'VR' and not self._is_using_preprocessed_video():
                 vr_format = self.vr_input_format
 
-            # Pass HD display dimensions so thumbnails match the display frame format
+            # HD display dims apply to thumbnails only for 2D (no fixed output
+            # size in the thumbnail filter). For VR, the thumbnail filter's
+            # v360 outputs at yolo_input_size (640), so passing HD dims here
+            # would mismatch the actual output and break shape validation.
             display_dims = None
-            if self.is_hd_active:
+            if self.is_hd_active and self.determined_video_type == '2D':
                 display_dims = (self._display_frame_w, self._display_frame_h)
 
             extractor = ThumbnailExtractor(
@@ -224,14 +142,23 @@ class FFmpegBuildersMixin:
 
     def _get_vr_video_filters(self) -> List[str]:
         """Builds the list of FFmpeg filter segments for VR video, including cropping and v360."""
-        from config.constants import ENABLE_GPU_UNWARP
-
         if not self.video_info:
             return []
 
         original_width = self.video_info.get('width', 0)
         original_height = self.video_info.get('height', 0)
-        v_h_FOV = 90  # Default vertical and horizontal FOV for the output projection
+        # Output dimensions + FOV for the stereographic projection. When HD
+        # is active we honor _display_frame_{w,h}; horizontal FOV scales with
+        # output aspect to fill wider displays without squashing content.
+        if self.is_hd_active:
+            out_w = self._display_frame_w
+            out_h = self._display_frame_h
+        else:
+            out_w = self.yolo_input_size
+            out_h = self.yolo_input_size
+        v_fov = 90
+        aspect = (out_w / out_h) if out_h > 0 else 1.0
+        h_fov = max(60, min(170, int(round(v_fov * aspect))))
 
         vr_filters = []
         is_sbs_format = '_sbs' in self.vr_input_format
@@ -274,28 +201,21 @@ class FFmpegBuildersMixin:
             panel_label = "left" if use_second_panel else "right"
             self.logger.info(f"Applying RL pre-crop ({panel_label} panel): w={int(crop_w)} h={int(crop_h)} x={crop_x} y=0")
 
-        # Decide unwarp method: none (crop only), GPU unwarp, or CPU v360
+        # Unwarp method: 'none' (crop only) or default libavfilter v360.
         if self.vr_unwarp_method_override == 'none':
-            # No unwarp — just scale the cropped panel to YOLO input size
-            vr_filters.append(f"scale={self.yolo_input_size}:{self.yolo_input_size}")
+            vr_filters.append(f"scale={out_w}:{out_h}")
             self.logger.info("Unwarp: None (crop only) - no dewarping applied, just crop+scale")
-        elif ENABLE_GPU_UNWARP and self.vr_unwarp_method_override != 'v360':
-            # GPU unwarp enabled — skip v360, just scale; unwrapping done by GPU worker
-            vr_filters.append(f"scale={self.yolo_input_size}:{self.yolo_input_size}")
-            self.logger.info(f"GPU unwarp enabled (method={self.vr_unwarp_method_override}) - using crop+scale (v360 skipped)")
         else:
-            # CPU v360 dewarp (user override or GPU unwarp disabled)
             base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '').replace('_lr', '').replace('_rl', '')
             v360_filter_core = (
                 f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
                 f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
                 f"d_fov={self.vr_fov}:"
-                f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
+                f"v_fov={v_fov}:h_fov={h_fov}:"
                 f"pitch={self.vr_pitch}:yaw=0:roll=0:"
-                f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=linear"
+                f"w={out_w}:h={out_h}:interp=linear"
             )
             vr_filters.append(v360_filter_core)
-            self.logger.debug(f"Using CPU v360 filter: {v360_filter_core}")
 
         return vr_filters
 

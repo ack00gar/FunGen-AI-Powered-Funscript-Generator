@@ -24,7 +24,6 @@ from .app_file_manager import AppFileManager
 from .app_stage_processor import AppStageProcessor
 from .app_funscript_processor import AppFunscriptProcessor
 from .app_event_handlers import AppEventHandlers
-from .app_calibration import AppCalibration
 from .app_energy_saver import AppEnergySaver
 from .app_utility import AppUtility
 from .app_model_manager import AppModelManager
@@ -40,7 +39,7 @@ from .app_cli_runner import (
     cli_stage3_progress_callback,
 )
 
-# Audio playback (optional — graceful degradation if sounddevice missing)
+# Audio playback (optional, graceful degradation if sounddevice missing)
 try:
     from video.audio_player import AudioPlayer, SOUNDDEVICE_AVAILABLE
     from video.audio_video_sync import AudioVideoSync
@@ -76,7 +75,7 @@ class ApplicationLogic:
         Path("logs").mkdir(exist_ok=True)
         self.app_log_file_path = 'logs/fungen.log'  # Define app_log_file_path
 
-        # Log purge runs in background — non-critical for startup
+        # Log purge runs in background, non-critical for startup
         threading.Thread(
             target=self._purge_old_log_entries,
             args=(self.app_log_file_path,),
@@ -187,7 +186,6 @@ class ApplicationLogic:
         self.stage_processor = AppStageProcessor(self)
         self.funscript_processor = AppFunscriptProcessor(self)
         self.event_handlers = AppEventHandlers(self)
-        self.calibration = AppCalibration(self)
         self.energy_saver = AppEnergySaver(self)
         self.utility = AppUtility(self)
         self.autotuner = AppAutotuner(self)
@@ -198,7 +196,7 @@ class ApplicationLogic:
         # --- Streamer state (set by cp_streamer_ui when streamer starts/stops) ---
         self._streamer_active = False
 
-        # --- Audio Playback (GUI only — no audio in CLI/batch mode) ---
+        # --- Audio Playback (GUI only, no audio in CLI/batch mode) ---
         self._audio_player = None
         self._audio_sync = None
         if not self.is_cli_mode and SOUNDDEVICE_AVAILABLE and self.app_settings.get("audio_enabled", True):
@@ -214,7 +212,7 @@ class ApplicationLogic:
                 self._audio_player = None
                 self._audio_sync = None
 
-        # --- mpv Playback Controller (fullscreen — Patreon supporter feature) ---
+        # --- mpv Playback Controller (fullscreen, Patreon supporter feature) ---
         self._mpv_controller = None
         self._mpv_binary_missing = False   # True = patreon folder present but mpv not installed
         if not self.is_cli_mode:
@@ -226,7 +224,7 @@ class ApplicationLogic:
                 if shutil.which(mpv_bin) is None and not __import__('os').path.isfile(mpv_bin):
                     self._mpv_binary_missing = True
                     self.logger.warning(
-                        "mpv binary not found — fullscreen mode unavailable. "
+                        "mpv binary not found, fullscreen mode unavailable. "
                         "Install mpv (macOS: brew install mpv)"
                     )
                 else:
@@ -340,6 +338,15 @@ class ApplicationLogic:
                 api_port = self.app_settings.get("ws_api_port", 8769)
                 self._ws_api = FunGenWSAPI(self, port=api_port)
                 self._ws_api.start()
+                # Bridge processor playback callbacks to WS event push.
+                if self.processor is not None:
+                    def _on_playback(is_playing: bool, current_time_ms: float):
+                        try:
+                            self._ws_api.emit_play(is_playing)
+                            self._ws_api.emit_time(current_time_ms)
+                        except Exception:
+                            pass
+                    self.processor.register_playback_state_callback(_on_playback)
             except Exception as e:
                 self.logger.warning(f"WebSocket API failed to start: {e}")
 
@@ -396,7 +403,7 @@ class ApplicationLogic:
                 if lines_to_keep:
                     f.writelines(lines_to_keep)
         except Exception:
-            pass  # Non-critical — swallow silently
+            pass  # Non-critical, swallow silently
 
     def _configure_third_party_logging(self):
         """Configure third-party library logging to reduce startup noise."""
@@ -1044,7 +1051,7 @@ class ApplicationLogic:
         if self.logging_level_setting != new_logging_level:
             self.set_application_logging_level(new_logging_level)
 
-        # Hardware Acceleration — uses cached list from last run (or background
+        # Hardware Acceleration, uses cached list from last run (or background
         # thread result if it finished first), so no blocking wait needed
         default_hw_accel_in_apply = "auto"
         if "auto" not in self.available_ffmpeg_hwaccels:
@@ -1080,9 +1087,7 @@ class ApplicationLogic:
         self.app_state_ui.update_settings_from_app()
         self.file_manager.update_settings_from_app()
         self.stage_processor.update_settings_from_app()
-        self.calibration.update_settings_from_app()
         self.energy_saver.update_settings_from_app()
-        self.calibration.update_tracker_delay_params()
         self.energy_saver.reset_activity_timer()
 
     def save_app_settings(self):
@@ -1100,7 +1105,6 @@ class ApplicationLogic:
         self.app_state_ui.save_settings_to_app()
         self.file_manager.save_settings_to_app()
         self.stage_processor.save_settings_to_app()
-        self.calibration.save_settings_to_app()
         self.energy_saver.save_settings_to_app()
         self.app_settings.save_settings()
         self.logger.info("Application settings saved.", extra={'status_message': True})

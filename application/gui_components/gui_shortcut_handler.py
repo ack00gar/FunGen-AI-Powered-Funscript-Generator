@@ -85,7 +85,7 @@ class ShortcutHandlerMixin:
         elif check_and_run_shortcut("open_project", self._handle_open_project_shortcut):
             pass
 
-        # Editing — unified undo/redo (single chronological stack)
+        # Editing, unified undo/redo (single chronological stack)
         elif check_and_run_shortcut("undo_timeline1", self._handle_unified_undo):
             pass
         elif check_and_run_shortcut("redo_timeline1", self._handle_unified_redo):
@@ -107,6 +107,10 @@ class ShortcutHandlerMixin:
         elif video_loaded and check_and_run_shortcut("jump_to_end", self._handle_jump_to_end_shortcut):
             pass
         elif video_loaded and check_and_run_shortcut("go_to_frame", self._handle_go_to_frame_shortcut):
+            pass
+        elif video_loaded and check_and_run_shortcut("seek_next_n_frames", self._handle_seek_n_frames, 1, repeat=True):
+            pass
+        elif video_loaded and check_and_run_shortcut("seek_prev_n_frames", self._handle_seek_n_frames, -1, repeat=True):
             pass
 
         # Timeline View Controls
@@ -294,23 +298,17 @@ class ShortcutHandlerMixin:
 
                         base_interval = self.arrow_key_state['seek_interval']
 
-                        if seek_direction > 0:
-                            # Forward: ramp from 1 frame/tick to many frames/tick
-                            # over _ARROW_ACCEL_RAMP_S seconds (pipe decode is the ceiling)
-                            hold_duration = current_time - self.arrow_key_state['continuous_start_time']
-                            t = min(1.0, hold_duration / _ARROW_ACCEL_RAMP_S)
-                            # Speed multiplier: 1x at t=0, unbounded at t=1
-                            # Use 1/(1-t) curve: 1→2→5→∞ (clamped by time budget)
-                            speed = 1.0 / max(0.01, 1.0 - t)
-                            video_fps = 60.0
-                            if self.app.processor and self.app.processor.fps > 0:
-                                video_fps = self.app.processor.fps
-                            frames_this_tick = max(1, round(speed * video_fps * time_since_last))
-                            should_navigate = True
-                        else:
-                            # Backward: 1 frame/tick at real-time (buffer is small)
-                            if time_since_last >= base_interval:
-                                should_navigate = True
+                        # Ramp speed from 1x to unbounded over _ARROW_ACCEL_RAMP_S
+                        # seconds; one seek per GUI tick jumps straight to the
+                        # computed target (no intermediate frame decodes).
+                        hold_duration = current_time - self.arrow_key_state['continuous_start_time']
+                        t = min(1.0, hold_duration / _ARROW_ACCEL_RAMP_S)
+                        speed = 1.0 / max(0.01, 1.0 - t)
+                        video_fps = 60.0
+                        if self.app.processor and self.app.processor.fps > 0:
+                            video_fps = self.app.processor.fps
+                        frames_this_tick = max(1, round(speed * video_fps * time_since_last))
+                        should_navigate = True
                     # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
 
             if should_navigate:
@@ -325,51 +323,77 @@ class ShortcutHandlerMixin:
                 if frames_this_tick <= 1:
                     self._perform_frame_seek(seek_direction)
                 else:
-                    # Read multiple frames from pipe, display only the last
-                    self._perform_accelerated_forward_seek(frames_this_tick)
+                    # One seek per tick to the target frame (no intermediate decodes).
+                    self._perform_accelerated_seek(seek_direction * frames_this_tick)
                 self.arrow_key_state['last_seek_time'] = current_time
 
-    def _perform_accelerated_forward_seek(self, frames_target):
-        """Read multiple frames from pipe in one GUI tick for accelerated seeking."""
+    def _perform_accelerated_seek(self, frames_delta):
+        """Accelerated arrow seek.
+
+        Small delta: step frame-by-frame through the pyav fast-path (pump, no
+        keyframe seek). Large delta: one libavformat seek to the target. The
+        crossover depends on per-frame decode cost vs keyframe-seek cost;
+        ~10 frames is a decent default on 1080p h264/h265. A time budget
+        caps GUI-thread blocking so we always render a frame this tick.
+        """
         proc = self.app.processor
-        if not proc or not proc.video_info or proc.seek_in_progress:
+        if not proc or not proc.video_info:
             return
 
         is_actively_playing = (proc.is_processing and not proc.pause_event.is_set())
         is_tracking = self.app.tracker and self.app.tracker.tracking_active
         if is_actively_playing or is_tracking:
-            # Fall back to single frame during playback/tracking
-            self._perform_frame_seek(1)
+            self._perform_frame_seek(1 if frames_delta >= 0 else -1)
             return
 
         total_frames = proc.total_frames
         max_frame = total_frames - 1 if total_frames > 0 else 0
+        cur = proc.current_frame_index
+        target = max(0, min(max_frame, cur + int(frames_delta)))
+        if target == cur:
+            return
+
+        SEEK_CROSSOVER = 10  # frames
         t0 = time.perf_counter()
         budget_end = t0 + _ARROW_TICK_BUDGET_S
         last_frame = None
         frames_read = 0
+        forward = target > cur
 
-        for _ in range(frames_target):
-            new_frame = proc.current_frame_index + 1
-            if new_frame > max_frame:
-                break
-            frame = proc.arrow_nav_forward(new_frame)
-            if frame is None:
-                break
-            last_frame = frame
-            frames_read += 1
-            # Check time budget — don't block GUI too long
-            if time.perf_counter() > budget_end:
-                break
+        if abs(target - cur) > SEEK_CROSSOVER:
+            # Single jump; seek + keyframe decode is cheaper than stepping.
+            if forward:
+                last_frame = proc.arrow_nav_forward(target)
+            else:
+                last_frame = proc.arrow_nav_backward(target)
+            frames_read = 1 if last_frame is not None else 0
+        else:
+            # Step-by-step: forward uses pyav +1 fast path; backward hits nav
+            # buffer if it's warm. Bail when we hit the per-tick time budget
+            # so the UI stays responsive.
+            step = 1 if forward else -1
+            idx = cur
+            while (forward and idx < target) or (not forward and idx > target):
+                idx += step
+                if forward:
+                    frame = proc.arrow_nav_forward(idx)
+                else:
+                    frame = proc.arrow_nav_backward(idx)
+                if frame is None:
+                    break
+                last_frame = frame
+                frames_read += 1
+                if time.perf_counter() > budget_end:
+                    break
+
+        elapsed = time.perf_counter() - t0
 
         if last_frame is not None:
             with proc.frame_lock:
                 proc.current_frame = last_frame
                 proc._frame_version += 1
 
-        elapsed = time.perf_counter() - t0
         self.track_frame_seek_time(elapsed * 1000, path="arrow")
-        # Report frames read this tick for status bar averaging
         self._reading_fps_frames.append((time.time(), frames_read))
         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
         if self.app.project_manager:
@@ -384,7 +408,7 @@ class ShortcutHandlerMixin:
         proc = self.app.processor
 
         # Skip if already seeking to avoid frame jump issues
-        if proc.seek_in_progress:
+        if False:
             return
 
         new_frame = proc.current_frame_index + delta_frames
@@ -466,8 +490,9 @@ class ShortcutHandlerMixin:
             tl = getattr(self, 'timeline_editor2', None)
         else:
             tl = self._extra_timeline_editors.get(active_tl_num)
-        if tl and hasattr(tl, '_snap_nearest_to_playhead'):
-            tl._snap_nearest_to_playhead()
+        if tl is not None:
+            from application.classes.timeline_ops import snap_to_playhead
+            snap_to_playhead(tl)
 
     def _handle_set_chapter_start_shortcut(self):
         """Handle keyboard shortcut for setting chapter start (I key)"""
@@ -600,7 +625,8 @@ class ShortcutHandlerMixin:
                     self.app.logger.info(f"Moved point: {old_value}% -> {value}% at {current_time_ms}ms (Timeline {timeline_num})", extra={'status_message': True})
                     return
 
-            timeline._add_point(current_time_ms, value)
+            from application.classes.timeline_ops import add_point
+            add_point(timeline, current_time_ms, value)
             self.app.logger.info(f"Added point: {value}% at {current_time_ms}ms (Timeline {timeline_num})", extra={'status_message': True})
         else:
             self.app.logger.warning(f"Timeline {timeline_num} not found")
@@ -668,6 +694,19 @@ class ShortcutHandlerMixin:
             last_frame = max(0, self.app.processor.total_frames - 1) if self.app.processor.total_frames > 0 else 0
             self.app.processor.seek_video(last_frame)
             self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+
+    def _handle_seek_n_frames(self, direction: int):
+        """Step `direction * seek_n_frames` frames (default N=5). Uses
+        seek_video_with_sync so timelines stay aligned."""
+        proc = self.app.processor
+        if not proc or proc.total_frames <= 0:
+            return
+        n = int(self.app.app_settings.get("seek_n_frames", 5))
+        target = max(0, min(proc.total_frames - 1,
+                            proc.current_frame_index + direction * n))
+        if target == proc.current_frame_index:
+            return
+        self.app.event_handlers.seek_video_with_sync(target)
 
     def _handle_go_to_frame_shortcut(self):
         """Open Go to Frame popup (Ctrl+G)."""

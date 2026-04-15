@@ -66,16 +66,16 @@ class BatchMixin:
         with self._batch_init_lock:
             try:
                 if self._batch_queue is None:
-                    from patreon_features.batch.batch_queue import BatchQueue
+                    from application.batch.batch_queue import BatchQueue
                     self._batch_queue = BatchQueue()
 
                 if self._batch_watcher is None:
-                    from patreon_features.batch.watched_folder import WatchedFolderProcessor
+                    from application.batch.watched_folder import WatchedFolderProcessor
                     queue = self._batch_queue
                     self._batch_watcher = WatchedFolderProcessor(on_new_video=lambda path: queue.add(path))
 
                 if self._batch_worker is None:
-                    from patreon_features.batch.batch_worker import BatchWorker
+                    from application.batch.batch_worker import BatchWorker
                     self._batch_worker = BatchWorker(self.app, self._batch_queue)
 
                 return self._batch_watcher, self._batch_queue, self._batch_worker
@@ -89,7 +89,7 @@ class BatchMixin:
         with self._batch_init_lock:
             if self._capture_manager is None:
                 try:
-                    from patreon_features.live_capture.capture_manager import CaptureManager
+                    from application.live_capture.capture_manager import CaptureManager
                     self._capture_manager = CaptureManager(width=_CAPTURE_WIDTH, height=_CAPTURE_HEIGHT)
                 except ImportError:
                     return None
@@ -125,7 +125,7 @@ class BatchMixin:
 
         def _do_refresh():
             try:
-                from patreon_features.live_capture.window_list import get_available_windows
+                from application.live_capture.window_list import get_available_windows
                 self._cached_windows = get_available_windows()
             except Exception as e:
                 logger.warning(f"Failed to list windows: {e}")
@@ -142,7 +142,7 @@ class BatchMixin:
 
         def _do_validate():
             try:
-                from patreon_features.live_capture.capture_sources import StreamCaptureSource
+                from application.live_capture.capture_sources import StreamCaptureSource
                 ok, msg = StreamCaptureSource.validate_url(url)
                 self._url_validation_result = msg if not ok else "Valid"
             except Exception as e:
@@ -535,10 +535,10 @@ class BatchMixin:
 
         try:
             if self._capture_source_type == 0:
-                from patreon_features.live_capture.capture_sources import ScreenCaptureSource
+                from application.live_capture.capture_sources import ScreenCaptureSource
                 source = ScreenCaptureSource(screen_index=0, width=w, height=h)
             elif self._capture_source_type == 1:
-                from patreon_features.live_capture.capture_sources import WindowCaptureSource
+                from application.live_capture.capture_sources import WindowCaptureSource
                 if self._cached_windows and 0 <= self._capture_selected_window < len(self._cached_windows):
                     win = self._cached_windows[self._capture_selected_window]
                     source = WindowCaptureSource(
@@ -548,7 +548,7 @@ class BatchMixin:
                     logger.warning("No window selected")
                     return
             elif self._capture_source_type == 2:
-                from patreon_features.live_capture.capture_sources import StreamCaptureSource
+                from application.live_capture.capture_sources import StreamCaptureSource
                 if not self._capture_stream_url.strip():
                     logger.warning("No stream URL provided")
                     return
@@ -710,14 +710,3 @@ class BatchMixin:
                 imgui.text("Right-click timeline > Generate Axis > choose axis")
                 imgui.pop_style_color()
 
-        # --- Live Device Preview ---
-        with _section_card("Live Device Preview##patreon_ldp", open_by_default=False) as _open:
-            if _open:
-                imgui.text_wrapped(
-                    "Feel cursor position on your device while editing, without playing the video. "
-                    "Rate-limited to avoid flooding device commands."
-                )
-                imgui.spacing()
-                imgui.push_style_color(imgui.COLOR_TEXT, *_CPColors.HINT_TEXT)
-                imgui.text("Enable in Device Control tab > Live Control Integration")
-                imgui.pop_style_color()

@@ -6,7 +6,7 @@ Provides a horizontal toolbar with common actions organized into labeled section
 Sections (each with a label above the icons):
 - PROJECT: New, Open, Save, Export operations
 - PLAYBACK: Play/Pause, Previous/Next Frame, Speed modes
-- TIMELINE EDIT: Axis dropdown + contextual Undo/Redo/Autotune
+- TIMELINE: Axis dropdown + Undo/Redo/Autotune + row height slider
 - VIEW: Chapter List, 3D Simulator
 - TOOLS: Streamer, Device Control, Batch Processing (add-ons)
 
@@ -170,17 +170,17 @@ class ToolbarUI:
         self._render_separator()
         imgui.same_line(spacing=12)
 
-        # --- AUDIO CONTROLS SECTION ---
-        self._begin_toolbar_section("Audio")
-        self._render_audio_section(icon_mgr, btn_size)
+        # --- UNDO / REDO SECTION ---
+        self._begin_toolbar_section("Undo/Redo")
+        self._render_undo_redo_section(icon_mgr, btn_size)
         self._end_toolbar_section()
 
         imgui.same_line(spacing=12)
         self._render_separator()
         imgui.same_line(spacing=12)
 
-        # --- EDIT OPERATIONS SECTION (Undo/Redo T1/T2) ---
-        self._begin_toolbar_section("Timeline Edit")
+        # --- TIMELINE SECTION (axis, autotune, row height) ---
+        self._begin_toolbar_section("Timeline")
         self._render_edit_section(icon_mgr, btn_size)
         self._end_toolbar_section()
 
@@ -317,84 +317,26 @@ class ToolbarUI:
             imgui.end_popup()
 
     def _render_edit_section(self, icon_mgr, btn_size):
-        """Render axis dropdown + contextual Undo/Redo/Autotune."""
+        """Timeline section: row-height slider only.
+
+        Axis selector + Autotune lived here previously; they have moved to the
+        per-timeline toolbar / right-click menus to keep the main toolbar lean.
+        """
         app = self.app
-        fs_proc = app.funscript_processor
-        has_video = app.processor and app.processor.is_video_open() if app.processor else False
-
-        # --- Axis dropdown (cached) ---
-        assignments = {}
-        if hasattr(app, 'tracker') and app.tracker and hasattr(app.tracker, 'funscript'):
-            try:
-                assignments = app.tracker.funscript.get_axis_assignments()
-            except Exception:
-                pass
-        if not assignments:
-            assignments = {1: "stroke"}
-
-        if assignments != self._cached_axis_assignments:
-            self._cached_axis_assignments = assignments.copy()
-            axis_items = []
-            for tl_num in sorted(assignments):
-                axis_name = assignments[tl_num].capitalize()
-                axis_items.append((tl_num, f"{axis_name} (T{tl_num})"))
-            self._cached_axis_items = axis_items
-            self._cached_axis_valid_tls = [item[0] for item in axis_items]
-            self._cached_axis_labels = [item[1] for item in axis_items]
-
-        valid_tls = self._cached_axis_valid_tls
-        labels = self._cached_axis_labels
-
-        if self._selected_edit_timeline not in valid_tls:
-            self._selected_edit_timeline = valid_tls[0]
-
-        current_idx = valid_tls.index(self._selected_edit_timeline)
-
         self._begin_vcenter()
-        imgui.push_item_width(120)
-        changed, new_idx = imgui.combo("##EditAxisCombo", current_idx, labels)
+        imgui.push_item_width(140)
+        cur_h = int(getattr(app.app_state_ui, 'timeline_base_height', 180))
+        changed_h, new_h = imgui.slider_int("##ToolbarTimelineHeight", cur_h, 100, 400, "%d px")
         imgui.pop_item_width()
         self._end_vcenter()
-        if changed:
-            self._selected_edit_timeline = valid_tls[new_idx]
-
-        selected_tl = self._selected_edit_timeline
-
-        imgui.same_line(spacing=8)
-
-        # --- Undo/Redo (unified) ---
-        umgr = self.app.undo_manager
-        can_undo = umgr.can_undo()
-        can_redo = umgr.can_redo()
-
-        if can_undo:
-            tooltip = f"Undo: {umgr.peek_undo()}"
-            if self._toolbar_button(icon_mgr, 'undo.png', btn_size, tooltip):
-                desc = umgr.undo(self.app)
-                if desc:
-                    self.app.notify(f"Undo: {desc}", "info", 1.5)
-        else:
-            self._toolbar_button_disabled(icon_mgr, 'undo.png', btn_size, "Undo (Nothing to undo)")
-
-        imgui.same_line()
-
-        if can_redo:
-            tooltip = f"Redo: {umgr.peek_redo()}"
-            if self._toolbar_button(icon_mgr, 'redo.png', btn_size, tooltip):
-                desc = umgr.redo(self.app)
-                if desc:
-                    self.app.notify(f"Redo: {desc}", "info", 1.5)
-        else:
-            self._toolbar_button_disabled(icon_mgr, 'redo.png', btn_size, "Redo (Nothing to redo)")
-
-        imgui.same_line(spacing=8)
-
-        # --- Autotune for selected timeline ---
-        if has_video:
-            if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, f"Ultimate Autotune (T{selected_tl})"):
-                app.trigger_ultimate_autotune_with_defaults(timeline_num=selected_tl)
-        else:
-            self._toolbar_button_disabled(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (No video)")
+        if changed_h:
+            app.app_state_ui.timeline_base_height = int(new_h)
+            try:
+                app.app_settings.set("timeline_base_height", int(new_h))
+            except Exception:
+                pass
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Timeline row height (all timelines); line thickness scales with it")
 
     def _render_playback_section(self, icon_mgr, btn_size):
         """Render playback control buttons."""
@@ -469,7 +411,11 @@ class ToolbarUI:
         self._render_separator()
         imgui.same_line(spacing=12)
 
-        # Show/Hide Video toggle — highlight only when video is visible
+        # Audio mute toggle (sits before Show Video so audio + video toggles cluster).
+        self._render_audio_mute_button(icon_mgr, btn_size)
+        imgui.same_line()
+
+        # Show/Hide Video toggle, highlight only when video is visible
         app_state = app.app_state_ui
         show_video = app_state.show_video_feed if hasattr(app_state, 'show_video_feed') else True
 
@@ -540,8 +486,69 @@ class ToolbarUI:
         if current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
             self._apply_button_default()
 
+    def _render_audio_mute_button(self, icon_mgr, btn_size):
+        """Mute / unmute toggle. Lives in the Playback section now; system
+        volume is the source of truth for level (no app-side slider)."""
+        app = self.app
+        settings = app.app_settings
+        sd_ok = SOUNDDEVICE_AVAILABLE
+        player_ok = getattr(app, '_audio_player', None) is not None
+        has_audio_system = sd_ok and player_ok
+        is_muted = settings.get("audio_muted", False)
+        disabled = not has_audio_system
+
+        if disabled:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+        icon = 'speaker-muted.png' if is_muted else 'speaker-high.png'
+        if is_muted and not disabled:
+            self._apply_button_active()
+        if disabled:
+            reasons = []
+            if not sd_ok:
+                reasons.append("sounddevice not installed")
+            if not player_ok:
+                reasons.append("audio player not initialized")
+            tooltip = f"Audio unavailable ({', '.join(reasons)})"
+        else:
+            tooltip = "Unmute Audio" if is_muted else "Mute Audio"
+        if self._toolbar_button(icon_mgr, icon, btn_size, tooltip):
+            if not disabled:
+                is_muted = not is_muted
+                settings.set("audio_muted", is_muted)
+                # Reuse last known volume; no in-app slider any more.
+                vol = getattr(app, '_audio_volume_live', settings.get("audio_volume", 1.0))
+                if app._audio_sync:
+                    app._audio_sync.update_settings(vol, is_muted)
+        if is_muted and not disabled:
+            self._apply_button_default()
+        if disabled:
+            imgui.pop_style_var()
+
+    def _render_undo_redo_section(self, icon_mgr, btn_size):
+        """Undo / Redo only. Was bundled inside Timeline; now its own section."""
+        umgr = self.app.undo_manager
+        can_undo = umgr.can_undo()
+        can_redo = umgr.can_redo()
+        if can_undo:
+            tooltip = f"Undo: {umgr.peek_undo()}"
+            if self._toolbar_button(icon_mgr, 'undo.png', btn_size, tooltip):
+                desc = umgr.undo(self.app)
+                if desc:
+                    self.app.notify(f"Undo: {desc}", "info", 1.5)
+        else:
+            self._toolbar_button_disabled(icon_mgr, 'undo.png', btn_size, "Undo (Nothing to undo)")
+        imgui.same_line()
+        if can_redo:
+            tooltip = f"Redo: {umgr.peek_redo()}"
+            if self._toolbar_button(icon_mgr, 'redo.png', btn_size, tooltip):
+                desc = umgr.redo(self.app)
+                if desc:
+                    self.app.notify(f"Redo: {desc}", "info", 1.5)
+        else:
+            self._toolbar_button_disabled(icon_mgr, 'redo.png', btn_size, "Redo (Nothing to redo)")
+
     def _render_audio_section(self, icon_mgr, btn_size):
-        """Render audio mute toggle and volume slider."""
+        """DEPRECATED — kept as no-op shim; mute now lives in Playback section."""
         app = self.app
         settings = app.app_settings
 

@@ -1119,7 +1119,7 @@ class AutoUpdater:
         self.migration_warning_triggered = False
         self.migration_warning_dismissed = False
         self.show_migration_warning = True
-        self.logger.info("🧪 Migration warning manually triggered for testing")
+        self.logger.info("Migration warning manually triggered for testing")
 
     def _get_available_updates(self, custom_count: int = None) -> List[Dict]:
         """Fetches available commits (merge commits and direct pushes) from the configured branch (v0.5.0)."""

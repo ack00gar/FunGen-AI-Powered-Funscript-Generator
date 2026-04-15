@@ -43,7 +43,7 @@ class OscillationExperimental2Tracker(BaseTracker):
             name="LIVE_OSCILLATION",
             display_name="Oscillation Detector",
             description="Hybrid approach combining experimental timing precision with legacy amplification and signal conditioning",
-            category="live",
+            category="tool",
             version="1.0.0",
             author="VR Funscript AI Generator",
             tags=["oscillation", "hybrid", "live", "amplitude", "timing"],

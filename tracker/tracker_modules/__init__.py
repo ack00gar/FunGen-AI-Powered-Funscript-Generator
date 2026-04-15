@@ -71,20 +71,17 @@ class TrackerRegistry:
         offline_dir = os.path.join(tracker_dir, 'offline')
         if os.path.exists(offline_dir):
             self._scan_directory(offline_dir, folder_name='offline', is_community=False)
+
+        # Scan tool trackers subdirectory (accessory utilities, opt-in via UI filter)
+        tool_dir = os.path.join(tracker_dir, 'tool')
+        if os.path.exists(tool_dir):
+            self._scan_directory(tool_dir, folder_name='tool', is_community=False)
         
         # Scan legacy trackers
         legacy_dir = os.path.join(tracker_dir, 'legacy')
         if os.path.exists(legacy_dir):
             self._scan_directory(legacy_dir, folder_name='legacy', is_community=False)
 
-        # Supporter-exclusive trackers (only if patreon_features installed)
-        try:
-            import patreon_features
-            supporter_dir = os.path.join(os.path.dirname(patreon_features.__file__), 'trackers')
-            if os.path.exists(supporter_dir):
-                self._scan_directory(supporter_dir, folder_name='experimental', is_community=False)
-        except ImportError:
-            pass
 
         # Scan community subdirectory
         community_dir = os.path.join(tracker_dir, 'community')

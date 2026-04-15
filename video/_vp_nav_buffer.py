@@ -1,12 +1,18 @@
-"""VideoProcessor NavBufferMixin — extracted from video_processor.py."""
+"""VideoProcessor NavBufferMixin — arrow-key navigation backed by a deque
+of recently-played frames and the PyAV source for misses.
 
-import subprocess
-import sys
+The buffer is populated by the PyAV processing loop as frames are decoded,
+so sequential forward/backward arrow-key presses land on instant O(1)
+lookups. On miss, we fall through to ``pyav_source.get_frame(target)``
+which is ~300ms on 8K VR — no subprocess respawn.
+"""
+
 import threading
-import numpy as np
 from typing import Optional
 
-# How many frames to prefetch before/after the target when jumping to a point
+import numpy as np
+
+
 POINT_NAV_PREFETCH_MARGIN = 15
 
 
@@ -16,89 +22,28 @@ class NavBufferMixin:
     def _compute_nav_buffer_size(self) -> int:
         """Compute arrow-nav buffer size based on available RAM.
 
-        Each frame is yolo_input_size^2 * 3 bytes.  We cap the buffer at
-        ~10 % of available RAM, with a floor of 120 frames.
+        Each frame is yolo_input_size^2 * 3 bytes. Cap at ~10% of free RAM,
+        floor 120 frames, ceiling 1800 (~1 minute at 30fps).
         """
         frame_bytes = self.yolo_input_size * self.yolo_input_size * 3
         try:
             import psutil
             avail = psutil.virtual_memory().available
-            budget = int(avail * 0.10)  # 10 % of free RAM
+            budget = int(avail * 0.10)
             max_frames = max(120, budget // frame_bytes)
-            # Cap at a reasonable upper bound (1800 = ~1 min at 30fps)
             max_frames = min(max_frames, 1800)
         except (ImportError, OSError):
-            max_frames = 300  # Safe default (~360 MB at 640px)
-        self.logger.debug(f"Arrow-nav buffer: {max_frames} frames "
-                         f"({max_frames * frame_bytes / (1024*1024):.0f} MB)")
+            max_frames = 300
+        self.logger.debug(
+            f"Arrow-nav buffer: {max_frames} frames "
+            f"({max_frames * frame_bytes / (1024*1024):.0f} MB)"
+        )
         return max_frames
 
-    def _start_unified_pipe(self, start_frame: int) -> bool:
-        """Spawn a unified FFmpeg pipe at *start_frame* for arrow nav / pipe reuse.
-
-        Uses the same filter chain as the processing loop so VR projection,
-        scaling, etc. are visually identical to playback.
-        """
-        self._stop_unified_pipe()
-
-        if not self.video_path or not self.video_info or self.fps <= 0:
-            return False
-
-        start_sec = start_frame / self.fps
-        common_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
-
-        effective_vf = self.ffmpeg_filter_string or (
-            f"scale={self.yolo_input_size}:{self.yolo_input_size}"
-            f":force_original_aspect_ratio=decrease,"
-            f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-        )
-
-        hwaccel_args = self._get_ffmpeg_hwaccel_args()
-        cmd = common_prefix + hwaccel_args[:]
-        if start_sec > 0.001:
-            cmd.extend(['-ss', str(start_sec)])
-        cmd.extend(['-i', self._active_video_source_path, '-an', '-sn'])
-        cmd.extend(['-vf', effective_vf])
-        cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
-
-        try:
-            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            self._ffmpeg_pipe = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                bufsize=-1, creationflags=creation_flags,
-            )
-            self._ffmpeg_read_position = start_frame
-            self.logger.debug(f"Unified FFmpeg pipe started at frame {start_frame}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to start unified FFmpeg pipe: {e}")
-            self._ffmpeg_pipe = None
-            return False
-
-    def _stop_unified_pipe(self):
-        """Terminate the unified FFmpeg pipe if running."""
-        if self._ffmpeg_pipe is not None:
-            self._terminate_process(self._ffmpeg_pipe, "UnifiedPipe")
-            self._ffmpeg_pipe = None
-
-    def _pipe_read_one(self) -> Optional[np.ndarray]:
-        """Read exactly one frame from the unified FFmpeg pipe."""
-        if self._ffmpeg_pipe is None or self._ffmpeg_pipe.stdout is None:
-            return None
-        try:
-            raw = self._ffmpeg_pipe.stdout.read(self.frame_size_bytes)
-            if len(raw) < self.frame_size_bytes:
-                return None
-            frame = np.frombuffer(raw, dtype=np.uint8).reshape(
-                self._display_frame_h, self._display_frame_w, 3
-            ).copy()
-            self._ffmpeg_read_position += 1
-            return frame
-        except (OSError, ValueError):
-            return None
+    # ------------------------------------------------------------------ buffer
 
     def _buffer_lookup(self, target_frame: int) -> Optional[np.ndarray]:
-        """O(1) lookup in the frame buffer by computing offset from first entry."""
+        """O(1) lookup in the frame buffer by offset from first entry."""
         with self._frame_buffer_lock:
             if not self._frame_buffer:
                 return None
@@ -111,7 +56,7 @@ class NavBufferMixin:
             return None
 
     def _buffer_append(self, frame_index: int, frame_data: np.ndarray):
-        """Append a frame to the buffer. Clear if non-contiguous."""
+        """Append a frame to the buffer; clear on non-contiguous append."""
         with self._frame_buffer_lock:
             if self._frame_buffer:
                 last_idx = self._frame_buffer[-1][0]
@@ -120,12 +65,7 @@ class NavBufferMixin:
             self._frame_buffer.append((frame_index, frame_data))
 
     def _clear_nav_state(self):
-        """Clear all navigation state: buffer + pipe.
-
-        Called on position jumps (seek, cache clear, FFmpeg teardown) so stale
-        frames from a previous position are never served.
-        """
-        self._stop_unified_pipe()
+        """Clear buffered nav frames. Called on seeks and teardown."""
         with self._frame_buffer_lock:
             self._frame_buffer.clear()
 
@@ -143,153 +83,80 @@ class NavBufferMixin:
     def _clear_cache(self):
         with self.frame_cache_lock:
             if self.frame_cache is not None:
+                cache_len = 0
                 try:
-                    if self.frame_cache is not None:
-                        cache_len = len(self.frame_cache)
-                    else:
-                        cache_len = 0
+                    cache_len = len(self.frame_cache)
                 except (TypeError, AttributeError):
-                    cache_len = 0
+                    pass
                 if cache_len > 0:
                     self.logger.debug(f"Clearing frame cache (had {cache_len} items).")
                     self.frame_cache.clear()
         self._clear_nav_state()
 
-    def arrow_nav_forward(self, target_frame: int) -> Optional[np.ndarray]:
-        """Navigate forward using unified buffer + pipe.
+    # --------------------------------------------------------------- arrow nav
 
-        3-tier lookup (no cv2 fallback):
-        1. Buffer hit — O(1), instant
-        2. Pipe at correct position — read + append
-        3. Restart pipe at target — read + append
-        """
-        if self.arrow_nav_in_progress:
-            return None
-
-        self.arrow_nav_in_progress = True
-        try:
-            # 1. Buffer lookup (O(1))
-            frame = self._buffer_lookup(target_frame)
-            if frame is not None:
-                self.current_frame_index = target_frame
-                return frame
-
-            # 2. Pipe at correct position — sequential read
-            if (self._ffmpeg_pipe is not None
-                    and self._ffmpeg_pipe.poll() is None
-                    and self._ffmpeg_read_position == target_frame):
-                frame = self._pipe_read_one()
-                if frame is not None:
-                    self._buffer_append(target_frame, frame)
-                    self.current_frame_index = target_frame
-                    return frame
-                else:
-                    self.logger.warning(f"Forward nav pipe read failed at frame {target_frame}")
-
-            # 3. Restart pipe at target
-            if self._start_unified_pipe(target_frame):
-                frame = self._pipe_read_one()
-                if frame is not None:
-                    self._buffer_append(target_frame, frame)
-                    self.current_frame_index = target_frame
-                    return frame
-                else:
-                    self.logger.warning(f"Forward nav pipe restart read failed at frame {target_frame}")
-            else:
-                self.logger.warning(f"Forward nav pipe restart failed at frame {target_frame}")
-
-            return None
-        finally:
-            self.arrow_nav_in_progress = False
-
-    def arrow_nav_backward(self, target_frame: int) -> Optional[np.ndarray]:
-        """Navigate backward using unified buffer + pipe.
-
-        2-tier lookup (no cv2 fallback):
-        1. Buffer hit — O(1), instant
-        2. Buffer miss — rebuild buffer centered on target (50% before, 50% after)
-        """
-        # 1. Buffer lookup (O(1))
+    def _nav_to_target(self, target_frame: int) -> Optional[np.ndarray]:
+        """Shared path for both forward and backward arrow nav: buffer hit
+        first, fall through to the PyAV source."""
         frame = self._buffer_lookup(target_frame)
         if frame is not None:
             self.current_frame_index = target_frame
             return frame
+        if self.pyav_source is None:
+            self.logger.warning(f"Nav miss and no PyAV source for frame {target_frame}")
+            return None
+        frame = self.pyav_source.get_frame(target_frame, timeout=2.0)
+        if frame is None:
+            self.logger.warning(f"PyAV get_frame({target_frame}) returned None")
+            return None
+        self._buffer_append(target_frame, frame)
+        self.current_frame_index = target_frame
+        return frame
 
-        # 2. Buffer miss: rebuild centered on target_frame
-        #    Start pipe at target - capacity/2 so cursor lands in the middle.
-        half_buf = (self._frame_buffer.maxlen or 300) // 2
-        pipe_start = max(0, target_frame - half_buf)
-        frames_to_skip = target_frame - pipe_start  # frames to read before target
+    def arrow_nav_forward(self, target_frame: int) -> Optional[np.ndarray]:
+        """Navigate forward: buffer hit, otherwise PyAV get_frame."""
+        if self.arrow_nav_in_progress:
+            return None
+        self.arrow_nav_in_progress = True
+        try:
+            return self._nav_to_target(target_frame)
+        finally:
+            self.arrow_nav_in_progress = False
 
-        with self._frame_buffer_lock:
-            self._frame_buffer.clear()
-
-        if self._start_unified_pipe(pipe_start):
-            # Pre-fill buffer with frames before target
-            for i in range(frames_to_skip):
-                pre_frame = self._pipe_read_one()
-                if pre_frame is not None:
-                    self._buffer_append(pipe_start + i, pre_frame)
-                else:
-                    break
-
-            # Read the target frame itself
-            frame = self._pipe_read_one()
-            if frame is not None:
-                self._buffer_append(target_frame, frame)
-                self.current_frame_index = target_frame
-                return frame
-            else:
-                self.logger.warning(f"Backward nav pipe read failed at frame {target_frame}")
-        else:
-            self.logger.warning(f"Backward nav pipe restart failed at frame {target_frame}")
-
-        return None
+    def arrow_nav_backward(self, target_frame: int) -> Optional[np.ndarray]:
+        """Navigate backward: buffer hit, otherwise PyAV get_frame."""
+        return self._nav_to_target(target_frame)
 
     def prefetch_around(self, center_frame: int, margin: int = POINT_NAV_PREFETCH_MARGIN):
-        """Extend the nav buffer toward *center_frame + margin* using the existing pipe.
-
-        Called after jumping to a funscript point so that subsequent left/right
-        arrow presses have zero decode latency.  Never starts a new FFmpeg pipe
-        -- only reads ahead on the existing one if it is positioned correctly.
-        """
+        """Warm ±margin frames around ``center_frame`` into the nav buffer
+        using the PyAV source. Runs in a background thread so the caller
+        (usually a UI click) returns immediately."""
         total = getattr(self, 'total_frames', 0) or 0
-        if total <= 0 or not self.video_path:
+        if total <= 0 or not self.video_path or self.pyav_source is None:
             return
 
         target_end = min(total - 1, center_frame + margin)
-
-        # Skip if buffer already covers the target range
         with self._frame_buffer_lock:
             if self._frame_buffer:
                 buf_end = self._frame_buffer[-1][0]
                 if buf_end >= target_end:
                     return
 
-        # Only extend if pipe is alive and positioned right after the buffer end
-        if (self._ffmpeg_pipe is None
-                or self._ffmpeg_pipe.poll() is not None):
-            return
-
         def _fill():
-            with self._frame_buffer_lock:
-                buf_end = self._frame_buffer[-1][0] if self._frame_buffer else -1
-            if self._ffmpeg_read_position != buf_end + 1:
-                return  # pipe is not contiguous with buffer, don't touch it
-            frames_needed = target_end - buf_end
-            if frames_needed <= 0:
-                return
+            src = self.pyav_source
+            if src is None: return
             read = 0
-            for i in range(frames_needed):
-                frame = self._pipe_read_one()
+            for idx in range(max(0, center_frame), target_end + 1):
+                frame = self._buffer_lookup(idx)
+                if frame is not None:
+                    continue
+                frame = src.get_frame(idx, timeout=2.0)
                 if frame is None:
                     break
-                self._buffer_append(buf_end + 1 + i, frame)
+                self._buffer_append(idx, frame)
                 read += 1
             if read > 0:
-                self.logger.debug(
-                    f"Prefetch: extended buffer by {read} frames toward {target_end}"
-                )
+                self.logger.debug(f"Prefetch: warmed {read} frames near {center_frame}")
 
-        t = threading.Thread(target=_fill, daemon=True, name="PointNavPrefetch")
+        t = threading.Thread(target=_fill, daemon=True, name="NavPrefetch")
         t.start()

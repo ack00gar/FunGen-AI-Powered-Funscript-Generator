@@ -17,11 +17,22 @@ from tracker.tracker_modules import tracker_registry, TrackerMetadata
 
 
 class TrackerCategory(Enum):
-    """Tracker categories for UI organization."""
+    """Tracker categories for UI organization.
+
+    LIVE / OFFLINE: primary scripting strategies the user picks first.
+    LIVE_INTERVENTION: live trackers that need user setup at runtime.
+    COMMUNITY: third-party drop-ins.
+    TOOL: accessory utilities (peak/beat marker, manual ROI, oscillation
+        detector, chapter maker). Hidden by default; surfaced when the user
+        opts into the Tools filter. Tools can be live or offline at runtime
+        depending on which base class they inherit; the category is purely
+        about UI grouping.
+    """
     LIVE = "live"
-    LIVE_INTERVENTION = "live_intervention" 
+    LIVE_INTERVENTION = "live_intervention"
     OFFLINE = "offline"
     COMMUNITY = "community"
+    TOOL = "tool"
 
 
 @dataclass 
@@ -107,9 +118,11 @@ class DynamicTrackerDiscovery:
         # Determine if tracker requires user intervention
         requires_intervention = self._requires_user_intervention(metadata)
         
-        # Determine capabilities
-        supports_batch = category in [TrackerCategory.LIVE, TrackerCategory.OFFLINE]  # No intervention trackers
-        supports_realtime = category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION]
+        # Determine capabilities. Tools fall through to base-class checks
+        # below: a TOOL inheriting from BaseOfflineTracker is batch-capable;
+        # one inheriting from BaseTracker is realtime.
+        supports_batch = category in [TrackerCategory.LIVE, TrackerCategory.OFFLINE, TrackerCategory.TOOL]
+        supports_realtime = category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION, TrackerCategory.TOOL]
         
         # Get stages and properties from metadata if available
         stages = getattr(metadata, 'stages', [])
@@ -154,7 +167,9 @@ class DynamicTrackerDiscovery:
             return "offline"
         elif category == TrackerCategory.COMMUNITY:
             return "community"
-        
+        elif category == TrackerCategory.TOOL:
+            return "tool"
+
         # Default fallback
         return "live"
     
@@ -178,6 +193,8 @@ class DynamicTrackerDiscovery:
             return TrackerCategory.OFFLINE
         elif metadata.category == "community":
             return TrackerCategory.COMMUNITY
+        elif metadata.category == "tool":
+            return TrackerCategory.TOOL
         else:
             # Default community for unknown categories
             return TrackerCategory.COMMUNITY

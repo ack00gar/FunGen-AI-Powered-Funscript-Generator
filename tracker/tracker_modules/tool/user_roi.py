@@ -97,10 +97,7 @@ class UserRoiTracker(BaseTracker):
         self._fps_counter = 0
         self._fps_last_time = time.time()
         self.stats_display = []
-        
-        # Output delay compensation
-        self.output_delay_frames = 0
-    
+
     @property
     def metadata(self) -> TrackerMetadata:
         """Return metadata describing this tracker."""
@@ -108,7 +105,7 @@ class UserRoiTracker(BaseTracker):
             name="LIVE_USER_ROI",
             display_name="User ROI",
             description="Manual ROI definition with optical flow tracking and optional sub-tracking",
-            category="live",
+            category="tool",
             version="1.0.0",
             author="User ROI System",
             tags=["manual", "roi", "optical-flow", "fixed", "user-defined"],
@@ -140,8 +137,7 @@ class UserRoiTracker(BaseTracker):
                 self.x_offset = settings.get('x_offset', 0)
                 self.show_roi = settings.get('show_roi', True)
                 self.use_sparse_flow = settings.get('use_sparse_flow', False)
-                self.output_delay_frames = settings.get('output_delay_frames', 0)
-                
+
                 self.logger.info(f"User ROI settings: sub_tracking={self.enable_user_roi_sub_tracking}, "
                                f"box_size={self.user_roi_tracking_box_size}, sensitivity={self.sensitivity}")
             
@@ -747,11 +743,10 @@ class UserRoiTracker(BaseTracker):
             else:
                 secondary_to_write = final_secondary_pos
         
-        # Apply automatic lag compensation
-        automatic_smoothing_delay_frames = ((self.flow_history_window_smooth - 1) / 2.0 
-                                          if self.flow_history_window_smooth > 1 else 0.0)
-        total_delay_frames = self.output_delay_frames + automatic_smoothing_delay_frames
-        
+        # Apply automatic lag compensation (smoothing window only)
+        total_delay_frames = ((self.flow_history_window_smooth - 1) / 2.0
+                              if self.flow_history_window_smooth > 1 else 0.0)
+
         # Convert frame delay to time delay
         effective_delay_ms = total_delay_frames * (1000.0 / max(self.current_fps, 1.0))
         adjusted_frame_time_ms = frame_time_ms - effective_delay_ms

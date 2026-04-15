@@ -28,7 +28,7 @@ class AppFunscriptProcessor:
         self.scripting_start_frame: int = 0
         self.scripting_end_frame: int = 0
 
-        # Monotonic revision counter — bumped on every funscript mutation.
+        # Monotonic revision counter, bumped on every funscript mutation.
         # Used by device control to detect changes (replaces brittle len()/id() checks).
         self._revision: int = 0
 
@@ -304,7 +304,7 @@ class AppFunscriptProcessor:
         if self.app.processor and hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:
             return self.app.processor.fps
         self.logger.warning(
-            "Video FPS not available, using fallback 30.0 — "
+            "Video FPS not available, using fallback 30.0, "
             "chapter frame indices may be wrong for 60fps videos!"
         )
         return 30.0
@@ -653,6 +653,14 @@ class AppFunscriptProcessor:
         self._revision += 1
         self.update_funscript_stats_for_timeline(timeline_num, change_description)
         self.app.project_manager.project_dirty = True
+        # WS event push (debounced 200ms per axis). Cheap no-op when no WS API.
+        ws = getattr(self.app, '_ws_api', None)
+        if ws is not None:
+            axis = 'primary' if timeline_num == 1 else ('secondary' if timeline_num == 2 else f'extra_{timeline_num}')
+            try:
+                ws.emit_funscript_change(axis)
+            except Exception:
+                pass
 
         # Invalidate the ultimate autotune preview for the affected timeline
         timeline_instance = None
@@ -745,7 +753,7 @@ class AppFunscriptProcessor:
         if hasattr(fs_a, '_invalidate_cache'):
             fs_a._invalidate_cache('both')
 
-        # Clear stale selection indices on both timeline editors — after the
+        # Clear stale selection indices on both timeline editors, after the
         # swap, the same indices point to different actions so highlights would
         # appear to shift.
         if self.app.gui_instance:

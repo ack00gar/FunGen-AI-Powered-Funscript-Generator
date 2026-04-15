@@ -188,7 +188,7 @@ class FunGenUniversalInstaller:
         
         # Add interactive warning for macOS/Linux
         if self.platform in ["Darwin", "Linux"]:
-            print(f"\n{Colors.YELLOW}⚠️  INTERACTIVE INSTALLATION NOTICE:")
+            print(f"\n{Colors.YELLOW}[!]  INTERACTIVE INSTALLATION NOTICE:")
             print("   Some system installations may require your interaction:")
             print("   • Password prompts for system package installation")
             print("   • License agreement acceptance (Xcode Command Line Tools)")
@@ -204,15 +204,15 @@ class FunGenUniversalInstaller:
     
     def print_success(self, message: str):
         """Print success message"""
-        print(f"{Colors.GREEN}✓ {message}{Colors.ENDC}")
+        print(f"{Colors.GREEN}[ok] {message}{Colors.ENDC}")
     
     def print_warning(self, message: str):
         """Print warning message"""
-        print(f"{Colors.YELLOW}⚠ {message}{Colors.ENDC}")
+        print(f"{Colors.YELLOW}[!] {message}{Colors.ENDC}")
     
     def print_error(self, message: str):
         """Print error message"""
-        print(f"{Colors.RED}✗ {message}{Colors.ENDC}")
+        print(f"{Colors.RED}[x] {message}{Colors.ENDC}")
     
     def command_exists(self, command: str) -> bool:
         """Check if a command exists"""
@@ -502,7 +502,7 @@ class FunGenUniversalInstaller:
         ret, _, _ = self.run_command(["xcode-select", "--install"], check=False)
         
         if ret == 0:
-            print("  ⚠️  INTERACTIVE STEP REQUIRED:")
+            print("  [!]  INTERACTIVE STEP REQUIRED:")
             print("     A dialog has opened for Xcode Command Line Tools installation")
             print("     Please accept the license agreement and complete the installation")
             print("     This may take several minutes to download and install")
@@ -551,7 +551,7 @@ class FunGenUniversalInstaller:
                     self.print_warning(f"Failed to install with {install_cmd[0]}: {stderr}")
                     # If interactive prompts were missed, suggest manual installation
                     if "interactive" in stderr.lower() or "prompt" in stderr.lower():
-                        print("  ⚠️  This package manager may require interactive input")
+                        print("  [!]  This package manager may require interactive input")
                         print(f"     Try running manually: sudo {' '.join(install_cmd)}")
                         return False
         
@@ -813,7 +813,7 @@ class FunGenUniversalInstaller:
             self.print_error("3. Use Windows Subsystem for Linux (WSL2)")
         
         self.print_error("")
-        self.print_error("⚠️  WITHOUT IMGUI, FUNGEN CANNOT DISPLAY ITS GUI!")
+        self.print_error("[!]  WITHOUT IMGUI, FUNGEN CANNOT DISPLAY ITS GUI!")
         self.print_error("The installation will continue, but FunGen won't work until this is fixed.")
         print("  Core requirements installed (GUI unavailable)")
 
@@ -1237,10 +1237,8 @@ class FunGenUniversalInstaller:
             if not any_addon_found:
                 print("  No addons found — core features only")
 
-            # Check / install mpv system binary (required for Patreon fullscreen feature).
-            patreon_folder = self.project_path / "patreon_features"
-            if patreon_folder.exists():
-                self._ensure_mpv_installed()
+            # mpv system binary backs the fullscreen video feature for everyone now.
+            self._ensure_mpv_installed()
             
             self.print_success("Python dependencies installed")
             return True
@@ -1335,7 +1333,7 @@ class FunGenUniversalInstaller:
             self.print_success("mpv is already installed")
             return
 
-        print("  mpv not found — required for Patreon fullscreen feature")
+        print("  mpv not found, required for the fullscreen video feature")
 
         if self.platform == "Darwin":
             # Try Homebrew
@@ -1412,8 +1410,8 @@ class FunGenUniversalInstaller:
         self.print_warning("  • ROCm drivers may need updating")
         print()
         self.print_warning("Falling back to CPU-only installation will:")
-        self.print_warning("  ✓ Allow FunGen to run (slower performance)")
-        self.print_warning("  ✗ No GPU acceleration")
+        self.print_warning("  [ok] Allow FunGen to run (slower performance)")
+        self.print_warning("  [x] No GPU acceleration")
         print()
         
         # Wait for user acknowledgement
@@ -1726,7 +1724,7 @@ read -p "Press Enter to close..."
         print("=" * 60 + Colors.ENDC)
         
         print(f"\n{Colors.CYAN}To run FunGen:{Colors.ENDC}")
-        print(f"{Colors.YELLOW}  ⚠ IMPORTANT: Use the launcher scripts below (not 'python main.py' directly){Colors.ENDC}")
+        print(f"{Colors.YELLOW}  [!] IMPORTANT: Use the launcher scripts below (not 'python main.py' directly){Colors.ENDC}")
         
         if self.platform == "Windows":
             print(f"  • Double-click: {self.project_path / 'launch.bat'}")
@@ -1775,9 +1773,9 @@ read -p "Press Enter to close..."
         
         # Early ARM64 Windows detection
         if platform.system() == "Windows" and platform.machine().lower() in ['arm64', 'aarch64']:
-            self.print_warning("⚠️  ARM64 Windows system detected!")
-            self.print_warning("📦 Python packages may have limited compatibility on ARM64.")
-            self.print_warning("🔧 If installation fails, consider using x64 Python instead.")
+            self.print_warning("[!]  ARM64 Windows system detected!")
+            self.print_warning("[pkg] Python packages may have limited compatibility on ARM64.")
+            self.print_warning("[tool] If installation fails, consider using x64 Python instead.")
             print()
         
         try:
@@ -1881,7 +1879,7 @@ Examples:
     
     # Handle uninstall option
     if args.uninstall:
-        print("🗑️ Downloading and running FunGen uninstaller...")
+        print("[rm] Downloading and running FunGen uninstaller...")
         
         uninstaller_url = "https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/uninstall.py"
         
@@ -1890,7 +1888,7 @@ Examples:
             
             try:
                 urllib.request.urlretrieve(uninstaller_url, uninstaller_path)
-                print("✓ Downloaded uninstaller")
+                print("[ok] Downloaded uninstaller")
                 
                 # Run uninstaller with remaining args
                 remaining_args = [arg for arg in sys.argv[1:] if arg != "--uninstall"]
@@ -1898,7 +1896,7 @@ Examples:
                 sys.exit(result.returncode)
                 
             except Exception as e:
-                print(f"❌ Failed to download uninstaller: {e}")
+                print(f"[x] Failed to download uninstaller: {e}")
                 print("Please download fungen_uninstall.py manually from GitHub")
                 sys.exit(1)
     

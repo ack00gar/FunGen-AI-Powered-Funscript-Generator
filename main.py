@@ -299,8 +299,8 @@ def main():
             from application.utils.feature_detection import is_feature_available
             if not is_feature_available("patreon_features"):
                 parser.error("--watch requires the patreon_features add-on")
-            from patreon_features.batch.watched_folder import WatchedFolderProcessor
-            from patreon_features.batch.batch_queue import BatchQueue
+            from application.batch.watched_folder import WatchedFolderProcessor
+            from application.batch.batch_queue import BatchQueue
         except ImportError as e:
             parser.error(f"--watch requires patreon_features: {e}")
 

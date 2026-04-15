@@ -6,9 +6,9 @@
       "changelog": "Frame-perfect time conversions (round instead of truncate)"
     },
     "streamer": {
-      "version": "3.6.3",
+      "version": "3.6.4",
       "display_name": "Video Streamer",
-      "changelog": "Frame-perfect time conversions (round instead of truncate)"
+      "changelog": "Rebundle: frame-perfect time math + full vr_viewer/xbvr/local_file/stash browser assets"
     },
     "patreon_features": {
       "version": "1.1.4",

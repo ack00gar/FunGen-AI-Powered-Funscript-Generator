@@ -151,8 +151,14 @@ class VideoNavigationCoreMixin:
             fs_proc = self.app.funscript_processor
 
             eff_duration_s, _, _ = self.app.get_effective_video_duration_params()
+
+            section_left_x, section_top_screen_y = imgui.get_cursor_screen_pos()
+            playhead_top_y = None
+
             if app_state.show_funscript_timeline:
                 imgui.push_item_width(actual_content_width)
+                # Funscript preview internally offsets cursor by +20 before the image.
+                playhead_top_y = section_top_screen_y + 20
                 self._render_funscript_timeline_preview(eff_duration_s, app_state.funscript_preview_draw_height)
                 imgui.pop_item_width()
 
@@ -165,12 +171,28 @@ class VideoNavigationCoreMixin:
                     total_frames_for_bars = self.app.processor.total_frames
 
             chapter_bar_h = fs_proc.chapter_bar_height if hasattr(fs_proc, 'chapter_bar_height') else 20
+            if playhead_top_y is None:
+                playhead_top_y = imgui.get_cursor_screen_pos()[1]
             self._render_chapter_bar(fs_proc, total_frames_for_bars, actual_content_width, chapter_bar_h)
             imgui.spacing()
 
             if app_state.show_heatmap:
                 self._render_funscript_heatmap_preview(eff_duration_s, actual_content_width, app_state.timeline_heatmap_height)
                 imgui.spacing()
+
+            # Unified playhead line across funscript preview + chapter bar + heatmap.
+            proc = self.app.processor
+            if (proc and proc.video_info and proc.current_frame_index >= 0
+                    and total_frames_for_bars > 0 and eff_duration_s > 0):
+                fps = proc.fps if proc.fps and proc.fps > 0 else 30.0
+                current_time_s = proc.current_frame_index / fps
+                norm = max(0.0, min(1.0, current_time_s / eff_duration_s))
+                marker_x = section_left_x + norm * actual_content_width
+                playhead_bottom_y = imgui.get_cursor_screen_pos()[1] - 2
+                if playhead_bottom_y > playhead_top_y:
+                    dl = imgui.get_window_draw_list()
+                    col = imgui.get_color_u32_rgba(1.0, 0.15, 0.15, 1.0)
+                    dl.add_line(marker_x, playhead_top_y, marker_x, playhead_bottom_y, col, thickness=1.5)
             if self.chapter_tooltip_segment and total_frames_for_bars > 0:
                 self._render_chapter_tooltip()
 

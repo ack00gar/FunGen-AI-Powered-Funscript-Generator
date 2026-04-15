@@ -293,7 +293,8 @@ class VideoDisplayCoreMixin:
                             self._video_display_rect_max = imgui.get_item_rect_max()
 
                             # Show "Seeking..." indicator when video is seeking
-                            if self.app.processor and self.app.processor.seek_in_progress:
+                            # (seek_in_progress attribute removed — PyAV seeks are synchronous)
+                            if False:
                                 draw_list = imgui.get_window_draw_list()
                                 # Draw semi-transparent overlay
                                 overlay_color = imgui.get_color_u32_rgba(0.0, 0.0, 0.0, 0.5)

@@ -438,23 +438,46 @@ class RealMLVRFormatDetector:
             return self._create_error_result(str(e))
 
     def _extract_middle_frames(self, video_path: str, video_info: Dict, num_frames: int) -> List[np.ndarray]:
-        """Extract sample frames from middle of video."""
-        cap = cv2.VideoCapture(video_path)
-        total_frames = video_info.get('nb_frames', 1000)
+        """Extract ``num_frames`` sample frames evenly distributed across the
+        middle 50% of the video. Uses PyAV (in-process libav) — no cv2
+        nor system ffmpeg dependency."""
+        import av
 
+        total_frames = video_info.get('nb_frames', 1000)
         start_frame = int(total_frames * 0.25)
         end_frame = int(total_frames * 0.75)
         sample_interval = max(1, (end_frame - start_frame) // num_frames)
+        targets = [start_frame + i * sample_interval for i in range(num_frames)]
 
-        frames = []
-        for i in range(num_frames):
-            frame_num = start_frame + (i * sample_interval)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                frames.append(frame)
-
-        cap.release()
+        frames: List[np.ndarray] = []
+        container = None
+        try:
+            container = av.open(video_path)
+            stream = container.streams.video[0]
+            stream.thread_type = "AUTO"
+            fps = float(stream.average_rate or stream.guessed_rate or 30.0)
+            time_base = stream.time_base
+            for tgt in targets:
+                try:
+                    target_pts = int(tgt / fps / time_base)
+                    container.seek(target_pts, backward=True, any_frame=False, stream=stream)
+                except Exception:
+                    continue
+                # Decode one frame after the seek (lands near target)
+                got = False
+                for packet in container.demux(stream):
+                    for frame in packet.decode():
+                        arr = frame.to_ndarray(format="bgr24")
+                        frames.append(arr)
+                        got = True
+                        break
+                    if got: break
+        except Exception as e:
+            self.logger.warning(f"PyAV sample extraction failed: {e}")
+        finally:
+            if container is not None:
+                try: container.close()
+                except Exception: pass
         return frames
 
     def _create_error_result(self, error_msg: str) -> Dict:

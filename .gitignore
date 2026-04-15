@@ -26,10 +26,9 @@ vr_streaming/
 # Supporter-only features (not included in public release)
 device_control/
 streamer/
+subtitle_translation/
 patreon_features/
-patreon_features.zip
-device_control.zip
-streamer.zip
+*.zip
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

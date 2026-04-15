@@ -61,6 +61,8 @@ class ProjectManager:
         self.project_file_path = None
         self.project_dirty = False  # A new project starts clean
         self.last_autosave_time = time.time()
+        self.first_dirty_time: Optional[float] = None  # Set by render loop when dirty arms
+        self.nudge_metadata: bool = True  # Auto-open metadata tab once on new project
 
     def get_suggested_save_path_and_dir(self, save_as: bool) -> Optional[Tuple[str, str]]:
         if self.app.file_manager.video_path:
@@ -222,6 +224,7 @@ class ProjectManager:
                 self.app.gui_instance.track_disk_io_time("ProjectSave", io_time)
             self.project_file_path = filepath
             self.project_dirty = False
+            self.first_dirty_time = None
 
             # On successful save, update the recent projects list
             self._add_to_recent_projects(filepath)
@@ -307,7 +310,7 @@ class ProjectManager:
             "stage2_overlay_msgpack_path": stage_proc_data.get("stage2_overlay_msgpack_path"),
             "stage2_database_path": stage_proc_data.get("stage2_database_path"),
 
-            # Funscript Data — new canonical format (all axes + assignments)
+            # Funscript Data, new canonical format (all axes + assignments)
             "funscript_data": funscript_data_dict,
             # Legacy keys kept for backward compat with older FunGen versions
             "funscript_actions_timeline1": primary_actions,
@@ -332,8 +335,6 @@ class ProjectManager:
             # ApplicationLogic direct settings (or could be AppSettings if purely user preference)
             "yolo_detection_model_path_setting": self.app.yolo_detection_model_path_setting,
             "yolo_pose_model_path_setting": self.app.yolo_pose_model_path_setting,
-            # Consider if funscript_output_delay_frames (from calibration) should be project specific
-            "funscript_output_delay_frames": self.app.calibration.funscript_output_delay_frames,
 
             # StageProcessor Data (mostly status, as progress is transient)
             "stage2_status_text": stage_proc_data.get("stage2_status_text", "Not run."),
@@ -387,9 +388,6 @@ class ProjectManager:
             self.app.tracker.det_model_path = self.app.yolo_det_model_path
             self.app.tracker.pose_model_path = self.app.yolo_pose_model_path
 
-        self.app.calibration.funscript_output_delay_frames = project_data.get("funscript_output_delay_frames", self.app.app_settings.get("funscript_output_delay_frames", 0))
-        self.app.calibration.update_tracker_delay_params()  # Apply to tracker
-
         # Data for FileManager
         fm = self.app.file_manager
         fm.video_path = project_data.get("video_path", "")
@@ -411,7 +409,7 @@ class ProjectManager:
         funscript_data = project_data.get("funscript_data")
 
         if funscript_data and isinstance(funscript_data, dict) and "axes" in funscript_data:
-            # New canonical format — restore all axes including T3+ and axis assignments
+            # New canonical format, restore all axes including T3+ and axis assignments
             axes = funscript_data.get("axes", {})
             t1_actions = axes.get("primary", [])
             fs_proc.clear_timeline_history_and_set_new_baseline(1, t1_actions, "Project Loaded (T1)")
@@ -434,7 +432,7 @@ class ProjectManager:
                 if raw_assignments:
                     funscript_obj._axis_assignments = {int(k): v for k, v in raw_assignments.items()}
         else:
-            # Legacy format — only T1 and T2
+            # Legacy format, only T1 and T2
             t1_actions = project_data.get("funscript_actions_timeline1", [])
             fs_proc.clear_timeline_history_and_set_new_baseline(1, t1_actions, "Project Loaded (T1)")
             t2_actions = project_data.get("funscript_actions_timeline2", [])

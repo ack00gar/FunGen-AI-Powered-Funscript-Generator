@@ -23,6 +23,19 @@ from application.utils.bpm_analyzer import BPMOverlayConfig, TapTempo, SUBDIVISI
 from application.classes.bookmark_manager import BookmarkManager
 from application.classes.recording_capture import RecordingCapture
 from common.frame_utils import ms_to_frame, frame_to_ms
+from application.classes.timeline_ops import (
+    add_point, clear_all_points,
+    copy_selection, copy_to_other,
+    paste_actions, paste_actions_exact, paste_actions_replace,
+    delete_selected, equalize_selection, filter_selection,
+    isolate_selection,
+    begin_live_drag, end_live_drag, live_range_extend, live_rdp_simplify,
+    nudge_all_time, nudge_chapter_time,
+    nudge_selection_time, nudge_selection_value,
+    repeat_last_stroke,
+    select_points_in_chapter, select_relative_to_playhead,
+    snap_to_playhead,
+)
 
 class TimelineTransformer:
     """
@@ -133,10 +146,14 @@ class InteractiveFunscriptTimeline:
 
         # Heatmap coloring - speed-based segment colors enabled by default
         self._show_heatmap_coloring = True
-        # Smooth curve rendering (catmull-rom spline between points)
-        self._show_smooth_curve = False
+        # Smooth curve rendering (catmull-rom spline between points), always on.
+        self._show_smooth_curve = True
         self._smooth_samples_per_segment = 12
-        self._heatmap_mapper = HeatmapColorMapper(max_speed=400.0)
+        _settings = getattr(self.app, 'app_settings', None)
+        _max_speed = float(_settings.get("heatmap_max_speed", 400.0)) if _settings else 400.0
+        _highlight = bool(_settings.get("heatmap_highlight_overspeed", True)) if _settings else True
+        self._heatmap_mapper = HeatmapColorMapper(max_speed=_max_speed,
+                                                   highlight_overspeed=_highlight)
         self._heatmap_speeds_cache: Optional[np.ndarray] = None   # full-script speeds
         self._heatmap_colors_cache: Optional[np.ndarray] = None   # full-script u32 colors
         self._heatmap_cache_np_id: int = 0  # id() of numpy arrays when cache was built
@@ -144,6 +161,17 @@ class InteractiveFunscriptTimeline:
         # Speed limit visualization
         self._show_speed_warnings = False
         self._speed_limit_threshold = 400.0
+
+        # Selection bracket loop playback (A-B style). When armed, the playback
+        # tick wraps from the last selected action's time back to the first.
+        self._selection_loop_armed: bool = False
+
+        # Live-drag tool state (popup-driven). Opened from the Rendering menu;
+        # _live_drag_state holds {op_key, baseline, axis} during a drag so each
+        # tick re-applies from the original snapshot, not the previous tick.
+        self._live_tool_open: Optional[str] = None  # 'range' | 'rdp' | None
+        self._live_tool_value: float = 0.0
+        self._live_drag_state: Optional[dict] = None
 
         # Bookmarks
         self._bookmark_manager = BookmarkManager()
@@ -159,7 +187,7 @@ class InteractiveFunscriptTimeline:
         self._alt_top_value = 95
         self._alt_bottom_value = 5
 
-        # Waveform draw cache — skip recomputation when viewport unchanged
+        # Waveform draw cache, skip recomputation when viewport unchanged
         self._waveform_cache_key: Optional[tuple] = None  # (start_ms, end_ms, width)
         self._waveform_cache_xs = None
         self._waveform_cache_ys_top = None
@@ -253,10 +281,14 @@ class InteractiveFunscriptTimeline:
 
         self._container_mode = container_mode
 
+        # Selection-loop tick: enforced once per render frame (cheap, no-op
+        # when not armed). Wraps playhead at end of selection back to start.
+        self._tick_selection_loop()
+
         # 1. Window Configuration
         is_floating = app_state.ui_layout_mode == "floating"
         # NO_BRING_TO_FRONT_ON_FOCUS prevents the timeline from stealing
-        # z-order when clicked — dialog/plugin windows stay on top.
+        # z-order when clicked, dialog/plugin windows stay on top.
         flags = (imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE |
                  imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
 
@@ -378,6 +410,10 @@ class InteractiveFunscriptTimeline:
 
         imgui.end_child() if self._container_mode else imgui.end()
 
+        # Live-drag tool popup (rendered after the main timeline so it floats
+        # above without z-order tricks).
+        self._render_live_tool_popup()
+
     # ==================================================================================
     # INPUT HANDLING
     # ==================================================================================
@@ -388,7 +424,7 @@ class InteractiveFunscriptTimeline:
 
         # Check canvas bounds AND that no other window/popup/dialog is on top.
         # is_window_hovered() returns False when a popup, dialog, or overlapping
-        # window is above this one — preventing click-through to the canvas.
+        # window is above this one, preventing click-through to the canvas.
         in_canvas = (tf.x_offset <= mouse_pos[0] <= tf.x_offset + tf.width and
                      tf.y_offset <= mouse_pos[1] <= tf.y_offset + tf.height)
         is_hovered = in_canvas and imgui.is_window_hovered()
@@ -422,6 +458,12 @@ class InteractiveFunscriptTimeline:
                 app_state.timeline_zoom_factor_ms_per_px = new_zoom
                 app_state.timeline_pan_offset_ms = new_pan
                 app_state.timeline_interaction_active = True
+
+            # Double middle-click clears selection (fast deselect gesture).
+            if imgui.is_mouse_double_clicked(glfw.MOUSE_BUTTON_MIDDLE):
+                if self.multi_selected_action_indices:
+                    self.multi_selected_action_indices.clear()
+                    self.selected_action_idx = -1
 
             # Middle Drag Pan
             if imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_MIDDLE):
@@ -485,7 +527,7 @@ class InteractiveFunscriptTimeline:
             self.range_selecting = False
             self.is_marqueeing = False
 
-        # Left Click (single — handled after double-click check)
+        # Left Click (single, handled after double-click check)
         elif is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and self._mode == TimelineMode.SELECT:
             hit_idx = self._hit_test_point(mouse_pos, actions, tf)
 
@@ -497,10 +539,10 @@ class InteractiveFunscriptTimeline:
                 # Create-point modifier + click on empty: add new point at cursor
                 t = tf.x_to_time(mouse_pos[0])
                 v = tf.y_to_val(mouse_pos[1])
-                self._add_point(t, v)
+                add_point(self, t, v)
 
             elif hit_idx != -1:
-                # Point Clicked — select only (no seek on single click)
+                # Point Clicked, select only (no seek on single click)
                 self.dragging_action_idx = hit_idx
                 self.drag_start_pos = mouse_pos
                 self.is_dragging_active = False  # Wait for drag threshold
@@ -563,6 +605,15 @@ class InteractiveFunscriptTimeline:
             elif self.is_marqueeing:
                 self.marquee_end = mouse_pos
                 app_state.timeline_interaction_active = True
+                # Edge autoscroll: when marquee drags within 3% of canvas edge,
+                # pan timeline so the selection can extend off-screen.
+                edge_pct = 0.03
+                edge_px = max(8.0, tf.width * edge_pct)
+                pan_speed = max(8.0, tf.zoom * 4.0)
+                if mouse_pos[0] < tf.x_offset + edge_px:
+                    app_state.timeline_pan_offset_ms -= pan_speed
+                elif mouse_pos[0] > tf.x_offset + tf.width - edge_px:
+                    app_state.timeline_pan_offset_ms += pan_speed
                 
             elif self.range_selecting:
                 self.range_end_time = tf.x_to_time(mouse_pos[0])
@@ -698,7 +749,7 @@ class InteractiveFunscriptTimeline:
         if panning_now:
             self._alt_arrow_panning = True
         elif self._alt_arrow_panning:
-            # Just released — seek to center of visible timeline
+            # Just released, seek to center of visible timeline
             self._alt_arrow_panning = False
             if self.app.processor and self.app.processor.fps > 0:
                 # Estimate visible width from window width (timeline spans most of it)
@@ -719,20 +770,27 @@ class InteractiveFunscriptTimeline:
 
         # 3. Delete (Delete/Backspace)
         if check_shortcut("delete_selected_point", "DELETE") or check_shortcut("delete_selected_point_alt", "BACKSPACE"):
-            self._delete_selected()
+            delete_selected(self)
 
         # 4. Copy/Paste
         if check_shortcut("copy_selection", "CTRL+C"):
-            self._handle_copy_selection()
-        if check_shortcut("paste_selection", "CTRL+V"):
-            # Paste at current playhead position (video time), not stale mouse position
-            paste_time_ms = 0
+            copy_selection(self)
+
+        def _playhead_paste_ms():
             proc = self.app.processor
             if proc and proc.fps > 0:
-                paste_time_ms = getattr(proc, 'playhead_override_ms', None)
-                if paste_time_ms is None:
-                    paste_time_ms = frame_to_ms(proc.current_frame_index, proc.fps)
-            self._handle_paste_actions(paste_time_ms)
+                ph = getattr(proc, 'playhead_override_ms', None)
+                if ph is None:
+                    ph = frame_to_ms(proc.current_frame_index, proc.fps)
+                return ph
+            return 0
+
+        if check_shortcut("paste_selection", "CTRL+V"):
+            paste_actions(self, _playhead_paste_ms())
+        if check_shortcut("paste_selection_replace", "CTRL+SHIFT+V"):
+            paste_actions_replace(self, _playhead_paste_ms())
+        if check_shortcut("paste_selection_exact", "CTRL+ALT+V"):
+            paste_actions_exact(self)
 
         # 5. Nudge Selection (Arrows)
         nudge_val = 0
@@ -747,7 +805,7 @@ class InteractiveFunscriptTimeline:
                     if 0 <= nearest < len(actions):
                         self.multi_selected_action_indices = {self._action_key(actions[nearest])}
             if self.multi_selected_action_indices:
-                self._nudge_selection_value(nudge_val)
+                nudge_selection_value(self, nudge_val)
 
         # 6. Nudge Time (Shift+Arrows)
         nudge_t = 0
@@ -767,19 +825,33 @@ class InteractiveFunscriptTimeline:
                     if 0 <= nearest < len(actions):
                         self.multi_selected_action_indices = {self._action_key(actions[nearest])}
             if self.multi_selected_action_indices:
-                self._nudge_selection_time(nudge_t)
+                nudge_selection_time(self, nudge_t)
 
         # 6b. Snap nearest to playhead - handled by global shortcut handler
 
         # 6c. Select all left / right of playhead
         if check_shortcut("select_left_of_playhead", "CTRL+ALT+LEFT_ARROW"):
-            self._select_relative_to_playhead(before=True)
+            select_relative_to_playhead(self, before=True)
         if check_shortcut("select_right_of_playhead", "CTRL+ALT+RIGHT_ARROW"):
-            self._select_relative_to_playhead(before=False)
+            select_relative_to_playhead(self, before=False)
 
         # 6d. Repeat last stroke at playhead (Home)
         if check_shortcut("repeat_last_stroke", "HOME"):
-            self._repeat_last_stroke()
+            repeat_last_stroke(self)
+
+        # 6e. Selection-aware ops (SHIFT+ convention)
+        if check_shortcut("equalize_selection", "SHIFT+E"):
+            equalize_selection(self)
+        if check_shortcut("isolate_selection", "SHIFT+R"):
+            isolate_selection(self)
+        if check_shortcut("filter_selection_top", "SHIFT+T"):
+            filter_selection(self, 'top')
+        if check_shortcut("filter_selection_bottom", "SHIFT+B"):
+            filter_selection(self, 'bottom')
+        if check_shortcut("filter_selection_mid", "SHIFT+M"):
+            filter_selection(self, 'mid')
+        if check_shortcut("toggle_selection_loop", "\\"):
+            self._toggle_selection_loop()
 
         # 7. Bookmark at playhead (B key)
         if check_shortcut("add_bookmark", "B"):
@@ -962,58 +1034,6 @@ class InteractiveFunscriptTimeline:
                 frame = ms_to_frame(time_ms, fps)
                 self.app.processor.seek_video(frame)
 
-    # --- Nudge Helpers ---
-    def _nudge_selection_value(self, delta: int):
-        actions = self._get_actions()
-        if not actions: return
-
-        snap = self.app.app_state_ui.snap_to_grid_pos
-        actual_delta = delta * (snap if snap > 0 else 1)
-
-        resolved = self._resolve_selected_indices()
-        for idx in resolved:
-            actions[idx]['pos'] = max(0, min(100, actions[idx]['pos'] + actual_delta))
-        # Rebuild selection to reflect new pos values
-        self.multi_selected_action_indices = {self._action_key(actions[idx]) for idx in resolved}
-        fs, axis = self._get_target_funscript_details()
-        if fs:
-            fs._invalidate_cache(axis or 'both')
-        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Nudge Value")
-        self.invalidate_cache()
-
-        from application.classes.undo_manager import NudgeValuesCmd
-        self.app.undo_manager.push_done(NudgeValuesCmd(
-            self.timeline_num, resolved, actual_delta))
-
-    def _nudge_selection_time(self, delta_ms: int):
-        actions = self._get_actions()
-        if not actions: return
-
-        # Sort indices to avoid collision logic issues
-        resolved = self._resolve_selected_indices()
-        indices = sorted(resolved, reverse=(delta_ms > 0))
-
-        for idx in indices:
-            if idx < len(actions):
-                # Logic similar to drag constraint
-                prev_limit = actions[idx - 1]['at'] + 1 if idx > 0 else 0
-                next_limit = actions[idx + 1]['at'] - 1 if idx < len(actions) - 1 else float('inf')
-
-                new_at = actions[idx]['at'] + delta_ms
-                actions[idx]['at'] = int(max(prev_limit, min(next_limit, new_at)))
-
-        # Rebuild selection to reflect new at values
-        self.multi_selected_action_indices = {self._action_key(actions[idx]) for idx in resolved}
-        fs, axis = self._get_target_funscript_details()
-        if fs:
-            fs._invalidate_cache(axis or 'both')
-        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Nudge Time")
-        self.invalidate_cache()
-
-        from application.classes.undo_manager import NudgeTimesCmd
-        self.app.undo_manager.push_done(NudgeTimesCmd(
-            self.timeline_num, resolved, delta_ms))
-
     def _playhead_ms(self) -> Optional[int]:
         proc = self.app.processor
         if not proc or proc.fps <= 0:
@@ -1022,77 +1042,6 @@ class InteractiveFunscriptTimeline:
         if ms is None:
             ms = frame_to_ms(proc.current_frame_index, proc.fps)
         return ms
-
-    def _select_relative_to_playhead(self, before: bool):
-        actions = self._get_actions()
-        if not actions:
-            return
-        ph = self._playhead_ms()
-        if ph is None:
-            return
-        if before:
-            keys = {self._action_key(a) for a in actions if a['at'] <= ph}
-            label = "left of playhead"
-        else:
-            keys = {self._action_key(a) for a in actions if a['at'] >= ph}
-            label = "right of playhead"
-        self.multi_selected_action_indices = keys
-        self.app.logger.info(
-            f"Selected {len(keys)} point(s) {label} (Timeline {self.timeline_num})",
-            extra={'status_message': True})
-
-    def _repeat_last_stroke(self):
-        """Append a copy of the most recent stroke (last two actions) starting
-        at the current playhead. Mirrors the standard 'repeat stroke' action."""
-        actions = self._get_actions()
-        if len(actions) < 2:
-            self.app.logger.info("Repeat stroke needs at least two prior points",
-                                 extra={'status_message': True})
-            return
-        ph = self._playhead_ms()
-        if ph is None:
-            return
-
-        from bisect import bisect_left
-        timestamps = [a['at'] for a in actions]
-        idx = bisect_left(timestamps, ph)
-        # Take the last two actions strictly at or before the playhead
-        last_idx = min(idx, len(actions)) - 1
-        if last_idx < 1:
-            self.app.logger.info("Repeat stroke needs two points before the playhead",
-                                 extra={'status_message': True})
-            return
-        a1 = actions[last_idx - 1]
-        a2 = actions[last_idx]
-        dt = a2['at'] - a1['at']
-        if dt <= 0:
-            return
-
-        # Anchor the repeated stroke on the last point. New points appear at
-        # last.at + dt and last.at + 2*dt with positions a1.pos and a2.pos.
-        new1_at = a2['at'] + dt
-        new2_at = new1_at + dt
-        # Ensure no collision with existing points within a tiny tolerance
-        fps = self.app.processor.fps if self.app.processor else 30.0
-        tol = max(1, int(500 / max(1.0, fps)))
-
-        def _has_neighbor(ts):
-            j = bisect_left(timestamps, ts)
-            for c in (j - 1, j):
-                if 0 <= c < len(actions) and abs(actions[c]['at'] - ts) <= tol:
-                    return True
-            return False
-
-        if _has_neighbor(new1_at) or _has_neighbor(new2_at):
-            self.app.logger.info("Repeat stroke would overlap existing points",
-                                 extra={'status_message': True})
-            return
-
-        self._add_point(new1_at, a1['pos'])
-        self._add_point(new2_at, a2['pos'])
-        self.app.logger.info(
-            f"Repeated stroke at {new1_at}ms / {new2_at}ms (Timeline {self.timeline_num})",
-            extra={'status_message': True})
 
     def _find_nearest_point_index(self) -> Optional[int]:
         """Find the index of the action nearest to the current playhead, without moving it."""
@@ -1120,317 +1069,10 @@ class InteractiveFunscriptTimeline:
                     best_idx = candidate
         return best_idx
 
-    def _snap_nearest_to_playhead(self):
-        """Snap the nearest action point to the current playhead (video) position."""
-        from bisect import bisect_left
-
-        actions = self._get_actions()
-        if not actions:
-            return
-
-        # Get playhead time from video position
-        processor = self.app.processor
-        if not processor or processor.fps <= 0:
-            return
-        playhead_ms = frame_to_ms(processor.current_frame_index, processor.fps)
-
-        # Find nearest point using binary search
-        timestamps = [a['at'] for a in actions]
-        idx = bisect_left(timestamps, playhead_ms)
-
-        # Check idx-1 and idx to find actual nearest
-        best_idx = None
-        best_dist = float('inf')
-        for candidate in (idx - 1, idx):
-            if 0 <= candidate < len(actions):
-                dist = abs(actions[candidate]['at'] - playhead_ms)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_idx = candidate
-
-        if best_idx is None:
-            return
-
-        # Already at playhead? Nothing to do.
-        new_at = int(round(playhead_ms))
-        if actions[best_idx]['at'] == new_at:
-            return
-
-        # Enforce neighbor constraints (cannot cross adjacent points)
-        prev_limit = actions[best_idx - 1]['at'] + 1 if best_idx > 0 else 0
-        next_limit = actions[best_idx + 1]['at'] - 1 if best_idx < len(actions) - 1 else float('inf')
-        new_at = int(max(prev_limit, min(next_limit, new_at)))
-
-        # Capture old value for unified undo
-        old_at = actions[best_idx]['at']
-
-        actions[best_idx]['at'] = new_at
-
-        fs, axis = self._get_target_funscript_details()
-        if fs:
-            fs._invalidate_cache(axis or 'both')
-        self.app.funscript_processor._post_mutation_refresh(
-            self.timeline_num, "Snap to Playhead")
-        self.invalidate_cache()
-        self.app.project_manager.project_dirty = True
-        self.app.notify("Point snapped to playhead", "info", 1.5)
-
-        from application.classes.undo_manager import SnapToPlayheadCmd
-        self.app.undo_manager.push_done(SnapToPlayheadCmd(
-            self.timeline_num, best_idx, old_at, new_at))
-
-    def _nudge_all_time(self, frames: int):
-        """Nudge ALL points by a number of frames (not just selection)"""
-        actions = self._get_actions()
-        if not actions: return
-
-        processor = self.app.processor
-        if not processor or not processor.video_info: return
-
-        fps = processor.fps
-        if fps <= 0: return
-
-        actions_before = list(self._get_actions() or [])
-
-        # Convert frames to milliseconds
-        delta_ms = frame_to_ms(frames, fps)
-
-        # Nudge all points by the same amount
-        for action in actions:
-            action['at'] = max(0, action['at'] + delta_ms)
-
-        fs, axis = self._get_target_funscript_details()
-        if fs and axis:
-            fs._invalidate_cache(axis)
-
-        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Nudge All Points")
-        self.invalidate_cache()
-
-        actions_after = list(self._get_actions() or [])
-        from application.classes.undo_manager import BulkReplaceCmd
-        self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Nudge All Points (T{self.timeline_num})"))
-
-    def _nudge_chapter_time(self, frames: int):
-        """Nudge points within the selected chapter(s) by a number of frames"""
-        # Get selected chapters from video_navigation_ui
-        selected_chapters = []
-        if self.app.gui_instance and hasattr(self.app.gui_instance, 'video_navigation_ui'):
-            nav_ui = self.app.gui_instance.video_navigation_ui
-            if nav_ui and hasattr(nav_ui, 'context_selected_chapters'):
-                selected_chapters = nav_ui.context_selected_chapters
-
-        if not selected_chapters:
-            if self.logger:
-                self.logger.info("No chapter selected for nudging", extra={'status_message': True})
-            return
-
-        actions = self._get_actions()
-        if not actions: return
-
-        processor = self.app.processor
-        if not processor or not processor.video_info: return
-
-        fps = processor.fps
-        if fps <= 0: return
-
-        actions_before = list(self._get_actions() or [])
-
-        # Convert frames to milliseconds
-        delta_ms = frame_to_ms(frames, fps)
-
-        # Process each selected chapter
-        total_nudged = 0
-        for chapter in selected_chapters:
-            # Get chapter time range
-            start_ms = frame_to_ms(chapter.start_frame_id, fps)
-            end_ms = frame_to_ms(chapter.end_frame_id, fps)
-
-            # Find points within chapter using binary search on cached timestamps
-            action_timestamps = self._get_cached_timestamps()
-            if not action_timestamps or len(action_timestamps) != len(actions):
-                action_timestamps = [a['at'] for a in actions]
-            start_idx = bisect_left(action_timestamps, start_ms)
-            end_idx = bisect_right(action_timestamps, end_ms)
-
-            # Nudge only points within the chapter
-            for i in range(start_idx, end_idx):
-                actions[i]['at'] = max(0, actions[i]['at'] + delta_ms)
-                total_nudged += 1
-
-        if total_nudged == 0:
-            if self.logger:
-                self.logger.info("No points found in selected chapter(s)", extra={'status_message': True})
-            return
-
-        fs, axis = self._get_target_funscript_details()
-        if fs and axis:
-            fs._invalidate_cache(axis)
-
-        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Nudge Chapter Points")
-        self.invalidate_cache()
-
-        actions_after = list(self._get_actions() or [])
-        from application.classes.undo_manager import BulkReplaceCmd
-        self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Nudge Chapter Points (T{self.timeline_num})"))
-
-    def select_points_in_chapter(self):
-        """Select all funscript points within the context-selected chapter boundaries."""
-        selected_chapters = []
-        if self.app.gui_instance and hasattr(self.app.gui_instance, 'video_navigation_ui'):
-            nav_ui = self.app.gui_instance.video_navigation_ui
-            if nav_ui and hasattr(nav_ui, 'context_selected_chapters'):
-                selected_chapters = nav_ui.context_selected_chapters
-
-        if not selected_chapters:
-            if self.logger:
-                self.logger.info("No chapter selected", extra={'status_message': True})
-            return
-
-        actions = self._get_actions()
-        if not actions:
-            return
-
-        processor = self.app.processor
-        if not processor or not processor.video_info:
-            return
-
-        fps = processor.fps
-        if fps <= 0:
-            return
-
-        new_selection = set()
-        for chapter in selected_chapters:
-            start_ms = frame_to_ms(chapter.start_frame_id, fps)
-            end_ms = frame_to_ms(chapter.end_frame_id, fps)
-
-            action_timestamps = self._get_cached_timestamps()
-            if not action_timestamps or len(action_timestamps) != len(actions):
-                action_timestamps = [a['at'] for a in actions]
-            start_idx = bisect_left(action_timestamps, start_ms)
-            end_idx = bisect_right(action_timestamps, end_ms)
-
-            for i in range(start_idx, end_idx):
-                new_selection.add(self._action_key(actions[i]))
-
-        self.multi_selected_action_indices = new_selection
-
-        if self.logger:
-            self.logger.info(
-                f"Selected {len(new_selection)} points in {len(selected_chapters)} chapter(s)",
-                extra={'status_message': True}
-            )
-
-    # --- Clipboard & Timeline Ops ---
-    def _handle_copy_selection(self):
-        actions = self._get_actions()
-        if not self.multi_selected_action_indices: return
-
-        indices = self._resolve_selected_indices()
-        selection = [actions[i] for i in indices]
-        
-        if not selection: return
-        
-        # Normalize to relative time (0 start)
-        base_time = selection[0]['at']
-        clipboard_data = [{'relative_at': a['at'] - base_time, 'pos': a['pos']} for a in selection]
-        
-        self.app.funscript_processor.set_clipboard_actions(clipboard_data)
-        self.logger.info(f"Copied {len(clipboard_data)} points.")
-
-    def _handle_paste_actions(self, paste_at_ms: float):
-        clip = self.app.funscript_processor.get_clipboard_actions()
-        if not clip: return
-
-        fs, axis = self._get_target_funscript_details()
-        if not fs: return
-
-        actions_before = list(self._get_actions() or [])
-
-        new_actions = []
-        for item in clip:
-            t = int(paste_at_ms + item['relative_at'])
-            v = int(item['pos'])
-            new_actions.append({
-                'timestamp_ms': t,
-                'primary_pos': v if axis=='primary' else None,
-                'secondary_pos': v if axis=='secondary' else None
-            })
-
-        fs.add_actions_batch(new_actions, is_from_live_tracker=False)
-        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Paste")
-        self.invalidate_cache()
-
-        actions_after = list(self._get_actions() or [])
-        from application.classes.undo_manager import BulkReplaceCmd
-        self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Paste (T{self.timeline_num})"))
-
     def _handle_swap_timeline(self, target_num=None):
         if target_num is None:
             target_num = 2 if self.timeline_num == 1 else 1
         self.app.funscript_processor.swap_timelines(self.timeline_num, target_num)
-
-    def _handle_copy_to_other(self, target_num=None):
-        actions = self._get_actions()
-        if not self.multi_selected_action_indices: return
-
-        other_num = target_num if target_num is not None else (2 if self.timeline_num == 1 else 1)
-        fs_other, axis_other = self.app.funscript_processor._get_target_funscript_object_and_axis(other_num)
-
-        if not fs_other: return
-
-        other_actions_before = list(fs_other.get_axis_actions(axis_other) or [])
-
-        indices = self._resolve_selected_indices()
-        points_to_copy = [actions[i] for i in indices]
-
-        if axis_other in ('primary', 'secondary'):
-            # Use batch add for built-in axes
-            batch = []
-            for p in points_to_copy:
-                batch.append({
-                    'timestamp_ms': p['at'],
-                    'primary_pos': p['pos'] if axis_other == 'primary' else None,
-                    'secondary_pos': p['pos'] if axis_other == 'secondary' else None
-                })
-            fs_other.add_actions_batch(batch, is_from_live_tracker=False)
-        else:
-            # Use add_action_to_axis for additional axes
-            for p in points_to_copy:
-                fs_other.add_action_to_axis(axis_other, p['at'], p['pos'])
-
-        self.app.funscript_processor._post_mutation_refresh(other_num, f"Copy from T{self.timeline_num}")
-
-        other_actions_after = list(fs_other.get_axis_actions(axis_other) or [])
-        from application.classes.undo_manager import BulkReplaceCmd
-        self.app.undo_manager.push_done(BulkReplaceCmd(other_num, other_actions_before, other_actions_after, f"Copy from T{self.timeline_num} (T{other_num})"))
-
-    # --- Selection Filters ---
-    def _filter_selection(self, mode: str):
-        """Filter selection: 'top', 'bottom', 'mid'"""
-        actions = self._get_actions()
-        if len(self.multi_selected_action_indices) < 3: return
-
-        indices = self._resolve_selected_indices()
-        if len(indices) < 3: return
-        subset = [actions[i] for i in indices]
-
-        # Simple peak detection logic within selection
-        keep_keys = set()
-
-        for k, idx in enumerate(indices):
-            current = actions[idx]['pos']
-            # Check neighbors within the selection list, not global list
-            prev_val = subset[k-1]['pos'] if k > 0 else -1
-            next_val = subset[k+1]['pos'] if k < len(subset)-1 else -1
-
-            is_peak = (current > prev_val) and (current >= next_val)
-            is_valley = (current < prev_val) and (current <= next_val)
-
-            if mode == 'top' and is_peak: keep_keys.add(self._action_key(actions[idx]))
-            elif mode == 'bottom' and is_valley: keep_keys.add(self._action_key(actions[idx]))
-            elif mode == 'mid' and not is_peak and not is_valley: keep_keys.add(self._action_key(actions[idx]))
-
-        self.multi_selected_action_indices = keep_keys
 
     # ==================================================================================
     # VISUAL DRAWING
@@ -1561,6 +1203,37 @@ class InteractiveFunscriptTimeline:
             dl.add_polyline(pts_top, col, False, 1.0)
             dl.add_polyline(pts_bot, col, False, 1.0)
 
+    def _line_thickness_for_height(self) -> float:
+        """Curve line thickness derived from the current timeline row height.
+        Baseline: height=180 → thickness=2.5. Scales linearly, clamped to a
+        sensible range so lines neither vanish on tall rows nor fatten too
+        much on short ones."""
+        h = float(getattr(self.app.app_state_ui, 'timeline_base_height', 180))
+        return max(1.0, min(6.0, h / 72.0))
+
+    def _spline_samples_for_view(self, canvas_width_px: float, n_visible_segments: int) -> int:
+        """Pixel-aware sample count per catmull-rom segment.
+
+        Budget ~150 samples per 2000px of canvas, spread over visible segments
+        (so dense scripts don't explode and sparse scripts stay smooth). If the
+        per-segment budget drops below 3, caller should fall back to a straight
+        line, subsampling with <3 points per segment produces visible kinks
+        worse than the straight interpolation.
+        """
+        if n_visible_segments <= 0 or canvas_width_px <= 0:
+            return 0
+        total_budget = int(150.0 * canvas_width_px / 2000.0)
+        return max(0, total_budget // n_visible_segments)
+
+    def _point_fade_opacity(self, tf: 'TimelineTransformer') -> float:
+        """Fade and eventually hide action points when zoomed far out.
+        Returns a 0-1 alpha multiplier; callers should skip drawing below 0.25
+        (where 10k points become visual noise and cost without value)."""
+        visible_s = max(1e-3, (tf.visible_end_ms - tf.visible_start_ms) / 1000.0)
+        o = 20.0 / visible_s
+        o = o * o if o < 1.0 else 1.0  # ease-out for visual smoothness
+        return max(0.0, min(1.0, o))
+
     def _expand_catmull(self, ats: np.ndarray, poss: np.ndarray, k: int):
         """Subsample each segment with catmull-rom spline. Returns (xs_a, ys_p, seg_idx).
         seg_idx maps each dense sample (excluding the appended final point) to its
@@ -1609,7 +1282,7 @@ class InteractiveFunscriptTimeline:
 
         visible_actions = actions[s_idx:e_idx]
 
-        # 2. Vectorized Transform — use cached numpy arrays, slice instead of rebuild
+        # 2. Vectorized Transform, use cached numpy arrays, slice instead of rebuild
         all_ats, all_poss = self._get_cached_numpy_arrays()
         if all_ats is not None and len(all_ats) == len(actions):
             ats = all_ats[s_idx:e_idx]
@@ -1646,28 +1319,39 @@ class InteractiveFunscriptTimeline:
         # -- LOD B: Lines Only --
         base_col = color_override or (TimelineColors.PREVIEW_LINES if is_preview else (0.8, 0.8, 0.8, 1.0))
         col_u32 = imgui.get_color_u32_rgba(base_col[0], base_col[1], base_col[2], base_col[3] * alpha)
-        base_thick = float(getattr(self.app.app_state_ui, 'timeline_line_thickness', 2.5))
+        base_thick = self._line_thickness_for_height()
         thick = max(1.0, base_thick - 0.5) if is_preview else base_thick
 
         if self._show_smooth_curve and not is_preview and len(ats) >= 2:
-            d_ats, d_poss, _ = self._expand_catmull(ats, poss, self._smooth_samples_per_segment)
-            d_xs = np.clip(tf.vec_time_to_x(d_ats), safe_min_x, safe_max_x)
-            d_ys = tf.vec_val_to_y(d_poss)
-            pts = np.column_stack((d_xs, d_ys)).tolist()
+            k = self._spline_samples_for_view(tf.width, len(ats) - 1)
+            if k >= 3:
+                d_ats, d_poss, _ = self._expand_catmull(ats, poss, k)
+                d_xs = np.clip(tf.vec_time_to_x(d_ats), safe_min_x, safe_max_x)
+                d_ys = tf.vec_val_to_y(d_poss)
+                pts = np.column_stack((d_xs, d_ys)).tolist()
+            else:
+                # Per-segment budget too low to render a smooth curve without
+                # visible kinks, fall back to straight segments, which at
+                # this density are indistinguishable from the spline anyway.
+                pts = np.column_stack((xs, ys)).tolist()
         else:
             pts = np.column_stack((xs, ys)).tolist()
         dl.add_polyline(pts, col_u32, False, thick)
 
         # -- LOD C: Points (Zoomed In) --
-        # Draw points if space permits OR if they are selected/dragged (always draw interactive points)
+        # Fade points out when the visible window is too wide; below ~0.25
+        # opacity ImGui's blend contributes nothing but still costs a draw
+        # call per point, so skip entirely.
+        point_fade = self._point_fade_opacity(tf) if not is_preview else 1.0
         should_draw_points = (pixels_per_point > 5) or (not force_lines_only)
-        
-        if should_draw_points and not force_lines_only:
+
+        if should_draw_points and not force_lines_only and point_fade >= 0.25:
             radius = self.app.app_state_ui.timeline_point_radius
+            pt_alpha = alpha * point_fade
 
             # Pre-compute color u32 values outside the per-point loop
             _default_c = TimelineColors.POINT_DEFAULT if not is_preview else TimelineColors.PREVIEW_POINTS
-            col_default = imgui.get_color_u32_rgba(_default_c[0], _default_c[1], _default_c[2], _default_c[3] * alpha)
+            col_default = imgui.get_color_u32_rgba(_default_c[0], _default_c[1], _default_c[2], _default_c[3] * pt_alpha)
             col_drag = imgui.get_color_u32_rgba(*TimelineColors.POINT_DRAGGING[:3], TimelineColors.POINT_DRAGGING[3] * alpha)
             col_sel = imgui.get_color_u32_rgba(*TimelineColors.POINT_SELECTED[:3], TimelineColors.POINT_SELECTED[3] * alpha)
             col_hover = imgui.get_color_u32_rgba(*TimelineColors.POINT_HOVER[:3], TimelineColors.POINT_HOVER[3] * alpha)
@@ -1728,7 +1412,7 @@ class InteractiveFunscriptTimeline:
 
         visible_actions = actions[s_idx:e_idx]
 
-        # Vectorized transform — use cached numpy arrays when available
+        # Vectorized transform, use cached numpy arrays when available
         all_ats, all_poss = self._get_cached_numpy_arrays()
         if all_ats is not None and len(all_ats) == len(actions):
             ats = all_ats[s_idx:e_idx]
@@ -1770,26 +1454,46 @@ class InteractiveFunscriptTimeline:
         n_segs = len(colors_u32)
         xs_list = xs.tolist()
         ys_list = ys.tolist()
-        hm_thick = float(getattr(self.app.app_state_ui, 'timeline_line_thickness', 2.5))
-        if self._show_smooth_curve and len(ats) >= 2 and n_segs > 0:
-            k = self._smooth_samples_per_segment
-            d_ats, d_poss, seg_idx = self._expand_catmull(ats, poss, k)
+        hm_thick = self._line_thickness_for_height()
+        # Adaptive LOD for the smooth curve (see _spline_samples_for_view).
+        lod_k = self._spline_samples_for_view(tf.width, n_segs) if n_segs > 0 else 0
+
+        def _draw_runs(point_xs, point_ys, sample_colors, add_polyline):
+            """Emit one polyline per run of consecutive same-color samples.
+            Cuts Python-side draw calls from O(N) to O(color_runs), which for
+            physically continuous motion is typically 5-20x fewer. Run
+            boundaries are located via numpy comparison, avoids the Python
+            while-loop overhead for large N."""
+            n = len(sample_colors)
+            if n <= 0 or len(point_xs) < 2:
+                return
+            arr = np.asarray(sample_colors, dtype=np.uint32)
+            # Positions where the color changes (0-indexed boundary of next run).
+            change_idx = np.flatnonzero(arr[:-1] != arr[1:]) + 1
+            # Build list of run starts: [0, change_1, change_2, ..., n]
+            starts = [0, *change_idx.tolist(), n]
+            # Precompute the full polyline points once; slicing is O(run_len).
+            pts_all = list(zip(point_xs, point_ys))
+            for run_i in range(len(starts) - 1):
+                i, j = starts[run_i], starts[run_i + 1]
+                add_polyline(pts_all[i:j + 1], int(arr[i]), False, hm_thick)
+
+        if self._show_smooth_curve and len(ats) >= 2 and n_segs > 0 and lod_k >= 3:
+            d_ats, d_poss, seg_idx = self._expand_catmull(ats, poss, lod_k)
             d_xs = np.clip(tf.vec_time_to_x(d_ats), safe_min_x, safe_max_x).tolist()
             d_ys = tf.vec_val_to_y(d_poss).tolist()
             colors_list = colors_u32.tolist()
-            _add_line = dl.add_line
-            n_dense = len(d_xs) - 1
+            # Map each dense sample to its segment's color.
             seg_idx_list = seg_idx.tolist()
-            for i in range(n_dense):
-                si = seg_idx_list[i] if i < len(seg_idx_list) else n_segs - 1
-                if si >= n_segs:
-                    si = n_segs - 1
-                _add_line(d_xs[i], d_ys[i], d_xs[i + 1], d_ys[i + 1], colors_list[si], hm_thick)
+            n_dense = len(d_xs) - 1
+            dense_colors = [
+                colors_list[min(seg_idx_list[i], n_segs - 1)] if i < len(seg_idx_list)
+                else colors_list[n_segs - 1]
+                for i in range(n_dense)
+            ]
+            _draw_runs(d_xs, d_ys, dense_colors, dl.add_polyline)
         else:
-            colors_list = colors_u32.tolist()
-            _add_line = dl.add_line
-            for i in range(n_segs):
-                _add_line(xs_list[i], ys_list[i], xs_list[i + 1], ys_list[i + 1], colors_list[i], hm_thick)
+            _draw_runs(xs_list, ys_list, colors_u32.tolist(), dl.add_polyline)
 
         # Draw points (same logic as standard _draw_curve)
         radius = self.app.app_state_ui.timeline_point_radius
@@ -1999,7 +1703,7 @@ class InteractiveFunscriptTimeline:
         unmatched_col = TimelineColors.REFERENCE_UNMATCHED
         sq = 4  # Square half-size (pixels)
 
-        # Draw matched peaks — filled square at the main peak position
+        # Draw matched peaks, filled square at the main peak position
         if self._reference_peak_matches:
             for mp, rp, offset, classification in self._reference_peak_matches:
                 px = tf.time_to_x(mp['at'])
@@ -2010,7 +1714,7 @@ class InteractiveFunscriptTimeline:
                 col_u32 = imgui.get_color_u32_rgba(*col)
                 dl.add_rect_filled(px - sq, py - sq, px + sq, py + sq, col_u32)
 
-        # Draw unmatched main peaks — hollow square
+        # Draw unmatched main peaks, hollow square
         if self._reference_unmatched_main:
             col_u32 = imgui.get_color_u32_rgba(*unmatched_col)
             for p in self._reference_unmatched_main:
@@ -2020,7 +1724,7 @@ class InteractiveFunscriptTimeline:
                 py = tf.val_to_y(p['pos'])
                 dl.add_rect(px - sq, py - sq, px + sq, py + sq, col_u32, 0, 0, 1.5)
 
-        # Draw unmatched ref peaks — hollow square on the reference curve
+        # Draw unmatched ref peaks, hollow square on the reference curve
         if self._reference_unmatched_ref:
             col_u32 = imgui.get_color_u32_rgba(*unmatched_col)
             for p in self._reference_unmatched_ref:
@@ -2205,7 +1909,7 @@ class InteractiveFunscriptTimeline:
 
             # Place point
             val = self._alt_top_value if self._alt_next_is_top else self._alt_bottom_value
-            self._add_point(click_time, val)
+            add_point(self, click_time, val)
             self._alt_next_is_top = not self._alt_next_is_top
 
     def _handle_recording_mode_input(self, app_state, tf: TimelineTransformer,
@@ -2427,7 +2131,7 @@ class InteractiveFunscriptTimeline:
                 self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Interpolate (T{self.timeline_num})"))
 
     def _draw_ui_overlays(self, dl, tf: TimelineTransformer):
-        # 1. Playhead (Center) — line + inverted triangle at top
+        # 1. Playhead (Center), line + inverted triangle at top
         # Round to nearest pixel + 0.5 so the 1px-wide visual center of the
         # 2px line lands exactly on a pixel boundary, and the triangle tip aligns.
         center_x = round(tf.x_offset + tf.width / 2) + 0.5
@@ -2440,7 +2144,21 @@ class InteractiveFunscriptTimeline:
             marker_color)
         dl.add_line(center_x, tri_top, center_x, tf.y_offset + tf.height,
                     marker_color, 1.0)
-        
+
+        # Optional video-time sync line: thin red line at the actual frame's
+        # ms (current_frame_index/fps), distinct from the white playhead which
+        # follows playhead_override_ms when set. Reveals sub-frame drift
+        # between video position and the timeline marker.
+        if self.app.app_settings.get("timeline_show_video_sync_line", False):
+            proc = self.app.processor
+            if proc and proc.fps and proc.fps > 0:
+                video_ms = (proc.current_frame_index / proc.fps) * 1000.0
+                video_x = tf.time_to_x(video_ms)
+                if tf.x_offset <= video_x <= tf.x_offset + tf.width:
+                    dl.add_line(video_x, tri_top, video_x,
+                                tf.y_offset + tf.height,
+                                imgui.get_color_u32_rgba(0.95, 0.2, 0.2, 0.85), 1.0)
+
         # Playhead Time Info (timecode + frame number)
         time_ms = tf.x_to_time(center_x)
         txt = _format_time(self.app, time_ms/1000.0)
@@ -2580,18 +2298,26 @@ class InteractiveFunscriptTimeline:
     # ==================================================================================
 
     def _render_toolbar(self):
+        # Hide this timeline
+        if imgui.button(f"Hide##hide_{self.timeline_num}"):
+            attr = f"show_funscript_interactive_timeline{'2' if self.timeline_num == 2 else ''}"
+            setattr(self.app.app_state_ui, attr, False)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(f"Hide timeline {self.timeline_num} (toggle from View menu)")
+        imgui.same_line()
+
         # Delete / Clear button - adaptive label based on selection
         num_selected = len(self.multi_selected_action_indices) if self.multi_selected_action_indices else 0
         if num_selected > 0:
             del_label = f"Delete ({num_selected})##{self.timeline_num}"
             if imgui.button(del_label):
-                self._delete_selected()
+                delete_selected(self)
             if imgui.is_item_hovered():
                 imgui.set_tooltip(f"Delete {num_selected} selected points (Ctrl+Z to undo)")
         else:
             del_label = f"Clear Timeline##{self.timeline_num}"
             if imgui.button(del_label):
-                self._clear_all_points()
+                clear_all_points(self)
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Delete ALL points on this timeline (Ctrl+Z to undo)")
         
@@ -2609,20 +2335,11 @@ class InteractiveFunscriptTimeline:
         if imgui.is_item_hovered():
             imgui.set_tooltip("Apply Ultimate Autotune (selection or full timeline)")
 
-        imgui.same_line()
+        # Plugin / Pipeline buttons removed from the per-timeline toolbar.
+        # Plugins are accessible from the right-side Plugins block and the
+        # Pipeline window is openable from the Plugins block header.
 
-        # Plugin System Buttons
-        self.plugin_renderer.render_plugin_buttons(self.timeline_num)
-
-        imgui.same_line()
-
-        # Pipeline button
-        if imgui.button(f"Pipeline##{self.timeline_num}"):
-            app_state = self.app.app_state_ui
-            app_state.show_plugin_pipeline = not getattr(app_state, 'show_plugin_pipeline', False)
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Open Plugin Pipeline builder")
-
+        # Keep the toolbar on one row: separator + continue with Nudge block.
         imgui.same_line()
         imgui.text("|")
         imgui.same_line()
@@ -2630,9 +2347,9 @@ class InteractiveFunscriptTimeline:
         # Nudge All Buttons
         if imgui.button(f"<<##{self.timeline_num}"):
             if self.nudge_chapter_only:
-                self._nudge_chapter_time(-1)
+                nudge_chapter_time(self, -1)
             else:
-                self._nudge_all_time(-1)
+                nudge_all_time(self, -1)
         if imgui.is_item_hovered():
             tip = "Nudge points in selected chapter left by 1 frame" if self.nudge_chapter_only else "Nudge all points left by 1 frame"
             imgui.set_tooltip(tip)
@@ -2640,9 +2357,9 @@ class InteractiveFunscriptTimeline:
 
         if imgui.button(f">>##{self.timeline_num}"):
             if self.nudge_chapter_only:
-                self._nudge_chapter_time(1)
+                nudge_chapter_time(self, 1)
             else:
-                self._nudge_all_time(1)
+                nudge_all_time(self, 1)
         if imgui.is_item_hovered():
             tip = "Nudge points in selected chapter right by 1 frame" if self.nudge_chapter_only else "Nudge all points right by 1 frame"
             imgui.set_tooltip(tip)
@@ -2675,31 +2392,14 @@ class InteractiveFunscriptTimeline:
             imgui.set_tooltip("Speed-based heatmap coloring for line segments")
         imgui.same_line()
 
-        # Smooth curve toggle (catmull-rom spline rendering)
-        _, self._show_smooth_curve = imgui.checkbox(f"Smooth##{self.timeline_num}", self._show_smooth_curve)
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Render points as a smooth spline instead of straight lines")
-        imgui.same_line()
-
         # Speed warnings toggle
         _, self._show_speed_warnings = imgui.checkbox(f"Spd##{self.timeline_num}", self._show_speed_warnings)
         if imgui.is_item_hovered():
             imgui.set_tooltip(f"Highlight speed limit violations (>{self._speed_limit_threshold:.0f} u/s)")
 
-        # Line thickness slider (shared across all timelines)
-        imgui.same_line()
-        imgui.push_item_width(70)
-        cur_thick = float(getattr(self.app.app_state_ui, 'timeline_line_thickness', 2.5))
-        changed, new_thick = imgui.slider_float(f"Line##{self.timeline_num}", cur_thick, 1.0, 4.0, "%.1f")
-        if changed:
-            self.app.app_state_ui.timeline_line_thickness = new_thick
-            try:
-                self.app.app_settings.set("timeline_line_thickness", new_thick)
-            except Exception:
-                pass
-        imgui.pop_item_width()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Timeline curve line thickness")
+        # Timeline row height lives in the main toolbar's TIMELINE section
+        # now (toolbar_ui._render_edit_section), removed from here to keep
+        # per-timeline toolbars minimal.
 
         # --- Mode Selector ---
         imgui.same_line()
@@ -2902,27 +2602,36 @@ class InteractiveFunscriptTimeline:
                 imgui.text_disabled(f"{n_sel} point{'s' if n_sel != 1 else ''} selected")
                 imgui.separator()
                 if imgui.menu_item("Delete Selected", "Del")[0]:
-                    self._delete_selected()
+                    delete_selected(self)
                     imgui.close_current_popup()
                 if imgui.menu_item("Copy Selection", "Ctrl+C")[0]:
-                    self._handle_copy_selection()
+                    copy_selection(self)
                     imgui.close_current_popup()
                 if imgui.begin_menu("Keep Only..."):
-                    if imgui.menu_item("Top Points")[0]: self._filter_selection('top')
-                    if imgui.menu_item("Bottom Points")[0]: self._filter_selection('bottom')
-                    if imgui.menu_item("Mid Points")[0]: self._filter_selection('mid')
+                    if imgui.menu_item("Top Points")[0]: filter_selection(self, 'top')
+                    if imgui.menu_item("Bottom Points")[0]: filter_selection(self, 'bottom')
+                    if imgui.menu_item("Mid Points")[0]: filter_selection(self, 'mid')
                     imgui.end_menu()
                 imgui.separator()
                 self._render_quickfix_flat(cursor_only=False)
             else:
                 if imgui.menu_item("Add Point Here")[0]:
                     t, v = getattr(self, 'new_point_candidate', (0, 0))
-                    self._add_point(t, v)
+                    add_point(self, t, v)
                     imgui.close_current_popup()
-                if imgui.menu_item("Paste from Clipboard", "Ctrl+V")[0]:
-                    t, v = getattr(self, 'new_point_candidate', (0, 0))
-                    self._handle_paste_actions(t)
-                    imgui.close_current_popup()
+                if imgui.begin_menu("Paste from Clipboard"):
+                    if imgui.menu_item("At Cursor (relative)", "Ctrl+V")[0]:
+                        t, v = getattr(self, 'new_point_candidate', (0, 0))
+                        paste_actions(self, t)
+                        imgui.close_current_popup()
+                    if imgui.menu_item("At Cursor + Replace Interval", "Ctrl+Shift+V")[0]:
+                        t, v = getattr(self, 'new_point_candidate', (0, 0))
+                        paste_actions_replace(self, t)
+                        imgui.close_current_popup()
+                    if imgui.menu_item("At Original Timestamps", "Ctrl+Alt+V")[0]:
+                        paste_actions_exact(self)
+                        imgui.close_current_popup()
+                    imgui.end_menu()
                 if imgui.menu_item("Select All", "Ctrl+A")[0]:
                     actions = self._get_actions()
                     self.multi_selected_action_indices = {self._action_key(a) for a in actions}
@@ -2931,6 +2640,43 @@ class InteractiveFunscriptTimeline:
                 self._render_quickfix_flat(cursor_only=True)
 
             imgui.separator()
+
+            # Rendering settings (heatmap, sync line, etc.)
+            if imgui.begin_menu("Rendering..."):
+                _hl = bool(self._heatmap_mapper.highlight_overspeed)
+                changed_hl, _hl = imgui.checkbox("Highlight overspeed segments", _hl)
+                if changed_hl:
+                    self._heatmap_mapper.highlight_overspeed = _hl
+                    self.app.app_settings.set("heatmap_highlight_overspeed", _hl)
+                    self._heatmap_speeds_cache = None
+                    self._heatmap_colors_cache = None
+                imgui.text("Max speed (units/s):")
+                imgui.same_line()
+                imgui.push_item_width(120)
+                _ms = float(self._heatmap_mapper.max_speed)
+                changed_ms, _ms = imgui.slider_float("##hm_max_speed",
+                                                      _ms, 50.0, 1000.0, "%.0f")
+                imgui.pop_item_width()
+                if changed_ms:
+                    self._heatmap_mapper.max_speed = max(1.0, _ms)
+                    self.app.app_settings.set("heatmap_max_speed", float(_ms))
+                    self._heatmap_speeds_cache = None
+                    self._heatmap_colors_cache = None
+                imgui.separator()
+                _sync = bool(self.app.app_settings.get("timeline_show_video_sync_line", False))
+                changed_sync, _sync = imgui.checkbox(
+                    "Show video sync line (red, exact frame time)", _sync)
+                if changed_sync:
+                    self.app.app_settings.set("timeline_show_video_sync_line", _sync)
+                imgui.end_menu()
+
+            # Live tools (drag a slider, see preview, single undo on release)
+            if imgui.begin_menu("Live Tools..."):
+                if imgui.menu_item("Range Extender (live drag)")[0]:
+                    self._open_live_tool('range')
+                if imgui.menu_item("RDP Simplify (live drag)")[0]:
+                    self._open_live_tool('rdp')
+                imgui.end_menu()
 
             # Timeline ops (cross-timeline copy / swap / axis)
             if imgui.begin_menu("Timeline Ops"):
@@ -2947,7 +2693,7 @@ class InteractiveFunscriptTimeline:
                 if imgui.begin_menu("Copy Selection to..."):
                     for t_num in _copy_swap_targets:
                         if imgui.menu_item(self._tl_label(t_num))[0]:
-                            self._handle_copy_to_other(t_num)
+                            copy_to_other(self, t_num)
                             imgui.close_current_popup()
                     imgui.end_menu()
                 if imgui.begin_menu("Swap with..."):
@@ -3255,79 +3001,98 @@ class InteractiveFunscriptTimeline:
         snap_t = self.app.app_state_ui.snap_to_grid_time_ms
         return round(t_ms / snap_t) * snap_t if snap_t > 0 else t_ms
 
-    def _add_point(self, t, v):
-        fs, axis = self._get_target_funscript_details()
-        if not fs: return
+    def _toggle_selection_loop(self):
+        self._selection_loop_armed = not self._selection_loop_armed
+        state = "armed" if self._selection_loop_armed else "off"
+        self.app.notify(f"Selection loop {state} (T{self.timeline_num})", "info", 1.5)
 
-        t = int(self._snap_time(t))
-        snap_v = self.app.app_state_ui.snap_to_grid_pos
-        v = int(round(v / snap_v) * snap_v) if snap_v > 0 else int(v)
+    def _open_live_tool(self, op: str):
+        self._live_tool_open = op
+        self._live_tool_value = 10.0 if op == 'range' else 1.0
+        begin_live_drag(self, 'range_extend' if op == 'range' else 'rdp')
 
-        fs.add_action(t, v if axis=='primary' else None, v if axis=='secondary' else None)
-        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Add Point")
-        self.invalidate_cache()
+    def _render_live_tool_popup(self):
+        if not self._live_tool_open:
+            return
+        op = self._live_tool_open
+        title = "Range Extender" if op == 'range' else "RDP Simplify"
+        imgui.set_next_window_size(360, 0, condition=imgui.APPEARING)
+        opened, visible = imgui.begin(f"{title}##LiveTool_T{self.timeline_num}",
+                                       closable=True,
+                                       flags=imgui.WINDOW_NO_COLLAPSE)
+        if not visible:
+            self._close_live_tool()
+            imgui.end()
+            return
+        if opened:
+            sel_count = len(self.multi_selected_action_indices)
+            if op == 'range':
+                imgui.text(f"Targeting: {'selection' if sel_count else 'all'} ({sel_count} pts)")
+                imgui.push_item_width(-1)
+                changed, val = imgui.slider_int("##rng_amt", int(self._live_tool_value), -50, 50, "%d %%")
+                imgui.pop_item_width()
+                if changed:
+                    self._live_tool_value = float(val)
+                    live_range_extend(self, int(val))
+                if imgui.button("Apply & Close"):
+                    self._close_live_tool()
+                imgui.same_line()
+                if imgui.button("Cancel"):
+                    self._cancel_live_tool()
+            else:
+                imgui.text(f"Targeting: {'selection' if sel_count else 'all'} ({sel_count} pts)")
+                imgui.push_item_width(-1)
+                changed, val = imgui.slider_float("##rdp_eps", float(self._live_tool_value), 0.1, 25.0, "eps=%.2f")
+                imgui.pop_item_width()
+                if changed:
+                    self._live_tool_value = float(val)
+                    live_rdp_simplify(self, float(val))
+                if imgui.button("Apply & Close"):
+                    self._close_live_tool()
+                imgui.same_line()
+                if imgui.button("Cancel"):
+                    self._cancel_live_tool()
+        imgui.end()
 
-        # New unified undo
-        from application.classes.undo_manager import AddPointCmd
-        self.app.undo_manager.push_done(AddPointCmd(self.timeline_num, {'at': t, 'pos': v}))
+    def _close_live_tool(self):
+        end_live_drag(self)
+        self._live_tool_open = None
 
-    def _delete_selected(self):
+    def _cancel_live_tool(self):
+        # Pop the coalesced live-drag entry and undo it to restore baseline.
+        from application.classes.undo_manager import LiveDragCmd
+        if self.app.undo_manager.match_top(LiveDragCmd):
+            self.app.undo_manager.pop_top(self.app)
+        self._close_live_tool()
+
+    def _tick_selection_loop(self):
+        """Wrap playhead from last selected to first when loop is armed."""
+        if not self._selection_loop_armed:
+            return
         if not self.multi_selected_action_indices:
             return
-
-        fs, axis = self._get_target_funscript_details()
-        if not fs:
-            self.logger.error(f"Could not get funscript details for timeline {self.timeline_num}")
+        proc = self.app.processor
+        if not proc or not proc.fps or proc.fps <= 0:
             return
-
-        # Capture deleted points for unified undo before mutation
+        # Honor only when actually playing, paused/scrubbing should not loop.
+        if not getattr(proc, 'is_processing', False):
+            return
+        if hasattr(proc, 'pause_event') and proc.pause_event.is_set():
+            return
         actions = self._get_actions()
-        resolved = self._resolve_selected_indices()
-        deleted_info = []
-        for idx in resolved:
-            deleted_info.append({'index': idx, 'action': actions[idx]})
-
-        fs.clear_points(axis=axis, selected_indices=resolved)
-        self.multi_selected_action_indices.clear()
-        self.selected_action_idx = -1
-        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Delete Points")
-        self.invalidate_cache()
-
-        # New unified undo
-        if deleted_info:
-            from application.classes.undo_manager import DeletePointsCmd
-            self.app.undo_manager.push_done(DeletePointsCmd(self.timeline_num, deleted_info))
-
-    def _clear_all_points(self):
-        """Delete all points on this timeline (undoable)."""
-        fs, axis = self._get_target_funscript_details()
-        if not fs:
+        if not actions:
             return
-
-        # Get current point count
-        actions = self._get_actions()
-        num_points = len(actions) if actions else 0
-
-        if num_points == 0:
+        resolved = sorted(self._resolve_selected_indices())
+        if len(resolved) < 2:
             return
-
-        actions_before = list(self._get_actions() or [])
-
-        # Select all points then delete them
-        all_indices = list(range(num_points))
-        fs.clear_points(axis=axis, selected_indices=all_indices)
-
-        # Clear selection
-        self.multi_selected_action_indices.clear()
-        self.selected_action_idx = -1
-
-        # Finalize
-        self.app.funscript_processor._post_mutation_refresh(self.timeline_num, "Clear All Points")
-        self.invalidate_cache()
-
-        actions_after = list(self._get_actions() or [])
-        from application.classes.undo_manager import BulkReplaceCmd
-        self.app.undo_manager.push_done(BulkReplaceCmd(self.timeline_num, actions_before, actions_after, f"Clear All Points (T{self.timeline_num})"))
+        t_start = actions[resolved[0]]['at']
+        t_end = actions[resolved[-1]]['at']
+        if t_end <= t_start:
+            return
+        cur_ms = (proc.current_frame_index / proc.fps) * 1000.0
+        if cur_ms >= t_end:
+            target_frame = max(0, int((t_start / 1000.0) * proc.fps))
+            self.app.event_handlers.seek_video_with_sync(target_frame)
 
     def _set_axis_assignment(self, axis_name: str):
         """Assign a semantic axis name to this timeline."""
@@ -3504,7 +3269,7 @@ class InteractiveFunscriptTimeline:
         is_playing = False
         mpv = getattr(self.app, '_mpv_controller', None)
         if mpv and mpv.is_active:
-            # mpv review mode — processor is stopped but mpv drives current_frame_index
+            # mpv review mode, processor is stopped but mpv drives current_frame_index
             is_playing = mpv.is_playing
         elif getattr(processor, 'live_capture_active', False):
             # Live capture pauses the processor but still updates current_frame_index
@@ -3531,7 +3296,7 @@ class InteractiveFunscriptTimeline:
         # CRITICAL: Do not consume the forced sync flag if a seek is still in progress.
         # The processor frame index might be stale (pre-seek), causing us to sync to the WRONG time
         # and then turn off the flag, effectively cancelling the jump visual.
-        seek_in_progress = getattr(processor, 'seek_in_progress', False)
+        seek_in_progress = False
 
         should_sync = is_playing or (forced and not app_state.timeline_interaction_active)
 
