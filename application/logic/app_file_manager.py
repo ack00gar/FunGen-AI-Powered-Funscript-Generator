@@ -1405,28 +1405,11 @@ class AppFileManager:
             self.app.funscript_processor.update_funscript_stats_for_timeline(1, "Video Loaded")
             self.app.funscript_processor.update_funscript_stats_for_timeline(2, "Video Loaded")
 
-            # Suggest building an iframe proxy if this is a large VR or
-            # 4K+ 2D source that isn't already a proxy or covered by one.
-            # Skip during batch processing: the proxy only helps interactive
-            # scrubbing / editing, and FunGen downscales every frame to the
-            # tracker input size anyway, so the proxy build would just add
-            # time to each batch item without changing the output.
-            try:
-                pc = getattr(self.app, "proxy_controller", None)
-                proc = self.app.processor
-                batch_active = bool(getattr(self.app, "is_batch_processing_active", False))
-                if (pc and proc and not batch_active
-                        and proc.determined_video_type in ("VR", "2D")):
-                    vr_format = (proc.vr_input_format
-                                 if proc.determined_video_type == "VR"
-                                 else "2d")
-                    pc.open_suggest_if_needed(
-                        file_path, proc.video_info,
-                        proc.determined_video_type,
-                        vr_format,
-                    )
-            except Exception as e:
-                self.app.logger.debug(f"Proxy suggest hook failed: {e}")
+            # Proxy suggestion on load was removed: the auto-popup was
+            # noisy on every qualifying open, and the proxy only helps
+            # interactive scrubbing anyway (FunGen downscales every frame
+            # to tracker input size regardless). The "Build iframe Proxy..."
+            # menu entry remains as a user-initiated action.
 
             # Clear existing subtitles, then auto-load .srt if one exists next to the video
             if _is_feature_available("subtitle_translation"):
