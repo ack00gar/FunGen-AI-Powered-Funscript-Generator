@@ -161,12 +161,23 @@ class ControlPanelUI(
         return tracker_info and tracker_info.category == category
 
     def _is_live_tracker(self, tracker_name: str) -> bool:
-        """Check if tracker is a live tracker (LIVE, LIVE_INTERVENTION, or COMMUNITY)."""
+        """Check if tracker runs in the real-time frame loop.
+
+        TOOL-category entries (User ROI, Oscillation Detector, Beat Marker)
+        hook into the same frame dispatch path as live trackers, so the
+        execution-progress UI, which gates rendering of Start Tracking and
+        Select ROI, must treat them the same. Kept in sync with
+        DynamicTrackerUI.is_live_tracker (commit 116f829).
+        """
         from config.tracker_discovery import get_tracker_discovery, TrackerCategory
         discovery = get_tracker_discovery()
         tracker_info = discovery.get_tracker_info(tracker_name)
         return tracker_info and tracker_info.category in [
-            TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION, TrackerCategory.COMMUNITY]
+            TrackerCategory.LIVE,
+            TrackerCategory.LIVE_INTERVENTION,
+            TrackerCategory.COMMUNITY,
+            TrackerCategory.TOOL,
+        ]
 
     def _is_offline_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is an offline tracker."""

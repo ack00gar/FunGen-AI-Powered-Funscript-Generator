@@ -752,10 +752,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                                 self._preview_cached_tooltip_data = None
                                 self._preview_cached_pos = None
                             
-                            # Use much tighter tolerance to avoid frame/video mismatches
-                            # With 10k frames, 0.0001 = ~1 frame tolerance instead of ~50 frames
-                            position_tolerance = 0.0001  # ~0.01% tolerance for position stability
-                            position_changed = (self._preview_hover_pos is None or 
+                            # Tolerance trades cache stability for frame precision.
+                            # 0.0001 (1 px on a 10k-wide bar) was over-strict:
+                            # every sub-pixel jitter invalidated the cache and
+                            # queued a fresh decode. 0.002 is ~2-3 px on a
+                            # typical bar width and still within a frame for
+                            # normal-length videos.
+                            position_tolerance = 0.002
+                            position_changed = (self._preview_hover_pos is None or
                                               abs(self._preview_hover_pos - normalized_pos) > position_tolerance)
                             
                             if position_changed:

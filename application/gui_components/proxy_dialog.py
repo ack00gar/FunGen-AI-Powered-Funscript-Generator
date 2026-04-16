@@ -277,6 +277,13 @@ class ProxyController:
             flags=(imgui.WINDOW_NO_COLLAPSE
                    | imgui.WINDOW_ALWAYS_AUTO_RESIZE))[0]
         if not opened:
+            # Our encode is still running (_progress_open is True) but imgui
+            # thinks the popup is closed. This happens when the GLFW window
+            # is iconified and restored, which resets the popup stack. Re-arm
+            # the one-shot so the next frame calls open_popup again and the
+            # progress dialog reappears with the rest of the UI.
+            if self._worker is not None and self._worker_result is None:
+                self._progress_needs_open = True
             return
 
         # --- Header: source + target ---------------------------------------

@@ -121,10 +121,13 @@ class ThumbnailExtractor:
                 specs.append(f"crop={ow}:{oh // 2}:0:0")
             base_fmt = (self.vr_input_format or '').replace(
                 '_sbs', '').replace('_tb', '').replace('_lr', '').replace('_rl', '')
+            # Guard against vr_fov=0 leaking in. libavfilter rejects v360 with
+            # iv_fov/ih_fov/d_fov all zero. See video_processor._build_pyav_filter_chain.
+            vr_fov = self.vr_fov if self.vr_fov and self.vr_fov > 0 else 190
             specs.append(
                 f"v360={base_fmt}:in_stereo=0:output=sg:"
-                f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
-                f"d_fov={self.vr_fov}:"
+                f"iv_fov={vr_fov}:ih_fov={vr_fov}:"
+                f"d_fov={vr_fov}:"
                 f"v_fov=90:h_fov=90:"
                 f"pitch={self.vr_pitch}:yaw=0:roll=0:"
                 f"w={self.output_size}:h={self.output_size}:interp=linear"

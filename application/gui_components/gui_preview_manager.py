@@ -473,8 +473,11 @@ class PreviewManagerMixin:
                 if frame_data is not None:
                     # Display cached frame using dedicated enhanced preview texture
                     if hasattr(self, 'enhanced_preview_texture_id') and self.enhanced_preview_texture_id:
-                        # Only update texture once per cached tooltip data
-                        if not hasattr(tooltip_data, '_frame_texture_updated'):
+                        # tooltip_data is a dict, so the previous
+                        # `hasattr(tooltip_data, '_frame_texture_updated')` guard
+                        # was always False (hasattr checks attributes, not keys),
+                        # causing update_texture to re-run every render frame.
+                        if '_frame_texture_updated' not in tooltip_data:
                             self.update_texture(self.enhanced_preview_texture_id, frame_data)
                             tooltip_data['_frame_texture_updated'] = True
 

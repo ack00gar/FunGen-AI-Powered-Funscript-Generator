@@ -1407,10 +1407,16 @@ class AppFileManager:
 
             # Suggest building an iframe proxy if this is a large VR or
             # 4K+ 2D source that isn't already a proxy or covered by one.
+            # Skip during batch processing: the proxy only helps interactive
+            # scrubbing / editing, and FunGen downscales every frame to the
+            # tracker input size anyway, so the proxy build would just add
+            # time to each batch item without changing the output.
             try:
                 pc = getattr(self.app, "proxy_controller", None)
                 proc = self.app.processor
-                if pc and proc and proc.determined_video_type in ("VR", "2D"):
+                batch_active = bool(getattr(self.app, "is_batch_processing_active", False))
+                if (pc and proc and not batch_active
+                        and proc.determined_video_type in ("VR", "2D")):
                     vr_format = (proc.vr_input_format
                                  if proc.determined_video_type == "VR"
                                  else "2d")

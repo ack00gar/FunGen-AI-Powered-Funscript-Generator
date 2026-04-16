@@ -242,7 +242,12 @@ class VideoProcessor(
         if not self.video_info:
             return f"scale={out_w}:{out_h}"
 
-        if self.determined_video_type == 'VR':
+        # Preprocessed videos are already cropped to one panel and dewarped
+        # to a flat rectangular view. Applying crop+v360 a second time produced
+        # walton's libavfilter "Invalid argument" crash (iv_fov=0:ih_fov=0:d_fov=0
+        # when vr_fov was unset on the reload path). Route preprocessed VR
+        # through the 2D scale-and-pad path instead.
+        if self.determined_video_type == 'VR' and not self._is_using_preprocessed_video():
             # Pre-crop to one stereo panel.
             ow = self.video_info.get('width', 0)
             oh = self.video_info.get('height', 0)
@@ -258,18 +263,23 @@ class VideoProcessor(
             base_fmt = (self.vr_input_format
                         .replace('_sbs', '').replace('_tb', '')
                         .replace('_lr', '').replace('_rl', ''))
+            # Defensive: vr_fov can end up 0 when a stale project/session is
+            # reloaded without settings plumbing re-populating it. Zero fov
+            # values produce the "Invalid argument" error in libavfilter.
             v_h_fov = 90
+            vr_fov = self.vr_fov if getattr(self, 'vr_fov', 0) and self.vr_fov > 0 else 190
             parts.append(
                 f"v360={base_fmt}:in_stereo=0:output=sg:"
-                f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
-                f"d_fov={self.vr_fov}:"
+                f"iv_fov={vr_fov}:ih_fov={vr_fov}:"
+                f"d_fov={vr_fov}:"
                 f"v_fov={v_h_fov}:h_fov={v_h_fov}:"
                 f"pitch={self.vr_pitch}:yaw=0:roll=0:"
                 f"w={out_w}:h={out_h}:interp=linear"
             )
             return ",".join(parts)
 
-        # 2D path: scale-and-pad to the display size.
+        # 2D path (and preprocessed VR, which is already flat):
+        # scale-and-pad to the display size.
         return (f"scale={out_w}:{out_h}"
                 f":force_original_aspect_ratio=decrease,"
                 f"pad={out_w}:{out_h}"
