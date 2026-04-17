@@ -126,6 +126,16 @@ class BatchWorker:
             if not tracker_info:
                 raise RuntimeError(f"Unknown tracker: {tracker_name}")
 
+            # User-intervention trackers (draw-a-box flows like User ROI)
+            # cannot run unattended in the watched folder worker.
+            if tracker_info.requires_intervention or not tracker_info.supports_batch:
+                raise RuntimeError(
+                    f"Tracker '{tracker_info.display_name}' requires user intervention and cannot run in batch mode")
+
+            # TOOL trackers (Oscillation, Chapter Maker, etc.) dispatch by the
+            # base class they inherit, not by the UI-grouping category.
+            runtime_category = discovery.get_runtime_category(tracker_name)
+
             # Open the video
             open_success = self.app.file_manager.open_video_from_path(video_path)
             if not open_success:
@@ -138,9 +148,9 @@ class BatchWorker:
 
             selected_mode = tracker_info.internal_name
 
-            if tracker_info.category == TrackerCategory.OFFLINE:
+            if runtime_category == TrackerCategory.OFFLINE:
                 self._process_offline(selected_mode, video_basename)
-            elif tracker_info.category == TrackerCategory.LIVE:
+            elif runtime_category == TrackerCategory.LIVE:
                 self._process_live(selected_mode, video_basename)
             else:
                 raise RuntimeError(

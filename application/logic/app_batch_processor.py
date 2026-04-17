@@ -333,17 +333,26 @@ class AppBatchProcessor:
                         self.app.logger.error(f"Invalid tracker name: {self.app.batch_tracker_name}. Skipping video.")
                         batch_failures.append((video_path, f"Invalid tracker: {self.app.batch_tracker_name}", datetime.now().isoformat()))
                         continue
+                    if selected_tracker.requires_intervention or not selected_tracker.supports_batch:
+                        self.app.logger.error(f"Tracker '{selected_tracker.display_name}' requires user intervention and cannot run in batch mode. Aborting.")
+                        batch_failures.append((video_path, f"Tracker requires intervention: {selected_tracker.display_name}", datetime.now().isoformat()))
+                        break
                     selected_mode = selected_tracker.internal_name
                 else:
                     self.app.logger.error("No tracker selected for batch processing. Skipping video.")
                     batch_failures.append((video_path, "No tracker selected", datetime.now().isoformat()))
                     continue
 
-                # Check tracker category to determine processing mode
+                # Check tracker category to determine processing mode.
+                # TOOL trackers (Oscillation, Chapter Maker, etc.) get resolved
+                # to their runtime dispatch category based on the base class
+                # they inherit; the declared category is UI grouping only and
+                # would skip them here otherwise.
                 from config.tracker_discovery import TrackerCategory
+                runtime_category = discovery.get_runtime_category(self.app.batch_tracker_name)
 
                 # --- OFFLINE MODES (Stage-based processing) ---
-                if selected_tracker.category == TrackerCategory.OFFLINE:
+                if runtime_category == TrackerCategory.OFFLINE:
                     # Set processing speed to MAX_SPEED for batch/CLI offline processing
                     from config.constants import ProcessingSpeedMode
                     original_speed_mode = self.app.app_state_ui.selected_processing_speed_mode

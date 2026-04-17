@@ -118,10 +118,14 @@ class DynamicTrackerDiscovery:
         # Determine if tracker requires user intervention
         requires_intervention = self._requires_user_intervention(metadata)
         
-        # Determine capabilities. Tools fall through to base-class checks
-        # below: a TOOL inheriting from BaseOfflineTracker is batch-capable;
-        # one inheriting from BaseTracker is realtime.
-        supports_batch = category in [TrackerCategory.LIVE, TrackerCategory.OFFLINE, TrackerCategory.TOOL]
+        # Determine capabilities. TOOL trackers (oscillation, chapter_maker,
+        # beat_marker, user_roi) are batch-capable only when they do not
+        # require user intervention: user_roi asks the user to draw a box at
+        # runtime, so it cannot run unattended.
+        supports_batch = (
+            category in [TrackerCategory.LIVE, TrackerCategory.OFFLINE]
+            or (category == TrackerCategory.TOOL and not requires_intervention)
+        )
         supports_realtime = category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION, TrackerCategory.TOOL]
         
         # Get stages and properties from metadata if available
@@ -281,6 +285,27 @@ class DynamicTrackerDiscovery:
     def resolve_cli_mode(self, cli_mode: str) -> Optional[str]:
         """Resolve CLI mode string to internal tracker name."""
         return self._cli_alias_map.get(cli_mode)
+
+    def get_runtime_category(self, identifier: str) -> Optional[TrackerCategory]:
+        """Resolve a tracker to its runtime dispatch category (LIVE or OFFLINE).
+
+        LIVE / LIVE_INTERVENTION / OFFLINE / COMMUNITY trackers pass through
+        unchanged. TOOL trackers are UI-grouped accessories whose actual runtime
+        is determined by which base class they inherit: BaseOfflineTracker maps
+        to OFFLINE, BaseTracker maps to LIVE. Batch dispatchers use this to pick
+        the right processing path for tools like Oscillation Detector (live) and
+        Chapter Maker (offline).
+        """
+        info = self.get_tracker_info(identifier)
+        if not info:
+            return None
+        if info.category != TrackerCategory.TOOL:
+            return info.category
+        from tracker.tracker_modules.core.base_offline_tracker import BaseOfflineTracker
+        tracker_class = tracker_registry.get_tracker(info.internal_name)
+        if tracker_class and issubclass(tracker_class, BaseOfflineTracker):
+            return TrackerCategory.OFFLINE
+        return TrackerCategory.LIVE
     
     def get_gui_display_list(self) -> Tuple[List[str], List[str]]:
         """
