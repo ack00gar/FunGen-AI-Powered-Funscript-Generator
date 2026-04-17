@@ -429,7 +429,7 @@ class AppBatchProcessor:
                     self.app.stage_processor.save_preprocessed_video = original_save_preprocessed
 
                 # --- LIVE MODES (Real-time tracking) ---
-                elif selected_tracker.category == TrackerCategory.LIVE:
+                elif runtime_category == TrackerCategory.LIVE:
                     self.app.logger.info(f"Running live mode: {selected_tracker.display_name} for {os.path.basename(video_path)}")
 
                     # Set processing speed to MAX_SPEED for batch/CLI live tracking
