@@ -1,14 +1,14 @@
 {
   "addons": {
     "device_control": {
-      "version": "5.7.4",
+      "version": "5.7.5",
       "display_name": "Device Control",
-      "changelog": "Frame-perfect time conversions (round instead of truncate)"
+      "changelog": "Multi-device Buttplug support"
     },
     "streamer": {
-      "version": "3.6.4",
+      "version": "3.6.8",
       "display_name": "Video Streamer",
-      "changelog": "Rebundle: frame-perfect time math + full vr_viewer/xbvr/local_file/stash browser assets"
+      "changelog": "Fix fisheye VR mode (shader double-crop), black-until-fullscreen, V key left<->right cycle for fisheye, anisotropic + denser sphere mesh, DynamicTrackerUI rename, filter tracker list, restore missing viewer/browser assets"
     },
     "patreon_features": {
       "version": "1.1.4",
