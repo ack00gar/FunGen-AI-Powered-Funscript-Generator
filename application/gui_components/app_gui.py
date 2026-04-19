@@ -13,6 +13,7 @@ import platform
 from typing import List, Dict
 from collections import deque
 
+from common import paths
 from config import constants, element_group_colors
 from config.constants_colors import CurrentTheme
 from application.classes import ImGuiFileDialog, InteractiveFunscriptTimeline, MainMenu, Simulator3DWindow, ScriptGaugeWindow
@@ -404,7 +405,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         try:
             import platform
             if platform.system() != "Darwin":  # Skip on macOS
-                icon_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'logo.png')
+                icon_path = str(paths.asset('logo.png'))
                 if os.path.exists(icon_path):
                     # Load icon with cv2 (already imported)
                     icon_img = cv2.imread(icon_path, cv2.IMREAD_UNCHANGED)
@@ -451,10 +452,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Merge Symbols Nerd Font so icon glyphs (\ue000-\uf8ff, \uf0000+) render.
         # Single TTF shipped under assets/fonts/, no runtime install needed.
         try:
-            icon_font_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                "assets", "fonts", "icons.ttf",
-            )
+            icon_font_path = str(paths.ICON_FONT_PATH)
             if os.path.exists(icon_font_path):
                 icon_cfg = imgui.FontConfig(merge_mode=True)
                 # Private-use ranges covering Font Awesome, Material, Octicons,

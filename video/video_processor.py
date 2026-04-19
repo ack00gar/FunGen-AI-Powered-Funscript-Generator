@@ -10,6 +10,7 @@ import os
 from collections import OrderedDict, deque
 
 from config import constants
+from common import paths
 
 # ML-based VR format detector
 from video.vr_format_detector_ml_real import RealMLVRFormatDetector
@@ -174,7 +175,7 @@ class VideoProcessor(
 
         # ML format detector (lazy loaded)
         self.ml_detector = None
-        self.ml_model_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'vr_detector_model_rf.pkl')
+        self.ml_model_path = str(paths.MODELS_DIR / 'vr_detector_model_rf.pkl')
 
         # Event callbacks (for optional features like streamer, device_control)
         self._seek_callbacks = []  # List of callbacks: func(frame_index: int) -> None

@@ -15,6 +15,8 @@ import OpenGL.GL as gl
 import os
 import logging
 
+from common import paths
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,9 +25,7 @@ class IconTextureManager:
 
     def __init__(self):
         self._icon_cache = {}  # {icon_name: (texture_id, width, height)}
-        self._assets_dir = os.path.join(
-            os.path.dirname(__file__), '..', '..', 'assets'
-        )
+        self._assets_dir = str(paths.ASSETS_DIR)
 
     def load_icon_texture(self, icon_name):
         """

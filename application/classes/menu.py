@@ -2,6 +2,7 @@ import os
 import webbrowser
 import platform
 import imgui
+from common import paths
 from config.element_group_colors import MenuColors
 from application.utils import get_logo_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
@@ -151,7 +152,7 @@ class MainMenu:
             import numpy as np
             import OpenGL.GL as gl
 
-            support_img_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'branding', 'support_badge.png')
+            support_img_path = str(paths.SUPPORT_BADGE_PATH)
 
             if not os.path.exists(support_img_path):
                 return None

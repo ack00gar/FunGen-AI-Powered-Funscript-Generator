@@ -8,6 +8,8 @@ from PIL import Image
 import os
 import logging
 
+from common import paths
+
 def check_gl_error(operation="Operation"):
     error = glGetError()
     if error != GL_NO_ERROR:
@@ -341,9 +343,7 @@ class Simulator3DWindow:
 
             # Load logo texture
             try:
-                # Get the path to assets/branding/logo.png
-                script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                logo_path = os.path.join(script_dir, "assets", "branding", "logo.png")
+                logo_path = str(paths.LOGO_PATH)
 
                 if os.path.exists(logo_path):
                     # Load image with PIL

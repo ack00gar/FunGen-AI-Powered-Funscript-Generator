@@ -13,11 +13,10 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from common import paths
 
-_FONT_PATH = os.path.normpath(os.path.join(
-    os.path.dirname(__file__), "..", "..",
-    "assets", "fonts", "icons.ttf",
-))
+
+_FONT_PATH = str(paths.ICON_FONT_PATH)
 
 
 # Map UI icon filenames (as referenced by call sites) to Nerd Font codepoints.

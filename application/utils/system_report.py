@@ -7,6 +7,8 @@ import subprocess
 import sys
 from typing import Dict, List, Tuple
 
+from common import paths
+
 
 def _anonymize_path(path: str) -> str:
     """Replace the user home directory with ~ to avoid leaking usernames."""
@@ -30,8 +32,7 @@ def _run_cmd(cmd: List[str], timeout: int = 5) -> str:
 def _get_git_info() -> Dict[str, str]:
     """Get git branch and short commit hash."""
     info = {}
-    # Find the repo root (this file lives in application/utils/)
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    repo_root = str(paths.APP_ROOT)
     git_dir = os.path.join(repo_root, ".git")
     if not os.path.isdir(git_dir):
         return info
@@ -154,8 +155,7 @@ def _get_addon_versions() -> List[Tuple[str, str]]:
 
 def _get_recent_log_issues(max_lines: int = 30) -> List[str]:
     """Return the last N WARNING/ERROR/CRITICAL lines from the FunGen log file."""
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    log_path = os.path.join(repo_root, "logs", "fungen.log")
+    log_path = str(paths.app_log_file())
     if not os.path.isfile(log_path):
         return []
     try:

@@ -14,6 +14,8 @@ import numpy as np
 import OpenGL.GL as gl
 import os
 
+from common import paths
+
 
 class LogoTextureManager:
     """Manages logo texture loading and caching for OpenGL rendering."""
@@ -35,8 +37,7 @@ class LogoTextureManager:
             return self.logo_texture_id
 
         try:
-            # Find logo.png in assets/branding folder
-            logo_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'branding', 'logo.png')
+            logo_path = str(paths.LOGO_PATH)
 
             if not os.path.exists(logo_path):
                 print(f"Logo file not found: {logo_path}")

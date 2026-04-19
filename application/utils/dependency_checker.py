@@ -8,6 +8,8 @@ from importlib.metadata import version, PackageNotFoundError
 from packaging import version as pkg_version
 from packaging.specifiers import SpecifierSet
 
+from common import paths
+
 logger = logging.getLogger(__name__)
 
 def _parse_package_spec(package_spec):
@@ -94,8 +96,7 @@ def _ensure_packages(packages, pip_args=None, *, non_interactive: bool = True, a
 
 def get_bin_dir():
     """Gets the directory where binaries like ffmpeg should be stored."""
-    # Place bin folder in the project root
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'bin')
+    return str(paths.BIN_DIR)
 
 def is_tool(name):
     """Check whether `name` is on PATH and marked as executable."""
@@ -404,8 +405,7 @@ def check_and_download_emojis(*, auto_download: bool = True):
         logger.debug("requests, tqdm, or config not available, skipping emoji download")
         return
 
-    # Get assets directory
-    assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'assets')
+    assets_dir = str(paths.ASSETS_DIR)
     os.makedirs(assets_dir, exist_ok=True)
 
     # Check which emojis are missing
@@ -489,8 +489,7 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
         logger.debug("requests, tqdm, or config not available, skipping UI icon download")
         return
 
-    # Get assets directory
-    assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'assets')
+    assets_dir = str(paths.ASSETS_DIR)
 
     # Check which icons are missing
     missing_icons = []

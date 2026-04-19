@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+
+from common import paths
 from video.vr_format_detector_ml_real import RealMLVRFormatDetector
 
 
@@ -357,7 +359,7 @@ class FormatDetectionMixin:
         # Try ML detection if requested
         if use_ml:
             try:
-                model_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'vr_detector_model_rf.pkl')
+                model_path = str(paths.MODELS_DIR / 'vr_detector_model_rf.pkl')
                 if os.path.exists(model_path):
                     detector = RealMLVRFormatDetector(logger=None)
                     detector.load_model(model_path)

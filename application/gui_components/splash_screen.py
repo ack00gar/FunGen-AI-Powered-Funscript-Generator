@@ -19,6 +19,7 @@ import gc
 import queue
 
 from application.gui_components import splash_themes
+from common import paths
 
 
 class SplashScreen:
@@ -56,9 +57,7 @@ class SplashScreen:
     def load_logo_texture(self):
         """Load the logo texture for display."""
         try:
-            # Get logo path (same as used by 3D simulator)
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            logo_path = os.path.join(script_dir, '..', '..', 'assets', 'branding', 'logo.png')
+            logo_path = str(paths.LOGO_PATH)
 
             if not os.path.exists(logo_path):
                 self.app.logger.warning(f"Splash screen logo not found: {logo_path}")
@@ -474,10 +473,7 @@ class StandaloneSplashWindow:
     def _load_logo_texture(self):
         """Load the logo texture for display."""
         try:
-            import os
-            # Get logo path
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            logo_path = os.path.join(script_dir, '..', '..', 'assets', 'branding', 'logo.png')
+            logo_path = str(paths.LOGO_PATH)
 
             if not os.path.exists(logo_path):
                 return
@@ -504,11 +500,9 @@ class StandaloneSplashWindow:
     def _load_emoji_textures(self):
         """Load emoji textures for display in laser circles (only loads available emojis)."""
         try:
-            import os
             from config.constants import SPLASH_EMOJI_URLS
 
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            assets_dir = os.path.join(script_dir, '..', '..', 'assets')
+            assets_dir = str(paths.ASSETS_DIR)
 
             # Build emoji name mapping from SPLASH_EMOJI_URLS
             # Keys will be the filename without extension
@@ -548,10 +542,8 @@ class StandaloneSplashWindow:
         """Load pre-rendered splash frames if available for buttery smooth playback."""
         try:
             import json
-            from pathlib import Path
 
-            # Check for pre-rendered frames directory
-            frames_dir = Path(__file__).parent.parent.parent / "assets" / "splash_frames"
+            frames_dir = paths.SPLASH_FRAMES_DIR
 
             if not frames_dir.exists():
                 return  # No pre-rendered frames, will use live rendering

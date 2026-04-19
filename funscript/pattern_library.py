@@ -9,6 +9,8 @@ import json
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
+from common import paths
+
 
 @dataclass
 class MotionPattern:
@@ -28,10 +30,7 @@ class PatternLibrary:
 
     def __init__(self, patterns_dir: str = None):
         if patterns_dir is None:
-            # Default: patterns/ in app data directory
-            base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))), 'patterns')
-            patterns_dir = base
+            patterns_dir = str(paths.PATTERNS_DIR)
         self._patterns_dir = patterns_dir
         os.makedirs(self._patterns_dir, exist_ok=True)
 
