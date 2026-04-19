@@ -2393,6 +2393,7 @@ def perform_contact_analysis(
     # --- Prepare overlay data BEFORE clearing frames from memory ---
     frame_data = []
     overlay_data_with_segments = None
+    all_frames_overlay_data = None
 
     if output_overlay_msgpack_path:
         logger.info("Preparing overlay data before memory optimization...")
