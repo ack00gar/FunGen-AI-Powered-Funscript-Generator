@@ -1,28 +1,37 @@
 """
 Modular tracker system with auto-discovery.
 
-This module automatically discovers and registers all tracker implementations,
-making them available for use in the application without requiring manual
-configuration or hardcoded lists.
+Built-in trackers (live / offline / tool / legacy) are discovered via
+pkgutil.iter_modules on each folder's package, which enumerates submodules
+regardless of whether they are Python source or compiled .so / .pyd. For
+each module, a lightweight AST parse pulls the metadata when source is
+available; otherwise the module is eager-imported and the live class is
+queried. Loading uses importlib.import_module throughout, so the same
+discovery code path works in source and compiled builds.
+
+Community trackers stay on the file-path security sandbox
+(load_tracker_safely) because they are user-supplied .py by contract
+and need code validation before execution.
 """
 
 import ast
-import os
-import sys
+import importlib
 import importlib.util
 import inspect
 import logging
-from typing import Dict, List, Type, Optional
+import os
+import pkgutil
+import sys
+from typing import Dict, List, Optional, Type
 
 try:
     from .core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult, TrackerError
     from .core.base_offline_tracker import BaseOfflineTracker
     from .core.security import (
-        TrackerSecurityError, TrackerValidationError, TrackerSandboxError, 
+        TrackerSecurityError, TrackerValidationError, TrackerSandboxError,
         TrackerAPIViolationError, load_tracker_safely
     )
 except ImportError:
-    # Fallback for direct execution
     from core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult, TrackerError
     from core.base_offline_tracker import BaseOfflineTracker
     from core.security import (
@@ -31,50 +40,48 @@ except ImportError:
     )
 
 
+# Built-in tracker folder packages -- discovered by pkgutil.
+BUILTIN_FOLDERS = ("live", "offline", "tool", "legacy")
+
+
 class _NotLiteral(Exception):
-    """Raised when an AST node can't be evaluated as a literal."""
     pass
 
 
 class TrackerRegistry:
-    """
-    Registry that automatically discovers and manages tracker implementations.
-    
-    The registry scans the tracker_modules directory and community subdirectory
-    for Python files containing BaseTracker subclasses, validates them, and
-    makes them available for instantiation.
-    """
-    
+    """Discovers and manages tracker implementations."""
+
     def __init__(self):
         self.logger = logging.getLogger("TrackerRegistry")
         self._trackers: Dict[str, Type] = {}
         self._metadata_cache: Dict[str, TrackerMetadata] = {}
         self._folder_map: Dict[str, str] = {}  # tracker_name -> folder_name
         self._discovery_errors: List[str] = []
-        # Lazy refs: name -> (file_path, filename, folder_name, is_community).
-        # Populated when metadata was extracted statically without importing
-        # the module. Class is loaded on first get_tracker()/create_tracker().
-        self._lazy_refs: Dict[str, tuple] = {}
 
-        # Background discovery. Even with static AST extraction we still want
-        # to scan dozens of files off the main thread so GUI init runs in
-        # parallel; public getters block on _ensure_discovered() only if a
-        # query arrives before scanning finishes.
+        # Lazy refs for built-in trackers: name -> (dotted_module_name, folder).
+        # Resolved via importlib.import_module on first materialization, which
+        # is indifferent to .py vs .so.
+        self._builtin_refs: Dict[str, tuple] = {}
+
+        # Lazy refs for community trackers: name -> (file_path, filename, folder).
+        # Resolved via the security sandbox (load_tracker_safely). Always .py.
+        self._community_refs: Dict[str, tuple] = {}
+
         import threading
         self._discovered = threading.Event()
-        self._discovery_lock = threading.Lock()  # guards lazy materialization
+        self._discovery_lock = threading.Lock()
         self._discovery_thread = threading.Thread(
             target=self._run_discovery, daemon=True, name="TrackerDiscovery")
         self._discovery_thread.start()
 
     def _run_discovery(self) -> None:
-        """Thread body: run _discover_trackers, then signal completion."""
         try:
             self._discover_trackers()
-            total = len(self._trackers) + len(self._lazy_refs)
+            total = len(self._trackers) + len(self._builtin_refs) + len(self._community_refs)
             if total:
                 self.logger.debug(
-                    f"Discovered {total} trackers ({len(self._lazy_refs)} lazy, "
+                    f"Discovered {total} trackers ({len(self._builtin_refs)} built-in lazy, "
+                    f"{len(self._community_refs)} community lazy, "
                     f"{len(self._trackers)} eager)")
             else:
                 self.logger.warning("No trackers discovered!")
@@ -84,100 +91,124 @@ class TrackerRegistry:
             self._discovered.set()
 
     def _ensure_discovered(self) -> None:
-        """Block the current thread until the discovery thread finishes.
-
-        Called at the top of every public getter. No-op if discovery is
-        already complete (cheap Event.wait fast path).
-        """
         if not self._discovered.is_set():
             self._discovered.wait()
-    
+
     def _discover_trackers(self):
-        """Auto-discover tracker modules in the tracker_modules subdirectories."""
+        """Walk built-in folder packages via pkgutil, then scan community/."""
+        for folder in BUILTIN_FOLDERS:
+            pkg_name = f"tracker.tracker_modules.{folder}"
+            try:
+                pkg = importlib.import_module(pkg_name)
+            except ImportError:
+                continue  # folder not present on this install
+            if not hasattr(pkg, "__path__"):
+                continue
+            for _finder, mod_name, _ispkg in pkgutil.iter_modules(pkg.__path__):
+                if mod_name.startswith("_"):
+                    continue
+                dotted = f"{pkg_name}.{mod_name}"
+                try:
+                    self._discover_builtin(dotted, folder)
+                except Exception as e:
+                    err = f"Discovery error in {dotted}: {e}"
+                    self._discovery_errors.append(err)
+                    self.logger.warning(err)
+
         tracker_dir = os.path.dirname(__file__)
-        
-        # Scan live trackers subdirectory
-        live_dir = os.path.join(tracker_dir, 'live')
-        if os.path.exists(live_dir):
-            self._scan_directory(live_dir, folder_name='live', is_community=False)
-        
-        # Scan offline trackers subdirectory
-        offline_dir = os.path.join(tracker_dir, 'offline')
-        if os.path.exists(offline_dir):
-            self._scan_directory(offline_dir, folder_name='offline', is_community=False)
+        community_dir = os.path.join(tracker_dir, "community")
+        if os.path.isdir(community_dir):
+            self._scan_community(community_dir)
 
-        # Scan tool trackers subdirectory (accessory utilities, opt-in via UI filter)
-        tool_dir = os.path.join(tracker_dir, 'tool')
-        if os.path.exists(tool_dir):
-            self._scan_directory(tool_dir, folder_name='tool', is_community=False)
-        
-        # Scan legacy trackers
-        legacy_dir = os.path.join(tracker_dir, 'legacy')
-        if os.path.exists(legacy_dir):
-            self._scan_directory(legacy_dir, folder_name='legacy', is_community=False)
+    def _discover_builtin(self, dotted: str, folder: str) -> None:
+        """Register a built-in tracker by dotted module name.
 
-
-        # Scan community subdirectory
-        community_dir = os.path.join(tracker_dir, 'community')
-        if os.path.exists(community_dir):
-            self._scan_directory(community_dir, folder_name='community', is_community=True)
-        
-        self.logger.debug(
-            f"Discovery complete. Found {len(self._trackers) + len(self._lazy_refs)} trackers.")
-    
-    def _scan_directory(self, directory: str, folder_name: str, is_community: bool = False):
-        """Scan a directory for tracker modules.
-
-        For community trackers, also recursively scans subdirectories so users
-        can organize their trackers in folders (e.g. community/my_trackers/).
+        Prefers AST parse of the source .py file when available, so
+        metadata loads without importing torch / ultralytics. Falls back
+        to eager import if the module is compiled (.so) or if its metadata
+        property is not a literal call.
         """
         try:
-            for filename in os.listdir(directory):
-                full_path = os.path.join(directory, filename)
-                if filename.endswith('.py') and filename not in ['__init__.py']:
-                    self._load_tracker_module(full_path, filename, folder_name, is_community)
-                elif is_community and os.path.isdir(full_path) and not filename.startswith(('__', '.')):
-                    # Recursively scan user-created subdirectories within community/
-                    self.logger.debug(f"Scanning community subfolder: {filename}/")
-                    self._scan_directory(full_path, folder_name, is_community)
-        except OSError as e:
-            error_msg = f"Failed to scan directory {directory}: {e}"
-            self._discovery_errors.append(error_msg)
-            self.logger.error(error_msg)
-    
-    def _load_tracker_module(self, file_path: str, filename: str, folder_name: str, is_community: bool):
-        """Register a tracker by metadata, deferring the actual class import.
+            spec = importlib.util.find_spec(dotted)
+        except (ImportError, ValueError):
+            return
+        if spec is None:
+            return
 
-        Static AST extraction avoids pulling torch/ultralytics/cv2 for trackers
-        the user never selects. Files without a tracker subclass are skipped.
-        Files with one but non-literal metadata fall back to eager load.
-        """
+        origin = spec.origin
+        if origin and origin.endswith(".py"):
+            tree = self._parse_file(origin)
+            if tree is None or not self._has_tracker_subclass(tree):
+                return
+            meta = self._extract_metadata_from_tree(tree)
+            if meta is not None:
+                self._register_builtin_lazy(meta, dotted, folder)
+                return
+            # Metadata not literal -- fall through to eager load.
+
+        # Compiled module or non-literal metadata: import now.
+        try:
+            tracker_class = self._import_and_find_class(dotted)
+        except Exception as e:
+            err = f"Failed to import built-in tracker {dotted}: {e}"
+            self._discovery_errors.append(err)
+            self.logger.warning(err)
+            return
+        if tracker_class is not None:
+            self._register_tracker(tracker_class, folder, is_community=False, source=dotted)
+
+    def _import_and_find_class(self, dotted: str) -> Optional[Type]:
+        """Import dotted and return the first concrete BaseTracker subclass."""
+        module = importlib.import_module(dotted)
+        for _name, obj in inspect.getmembers(module):
+            if (inspect.isclass(obj)
+                    and (issubclass(obj, BaseTracker) or issubclass(obj, BaseOfflineTracker))
+                    and obj not in (BaseTracker, BaseOfflineTracker)
+                    and not inspect.isabstract(obj)):
+                return obj
+        return None
+
+    def _scan_community(self, directory: str) -> None:
+        """Directory scan for community trackers -- always .py, sandboxed."""
+        try:
+            entries = os.listdir(directory)
+        except OSError as e:
+            err = f"Failed to scan community directory {directory}: {e}"
+            self._discovery_errors.append(err)
+            self.logger.error(err)
+            return
+
+        for filename in entries:
+            full_path = os.path.join(directory, filename)
+            if filename.endswith(".py") and filename != "__init__.py":
+                self._load_community(full_path, filename)
+            elif os.path.isdir(full_path) and not filename.startswith(("__", ".")):
+                # Recurse into user-organised subfolders.
+                self._scan_community(full_path)
+
+    def _load_community(self, file_path: str, filename: str) -> None:
         try:
             tree = self._parse_file(file_path)
             if tree is None or not self._has_tracker_subclass(tree):
-                return  # standalone script, test file, helper — not a tracker
+                return
             meta = self._extract_metadata_from_tree(tree)
             if meta is not None:
-                self._register_lazy(meta, file_path, filename, folder_name, is_community)
+                self._register_community_lazy(meta, file_path, filename)
                 return
-            # Tracker subclass exists but metadata isn't literal — eager path.
-            if is_community:
-                tracker_class = load_tracker_safely(file_path, filename)
-            else:
-                tracker_class = self._direct_import(file_path, filename)
+            # Non-literal metadata: eager load through the sandbox.
+            tracker_class = load_tracker_safely(file_path, filename)
             if tracker_class:
-                self._register_tracker(tracker_class, folder_name, is_community, file_path)
-            else:
-                self.logger.debug(f"No valid tracker classes found in {filename}")
-
+                self._register_tracker(tracker_class, "community", True, file_path)
         except TrackerSecurityError as e:
-            error_msg = f"SECURITY VIOLATION in {filename}: {e}"
-            self._discovery_errors.append(error_msg)
-            self.logger.error(error_msg)
+            err = f"SECURITY VIOLATION in {filename}: {e}"
+            self._discovery_errors.append(err)
+            self.logger.error(err)
         except Exception as e:
-            error_msg = f"Failed to load tracker module {filename}: {e}"
-            self._discovery_errors.append(error_msg)
-            self.logger.warning(error_msg)
+            err = f"Failed to load community tracker {filename}: {e}"
+            self._discovery_errors.append(err)
+            self.logger.warning(err)
+
+    # ----- AST helpers (unchanged from prior revisions) -----
 
     @staticmethod
     def _parse_file(file_path: str):
@@ -189,7 +220,6 @@ class TrackerRegistry:
 
     @staticmethod
     def _has_tracker_subclass(tree) -> bool:
-        """True iff any top-level class inherits from BaseTracker/BaseOfflineTracker by name."""
         wanted = ("BaseTracker", "BaseOfflineTracker")
         for node in tree.body:
             if not isinstance(node, ast.ClassDef):
@@ -202,7 +232,6 @@ class TrackerRegistry:
         return False
 
     def _extract_metadata_from_tree(self, tree) -> Optional[TrackerMetadata]:
-        """Find `@property def metadata(self)` in an AST and evaluate its return."""
         for node in tree.body:
             if not isinstance(node, ast.ClassDef):
                 continue
@@ -220,7 +249,6 @@ class TrackerRegistry:
         return None
 
     def _eval_metadata_body(self, func_node) -> Optional[TrackerMetadata]:
-        """Find `return TrackerMetadata(...)` inside a metadata property body."""
         for stmt in ast.walk(func_node):
             if not isinstance(stmt, ast.Return) or stmt.value is None:
                 continue
@@ -241,7 +269,6 @@ class TrackerRegistry:
 
     @staticmethod
     def _literalize(node):
-        """Recursive evaluator: literals + nested StageDefinition(...) calls."""
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.Name):
@@ -269,48 +296,71 @@ class TrackerRegistry:
             return StageDefinition(*args, **kwargs)
         raise _NotLiteral()
 
-    def _register_lazy(self, metadata: TrackerMetadata, file_path: str,
-                       filename: str, folder_name: str, is_community: bool) -> None:
-        """Register metadata + a lazy ref; class loads on first get_tracker()."""
-        if not isinstance(metadata, TrackerMetadata) or not metadata.name:
+    # ----- Lazy registration -----
+
+    def _register_builtin_lazy(self, meta: TrackerMetadata, dotted: str, folder: str) -> None:
+        if not isinstance(meta, TrackerMetadata) or not meta.name:
             return
-        if metadata.name in self._trackers or metadata.name in self._lazy_refs:
-            existing = self._metadata_cache.get(metadata.name)
+        if self._name_conflict(meta):
+            return
+        self._metadata_cache[meta.name] = meta
+        self._folder_map[meta.name] = folder
+        self._builtin_refs[meta.name] = (dotted, folder)
+
+    def _register_community_lazy(self, meta: TrackerMetadata, file_path: str, filename: str) -> None:
+        if not isinstance(meta, TrackerMetadata) or not meta.name:
+            return
+        if self._name_conflict(meta):
+            return
+        self._metadata_cache[meta.name] = meta
+        self._folder_map[meta.name] = "community"
+        self._community_refs[meta.name] = (file_path, filename, "community")
+
+    def _name_conflict(self, meta: TrackerMetadata) -> bool:
+        if (meta.name in self._trackers or meta.name in self._builtin_refs
+                or meta.name in self._community_refs):
+            existing = self._metadata_cache.get(meta.name)
             self.logger.warning(
-                f"Tracker name conflict: '{metadata.name}' "
+                f"Tracker name conflict: '{meta.name}' "
                 f"(existing: {existing.display_name if existing else '?'}, "
-                f"new: {metadata.display_name}). Skipping new tracker."
+                f"new: {meta.display_name}). Skipping new tracker."
             )
-            return
-        self._metadata_cache[metadata.name] = metadata
-        self._folder_map[metadata.name] = folder_name
-        self._lazy_refs[metadata.name] = (file_path, filename, folder_name, is_community)
+            return True
+        return False
+
+    # ----- Materialisation -----
 
     def _materialize(self, name: str) -> Optional[Type]:
-        """Load the class for a lazily-registered tracker. Thread-safe."""
         with self._discovery_lock:
             if name in self._trackers:
                 return self._trackers[name]
-            ref = self._lazy_refs.get(name)
-            if ref is None:
-                return None
-            file_path, filename, folder_name, is_community = ref
-            try:
-                if is_community:
+
+            if name in self._builtin_refs:
+                dotted, _folder = self._builtin_refs[name]
+                try:
+                    tracker_class = self._import_and_find_class(dotted)
+                except Exception as e:
+                    self.logger.error(f"Failed to materialize built-in {name}: {e}")
+                    return None
+
+            elif name in self._community_refs:
+                file_path, filename, _folder = self._community_refs[name]
+                try:
                     tracker_class = load_tracker_safely(file_path, filename)
-                else:
-                    tracker_class = self._direct_import(file_path, filename)
-            except TrackerSecurityError as e:
-                self.logger.error(f"SECURITY VIOLATION materializing {name}: {e}")
+                except TrackerSecurityError as e:
+                    self.logger.error(f"SECURITY VIOLATION materializing {name}: {e}")
+                    return None
+                except Exception as e:
+                    self.logger.error(f"Failed to materialize community {name}: {e}")
+                    return None
+            else:
                 return None
-            except Exception as e:
-                self.logger.error(f"Failed to materialize tracker {name}: {e}")
-                return None
+
             if tracker_class is None:
                 return None
             self._trackers[name] = tracker_class
-            # Refresh metadata from the live class in case the static parse
-            # missed anything (e.g. auto-generated properties).
+            # Refresh metadata from the live instance -- picks up anything the
+            # static parse couldn't see (e.g. computed properties).
             try:
                 live_meta = tracker_class().metadata
                 if isinstance(live_meta, TrackerMetadata) and live_meta.name == name:
@@ -319,111 +369,65 @@ class TrackerRegistry:
                 pass
             return tracker_class
 
-    def _direct_import(self, file_path: str, filename: str) -> Optional[Type]:
-        """Import an official tracker module without security sandbox."""
-        module_name = filename[:-3]
-        spec = importlib.util.spec_from_file_location(f"tracker_modules.{module_name}", file_path)
-        if spec is None or spec.loader is None:
-            return None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[f"tracker_modules.{module_name}"] = module
-        spec.loader.exec_module(module)
-
-        tracker_classes = []
-        for name, obj in inspect.getmembers(module):
-            if (inspect.isclass(obj) and
-                (issubclass(obj, BaseTracker) or issubclass(obj, BaseOfflineTracker)) and
-                obj not in [BaseTracker, BaseOfflineTracker] and
-                not inspect.isabstract(obj)):
-                tracker_classes.append(obj)
-
-        return tracker_classes[0] if tracker_classes else None
-    
-    
-    def _register_tracker(self, tracker_class: Type, folder_name: str, is_community: bool, file_path: str):
-        """Register a validated tracker class with resource management."""
+    def _register_tracker(self, tracker_class: Type, folder_name: str,
+                          is_community: bool, source: str) -> None:
+        """Eagerly register a tracker class that was imported during discovery."""
         temp_instance = None
         try:
-            # Validate by attempting to access metadata
-            # Note: We create a temporary instance just to get metadata
-            # This ensures the metadata property is properly implemented
             temp_instance = tracker_class()
             metadata = temp_instance.metadata
-            
+
             if not isinstance(metadata, TrackerMetadata):
-                raise TrackerValidationError(f"Tracker metadata must be TrackerMetadata instance")
-            
+                raise TrackerValidationError("Tracker metadata must be TrackerMetadata instance")
             if not metadata.name:
-                raise TrackerValidationError(f"Tracker name cannot be empty")
-            
-            # Check for name conflicts
+                raise TrackerValidationError("Tracker name cannot be empty")
+
             if metadata.name in self._trackers:
-                existing_metadata = self._metadata_cache[metadata.name]
+                existing = self._metadata_cache.get(metadata.name)
                 self.logger.warning(
                     f"Tracker name conflict: '{metadata.name}' "
-                    f"(existing: {existing_metadata.display_name}, "
+                    f"(existing: {existing.display_name if existing else '?'}, "
                     f"new: {metadata.display_name}). Skipping new tracker."
                 )
                 return
-            
-            # Register the tracker
+
             self._trackers[metadata.name] = tracker_class
             self._metadata_cache[metadata.name] = metadata
             self._folder_map[metadata.name] = folder_name
-            
-            # Log at debug level to reduce verbosity
+
             category_prefix = "[Community] " if is_community else ""
             self.logger.debug(
-                f"Registered: {category_prefix}{metadata.display_name} ({metadata.name})"
-            )
-            
+                f"Registered: {category_prefix}{metadata.display_name} ({metadata.name})")
+
         except TrackerSecurityError as e:
-            error_msg = f"SECURITY VIOLATION during registration of {tracker_class.__name__}: {e}"
-            self._discovery_errors.append(error_msg)
-            self.logger.error(error_msg)
+            err = f"SECURITY VIOLATION registering {tracker_class.__name__}: {e}"
+            self._discovery_errors.append(err)
+            self.logger.error(err)
         except Exception as e:
-            error_msg = f"Failed to register tracker {tracker_class.__name__}: {e}"
-            self._discovery_errors.append(error_msg)
-            self.logger.error(error_msg)
+            err = f"Failed to register tracker {tracker_class.__name__}: {e}"
+            self._discovery_errors.append(err)
+            self.logger.error(err)
         finally:
-            # Resource cleanup - ensure temp instance is properly cleaned up
             if temp_instance:
                 try:
-                    if hasattr(temp_instance, 'cleanup'):
+                    if hasattr(temp_instance, "cleanup"):
                         temp_instance.cleanup()
-                    # Clear references to help garbage collection
                     temp_instance = None
                 except Exception as cleanup_error:
                     self.logger.warning(f"Failed to cleanup temp instance: {cleanup_error}")
-    
+
+    # ----- Public API -----
+
     def get_tracker(self, name: str) -> Optional[Type]:
-        """
-        Get tracker class by name.
-
-        Args:
-            name: Internal tracker name (from metadata.name)
-
-        Returns:
-            Type: Tracker class, or None if not found
-        """
         self._ensure_discovered()
         cls = self._trackers.get(name)
         if cls is not None:
             return cls
-        if name in self._lazy_refs:
+        if name in self._builtin_refs or name in self._community_refs:
             return self._materialize(name)
         return None
-    
-    def create_tracker(self, name: str) -> Optional:
-        """
-        Create a new instance of the named tracker.
-        
-        Args:
-            name: Internal tracker name (from metadata.name)
-        
-        Returns:
-            BaseTracker or BaseOfflineTracker: New tracker instance, or None if not found
-        """
+
+    def create_tracker(self, name: str):
         tracker_class = self.get_tracker(name)
         if tracker_class:
             try:
@@ -432,118 +436,74 @@ class TrackerRegistry:
                 self.logger.error(f"Failed to create tracker instance {name}: {e}")
                 return None
         return None
-    
+
     def list_trackers(self, category: Optional[str] = None) -> List[TrackerMetadata]:
-        """
-        List all discovered tracker metadata.
-
-        Args:
-            category: Optional category filter ("live", "offline", etc.)
-
-        Returns:
-            List[TrackerMetadata]: List of tracker metadata
-        """
         self._ensure_discovered()
         trackers = list(self._metadata_cache.values())
-        
         if category:
             trackers = [t for t in trackers if t.category == category]
-        
-        # Custom category priority: live first, then offline, then community
-        # Within each category, sort alphabetically by display name
-        category_priority = {'live': 1, 'offline': 2, 'community': 3}
+        category_priority = {"live": 1, "offline": 2, "community": 3}
         return sorted(trackers, key=lambda t: (category_priority.get(t.category, 999), t.display_name))
-    
+
     def get_metadata(self, name: str) -> Optional[TrackerMetadata]:
-        """
-        Get metadata for a specific tracker.
-
-        Args:
-            name: Internal tracker name
-
-        Returns:
-            TrackerMetadata: Tracker metadata, or None if not found
-        """
         self._ensure_discovered()
         return self._metadata_cache.get(name)
 
     def get_available_names(self) -> List[str]:
-        """Get list of all available tracker names."""
         self._ensure_discovered()
         names = set(self._trackers.keys())
-        names.update(self._lazy_refs.keys())
+        names.update(self._builtin_refs.keys())
+        names.update(self._community_refs.keys())
         return list(names)
 
     def get_discovery_errors(self) -> List[str]:
-        """Get list of errors encountered during discovery."""
         self._ensure_discovered()
         return self._discovery_errors.copy()
 
     def get_tracker_folder(self, name: str) -> Optional[str]:
-        """Get folder name for a specific tracker."""
         self._ensure_discovered()
         return self._folder_map.get(name)
-    
+
     def reload_trackers(self):
-        """Reload all trackers (useful for development)."""
         self.logger.debug("Reloading trackers...")
         self._trackers.clear()
         self._metadata_cache.clear()
         self._folder_map.clear()
-        self._lazy_refs.clear()
+        self._builtin_refs.clear()
+        self._community_refs.clear()
         self._discovery_errors.clear()
         self._discover_trackers()
 
 
-# Global registry instance - automatically discovers trackers on import
+# Global registry instance -- automatically discovers trackers on import
 tracker_registry = TrackerRegistry()
 
 
 def get_tracker_registry() -> TrackerRegistry:
-    """Get the global tracker registry instance."""
     return tracker_registry
 
 
 def list_available_trackers(category: Optional[str] = None) -> List[TrackerMetadata]:
-    """
-    Convenience function to list available trackers.
-    
-    Args:
-        category: Optional category filter
-    
-    Returns:
-        List[TrackerMetadata]: Available trackers
-    """
     return tracker_registry.list_trackers(category)
 
 
 def create_tracker(name: str):
-    """
-    Convenience function to create a tracker instance.
-    
-    Args:
-        name: Internal tracker name
-    
-    Returns:
-        BaseTracker or BaseOfflineTracker: New tracker instance, or None if not found
-    """
     return tracker_registry.create_tracker(name)
 
 
-# Export commonly used classes for easy importing
 __all__ = [
-    'TrackerRegistry', 
-    'tracker_registry',
-    'BaseTracker',
-    'BaseOfflineTracker',
-    'TrackerMetadata', 
-    'TrackerResult',
-    'TrackerError',
-    'TrackerSecurityError',
-    'TrackerValidationError', 
-    'TrackerSandboxError',
-    'TrackerAPIViolationError',
-    'get_tracker_registry',
-    'list_available_trackers',
-    'create_tracker'
+    "TrackerRegistry",
+    "tracker_registry",
+    "BaseTracker",
+    "BaseOfflineTracker",
+    "TrackerMetadata",
+    "TrackerResult",
+    "TrackerError",
+    "TrackerSecurityError",
+    "TrackerValidationError",
+    "TrackerSandboxError",
+    "TrackerAPIViolationError",
+    "get_tracker_registry",
+    "list_available_trackers",
+    "create_tracker",
 ]

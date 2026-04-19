@@ -9,6 +9,7 @@ import importlib
 import importlib.util
 import inspect
 import logging
+import pkgutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Type
 
@@ -30,14 +31,52 @@ class PluginLoader:
         self.loaded_modules = {}
     
     def load_builtin_plugins(self) -> Dict[str, bool]:
-        """
-        Load all built-in plugins from the plugins directory using auto-discovery.
-        
+        """Load all built-in plugins from the funscript.plugins package.
+
+        Uses pkgutil.iter_modules to enumerate submodules, which handles
+        both Python source (.py) and compiled extensions (.so / .pyd)
+        uniformly. Each module is loaded via importlib.import_module so
+        the same code path works in source builds and compiled builds.
+
         Returns:
-            Dictionary mapping plugin names to load success status
+            Dictionary mapping dotted module names to load success status.
         """
-        plugins_dir = Path(__file__).parent
-        return self.load_plugins_from_directory(str(plugins_dir), recursive=False)
+        import funscript.plugins as pkg
+
+        # Infrastructure modules that never contain plugin classes.
+        skip = {"base_plugin", "plugin_loader"}
+
+        results: Dict[str, bool] = {}
+        for _finder, mod_name, _ispkg in pkgutil.iter_modules(pkg.__path__):
+            if mod_name in skip or mod_name.startswith("_"):
+                continue
+            dotted = f"funscript.plugins.{mod_name}"
+            results[dotted] = self._load_plugin_by_dotted_name(dotted)
+
+        self.logger.debug(f"Loaded {sum(1 for v in results.values() if v)} built-in plugin modules")
+        return results
+
+    def _load_plugin_by_dotted_name(self, dotted: str) -> bool:
+        """Import dotted and register every concrete plugin class it defines."""
+        try:
+            module = importlib.import_module(dotted)
+        except Exception as e:
+            self.logger.error(f"Failed to import plugin {dotted}: {e}")
+            return False
+
+        self.loaded_modules[dotted] = module
+
+        plugin_classes = self._find_plugin_classes(module)
+        if not plugin_classes:
+            self.logger.debug(f"No plugin classes found in {dotted}")
+            return False
+
+        display_path = Path(module.__file__) if getattr(module, "__file__", None) else Path(dotted)
+        registered = 0
+        for cls in plugin_classes:
+            if self._register_plugin_class(cls, display_path):
+                registered += 1
+        return registered > 0
     
     def load_plugins_from_directory(self, directory: str, recursive: bool = False) -> Dict[str, bool]:
         """
