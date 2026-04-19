@@ -419,7 +419,7 @@ class Simulator3DWindow:
 
         imgui.set_next_window_size(self.window_size[0], self.window_size[1], condition=imgui.ONCE)
         # Remove scrollbars
-        visible, opened_state = imgui.begin("3D Simulator", closable=True, flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE)
+        visible, opened_state = imgui.begin("FunGen: 3D Simulator", closable=True, flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE)
 
         # Update app state based on window close button
         if app_state.show_simulator_3d != opened_state:
@@ -481,7 +481,7 @@ class Simulator3DWindow:
             tertiary_pos = 50  # No pitch movement when third axis not available
 
         # Check logo setting
-        logo_enabled = self.app.app_settings.get('show_3d_simulator_logo', True)
+        logo_enabled = self.app.app_settings.config.ui.show_3d_simulator_logo
 
         # Performance: Check if positions or settings changed (dirty flag)
         current_positions = (primary_pos, secondary_pos, tertiary_pos)
@@ -681,7 +681,7 @@ class Simulator3DWindow:
             glUniform1f(self._uloc_pitch, pitch_angle)
 
         # Bind logo texture if available and enabled in settings
-        logo_enabled = self.app.app_settings.get('show_3d_simulator_logo', True)
+        logo_enabled = self.app.app_settings.config.ui.show_3d_simulator_logo
         if self.logo_texture is not None and logo_enabled:
             glActiveTexture(GL_TEXTURE0)
             glBindTexture(GL_TEXTURE_2D, self.logo_texture)

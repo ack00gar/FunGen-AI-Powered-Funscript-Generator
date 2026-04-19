@@ -6,6 +6,7 @@ from application.utils.section_card import section_card as _section_card
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 from application.gui_components.ig_panels import InfoGraphsMixin
 from application.gui_components.settings_renderer import SettingsRenderer
+from config.constants_colors import CurrentTheme
 
 
 class InfoGraphsUI(InfoGraphsMixin):
@@ -80,7 +81,7 @@ class InfoGraphsUI(InfoGraphsMixin):
         x_offset = (avail_w - text_size[0]) * 0.5
         if x_offset > 0:
             imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + x_offset)
-        imgui.text_colored(label, 0.45, 0.45, 0.50, 0.7)
+        imgui.text_colored(label, *CurrentTheme.GRAY_SUBDUED)
         imgui.spacing()
 
     def _get_system_stats(self):
@@ -99,7 +100,7 @@ class InfoGraphsUI(InfoGraphsMixin):
     def render(self):
         self._render_frame_counter += 1
         app_state = self.app.app_state_ui
-        window_title = "Info & Graphs##InfoGraphsFloating"
+        window_title = "FunGen: Info & Graphs##InfoGraphsFloating"
 
         # Determine flags based on layout mode
         if app_state.ui_layout_mode == "floating":
@@ -194,7 +195,7 @@ class InfoGraphsUI(InfoGraphsMixin):
             processor = self.app.processor
             if processor and processor.video_info:
                 video_type = processor.determined_video_type or "2D"
-                imgui.text_colored(f"{video_type} Video", 0.4, 0.8, 1.0, 1.0)
+                imgui.text_colored(f"{video_type} Video", *CurrentTheme.REFERENCE_OVERLAY)
                 if video_type == "VR":
                     imgui.text_wrapped("Recommended unwarp: CPU (v360)")
                     imgui.text_wrapped("Recommended pitch: -21 for typical POV")

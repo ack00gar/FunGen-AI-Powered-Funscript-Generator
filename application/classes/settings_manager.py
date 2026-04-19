@@ -3,9 +3,14 @@ import os
 import logging
 import subprocess
 import platform
+import threading
 from datetime import datetime
 from typing import Optional, List, Dict
 from config import constants
+from config import ui_metrics
+
+
+_SAVE_DEBOUNCE_SECONDS = 0.3
 
 
 # Settings keys to include in profiles (processing-related, not UI layout)
@@ -77,7 +82,21 @@ class AppSettings:
 
         self.is_first_run = False
         self.shortcuts_were_reset = False  # Set by migration; GUI shows one-time notice
+
+        # Debounced-save state. set() schedules a timer instead of writing
+        # immediately so slider drags (60 fps) don't thrash disk. flush() on
+        # shutdown to guarantee the last value persists.
+        self._save_lock = threading.Lock()
+        self._save_timer: Optional[threading.Timer] = None
+        self._save_pending = False
+
         self.load_settings()
+
+        # Typed view: app_settings.config.audio.volume etc. Reads/writes go
+        # straight back through self.get/self.set so the debounced save and
+        # on-disk format are unchanged.
+        from config.typed_settings import AppConfig
+        self.config = AppConfig(self)
 
         # Auto-detect and set hardware acceleration on first run
         if self.is_first_run:
@@ -125,6 +144,7 @@ class AppSettings:
             "show_timeline_editor_buttons": False,
             "show_advanced_options": False,
             "show_toast_notifications": True,
+            "theme": "dark",
             "show_video_feed": True,
             "hd_video_display": True,  # Decode at display resolution (up to 1920px) for sharper preview
 
@@ -145,10 +165,11 @@ class AppSettings:
             "hardware_acceleration_method": "none",  # Default to CPU to avoid CUDA errors on non-NVIDIA systems
             "default_secondary_axis": "roll",  # Default secondary axis for dual-axis trackers (roll, twist, pitch, etc.)
             "ffmpeg_path": "ffmpeg",
-            # VR Unwarp method: 'auto', 'metal', 'opengl', 'v360'
-            # macOS: v360 is 26% faster than GPU unwarp due to optimized FFmpeg filter
-            # Other platforms: auto selects best GPU backend
-            "vr_unwarp_method": "v360" if platform.system() == "Darwin" else "auto",
+            # VR Unwarp method: 'v360' (ffmpeg v360 filter) or 'none'
+            # (crop-only). Legacy GPU variants ('auto', 'metal',
+            # 'opengl') were decommissioned and are migrated to 'v360'
+            # at load by VideoProcessor.
+            "vr_unwarp_method": "v360",
 
             # Autosave & Energy Saver
             "autosave_enabled": True,
@@ -170,7 +191,7 @@ class AppSettings:
 
             # Tracking & Processing
             "funscript_output_delay_frames": 0,
-            "timeline_base_height": 180,
+            "timeline_base_height": ui_metrics.TIMELINE_BASE_DEFAULT_PX,
             "discarded_tracking_classes": constants.CLASSES_TO_DISCARD_BY_DEFAULT,
             "tracking_axis_mode": "both",
             "single_axis_output_target": "primary",
@@ -315,6 +336,15 @@ class AppSettings:
             self.data = defaults
 
     def save_settings(self):
+        """Write settings to disk immediately. Call flush() on shutdown."""
+        with self._save_lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+                self._save_timer = None
+            self._save_pending = False
+        self._write_settings_now()
+
+    def _write_settings_now(self):
         settings_file = self.settings_file
         try:
             with open(settings_file, 'w') as f:
@@ -322,6 +352,37 @@ class AppSettings:
             self.logger.debug(f"Settings saved to {settings_file}.")
         except Exception as e:
             self.logger.error(f"Error saving settings to '{settings_file}': {e}", exc_info=True)
+
+    def _schedule_save(self):
+        """Arm a debounced write. Resets the timer on each call so a slider
+        drag only produces a single disk write once the user stops moving."""
+        with self._save_lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+            self._save_pending = True
+            self._save_timer = threading.Timer(_SAVE_DEBOUNCE_SECONDS, self._debounced_write)
+            self._save_timer.daemon = True
+            self._save_timer.start()
+
+    def _debounced_write(self):
+        with self._save_lock:
+            if not self._save_pending:
+                return
+            self._save_pending = False
+            self._save_timer = None
+        self._write_settings_now()
+
+    def flush(self):
+        """Force any pending debounced save to disk. Must be called on app
+        shutdown, otherwise the last set() within the debounce window is lost."""
+        with self._save_lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+                self._save_timer = None
+            if not self._save_pending:
+                return
+            self._save_pending = False
+        self._write_settings_now()
 
     def get(self, key, default=None):
         # Ensure that if a key is missing from self.data (e.g. new setting added),
@@ -337,13 +398,13 @@ class AppSettings:
 
     def set(self, key, value):
         self.data[key] = value
-        self.save_settings()  # here for immediate saving
+        self._schedule_save()
 
     def set_batch(self, **kwargs):
         """Set multiple keys at once and save only once at the end."""
         for key, value in kwargs.items():
             self.data[key] = value
-        self.save_settings()
+        self._schedule_save()
 
     def reset_to_defaults(self):
         self.data = self.get_default_settings()

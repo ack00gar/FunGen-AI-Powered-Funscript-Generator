@@ -12,6 +12,15 @@ This project is still at the early stages of development. It is not intended for
 
 ---
 
+## v0.9.0 Highlights
+
+- **Video backend rewrite** — PyAV is gone. Frame decode runs through a dedicated FFmpeg subprocess frame source; the GUI display uses libmpv via its render API for smooth playback. Each video-touching subsystem (thumbnails, proxy encode, metadata probe, audio) is a purpose-built FFmpeg or ffprobe path, not a shared in-process filter graph.
+- **New nav buffer** — 1 GB byte-budgeted LRU frame cache replaces the old contiguous deque. Survives seeks, so bouncing between regions of the video reuses previously decoded frames for free until the byte budget forces LRU eviction. Hit-rate and fill percentage visible in the Expert → Developer Perf panel.
+- **Anticipatory prefetcher** — While paused and idle, a background thread watches the arrow-nav pattern and warms the cache around the likely next target (bidirectional fill on "landed", forward/backward fill on sustained trend). Gated off during playback (the loop pumps the cache itself) and during tracking (tracker owns the decoder).
+- **Progressive arrow-hold playback** — Tap right arrow = one frame forward. Hold ≥ 0.25 s = REALTIME playback. Hold ≥ 3 s = MAX_SPEED. Release stops playback. Left arrow = one frame back on tap, auto-repeat step-back on hold (engine has no reverse playback).
+- **Faster texture upload** — `GL_BGR` native upload eliminates the per-frame `cv2.cvtColor` allocation; PBO-backed streaming with `glBufferData` orphaning lets the driver overlap the DMA copy with the rest of the render pass. Automatic fallback to direct upload if PBO fails.
+- **Better diagnostics** — FFmpeg subprocess deaths now surface the return code and stderr tail so misconfigured hwaccel or filter chains are identifiable from the log. MpvDisplay load failures surface to the user via toast + expert panel instead of showing a silent black frame. Expert panel exposes a "Debug nav logging" toggle that emits a one-line NAV trace per arrow/scrub event.
+
 ## v0.8.0 Highlights
 
 - **Simplified GUI** - Removed Simple Mode (Run tab is now clean enough for everyone). Control panel reduced to Run + Metadata. Settings, Undo, and Performance tabs moved to the Info panel on the right
@@ -19,7 +28,6 @@ This project is still at the early stages of development. It is not intended for
 - **Ultimate Autotune Popup** - Opens with parameter sliders and live preview overlay. Adjust settings and see the result before applying
 - **Streamlined Menus** - Flattened View menu, added shortcut hints throughout, removed unused gauges and movement bar. All display toggles show their keyboard shortcuts
 - **Cleaner Tracker Settings** - Stripped broken/dead settings from live trackers. Only working, user-relevant controls exposed
-- **Add-on Terminology** - Updated from "Supporter" to PayPal add-on language with correct purchase URLs
 - **First-run Wizard** - Reduced from 6 to 5 steps (no mode selection needed)
 - **Model Download Button** - Re-download AI models anytime from Settings > AI Models
 - **Auto-populated Metadata** - Creator and Title fields auto-fill from FunGen version and video filename
@@ -55,8 +63,8 @@ curl -fsSL https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscrip
 
 The installer automatically:
 - Installs Python 3.11 (Miniconda)
-- Installs Git and FFmpeg/FFprobe  
-- Downloads and sets up FunGen AI
+- Installs Git, FFmpeg/FFprobe, and libmpv
+- Downloads and sets up FunGen
 - Installs all required dependencies
 - Creates launcher scripts for easy startup
 - Detects your GPU and optimizes PyTorch installation
@@ -73,9 +81,10 @@ If you prefer manual installation or need custom configuration:
 
 Before using this project, ensure you have the following installed:
 
-- **Git** https://git-scm.com/downloads/ or 'winget install --id Git.Git -e --source winget' from a command prompt for Windows users as described below for easy install of Miniconda.
-- **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
-- **Miniconda** (https://www.anaconda.com/docs/getting-started/miniconda/install)
+- **Git** — https://git-scm.com/downloads/ (Windows users can also run `winget install --id Git.Git -e --source winget`)
+- **FFmpeg + ffprobe** on PATH, or set the path in the settings menu — https://www.ffmpeg.org/download.html
+- **libmpv** — required for smooth in-GUI video playback. Homebrew: `brew install mpv`. Debian/Ubuntu: `sudo apt install libmpv-dev`. Windows: bundled with the installer.
+- **Miniconda** — https://www.anaconda.com/docs/getting-started/miniconda/install
 
 Easy install of Miniconda for Windows users:
 Open Command Prompt and run: `winget install -e --id Anaconda.Miniconda3`
@@ -128,7 +137,7 @@ pip install tensorrt
 **Verify Installation:**
 ```bash
 nvidia-smi                    # Check GPU and driver
-nvcc --version               # Check CUDA version  
+nvcc --version               # Check CUDA version
 python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
 python -c "import torch; print(torch.backends.cudnn.is_available())"  # Check cuDNN
 ```
@@ -179,7 +188,7 @@ In most cases, the app will automatically detect the best model from your models
 **Verification Commands:**
 ```bash
 nvidia-smi                    # Check GPU and driver
-nvcc --version               # Check CUDA version  
+nvcc --version               # Check CUDA version
 python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
 python -c "import torch; print(torch.backends.cudnn.is_available())"  # Check cuDNN
 ```
@@ -297,7 +306,7 @@ a top of the line card like the 4090 is not required to get similar results. Hav
 **Important considerations:**
 
 - Each instance requires the YOLO model to load which means you'll need to keep checks on your VRAM to see how many you can load.
-- The optimal number of instances depends on a combination of factors, including your CPU, GPU, RAM, and system configuration. So experiment with different setups to find the ideal configuration for your hardware! 😊
+- The optimal number of instances depends on a combination of factors, including your CPU, GPU, RAM, and system configuration. So experiment with different setups to find the ideal configuration for your hardware!
 
 ---
 
@@ -326,23 +335,13 @@ Each tracker implements its own pipeline. The VR Hybrid tracker (recommended) wo
 
 ## Project Genesis and Evolution
 
-This project started as a dream to automate Funscript generation for VR videos. Here’s a brief history of its development:
+This project started as a dream to automate Funscript generation for VR videos. Here's a brief history of its development:
 
 - **Initial Approach (OpenCV Trackers)**: The first version relied on OpenCV trackers to detect and track objects in the video. While functional, the approach was slow (8–20 FPS) and struggled with occlusions and complex scenes.
 - **Transition to YOLO**: To improve accuracy and speed, the project shifted to using YOLO object detection. A custom YOLO model was trained on a dataset of 1000nds annotated VR video frames, significantly improving detection quality.
+- **v0.9.0 Video Backend Rewrite**: PyAV and its in-process libav filter graph were replaced by a purpose-built FFmpeg subprocess frame source for analysis and a libmpv render-API display for playback. Removed a major source of C-level crashes, cut cold-start latency, and unblocked the GPU texture-upload and nav-cache improvements shipped in the same release.
 - **Original Post**: For more details and discussions, check out the original post on EroScripts:
   [VR Funscript Generation Helper (Python + CV/AI)](https://discuss.eroscripts.com/t/vr-funscript-generation-helper-python-now-cv-ai/202554)
-
-----
-
-# Contributing
-
-Contributions are welcome! If you'd like to contribute, please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch for your feature or bug fix.
-3. Commit your changes.
-4. Submit a pull request.
 
 ---
 
@@ -360,9 +359,10 @@ See the [LICENSE](LICENSE) file for full details.
 
 # Acknowledgments
 
-- **YOLO**: Thanks to the Ultralytics team for the YOLO implementation.
-- **FFmpeg**: For video processing capabilities.
-- **Eroscripts Community**: For the inspiration and use cases.
+- **YOLO** — Ultralytics for the detection framework.
+- **FFmpeg / libavfilter** — decode, v360 dewarp, proxy encoding, audio, thumbnails.
+- **libmpv** — smooth in-GUI playback via the render API.
+- **Eroscripts Community** — inspiration and real-world use cases.
 
 ---
 
@@ -394,6 +394,16 @@ If you get "ffmpeg/ffprobe not found" errors:
 1. **Use the launcher script** (`launch.bat` or `launch.sh`) instead of running `python main.py` directly
 2. **Rerun the installer** to get updated launcher scripts with FFmpeg PATH fixes
 3. The launcher automatically adds FFmpeg to PATH
+
+### libmpv not found
+
+If the log shows `libmpv not available; MpvDisplay disabled` and video playback stutters:
+
+- **macOS**: `brew install mpv`
+- **Linux (Debian/Ubuntu)**: `sudo apt install libmpv2` (or `libmpv1` on older distros)
+- **Windows**: reinstall using the installer, which bundles libmpv DLLs
+
+Analysis, batch, and CLI modes do not require libmpv; only the in-GUI smooth-playback path does. Without it, the app falls back to CPU texture uploads per frame.
 
 ### General Installation Problems
 

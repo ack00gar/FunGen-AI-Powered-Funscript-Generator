@@ -273,23 +273,22 @@ def apply_system_scaling_to_settings(app_settings) -> bool:
         True if scaling was applied, False otherwise
     """
     try:
+        ui_cfg = app_settings.config.ui
         # Check if automatic scaling is enabled
-        auto_scaling_enabled = app_settings.get("auto_system_scaling_enabled", True)
-        if not auto_scaling_enabled:
+        if not ui_cfg.auto_system_scaling:
             return False
-            
+
         # Get system scaling info
         scaling_factor, dpi, platform = get_system_scaling_info()
-        
+
         # Only apply if scaling is significantly different from 100%
         if abs(scaling_factor - 1.0) > 0.1:  # More than 10% difference
             # Convert to recommended font scale
             recommended_scale = get_recommended_font_scale(scaling_factor)
-            
+
             # Apply to settings
-            current_scale = app_settings.get("global_font_scale", 1.0)
-            if abs(recommended_scale - current_scale) > 0.05:  # Only update if significantly different
-                app_settings.set("global_font_scale", recommended_scale)
+            if abs(recommended_scale - ui_cfg.global_font_scale) > 0.05:  # Only update if significantly different
+                ui_cfg.global_font_scale = recommended_scale
                 logging.getLogger(__name__).info(
                     f"Applied system scaling: {scaling_factor:.2f}x ({dpi:.0f} DPI) -> "
                     f"font scale: {recommended_scale}"

@@ -184,6 +184,17 @@ class DarkTheme:
     UPDATE_DIALOG_TEXT = WHITE
     UPDATE_DIALOG_GRAY_TEXT = GRAY
 
+    PROMO_BANNER_GOLD = (0.9, 0.75, 0.3, 1.0)
+    PROMO_BANNER_BAR = (0.9, 0.75, 0.3, 0.8)
+    DESCRIPTION_TEXT = (0.7, 0.7, 0.7, 1.0)
+
+    HOVER_BG = (0.5, 0.5, 0.55, 0.2)
+    PRESSED_BG = (0.4, 0.4, 0.45, 0.35)
+    DISABLED_OVERLAY = (0.3, 0.3, 0.3, 0.5)
+    PANEL_BG_DARK = (0.1, 0.1, 0.12, 1.0)
+    DESTRUCTIVE_BG_DARK = (0.5, 0.12, 0.12, 1.0)
+    HIGHLIGHT_OVERLAY = (1.0, 1.0, 1.0, 0.9)
+
     # Button Palette Colors (for visual hierarchy)
     # PRIMARY buttons (positive/affirmative actions: Start, Create, Save, etc.)
     BUTTON_PRIMARY = (0.2, 0.5, 0.9, 1.0)  # Blue
@@ -222,8 +233,254 @@ class DarkTheme:
     STATUS_STRIP_WARNING = (0.9, 0.75, 0.2, 1.0)
 
 
-# Current theme (default to dark)
-CurrentTheme = DarkTheme
+class LightTheme:
+    RED = (0.62, 0.28, 0.28, 1.0)
+    RED_LIGHT = (0.72, 0.45, 0.45, 0.85)
+    RED_DARK = (0.52, 0.22, 0.22, 1.0)
+
+    GREEN = (0.25, 0.52, 0.25, 1.0)
+    GREEN_LIGHT = (0.42, 0.68, 0.42, 0.85)
+    GREEN_DARK = (0.18, 0.42, 0.18, 1.0)
+
+    BLUE = (0.28, 0.42, 0.72, 1.0)
+    BLUE_LIGHT = (0.35, 0.50, 0.75, 1.0)
+    BLUE_DARK = (0.20, 0.32, 0.55, 0.85)
+
+    YELLOW = (0.72, 0.62, 0.20, 1.0)
+    YELLOW_LIGHT = (0.82, 0.72, 0.30, 0.85)
+    YELLOW_DARK = (0.62, 0.52, 0.18, 1.0)
+
+    CYAN = (0.20, 0.58, 0.62, 1.0)
+    MAGENTA = (0.65, 0.30, 0.62, 1.0)
+
+    WHITE = (0.90, 0.89, 0.86, 1.0)
+    WHITE_DARK = (0.82, 0.81, 0.78, 1.0)
+    BLACK = (0.08, 0.08, 0.07, 1.0)
+    GRAY = (0.72, 0.71, 0.68, 1.0)
+    GRAY_LIGHT = (0.60, 0.59, 0.56, 1.0)
+    GRAY_DARK = (0.42, 0.41, 0.38, 1.0)
+    GRAY_MEDIUM = (0.52, 0.51, 0.48, 1.0)
+    GRAY_SUBDUED = (0.65, 0.64, 0.61, 1.0)
+    HINT_TEXT = (0.62, 0.61, 0.58, 1.0)
+
+    ORANGE = (0.75, 0.52, 0.15, 1.0)
+    ORANGE_LIGHT = (0.82, 0.62, 0.28, 0.85)
+    ORANGE_DARK = (0.65, 0.45, 0.12, 1.0)
+
+    BROWN = (0.65, 0.42, 0.18, 0.85)
+    PURPLE = (0.50, 0.40, 0.75, 0.85)
+    PINK = (0.85, 0.30, 0.55, 0.85)
+
+    TRANSPARENT = (0, 0, 0, 0)
+    SEMI_TRANSPARENT = (1, 1, 1, 0.4)
+
+    APP_MARKER = (*RED[:3], 0.85)
+    FLOATING_WIDGET_BG = (0.32, 0.31, 0.29, 1.0)
+    FLOATING_WIDGET_BORDER = GRAY_MEDIUM
+    FLOATING_WIDGET_TEXT = WHITE_DARK
+    ENERGY_SAVER_INDICATOR = GREEN
+    VERSION_CURRENT_HIGHLIGHT = GREEN
+    VERSION_CHANGELOG_TEXT = GRAY
+    VIDEO_STATUS_FUNGEN = GREEN
+    VIDEO_STATUS_OTHER = YELLOW
+    BACKGROUND_CLEAR = (0.28, 0.27, 0.25, 1.0)
+
+    FRAME_OFFSET = YELLOW
+
+    TIMELINE_CANVAS_BG = (0.26, 0.25, 0.23, 1.0)
+    TIMELINE_MARKER = (*RED[:3], 0.9)
+    TIMELINE_TIME_TEXT = (*WHITE[:3], 0.8)
+    TIMELINE_GRID = (0.80, 0.80, 0.80, 0.9)
+    TIMELINE_GRID_MAJOR = (0.70, 0.70, 0.70, 0.95)
+    TIMELINE_GRID_LABELS = GRAY
+    TIMELINE_WAVEFORM = BLUE_DARK
+    TIMELINE_SELECTED_BORDER = (0.65, 0.00, 0.00, 1.0)
+    TIMELINE_PREVIEW_LINE = (*ORANGE[:3], 0.9)
+    TIMELINE_PREVIEW_POINT = ORANGE
+    TIMELINE_MARQUEE_FILL = (0.25, 0.45, 0.85, 0.20)
+    TIMELINE_MARQUEE_BORDER = (0.20, 0.40, 0.80, 0.70)
+    TIMELINE_CHAPTER_HIGHLIGHT_FILL = (0.90, 0.65, 0.05, 0.12)
+    TIMELINE_CHAPTER_HIGHLIGHT_EDGE = (0.90, 0.65, 0.05, 0.40)
+    TIMELINE_POINT_DEFAULT = GREEN
+    TIMELINE_POINT_DRAGGING = RED
+    TIMELINE_POINT_SELECTED = (0.70, 0.00, 0.00, 1.0)
+    TIMELINE_POINT_HOVER = (0.30, 0.80, 0.30, 1.0)
+    ULTIMATE_AUTOTUNE_PREVIEW = (0.15, 0.75, 0.35, 0.50)
+    REFERENCE_OVERLAY = (0.20, 0.50, 0.85, 0.9)
+    REFERENCE_MATCH_GOLD = (0.90, 0.70, 0.00, 1.0)
+    REFERENCE_MATCH_GREEN = (0.15, 0.75, 0.20, 1.0)
+    REFERENCE_MATCH_YELLOW = (0.85, 0.75, 0.15, 1.0)
+    REFERENCE_MATCH_RED = (0.85, 0.15, 0.15, 1.0)
+    REFERENCE_UNMATCHED = (0.60, 0.60, 0.60, 0.5)
+
+    COMPILER_SUCCESS = GREEN
+    COMPILER_ERROR = RED
+    COMPILER_INFO = GRAY
+    COMPILER_WARNING = YELLOW
+    COMPILER_STARTING = ORANGE
+    COMPILER_STOPPING = YELLOW
+    COMPILER_OUTPUT_TEXT = BLUE
+
+    VIDEO_DOMINANT_LIMB = (*GREEN[:3], 0.95)
+    VIDEO_DOMINANT_KEYPOINT = (0.95, 0.50, 0.10, 1.0)
+    VIDEO_MUTED_LIMB = (0.20, 0.50, 0.85, 0.40)
+    VIDEO_MUTED_KEYPOINT = (*RED[:3], 0.5)
+    VIDEO_MOTION_UNDETERMINED = (*YELLOW[:3], 0.9)
+    VIDEO_MOTION_THRUSTING = (*GREEN[:3], 0.95)
+    VIDEO_MOTION_RIDING = (*MAGENTA[:3], 0.95)
+    VIDEO_ROI_DRAWING = (*YELLOW[:3], 0.7)
+    VIDEO_ROI_BORDER = (*CYAN[:3], 0.7)
+    VIDEO_TRACKING_POINT = (*GREEN[:3], 0.9)
+    VIDEO_FLOW_VECTOR = (*RED[:3], 0.9)
+    VIDEO_BOX_LABEL = BLACK
+    VIDEO_OCCLUSION_WARNING = (*ORANGE[:3], 0.95)
+    VIDEO_PERSISTENT_REFINED_TRACK = CYAN
+    VIDEO_ACTIVE_INTERACTOR = YELLOW
+    VIDEO_LOCKED_PENIS = GREEN_DARK
+    VIDEO_FILL_COLOR = (*GREEN[:3], 0.4)
+    VIDEO_ALIGNED_FALLBACK = (*ORANGE[:3], 0.9)
+    VIDEO_INFERRED_BOX = (*PURPLE[:3], 0.85)
+
+    NAV_BACKGROUND = (0.24, 0.23, 0.21, 1.0)
+    NAV_ICON = (*ORANGE_DARK[:3], 0.9)
+    NAV_SCRIPTING_BORDER = (*YELLOW[:3], 0.7)
+    NAV_SELECTION_PRIMARY = (*GREEN[:3], 0.95)
+    NAV_SELECTION_SECONDARY = (0.25, 0.45, 0.85, 0.95)
+    NAV_TEXT_BLACK = BLACK
+    NAV_TEXT_WHITE = WHITE
+    NAV_MARKER = (0.20, 0.20, 0.25, 0.85)
+
+    BOX_GENERAL = (*GRAY_LIGHT[:3], 0.7)
+    BOX_PREF_PENIS = (*GREEN[:3], 0.9)
+    BOX_LOCKED_PENIS = (*CYAN[:3], 0.8)
+    BOX_PUSSY = (0.90, 0.45, 0.70, 0.85)
+    BOX_BUTT = (*BROWN[:3], 0.8)
+    BOX_TRACKED = (*YELLOW[:3], 0.8)
+    BOX_TRACKED_ALT = (*GRAY[:3], 0.7)
+    BOX_GENERAL_DETECTION = (0.25, 0.45, 0.85, 0.65)
+    BOX_EXCLUDED = (0.55, 0.15, 0.15, 0.55)
+
+    SEGMENT_BJ = (*GREEN_LIGHT[:3], 0.8)
+    SEGMENT_HJ = (*GREEN_LIGHT[:3], 0.8)
+    SEGMENT_NR = (*GRAY[:3], 0.7)
+    SEGMENT_CG_MISS = (0.40, 0.45, 0.85, 0.8)
+    SEGMENT_REV_CG_DOG = (*BROWN[:3], 0.8)
+    SEGMENT_CG = (0.30, 0.50, 0.85, 0.8)
+    SEGMENT_MISS = (0.50, 0.35, 0.85, 0.8)
+    SEGMENT_REV_CG = (0.70, 0.50, 0.30, 0.8)
+    SEGMENT_DOG = (0.50, 0.40, 0.20, 0.8)
+    SEGMENT_FOOTJ = (*YELLOW_LIGHT[:3], 0.8)
+    SEGMENT_BOOBJ = (*PINK[:3], 0.8)
+    SEGMENT_CLOSEUP = (*PURPLE[:3], 0.8)
+    SEGMENT_INTRO = (0.60, 0.65, 0.75, 0.7)
+    SEGMENT_OUTRO = (0.65, 0.55, 0.65, 0.7)
+    SEGMENT_TRANSITION = (0.65, 0.65, 0.55, 0.7)
+    SEGMENT_DEFAULT = TRANSPARENT
+
+    CONTROL_PANEL_ACTIVE_PROGRESS = (0.20, 0.50, 0.90, 1.0)
+    CONTROL_PANEL_COMPLETED_PROGRESS = (0.15, 0.60, 0.20, 1.0)
+    CONTROL_PANEL_SUB_PROGRESS = (0.25, 0.60, 0.90, 1.0)
+
+    CONTROL_PANEL_STATUS_READY = GREEN
+    CONTROL_PANEL_STATUS_WARNING = ORANGE
+    CONTROL_PANEL_STATUS_ERROR = RED
+    CONTROL_PANEL_STATUS_INFO = BLUE
+
+    CONTROL_PANEL_SECTION_HEADER = (0.15, 0.15, 0.15, 1.0)
+
+    UPDATE_TOKEN_VALID = GREEN
+    UPDATE_TOKEN_INVALID = RED
+    UPDATE_TOKEN_WARNING = ORANGE
+    UPDATE_TOKEN_SET = GREEN
+    UPDATE_TOKEN_NOT_SET = ORANGE
+    UPDATE_DIALOG_TEXT = BLACK
+    UPDATE_DIALOG_GRAY_TEXT = GRAY
+
+    PROMO_BANNER_GOLD = (0.78, 0.62, 0.20, 1.0)
+    PROMO_BANNER_BAR = (0.78, 0.62, 0.20, 0.8)
+    DESCRIPTION_TEXT = (0.70, 0.69, 0.66, 1.0)
+
+    HOVER_BG = (0.75, 0.74, 0.72, 0.18)
+    PRESSED_BG = (0.78, 0.78, 0.82, 0.30)
+    DISABLED_OVERLAY = (0.55, 0.55, 0.58, 0.55)
+    PANEL_BG_DARK = (0.18, 0.17, 0.15, 1.0)
+    DESTRUCTIVE_BG_DARK = (0.55, 0.28, 0.28, 0.70)
+    HIGHLIGHT_OVERLAY = (0.92, 0.92, 0.90, 0.90)
+
+    BUTTON_PRIMARY = (0.30, 0.45, 0.72, 1.0)
+    BUTTON_PRIMARY_HOVERED = (0.36, 0.52, 0.80, 1.0)
+    BUTTON_PRIMARY_ACTIVE = (0.22, 0.38, 0.60, 1.0)
+
+    BUTTON_DESTRUCTIVE = (0.62, 0.28, 0.28, 1.0)
+    BUTTON_DESTRUCTIVE_HOVERED = (0.70, 0.35, 0.35, 1.0)
+    BUTTON_DESTRUCTIVE_ACTIVE = (0.52, 0.22, 0.22, 1.0)
+
+    CARD_PRIMARY_BG = (0.36, 0.35, 0.32, 1.0)
+    CARD_SECONDARY_BG = (0.40, 0.39, 0.36, 0.7)
+    CARD_INLINE_BG = (0.38, 0.37, 0.34, 0.4)
+
+    BREADCRUMB_DONE = (0.35, 0.65, 0.40, 1.0)
+    BREADCRUMB_ACTIVE = (0.40, 0.58, 0.82, 1.0)
+    BREADCRUMB_FUTURE = (0.52, 0.51, 0.48, 0.7)
+    BREADCRUMB_CONNECTOR = (0.45, 0.44, 0.41, 0.6)
+
+    SIDEBAR_BG = (0.26, 0.25, 0.23, 1.0)
+    SIDEBAR_ACTIVE_ACCENT = (0.40, 0.58, 0.82, 1.0)
+    SIDEBAR_HOVER_BG = (0.34, 0.33, 0.30, 1.0)
+    SIDEBAR_LOCKED_ALPHA = 0.45
+
+    STATUS_STRIP_BG = (0.22, 0.21, 0.19, 1.0)
+    STATUS_STRIP_TEXT = (0.70, 0.69, 0.66, 1.0)
+    STATUS_STRIP_ACCENT = (0.40, 0.55, 0.85, 1.0)
+    STATUS_STRIP_WARNING = (0.85, 0.70, 0.25, 1.0)
+
+
+def _select_theme():
+    import os, json
+    theme_name = os.environ.get("FUNGEN_THEME", "").strip().lower()
+    if not theme_name:
+        try:
+            settings_path = os.path.join(os.getcwd(), "settings.json")
+            if os.path.exists(settings_path):
+                with open(settings_path, "r") as f:
+                    data = json.load(f)
+                theme_name = str(data.get("theme", "dark")).strip().lower()
+        except Exception:
+            theme_name = "dark"
+    if theme_name == "light":
+        return LightTheme
+    return DarkTheme
+
+
+class _ThemeProxy:
+    """Forwards attribute access to a swappable underlying theme class.
+
+    Modules import `CurrentTheme` once at load time; their local binding
+    points at this single proxy instance. Swapping the inner theme via
+    `set_active_theme()` makes every `CurrentTheme.X` call site see the
+    new values on the next render frame without a restart.
+    """
+    __slots__ = ('_theme',)
+
+    def __init__(self, theme):
+        object.__setattr__(self, '_theme', theme)
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, '_theme'), name)
+
+
+CurrentTheme = _ThemeProxy(_select_theme())
+
+
+def get_active_theme():
+    """Return the underlying theme class CurrentTheme currently delegates to."""
+    return object.__getattribute__(CurrentTheme, '_theme')
+
+
+def set_active_theme(theme_cls):
+    """Swap the proxy's inner theme. All CurrentTheme.X lookups pick up the new
+    values immediately. Safe to call from the main thread during a render frame."""
+    object.__setattr__(CurrentTheme, '_theme', theme_cls)
 
 class RGBColors:
     # RGB Colors (for legacy compatibility - 0-255 range)

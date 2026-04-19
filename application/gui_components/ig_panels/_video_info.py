@@ -5,6 +5,7 @@ from application.utils import _format_time
 from application.utils.imgui_layout_helpers import (
     begin_settings_columns, end_settings_columns, row_label, row_end, row_separator,
 )
+from config.constants_colors import CurrentTheme
 
 
 class VideoInfoMixin:
@@ -183,7 +184,7 @@ class VideoInfoMixin:
             end_settings_columns()
         else:
             imgui.spacing()
-            imgui.text_colored("No audio stream", 0.5, 0.5, 0.5, 1.0)
+            imgui.text_colored("No audio stream", *CurrentTheme.GRAY_MEDIUM)
 
         imgui.spacing()
         self.video_info_perf.end_timing()

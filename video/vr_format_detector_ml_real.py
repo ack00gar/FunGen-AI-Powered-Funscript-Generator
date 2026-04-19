@@ -439,45 +439,50 @@ class RealMLVRFormatDetector:
 
     def _extract_middle_frames(self, video_path: str, video_info: Dict, num_frames: int) -> List[np.ndarray]:
         """Extract ``num_frames`` sample frames evenly distributed across the
-        middle 50% of the video. Uses PyAV (in-process libav) — no cv2
-        nor system ffmpeg dependency."""
-        import av
+        middle 50% of the video via one ffmpeg subprocess per frame.
+
+        Each invocation: ``ffmpeg -ss <t> -i <path> -vframes 1 -f image2pipe
+        -c:v bmp -``. BMP is decoded in-memory by cv2; no temp files. Spawn
+        cost is ~150-400 ms per frame on typical sources which is fine for
+        an on-load one-shot detection step.
+        """
+        from video.ffmpeg_helpers import find_ffmpeg, subprocess_flags
+        import subprocess
 
         total_frames = video_info.get('nb_frames', 1000)
+        fps = float(video_info.get('fps') or 30.0)
+        if fps <= 0:
+            fps = 30.0
+
         start_frame = int(total_frames * 0.25)
         end_frame = int(total_frames * 0.75)
         sample_interval = max(1, (end_frame - start_frame) // num_frames)
         targets = [start_frame + i * sample_interval for i in range(num_frames)]
 
+        ffmpeg = find_ffmpeg()
+        flags = subprocess_flags()
+
         frames: List[np.ndarray] = []
-        container = None
-        try:
-            container = av.open(video_path)
-            stream = container.streams.video[0]
-            stream.thread_type = "AUTO"
-            fps = float(stream.average_rate or stream.guessed_rate or 30.0)
-            time_base = stream.time_base
-            for tgt in targets:
-                try:
-                    target_pts = int(tgt / fps / time_base)
-                    container.seek(target_pts, backward=True, any_frame=False, stream=stream)
-                except Exception:
+        for tgt in targets:
+            t_s = max(0.0, tgt / fps)
+            cmd = [
+                ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-ss", f"{t_s:.3f}", "-i", video_path,
+                "-vframes", "1", "-f", "image2pipe", "-c:v", "bmp", "-",
+            ]
+            try:
+                result = subprocess.run(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    timeout=10.0, creationflags=flags,
+                )
+                if result.returncode != 0 or not result.stdout:
                     continue
-                # Decode one frame after the seek (lands near target)
-                got = False
-                for packet in container.demux(stream):
-                    for frame in packet.decode():
-                        arr = frame.to_ndarray(format="bgr24")
-                        frames.append(arr)
-                        got = True
-                        break
-                    if got: break
-        except Exception as e:
-            self.logger.warning(f"PyAV sample extraction failed: {e}")
-        finally:
-            if container is not None:
-                try: container.close()
-                except Exception: pass
+                buf = np.frombuffer(result.stdout, dtype=np.uint8)
+                img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+                if img is not None and img.size > 0:
+                    frames.append(img)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                self.logger.warning(f"ffmpeg sample extraction at {t_s:.2f}s failed: {e}")
         return frames
 
     def _create_error_result(self, error_msg: str) -> Dict:

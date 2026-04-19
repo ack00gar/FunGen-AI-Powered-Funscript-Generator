@@ -1,6 +1,8 @@
+import threading
 import numpy as np
 from typing import Tuple, Optional
 from config.constants import ProcessingSpeedMode, DEFAULT_TRACKER_NAME
+from config import ui_metrics
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 from common.frame_utils import frame_to_ms
 
@@ -11,26 +13,27 @@ class AppStateUI:
         self.logger = self.app.logger
         self.app_settings = self.app.app_settings
         defaults = self.app_settings.get_default_settings()
+        ui_cfg = self.app_settings.config.ui
 
-        self.ui_layout_mode = self.app_settings.get("ui_layout_mode", defaults.get("ui_layout_mode", "fixed"))
-        self.show_control_panel_window = self.app_settings.get("show_control_panel_window", True)
+        self.ui_layout_mode = ui_cfg.layout_mode
+        self.show_control_panel_window = ui_cfg.show_control_panel_window
         # Note: show_video_display_window only applies to floating mode
         # In fixed mode, video display is always shown regardless of this setting
-        self.show_video_display_window = self.app_settings.get("show_video_display_window", True)
-        self.show_video_navigation_window = self.app_settings.get("show_video_navigation_window", True)
-        self.show_info_graphs_window = self.app_settings.get("show_info_graphs_window", True)
+        self.show_video_display_window = ui_cfg.show_video_display_window
+        self.show_video_navigation_window = ui_cfg.show_video_navigation_window
+        self.show_info_graphs_window = ui_cfg.show_info_graphs_window
 
         # Quad-block layout toggles (collapsible side blocks)
-        self.show_left_top_block = self.app_settings.get("show_left_top_block", True)
-        self.show_left_bottom_block = self.app_settings.get("show_left_bottom_block", True)
-        self.show_right_top_block = self.app_settings.get("show_right_top_block", True)
-        self.show_right_bottom_block = self.app_settings.get("show_right_bottom_block", True)
-        self.left_bottom_block_height_frac = float(self.app_settings.get("left_bottom_block_height_frac", 0.45))
-        self.right_bottom_block_height_frac = float(self.app_settings.get("right_bottom_block_height_frac", 0.45))
+        self.show_left_top_block = ui_cfg.show_left_top_block
+        self.show_left_bottom_block = ui_cfg.show_left_bottom_block
+        self.show_right_top_block = ui_cfg.show_right_top_block
+        self.show_right_bottom_block = ui_cfg.show_right_bottom_block
+        self.left_bottom_block_height_frac = ui_cfg.left_bottom_block_height_frac
+        self.right_bottom_block_height_frac = ui_cfg.right_bottom_block_height_frac
 
         # Window dimensions
-        self.window_width = self.app_settings.get("window_width", defaults.get("window_width", 1800))
-        self.window_height = self.app_settings.get("window_height", defaults.get("window_height", 1000))
+        self.window_width = ui_cfg.window_width
+        self.window_height = ui_cfg.window_height
 
         # Video Zoom and Pan State
         self.video_zoom_factor = 1.0
@@ -44,9 +47,10 @@ class AppStateUI:
         # used by get_video_uv_coords to preserve texel aspect under zoom.
         self._cached_fit_size = None
 
-        # Status Message
-        self.status_message: str = ""
-        self.status_message_time: float = 0.0
+        # Status message: logging thread writes, GUI reads. Pair guarded together.
+        self._status_lock = threading.Lock()
+        self._status_message: str = ""
+        self._status_message_time: float = 0.0
 
         # Load last used tracker using dynamic discovery
         _TRACKER_MIGRATION = {
@@ -69,13 +73,11 @@ class AppStateUI:
             # Old community names
             "multi_axis_stress_test": "COMMUNITY_MULTI_AXIS_STRESS_TEST",
         }
-        saved_tracker = self.app_settings.get(
-            "selected_tracker_name",
-            defaults.get("selected_tracker_name", DEFAULT_TRACKER_NAME)
-        )
+        tracking_cfg = self.app_settings.config.tracking
+        saved_tracker = tracking_cfg.selected_tracker_name
         if saved_tracker in _TRACKER_MIGRATION:
             saved_tracker = _TRACKER_MIGRATION[saved_tracker]
-            self.app_settings.set("selected_tracker_name", saved_tracker)
+            tracking_cfg.selected_tracker_name = saved_tracker
         # Validate saved tracker still exists — fall back to default if not
         try:
             from config.tracker_discovery import TrackerDiscovery
@@ -83,49 +85,57 @@ class AppStateUI:
             if saved_tracker not in discovery.get_all_trackers():
                 self.logger.warning(f"Saved tracker '{saved_tracker}' not found, falling back to default")
                 saved_tracker = DEFAULT_TRACKER_NAME
-                self.app_settings.set("selected_tracker_name", saved_tracker)
+                tracking_cfg.selected_tracker_name = saved_tracker
         except Exception:
             pass  # Discovery not ready yet, trust the saved value
         self.selected_tracker_name: str = saved_tracker
         # Load saved processing speed mode, default to REALTIME
-        saved_speed_mode = self.app_settings.get("selected_processing_speed_mode", "REALTIME")
+        saved_speed_mode = tracking_cfg.selected_processing_speed_mode
         try:
             self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode[saved_speed_mode]
         except KeyError:
             self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode.REALTIME
         # Slow-motion target FPS (1–30, default 10)
-        self.slow_motion_fps: float = self.app_settings.get("slow_motion_fps", 10.0)
+        self.slow_motion_fps: float = tracking_cfg.slow_motion_fps
 
         # UI visibility states
         self.show_toolbar = True
-        self.show_simulator_3d = self.app_settings.get("show_simulator_3d", defaults.get("show_simulator_3d", True))
-        self.show_script_gauge = self.app_settings.get("show_script_gauge", False)
+        self.show_simulator_3d = ui_cfg.show_simulator_3d
+        self.show_script_gauge = ui_cfg.show_script_gauge
         self.show_plugin_pipeline = False
-        self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", True))
-        self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", True))
-        self.show_audio_waveform = self.app_settings.get("show_audio_waveform", False)
-        self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline", defaults.get("show_funscript_interactive_timeline", True))
-        self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2", defaults.get("show_funscript_interactive_timeline2", False))
-        # Extra timeline visibility (supporter feature, default False)
+        self.show_funscript_timeline = ui_cfg.show_funscript_timeline
+        self.show_heatmap = ui_cfg.show_heatmap
+        self.show_audio_waveform = ui_cfg.show_audio_waveform
+        self.show_funscript_interactive_timeline = ui_cfg.show_funscript_interactive_timeline
+        self.show_funscript_interactive_timeline2 = ui_cfg.show_funscript_interactive_timeline2
+        # Extra timeline visibility (supporter feature, default False) —
+        # dynamic keys, stays on the raw .get() path.
         for _t_num in EXTRA_TIMELINE_RANGE:
             _attr = f"show_funscript_interactive_timeline{_t_num}"
             setattr(self, _attr, self.app_settings.get(_attr, defaults.get(_attr, False)))
-        self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay", defaults.get("show_stage2_overlay", True))
-        self.show_timeline_editor_buttons = self.app_settings.get("show_timeline_editor_buttons", defaults.get("show_timeline_editor_buttons", False))
-        self.show_advanced_options = self.app_settings.get("show_advanced_options", defaults.get("show_advanced_options", False))
-        self.show_video_feed = self.app_settings.get("show_video_feed", defaults.get("show_video_feed", True))
+        self.show_stage2_overlay = ui_cfg.show_stage2_overlay
+        self.show_timeline_editor_buttons = ui_cfg.show_timeline_editor_buttons
+        self.show_advanced_options = ui_cfg.show_advanced_options
+        self.show_video_feed = ui_cfg.show_video_feed
 
-        self.show_video_controls_overlay = self.app_settings.get("show_video_controls_overlay", defaults.get("show_video_controls_overlay", True))
+        self.show_video_controls_overlay = ui_cfg.show_video_controls_overlay
 
         self.show_generated_file_manager = False
 
         # Visualization Feature Settings
-        self.speed_limit_threshold: float = self.app_settings.get("speed_limit_threshold", 400.0)
-        self.show_bpm_overlay: bool = self.app_settings.get("show_bpm_overlay", False)
+        self.speed_limit_threshold: float = self.app_settings.config.funscript.speed_limit_threshold
+        self.show_bpm_overlay: bool = ui_cfg.show_bpm_overlay
 
         # FPS Override (manual scripting — snap grid at custom FPS)
         self.fps_override_enabled: bool = False
         self.fps_override_value: float = 60.0
+
+        # VR pan (only meaningful when vr_display_mode == 'shader_dewarp').
+        # Reset to zero on each video open. Mouse drag in the video panel
+        # mutates these; the dewarp shader reads them every render frame.
+        self.vr_pan_yaw: float = 0.0
+        self.vr_pan_pitch: float = 0.0
+        self.vr_pan_output_fov_deg: float = 90.0
 
         # Tracker UI visibility flags (app state that tracker reads via app_logic)
         # These will be updated by app_logic based on tracker's actual state if needed,
@@ -154,13 +164,9 @@ class AppStateUI:
         self.fps_slider_max_val = 200.0
 
         # Timeline Interaction Properties
-        self.timeline_base_height = int(self.app_settings.get("timeline_base_height",
-                                                              defaults.get("timeline_base_height", 180)))
-        self.timeline_zoom_factor_ms_per_px = self.app_settings.get("timeline_zoom_factor_ms_per_px",
-                                                                    defaults.get("timeline_zoom_factor_ms_per_px",
-                                                                                 20.0))
-        self.timeline_pan_offset_ms = self.app_settings.get("timeline_pan_offset_ms",
-                                                            defaults.get("timeline_pan_offset_ms", 0.0))
+        self.timeline_base_height = ui_cfg.timeline_base_height
+        self.timeline_zoom_factor_ms_per_px = ui_cfg.timeline_zoom_factor_ms_per_px
+        self.timeline_pan_offset_ms = ui_cfg.timeline_pan_offset_ms
         self.timeline_point_radius = 4.0  # Constant for timeline drawing
         # Line thickness is auto-computed from timeline height (see
         # InteractiveTimeline._line_thickness_for_height). The old
@@ -194,6 +200,8 @@ class AppStateUI:
         self.timeline_interaction_active = False  # True if user is dragging points/selection box in a timeline
         self.last_synced_frame_index_timeline = -1  # Last video frame index timeline was auto-panned to
         self.force_timeline_pan_to_current_frame = False  # Flag to command timeline to pan to current video frame
+        self.last_nav_activity_time: float = 0.0
+        self.last_nav_activity_window_s: float = 0.3
         self.interactive_refinement_mode_enabled: bool = False
 
         # Active timeline tracking for shortcuts (which timeline receives number key input)
@@ -202,6 +210,37 @@ class AppStateUI:
         
         # Update Settings Dialog
         self.show_update_settings_dialog = False
+
+    # Preferred API: set_status / peek_status update (message, expire_at)
+    # atomically. Property accessors below are back-compat for single-field writes.
+    def set_status(self, message: str, expire_at: float) -> None:
+        with self._status_lock:
+            self._status_message = message
+            self._status_message_time = expire_at
+
+    def peek_status(self) -> Tuple[str, float]:
+        with self._status_lock:
+            return self._status_message, self._status_message_time
+
+    @property
+    def status_message(self) -> str:
+        with self._status_lock:
+            return self._status_message
+
+    @status_message.setter
+    def status_message(self, value: str) -> None:
+        with self._status_lock:
+            self._status_message = value
+
+    @property
+    def status_message_time(self) -> float:
+        with self._status_lock:
+            return self._status_message_time
+
+    @status_message_time.setter
+    def status_message_time(self, value: float) -> None:
+        with self._status_lock:
+            self._status_message_time = value
 
     def sync_tracker_ui_flags(self):
         """Ensure AppStateUI flags match the actual tracker state."""
@@ -389,13 +428,27 @@ class AppStateUI:
         (get_video_uv_coords) crop the texture to match while preserving
         texel aspect (no distortion).
         """
-        if not (self.app.processor and self.app.processor.current_frame is not None and \
-                self.app.processor.current_frame.shape[0] > 0 and self.app.processor.current_frame.shape[1] > 0):
+        proc = self.app.processor
+        frame_h_orig = 0
+        frame_w_orig = 0
+        # Prefer the live ffmpeg frame when present (tracker/scrub path).
+        if (proc and proc.current_frame is not None
+                and proc.current_frame.shape[0] > 0
+                and proc.current_frame.shape[1] > 0):
+            frame_h_orig, frame_w_orig = proc.current_frame.shape[:2]
+        # Fall back to the processor's declared display dims — the mpv
+        # path pauses the ffmpeg source so current_frame can be None for
+        # the entire playback session. _display_frame_w/h is set the
+        # moment the video opens (see video_processor:_determine_display_size)
+        # and is the same size mpv's filter chain writes into the FBO.
+        if frame_w_orig == 0 or frame_h_orig == 0:
+            if proc is not None:
+                dfw = int(getattr(proc, '_display_frame_w', 0) or 0)
+                dfh = int(getattr(proc, '_display_frame_h', 0) or 0)
+                if dfw > 0 and dfh > 0:
+                    frame_w_orig, frame_h_orig = dfw, dfh
+        if frame_w_orig == 0 or frame_h_orig == 0:
             self._cached_fit_size = None
-            return 0, 0, 0, 0
-
-        frame_h_orig, frame_w_orig = self.app.processor.current_frame.shape[:2]
-        if frame_h_orig == 0 or frame_w_orig == 0:
             return 0, 0, 0, 0
 
         c_left, c_top, c_right, c_bottom = self.get_content_uv_rect()
@@ -494,32 +547,33 @@ class AppStateUI:
     def update_settings_from_app(self):
         """Called by AppLogic when settings are loaded or project is loaded."""
         defaults = self.app_settings.get_default_settings()
-        self.window_width = self.app_settings.get("window_width", defaults.get("window_width", self.window_width))
-        self.window_height = self.app_settings.get("window_height", defaults.get("window_height", self.window_height))
+        ui_cfg = self.app_settings.config.ui
+        self.window_width = ui_cfg.window_width
+        self.window_height = ui_cfg.window_height
 
-        self.timeline_zoom_factor_ms_per_px = self.app_settings.get("timeline_zoom_factor_ms_per_px", defaults.get("timeline_zoom_factor_ms_per_px", self.timeline_zoom_factor_ms_per_px))
-        self.timeline_pan_offset_ms = self.app_settings.get("timeline_pan_offset_ms", defaults.get("timeline_pan_offset_ms", self.timeline_pan_offset_ms))
+        self.timeline_zoom_factor_ms_per_px = ui_cfg.timeline_zoom_factor_ms_per_px
+        self.timeline_pan_offset_ms = ui_cfg.timeline_pan_offset_ms
 
-        self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline", defaults.get("show_funscript_interactive_timeline", self.show_funscript_interactive_timeline))
-        self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2", defaults.get("show_funscript_interactive_timeline2", self.show_funscript_interactive_timeline2))
+        self.show_funscript_interactive_timeline = ui_cfg.show_funscript_interactive_timeline
+        self.show_funscript_interactive_timeline2 = ui_cfg.show_funscript_interactive_timeline2
         for _t_num in EXTRA_TIMELINE_RANGE:
             _attr = f"show_funscript_interactive_timeline{_t_num}"
             setattr(self, _attr, self.app_settings.get(_attr, defaults.get(_attr, getattr(self, _attr, False))))
-        self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", self.show_funscript_timeline))
-        self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", self.show_heatmap))
-        self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay", defaults.get("show_stage2_overlay", self.show_stage2_overlay))
-        self.show_timeline_editor_buttons = self.app_settings.get("show_timeline_editor_buttons", defaults.get("show_timeline_editor_buttons", self.show_timeline_editor_buttons))
-        self.show_advanced_options = self.app_settings.get("show_advanced_options", defaults.get("show_advanced_options", self.show_advanced_options))
+        self.show_funscript_timeline = ui_cfg.show_funscript_timeline
+        self.show_heatmap = ui_cfg.show_heatmap
+        self.show_stage2_overlay = ui_cfg.show_stage2_overlay
+        self.show_timeline_editor_buttons = ui_cfg.show_timeline_editor_buttons
+        self.show_advanced_options = ui_cfg.show_advanced_options
 
         self.show_audio_waveform = False
 
-        self.full_width_nav = self.app_settings.get("full_width_nav", defaults.get("full_width_nav", True))
+        self.full_width_nav = ui_cfg.full_width_nav
 
-        self.ui_layout_mode = self.app_settings.get("ui_layout_mode", defaults.get("ui_layout_mode", self.ui_layout_mode))
-        self.show_control_panel_window = self.app_settings.get("show_control_panel_window", self.show_control_panel_window)
-        self.show_video_display_window = self.app_settings.get("show_video_display_window", self.show_video_display_window)
-        self.show_video_navigation_window = self.app_settings.get("show_video_navigation_window", self.show_video_navigation_window)
-        self.show_info_graphs_window = self.app_settings.get("show_info_graphs_window", self.show_info_graphs_window)
+        self.ui_layout_mode = ui_cfg.layout_mode
+        self.show_control_panel_window = ui_cfg.show_control_panel_window
+        self.show_video_display_window = ui_cfg.show_video_display_window
+        self.show_video_navigation_window = ui_cfg.show_video_navigation_window
+        self.show_info_graphs_window = ui_cfg.show_info_graphs_window
 
         # If project data has specific values, they override app_settings
         if hasattr(self.app, 'project_data_on_load') and self.app.project_data_on_load:
@@ -545,38 +599,39 @@ class AppStateUI:
 
     def save_settings_to_app(self):
         """Called by AppLogic when settings are to be saved."""
-        self.app_settings.set("window_width", int(self.window_width))
-        self.app_settings.set("window_height", int(self.window_height))
-        self.app_settings.set("timeline_zoom_factor_ms_per_px", self.timeline_zoom_factor_ms_per_px)
-        self.app_settings.set("timeline_pan_offset_ms", self.timeline_pan_offset_ms)
+        ui_cfg = self.app_settings.config.ui
+        ui_cfg.window_width = self.window_width
+        ui_cfg.window_height = self.window_height
+        ui_cfg.timeline_zoom_factor_ms_per_px = self.timeline_zoom_factor_ms_per_px
+        ui_cfg.timeline_pan_offset_ms = self.timeline_pan_offset_ms
 
-        self.app_settings.set("ui_layout_mode", self.ui_layout_mode)
-        self.app_settings.set("show_control_panel_window", self.show_control_panel_window)
-        self.app_settings.set("show_video_display_window", self.show_video_display_window)
-        self.app_settings.set("show_video_navigation_window", self.show_video_navigation_window)
-        self.app_settings.set("show_info_graphs_window", self.show_info_graphs_window)
-        self.app_settings.set("show_left_top_block", self.show_left_top_block)
-        self.app_settings.set("show_left_bottom_block", self.show_left_bottom_block)
-        self.app_settings.set("show_right_top_block", self.show_right_top_block)
-        self.app_settings.set("show_right_bottom_block", self.show_right_bottom_block)
-        self.app_settings.set("left_bottom_block_height_frac", float(self.left_bottom_block_height_frac))
-        self.app_settings.set("right_bottom_block_height_frac", float(self.right_bottom_block_height_frac))
+        ui_cfg.layout_mode = self.ui_layout_mode
+        ui_cfg.show_control_panel_window = self.show_control_panel_window
+        ui_cfg.show_video_display_window = self.show_video_display_window
+        ui_cfg.show_video_navigation_window = self.show_video_navigation_window
+        ui_cfg.show_info_graphs_window = self.show_info_graphs_window
+        ui_cfg.show_left_top_block = self.show_left_top_block
+        ui_cfg.show_left_bottom_block = self.show_left_bottom_block
+        ui_cfg.show_right_top_block = self.show_right_top_block
+        ui_cfg.show_right_bottom_block = self.show_right_bottom_block
+        ui_cfg.left_bottom_block_height_frac = self.left_bottom_block_height_frac
+        ui_cfg.right_bottom_block_height_frac = self.right_bottom_block_height_frac
 
-
-        self.app_settings.set("show_funscript_interactive_timeline", self.show_funscript_interactive_timeline)
-        self.app_settings.set("show_funscript_interactive_timeline2", self.show_funscript_interactive_timeline2)
+        ui_cfg.show_funscript_interactive_timeline = self.show_funscript_interactive_timeline
+        ui_cfg.show_funscript_interactive_timeline2 = self.show_funscript_interactive_timeline2
         for _t_num in EXTRA_TIMELINE_RANGE:
             _attr = f"show_funscript_interactive_timeline{_t_num}"
             self.app_settings.set(_attr, getattr(self, _attr, False))
-        self.app_settings.set("show_funscript_timeline", self.show_funscript_timeline)  # Legacy
-        self.app_settings.set("show_heatmap", self.show_heatmap)
-        self.app_settings.set("show_stage2_overlay", self.show_stage2_overlay)
-        self.app_settings.set("show_timeline_editor_buttons", self.show_timeline_editor_buttons)
-        self.app_settings.set("show_advanced_options", self.show_advanced_options)
-        self.app_settings.set("show_video_feed", self.show_video_feed)
-        self.app_settings.set("show_video_controls_overlay", self.show_video_controls_overlay)
-        self.app_settings.set("show_script_gauge", self.show_script_gauge)
+        ui_cfg.show_funscript_timeline = self.show_funscript_timeline  # Legacy
+        ui_cfg.show_heatmap = self.show_heatmap
+        ui_cfg.show_stage2_overlay = self.show_stage2_overlay
+        ui_cfg.show_timeline_editor_buttons = self.show_timeline_editor_buttons
+        ui_cfg.show_advanced_options = self.show_advanced_options
+        ui_cfg.show_video_feed = self.show_video_feed
+        ui_cfg.show_video_controls_overlay = self.show_video_controls_overlay
+        ui_cfg.show_script_gauge = self.show_script_gauge
 
-        self.app_settings.set("interactive_refinement_mode_enabled", self.interactive_refinement_mode_enabled)
-        self.app_settings.set("selected_processing_speed_mode", self.selected_processing_speed_mode.name)
-        self.app_settings.set("slow_motion_fps", self.slow_motion_fps)
+        self.app_settings.config.funscript.interactive_refinement_mode_enabled = self.interactive_refinement_mode_enabled
+        tracking_cfg = self.app_settings.config.tracking
+        tracking_cfg.selected_processing_speed_mode = self.selected_processing_speed_mode.name
+        tracking_cfg.slow_motion_fps = self.slow_motion_fps

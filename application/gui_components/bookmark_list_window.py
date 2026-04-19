@@ -76,7 +76,7 @@ class BookmarkListWindow:
         imgui.set_next_window_size(550, 350, condition=imgui.FIRST_USE_EVER)
 
         is_open, app_state.show_bookmark_list_window = imgui.begin(
-            "Bookmark List##BookmarkListWindow",
+            "FunGen: Bookmark List##BookmarkListWindow",
             closable=True,
             flags=window_flags
         )
@@ -96,6 +96,8 @@ class BookmarkListWindow:
                 if managers:
                     _, mgr = managers[0]  # Add to timeline 1
                     mgr.add(current_time_ms)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Add a bookmark on Funscript 1 at the current playback frame.")
 
         imgui.same_line()
         if all_bookmarks:
@@ -103,6 +105,8 @@ class BookmarkListWindow:
                 for _, mgr in self._get_all_bookmark_managers():
                     mgr.clear()
                 all_bookmarks = []
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Delete every bookmark across all funscripts. Cannot be undone from here.")
 
         imgui.separator()
 

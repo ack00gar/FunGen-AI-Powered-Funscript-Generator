@@ -166,7 +166,7 @@ class StageGuiEventsMixin:
             primary_actions = funscript_obj.primary_actions
             secondary_actions = funscript_obj.secondary_actions
 
-            overwrite_chapters = self.app.app_settings.get("overwrite_chapters_on_analysis", False)
+            overwrite_chapters = self.app.app_settings.config.chapter.overwrite_on_analysis
 
             if hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
                 self._apply_chapters_from_funscript(funscript_obj, fs_proc, overwrite_chapters, "Stage 2")
@@ -254,7 +254,7 @@ class StageGuiEventsMixin:
         primary_actions = funscript_obj.primary_actions
         secondary_actions = funscript_obj.secondary_actions
 
-        overwrite_chapters = self.app.app_settings.get("overwrite_chapters_on_analysis", False)
+        overwrite_chapters = self.app.app_settings.config.chapter.overwrite_on_analysis
         if hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
             self._apply_chapters_from_funscript(funscript_obj, fs_proc, overwrite_chapters, "Stage 3")
 

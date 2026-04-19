@@ -70,18 +70,19 @@ class ButtplugPanelMixin:
             if imgui.collapsing_header("Buttplug Server Configuration##ButtplugServer")[0]:
                 imgui.indent(10)
 
+                _dc_cfg = self.app.app_settings.config.device_control
                 # Server address
-                current_address = self.app.app_settings.get("buttplug_server_address", "localhost")
+                current_address = _dc_cfg.buttplug_server_address
                 changed, new_address = imgui.input_text("Server Address##ButtplugAddr", current_address, 256)
                 if changed:
-                    self.app.app_settings.set("buttplug_server_address", new_address)
+                    _dc_cfg.buttplug_server_address = new_address
                 _tooltip_if_hovered("IP address or hostname of Intiface Central server")
 
                 # Server port
-                current_port = self.app.app_settings.get("buttplug_server_port", 12345)
+                current_port = _dc_cfg.buttplug_server_port
                 changed, new_port = imgui.input_int("Port##ButtplugPort", current_port)
                 if changed and 1024 <= new_port <= 65535:
-                    self.app.app_settings.set("buttplug_server_port", new_port)
+                    _dc_cfg.buttplug_server_port = new_port
                 _tooltip_if_hovered("WebSocket port (default: 12345)")
 
                 imgui.unindent(10)
@@ -135,8 +136,9 @@ class ButtplugPanelMixin:
                         # Fallback: Create temporary backend for discovery
                         from device_control.backends.buttplug_backend_direct import DirectButtplugBackend
 
-                        server_address = self.app.app_settings.get("buttplug_server_address", "localhost")
-                        server_port = self.app.app_settings.get("buttplug_server_port", 12345)
+                        _dc_cfg = self.app.app_settings.config.device_control
+                        server_address = _dc_cfg.buttplug_server_address
+                        server_port = _dc_cfg.buttplug_server_port
                         server_url = f"ws://{server_address}:{server_port}"
 
                         self.app.logger.info(f"Discovering Buttplug devices at {server_url}...")
@@ -220,8 +222,9 @@ class ButtplugPanelMixin:
 
                 async def check_server():
                     try:
-                        server_address = self.app.app_settings.get("buttplug_server_address", "localhost")
-                        server_port = self.app.app_settings.get("buttplug_server_port", 12345)
+                        _dc_cfg = self.app.app_settings.config.device_control
+                        server_address = _dc_cfg.buttplug_server_address
+                        server_port = _dc_cfg.buttplug_server_port
                         server_url = f"ws://{server_address}:{server_port}"
 
                         # Try to connect briefly to check status

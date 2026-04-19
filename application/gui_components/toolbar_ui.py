@@ -24,6 +24,7 @@ from application.utils import get_icon_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from config.element_group_colors import ToolbarColors
 from common.frame_utils import frame_to_ms
+from config.constants_colors import CurrentTheme
 
 try:
     from video.audio_player import SOUNDDEVICE_AVAILABLE
@@ -35,11 +36,12 @@ class ToolbarUI:
     """Main application toolbar with common actions."""
 
     def __init__(self, app):
+        from config import ui_metrics
         self.app = app
-        self._icon_size = 24  # Base icon size
-        self._button_padding = 4
-        self._label_height = 14  # Height for section labels
-        self._label_spacing = 2  # Space between label and buttons
+        self._icon_size = ui_metrics.TOOLBAR_ICON_PX
+        self._button_padding = ui_metrics.TOOLBAR_BUTTON_PAD
+        self._label_height = ui_metrics.TOOLBAR_LABEL_HEIGHT
+        self._label_spacing = ui_metrics.TOOLBAR_LABEL_SPACING
         self._selected_edit_timeline = 1
         # Pre-computed u32 colors (set on first render when imgui context exists)
         self._separator_color_u32 = None
@@ -78,7 +80,8 @@ class ToolbarUI:
         Returns:
             int: Total toolbar height in pixels
         """
-        return self._label_height + self._label_spacing + self._icon_size + (self._button_padding * 2) + 10
+        from config import ui_metrics
+        return self._label_height + self._label_spacing + self._icon_size + (self._button_padding * 2) + ui_metrics.TOOLBAR_EXTRA_MARGIN
 
     def _apply_button_active(self):
         """Apply active/toggled highlight — matches sidebar accent style."""
@@ -90,9 +93,9 @@ class ToolbarUI:
     def _apply_button_default(self):
         """Restore default transparent button colors."""
         imgui.pop_style_color(3)
-        imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.0, 0.0, 0.0)
-        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.5, 0.5, 0.55, 0.2)
-        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.4, 0.4, 0.45, 0.35)
+        imgui.push_style_color(imgui.COLOR_BUTTON, *CurrentTheme.TRANSPARENT)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *CurrentTheme.HOVER_BG)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *CurrentTheme.PRESSED_BG)
 
     def render(self):
         """Render the toolbar below the menu bar."""
@@ -141,9 +144,9 @@ class ToolbarUI:
         imgui.push_style_var(imgui.STYLE_FRAME_PADDING, (self._button_padding, self._button_padding))
         imgui.push_style_var(imgui.STYLE_ITEM_SPACING, (8, 4))
         imgui.push_style_var(imgui.STYLE_FRAME_ROUNDING, 6.0)
-        imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.0, 0.0, 0.0)
-        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.5, 0.5, 0.55, 0.2)
-        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.4, 0.4, 0.45, 0.35)
+        imgui.push_style_color(imgui.COLOR_BUTTON, *CurrentTheme.TRANSPARENT)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *CurrentTheme.HOVER_BG)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *CurrentTheme.PRESSED_BG)
 
         # Add small padding at start
         imgui.dummy(8, 0)
@@ -310,9 +313,9 @@ class ToolbarUI:
 
         # Export popup menu
         if imgui.begin_popup("ExportPopup##Toolbar"):
-            if imgui.menu_item("Timeline 1...")[0]:
+            if imgui.menu_item("Funscript 1...")[0]:
                 self._export_timeline(1)
-            if imgui.menu_item("Timeline 2...")[0]:
+            if imgui.menu_item("Funscript 2...")[0]:
                 self._export_timeline(2)
             imgui.end_popup()
 
@@ -325,14 +328,15 @@ class ToolbarUI:
         app = self.app
         self._begin_vcenter()
         imgui.push_item_width(140)
-        cur_h = int(getattr(app.app_state_ui, 'timeline_base_height', 180))
+        from config import ui_metrics
+        cur_h = int(getattr(app.app_state_ui, 'timeline_base_height', ui_metrics.TIMELINE_BASE_DEFAULT_PX))
         changed_h, new_h = imgui.slider_int("##ToolbarTimelineHeight", cur_h, 100, 400, "%d px")
         imgui.pop_item_width()
         self._end_vcenter()
         if changed_h:
             app.app_state_ui.timeline_base_height = int(new_h)
             try:
-                app.app_settings.set("timeline_base_height", int(new_h))
+                app.app_settings.config.ui.timeline_base_height = int(new_h)
             except Exception:
                 pass
         if imgui.is_item_hovered():
@@ -428,7 +432,7 @@ class ToolbarUI:
         if self._toolbar_button(icon_mgr, icon_name, btn_size, tooltip):
             if hasattr(app_state, 'show_video_feed'):
                 app_state.show_video_feed = not app_state.show_video_feed
-                app.app_settings.set("show_video_feed", app_state.show_video_feed)
+                app.app_settings.config.ui.show_video_feed = app_state.show_video_feed
 
         if show_video:
             self._apply_button_default()
@@ -490,11 +494,11 @@ class ToolbarUI:
         """Mute / unmute toggle. Lives in the Playback section now; system
         volume is the source of truth for level (no app-side slider)."""
         app = self.app
-        settings = app.app_settings
+        audio_cfg = app.app_settings.config.audio
         sd_ok = SOUNDDEVICE_AVAILABLE
         player_ok = getattr(app, '_audio_player', None) is not None
         has_audio_system = sd_ok and player_ok
-        is_muted = settings.get("audio_muted", False)
+        is_muted = audio_cfg.muted
         disabled = not has_audio_system
 
         if disabled:
@@ -514,9 +518,9 @@ class ToolbarUI:
         if self._toolbar_button(icon_mgr, icon, btn_size, tooltip):
             if not disabled:
                 is_muted = not is_muted
-                settings.set("audio_muted", is_muted)
+                audio_cfg.muted = is_muted
                 # Reuse last known volume; no in-app slider any more.
-                vol = getattr(app, '_audio_volume_live', settings.get("audio_volume", 1.0))
+                vol = getattr(app, '_audio_volume_live', audio_cfg.volume)
                 if app._audio_sync:
                     app._audio_sync.update_settings(vol, is_muted)
         if is_muted and not disabled:
@@ -546,70 +550,6 @@ class ToolbarUI:
                     self.app.notify(f"Redo: {desc}", "info", 1.5)
         else:
             self._toolbar_button_disabled(icon_mgr, 'redo.png', btn_size, "Redo (Nothing to redo)")
-
-    def _render_audio_section(self, icon_mgr, btn_size):
-        """DEPRECATED — kept as no-op shim; mute now lives in Playback section."""
-        app = self.app
-        settings = app.app_settings
-
-        sd_ok = SOUNDDEVICE_AVAILABLE
-        player_ok = getattr(app, '_audio_player', None) is not None
-        has_audio_system = sd_ok and player_ok
-        is_muted = settings.get("audio_muted", False)
-        vol = getattr(app, '_audio_volume_live', settings.get("audio_volume", 0.8))
-
-        disabled = not has_audio_system
-        if disabled:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-
-        # --- Mute / unmute toggle ---
-        icon = 'speaker-muted.png' if is_muted else 'speaker-high.png'
-
-        if is_muted and not disabled:
-            self._apply_button_active()
-
-        # Tooltip
-        if disabled:
-            reasons = []
-            if not sd_ok:
-                reasons.append("sounddevice not installed")
-            if not player_ok:
-                reasons.append("audio player not initialized")
-            tooltip = f"Audio unavailable ({', '.join(reasons)})"
-        else:
-            tooltip = "Unmute Audio" if is_muted else "Mute Audio"
-
-        if self._toolbar_button(icon_mgr, icon, btn_size, tooltip):
-            if not disabled:
-                is_muted = not is_muted
-                settings.set("audio_muted", is_muted)
-                if app._audio_sync:
-                    app._audio_sync.update_settings(vol, is_muted)
-
-        if is_muted and not disabled:
-            self._apply_button_default()
-
-        # --- Volume slider (always visible) ---
-        imgui.same_line()
-        self._begin_vcenter()
-        imgui.push_item_width(100)
-        pct_label = f"{int(vol * 100)}%%"
-        changed, vol = imgui.slider_float("##vol", vol, 0.0, 1.0, pct_label)
-        if changed and not disabled:
-            # Auto-mute when slider hits 0, auto-unmute when dragged above 0
-            if vol <= 0.0 and not is_muted:
-                settings.set("audio_muted", True)
-            elif vol > 0.0 and is_muted:
-                settings.set("audio_muted", False)
-            # Update the player live — volume is persisted to settings on quit only
-            app._audio_volume_live = vol
-            if app._audio_sync:
-                app._audio_sync.update_settings(vol, settings.get("audio_muted", False))
-        imgui.pop_item_width()
-        self._end_vcenter()
-
-        if disabled:
-            imgui.pop_style_var()
 
     def _render_navigation_section(self, icon_mgr, btn_size):
         """Render navigation buttons (points and chapters)."""
@@ -650,7 +590,7 @@ class ToolbarUI:
         else:
             self._toolbar_button_disabled(
                 icon_mgr, 'satellite.png', btn_size,
-                "Streamer - Stream from XBVR & Stash.\nAdd-on available at paypal.me/k00gar"
+                "Streamer - Stream from XBVR & Stash.\nAvailable as a FunGen add-on: paypal.me/k00gar"
             )
             rendered_any = True
 
@@ -661,7 +601,7 @@ class ToolbarUI:
         else:
             self._toolbar_button_disabled(
                 icon_mgr, 'flashlight.png', btn_size,
-                "Device Control - Control OSR2, Handy & more.\nAdd-on available at paypal.me/k00gar"
+                "Device Control - Control OSR2, Handy & more.\nAvailable as a FunGen add-on: paypal.me/k00gar"
             )
 
         # --- Batch Processing button ---
@@ -674,7 +614,7 @@ class ToolbarUI:
         else:
             self._toolbar_button_disabled(
                 icon_mgr, 'sidebar-batch.png', btn_size,
-                "Batch Processing - Early access trackers, batch queue.\nMonthly paypal.me/k00gar subscription."
+                "Batch Processing: early access trackers and batch queue.\nMonthly FunGen add-on subscription: paypal.me/k00gar"
             )
 
     def _render_streamer_button_active(self, icon_mgr, btn_size, is_first=False):
@@ -854,32 +794,6 @@ class ToolbarUI:
             app_state.show_simulator_3d = not active
             self.app.project_manager.project_dirty = True
 
-    _BOOT_INTRO_S = 3.5
-    _BOOT_FADE_S = 0.8
-    _BOOT_HUE_SPEED = 0.6       # full hue cycles per second
-    _BOOT_WAVELENGTH_PX = 220.0  # horizontal distance for a full hue sweep
-
-    def _boot_rainbow_tint(self):
-        """Return an (r,g,b,a) tint for the current toolbar icon based on
-        its horizontal screen position and the wall-clock since launch.
-        Returns white once the intro finishes."""
-        import time as _t
-        if not hasattr(self, "_boot_start_ts"):
-            self._boot_start_ts = _t.time()
-        elapsed = _t.time() - self._boot_start_ts
-        if elapsed >= self._BOOT_INTRO_S:
-            return (1.0, 1.0, 1.0, 1.0)
-        import colorsys
-        fade_start = self._BOOT_INTRO_S - self._BOOT_FADE_S
-        mix = 1.0 if elapsed < fade_start else max(0.0, 1.0 - (elapsed - fade_start) / self._BOOT_FADE_S)
-        screen_x = imgui.get_cursor_screen_pos()[0]
-        hue = ((screen_x / self._BOOT_WAVELENGTH_PX) + elapsed * self._BOOT_HUE_SPEED) % 1.0
-        r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
-        return (r * mix + (1.0 - mix),
-                g * mix + (1.0 - mix),
-                b * mix + (1.0 - mix),
-                1.0)
-
     def _toolbar_button(self, icon_mgr, icon_name, size, tooltip):
         """
         Render a toolbar button with icon.
@@ -890,8 +804,7 @@ class ToolbarUI:
         icon_tex, _, _ = icon_mgr.get_icon_texture(icon_name)
 
         if icon_tex:
-            tint = self._boot_rainbow_tint()
-            clicked = imgui.image_button(icon_tex, size, size, tint_color=tint)
+            clicked = imgui.image_button(icon_tex, size, size)
         else:
             # Fallback to small labeled button if icon fails to load
             # Extract a short label from the icon name (e.g., "folder-open.png" -> "Open")

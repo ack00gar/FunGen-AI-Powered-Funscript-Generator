@@ -5,6 +5,7 @@ from application.utils import get_icon_texture_manager, primary_button_style, de
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
 from application.utils.section_card import section_card as _section_card
 from config.element_group_colors import ControlPanelColors as _CPColors
+from config.constants_colors import CurrentTheme
 
 
 class StreamerMixin:
@@ -13,18 +14,18 @@ class StreamerMixin:
     def _render_streamer_error(self, err):
         """Render streamer initialization error with version mismatch hints."""
         if err is not None:
-            imgui.text_colored(f"Streamer failed to initialize: {err}", 1.0, 0.4, 0.4, 1.0)
+            imgui.text_colored(f"Streamer failed to initialize: {err}", *CurrentTheme.RED_LIGHT)
             if isinstance(err, (AttributeError, TypeError)):
                 imgui.spacing()
-                imgui.text_colored("This looks like a version mismatch.", 1.0, 0.85, 0.2, 1.0)
-                imgui.text_colored("Did you update to the latest Streamer version?", 1.0, 0.85, 0.2, 1.0)
-                imgui.text_colored("Install the latest streamer zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+                imgui.text_colored("This looks like a version mismatch.", *CurrentTheme.YELLOW_LIGHT)
+                imgui.text_colored("Did you update to the latest Streamer version?", *CurrentTheme.YELLOW_LIGHT)
+                imgui.text_colored("Install the latest streamer zip from your purchase.", *CurrentTheme.GRAY_LIGHT)
             elif isinstance(err, (ImportError, ModuleNotFoundError)):
                 imgui.spacing()
-                imgui.text_colored("Streamer addon not found or incomplete.", 1.0, 0.85, 0.2, 1.0)
-                imgui.text_colored("Install the latest streamer zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+                imgui.text_colored("Streamer addon not found or incomplete.", *CurrentTheme.YELLOW_LIGHT)
+                imgui.text_colored("Install the latest streamer zip from your purchase.", *CurrentTheme.GRAY_LIGHT)
             else:
-                imgui.text_colored("Check logs for details.", 1.0, 0.5, 0.0, 1.0)
+                imgui.text_colored("Check logs for details.", *CurrentTheme.ORANGE)
         else:
             imgui.text("Streamer initializing...")
         imgui.spacing()
@@ -47,13 +48,13 @@ class StreamerMixin:
         # Client connected (0 -> >0)
         if auto_hide_enabled and client_count > 0 and self._prev_client_count == 0:
             self.app.app_state_ui.show_video_feed = False
-            self.app.app_settings.set("show_video_feed", False)
+            self.app.app_settings.config.ui.show_video_feed = False
             self.app.logger.info("Auto-hiding video feed (streamer active)")
 
         # All clients disconnected (>0 -> 0)
         elif client_count == 0 and self._prev_client_count > 0:
             self.app.app_state_ui.show_video_feed = True
-            self.app.app_settings.set("show_video_feed", True)
+            self.app.app_settings.config.ui.show_video_feed = True
             self.app.logger.info("Restoring video feed (no clients)")
 
         self._prev_client_count = client_count
@@ -283,10 +284,10 @@ class StreamerMixin:
                             self.app.app_settings._streamer_auto_hide_video = new_val
                             if new_val and client_count > 0:
                                 self.app.app_state_ui.show_video_feed = False
-                                self.app.app_settings.set("show_video_feed", False)
+                                self.app.app_settings.config.ui.show_video_feed = False
                             elif not new_val:
                                 self.app.app_state_ui.show_video_feed = True
-                                self.app.app_settings.set("show_video_feed", True)
+                                self.app.app_settings.config.ui.show_video_feed = True
                         _tooltip_if_hovered(
                             "When enabled, the video feed will be hidden\n"
                             "when clients are connected, and restored when\n"
@@ -347,7 +348,8 @@ class StreamerMixin:
                                 imgui.pop_text_wrap_pos()
                                 imgui.spacing()
 
-                            cur_enabled = settings.get("live_tracker_rolling_autotune_enabled", False)
+                            cfg = settings.config.tracking
+                            cur_enabled = cfg.live_rolling_autotune_enabled
 
                             with _DisabledScope(not can_enable):
                                 ch, new_enabled = imgui.checkbox("Enable Rolling Autotune##RollingAutotuneEnable", cur_enabled)
@@ -359,7 +361,7 @@ class StreamerMixin:
                             )
 
                             if ch and can_enable:
-                                settings.set("live_tracker_rolling_autotune_enabled", new_enabled)
+                                cfg.live_rolling_autotune_enabled = new_enabled
                                 tr.rolling_autotune_enabled = new_enabled
                                 if new_enabled:
                                     self.app.logger.info("Rolling autotune enabled for live tracking", extra={'status_message': True})
@@ -376,7 +378,7 @@ class StreamerMixin:
                                 imgui.pop_style_color()
                                 imgui.spacing()
 
-                                cur_interval = settings.get("live_tracker_rolling_autotune_interval_ms", 5000)
+                                cur_interval = cfg.live_rolling_autotune_interval_ms
                                 imgui.text("Autotune Interval (ms):")
                                 imgui.push_item_width(150)
                                 ch, new_interval = imgui.input_int("##RollingAutotuneInterval", cur_interval, 1000)
@@ -385,10 +387,10 @@ class StreamerMixin:
                                 if ch:
                                     v = max(1000, min(30000, new_interval))
                                     if v != cur_interval:
-                                        settings.set("live_tracker_rolling_autotune_interval_ms", v)
+                                        cfg.live_rolling_autotune_interval_ms = v
                                         tr.rolling_autotune_interval_ms = v
 
-                                cur_window = settings.get("live_tracker_rolling_autotune_window_ms", 5000)
+                                cur_window = cfg.live_rolling_autotune_window_ms
                                 imgui.text("Processing Window (ms):")
                                 imgui.push_item_width(150)
                                 ch, new_window = imgui.input_int("##RollingAutotuneWindow", cur_window, 1000)
@@ -400,7 +402,7 @@ class StreamerMixin:
                                 if ch:
                                     v = max(1000, min(30000, new_window))
                                     if v != cur_window:
-                                        settings.set("live_tracker_rolling_autotune_window_ms", v)
+                                        cfg.live_rolling_autotune_window_ms = v
                                         tr.rolling_autotune_window_ms = v
 
                                 imgui.spacing()
@@ -600,16 +602,16 @@ class StreamerMixin:
             import traceback
             self.app.logger.error(f"Streamer tab error: {e}")
             self.app.logger.error(traceback.format_exc())
-            imgui.text_colored(f"Error in Streamer: {e}", 1.0, 0.4, 0.4, 1.0)
+            imgui.text_colored(f"Error in Streamer: {e}", *CurrentTheme.RED_LIGHT)
             if isinstance(e, (AttributeError, TypeError)):
                 imgui.spacing()
-                imgui.text_colored("This looks like a version mismatch.", 1.0, 0.85, 0.2, 1.0)
-                imgui.text_colored("Did you update to the latest Streamer version?", 1.0, 0.85, 0.2, 1.0)
-                imgui.text_colored("Install the latest streamer zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+                imgui.text_colored("This looks like a version mismatch.", *CurrentTheme.YELLOW_LIGHT)
+                imgui.text_colored("Did you update to the latest Streamer version?", *CurrentTheme.YELLOW_LIGHT)
+                imgui.text_colored("Install the latest streamer zip from your purchase.", *CurrentTheme.GRAY_LIGHT)
             elif isinstance(e, (ImportError, ModuleNotFoundError)):
-                imgui.text_colored("Streamer addon not found or incomplete.", 1.0, 0.85, 0.2, 1.0)
-                imgui.text_colored("Install the latest streamer zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
-            imgui.text_colored("See logs for full details.", 0.7, 0.7, 0.7, 1.0)
+                imgui.text_colored("Streamer addon not found or incomplete.", *CurrentTheme.YELLOW_LIGHT)
+                imgui.text_colored("Install the latest streamer zip from your purchase.", *CurrentTheme.GRAY_LIGHT)
+            imgui.text_colored("See logs for full details.", *CurrentTheme.DESCRIPTION_TEXT)
 
     def _start_native_sync(self):
         """Start streamer servers."""

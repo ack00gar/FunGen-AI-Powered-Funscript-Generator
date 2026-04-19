@@ -75,66 +75,69 @@ class ChapterThumbnailCache:
                 self.logger.debug(f"Video path not available for thumbnail extraction")
                 return None
 
-            # Extract first frame of chapter via PyAV (in-process libav).
+            # Extract first frame of chapter via one-shot ffmpeg subprocess.
+            # Cheap (<300 ms cold spawn) and cached forever, so spawn cost is
+            # amortized to negligible. ffprobe first for fps + total_frames so
+            # we can validate the requested frame is in range and convert to
+            # a seek timestamp.
             start_frame = chapter.start_frame_id
-            import av
+            import subprocess
+            from video.ffmpeg_helpers import find_ffmpeg, subprocess_flags
+            from video.frame_source.probe import probe as _probe
 
-            container = None
-            frame = None
-            total_frames = 0
-            try:
-                container = av.open(video_path)
-                stream = container.streams.video[0]
-                stream.thread_type = "AUTO"
-                fps = float(stream.average_rate or stream.guessed_rate or 30.0)
-                time_base = stream.time_base
-                total_frames = int(stream.frames or 0)
-                if total_frames and start_frame >= total_frames:
-                    self.logger.debug(
-                        f"Frame {start_frame} is beyond video length ({total_frames} frames)")
-                    return None
-                target_pts = int(start_frame / fps / time_base)
-                container.seek(target_pts, backward=True, any_frame=False, stream=stream)
-                for packet in container.demux(stream):
-                    for avframe in packet.decode():
-                        frame = avframe.to_ndarray(format="bgr24")
-                        break
-                    if frame is not None:
-                        break
-            except Exception as e:
-                self.logger.debug(f"PyAV chapter thumbnail extraction failed: {e}")
+            info = _probe(video_path)
+            if info is None:
+                self.logger.debug(f"ffprobe failed for chapter thumbnail: {video_path}")
                 return None
-            finally:
-                if container is not None:
-                    try: container.close()
-                    except Exception: pass
+            fps = info.fps if info.fps > 0 else 30.0
+            total_frames = info.total_frames
+            if total_frames and start_frame >= total_frames:
+                self.logger.debug(
+                    f"Frame {start_frame} is beyond video length ({total_frames} frames)")
+                return None
 
-            if frame is None:
+            seek_time = start_frame / fps
+            cmd = [
+                find_ffmpeg(), '-hide_banner', '-loglevel', 'error', '-nostats',
+                '-ss', f'{seek_time:.6f}',
+                '-i', video_path,
+                '-frames:v', '1',
+                '-f', 'image2pipe', '-c:v', 'bmp', '-',
+            ]
+            frame = None
+            try:
+                result = subprocess.run(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    timeout=10.0, creationflags=subprocess_flags(),
+                )
+                if result.returncode == 0 and result.stdout:
+                    buf = np.frombuffer(result.stdout, dtype=np.uint8)
+                    frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                self.logger.debug(f"ffmpeg chapter thumbnail extraction failed: {e}")
+                return None
+
+            if frame is None or frame.size == 0:
                 self.logger.debug(
                     f"Could not read frame {start_frame} for chapter thumbnail "
                     f"(total frames: {total_frames})")
                 return None
 
-            # For VR videos, crop to show only one panel (left/right/top eye view)
             if (hasattr(self.app, 'processor') and self.app.processor and
                 hasattr(self.app.processor, 'is_vr_active_or_potential') and
                 self.app.processor.is_vr_active_or_potential()):
-                # Determine VR format to know which panel to crop
-                vr_format = getattr(self.app.processor, 'vr_input_format', '').lower()
-                is_tb = '_tb' in vr_format
-                is_rl = '_rl' in vr_format  # Right-left format (crop right panel)
-
+                from video import vr_panel
+                vr_format = getattr(self.app.processor, 'vr_input_format', '')
+                eye = vr_panel.read_setting(
+                    getattr(self.app, 'app_settings', None),
+                    default=vr_panel.EYE_LEFT)
+                if eye == vr_panel.EYE_FULL:
+                    eye = vr_panel.EYE_LEFT
                 orig_height, orig_width = frame.shape[:2]
-
-                if is_tb:
-                    # Top-bottom format: crop to top half (top eye panel)
-                    frame = frame[:orig_height // 2, :]
-                elif is_rl:
-                    # Right-left format (RL): crop to right half (right eye panel)
-                    frame = frame[:, orig_width // 2:]
-                else:
-                    # Side-by-side format (SBS/LR): crop to left half (left eye panel)
-                    frame = frame[:, :orig_width // 2]
+                region = vr_panel.resolve_eye(vr_format, eye)
+                if not region.is_full():
+                    x, y, w, h = region.pixel_rect(orig_width, orig_height)
+                    frame = frame[y:y + h, x:x + w]
 
             # Resize thumbnail to target height while preserving aspect ratio
             orig_height, orig_width = frame.shape[:2]

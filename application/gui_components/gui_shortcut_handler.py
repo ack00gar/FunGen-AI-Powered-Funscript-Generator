@@ -4,9 +4,30 @@ import time
 
 from common.frame_utils import frame_to_ms
 
-# Arrow key forward hold: ramp from real-time to max decode speed over this duration
 _ARROW_ACCEL_RAMP_S = 3.0
-_ARROW_TICK_BUDGET_S = 0.006  # max time to spend reading frames per GUI tick (6ms)
+_ARROW_TICK_BUDGET_S = 0.006
+# Right-arrow hold timings: tap < REALTIME, then REALTIME playback, then
+# MAX_SPEED at 3s so the user gets a solid window of normal-speed playback
+# before we flip into fast-scrub.
+_ARROW_REALTIME_HOLD_S = 0.25
+_ARROW_MAXSPEED_HOLD_S = 3.0
+
+# Time-based key-repeat for held shortcuts. We do our own pacing off
+# imgui.is_key_down instead of relying on imgui.is_key_pressed(key, True),
+# which needs GLFW to forward OS KEY_REPEAT events — BLE HID keyboards and
+# some remap tools (e.g. Contour Shuttle Pro V2 profiles, DaVinci Speed
+# Editor unlockers) never emit those, so "hold Left to pan frame-by-frame"
+# otherwise requires a tap per frame. Values chosen to roughly match macOS
+# default auto-repeat (~400ms to first repeat, ~25 Hz after).
+_REPEAT_INITIAL_DELAY_S = 0.40
+_REPEAT_INTERVAL_S = 0.040
+
+
+def _nav_dbg_enabled(app) -> bool:
+    try:
+        return app.app_settings.config.navigation.debug_logging
+    except Exception:
+        return False
 
 
 class ShortcutHandlerMixin:
@@ -36,21 +57,56 @@ class ShortcutHandlerMixin:
 
             mapped_key, mapped_mods_from_string = map_result
 
-            # Check key press state ONCE and reuse (calling is_key_pressed multiple times can consume the event).
-            # Allow auto-repeat so held keys (jump to next/prev point, etc.) fire continuously.
+            mods_match = (mapped_mods_from_string['ctrl'] == io.key_ctrl
+                and mapped_mods_from_string['alt'] == io.key_alt
+                and mapped_mods_from_string['shift'] == io.key_shift
+                and mapped_mods_from_string['super'] == io.key_super)
+
+            if repeat:
+                # Held-key path: own the repeat cadence so devices that do
+                # not forward OS KEY_REPEAT events still fire continuously
+                # while the key is down.
+                if self._time_based_repeat_fire(
+                        shortcut_name, mapped_key, mods_match):
+                    action_func(*action_args)
+                    return True
+                return False
+
+            # Non-repeat path: single fire on initial press.
             try:
-                key_pressed = imgui.is_key_pressed(mapped_key, repeat)
+                key_pressed = imgui.is_key_pressed(mapped_key, False)
             except TypeError:
                 key_pressed = imgui.is_key_pressed(mapped_key)
 
-            if key_pressed:
-                mods_match = (mapped_mods_from_string['ctrl'] == io.key_ctrl
-                    and mapped_mods_from_string['alt'] == io.key_alt
-                    and mapped_mods_from_string['shift'] == io.key_shift
-                    and mapped_mods_from_string['super'] == io.key_super)
-                if mods_match:
-                    action_func(*action_args)
-                    return True
+            if key_pressed and mods_match:
+                action_func(*action_args)
+                return True
+
+            # Char-input fallback (BLE HID, remapped hardware that reaches
+            # the OS via WM_CHAR / text-input events only, never key events
+            # — matches the community-reported Shuttle Pro V2 / Speed Editor
+            # pattern where Ctrl-combos work but "F" / "Space" don't). Only
+            # eligible when:
+            #   - shortcut has no modifiers AND no modifiers are currently
+            #     held (so a partial Ctrl+F, Ctrl via key path and 'F' via
+            #     char path, does not spuriously fire the plain-F shortcut),
+            #   - imgui doesn't already see the key as down: if key events
+            #     are flowing normally, holding the key would produce OS
+            #     char-repeat which would otherwise re-fire the shortcut
+            #     every char event and regress the "tap-only" semantics of
+            #     non-repeat shortcuts.
+            # Populated by app_gui._on_char_input during glfw.poll_events();
+            # cleared at the end of this dispatcher.
+            virtual = getattr(self, '_virtual_pressed_keys', None)
+            if (virtual
+                    and mapped_key in virtual
+                    and not imgui.is_key_down(mapped_key)
+                    and not any(mapped_mods_from_string.values())
+                    and not (io.key_ctrl or io.key_alt
+                             or io.key_shift or io.key_super)):
+                action_func(*action_args)
+                return True
+
             return False
 
         def check_key_held(shortcut_name):
@@ -198,152 +254,264 @@ class ShortcutHandlerMixin:
         elif video_loaded and check_and_run_shortcut("add_point_100", self._handle_add_point_at_value, 100):
             pass
 
-        # Handle continuous arrow key navigation
         if video_loaded:
             self._handle_arrow_navigation()
 
+        # Drop virtual key presses now that this frame's dispatcher has had
+        # a chance to consume them. Next frame's glfw.poll_events() will
+        # repopulate from fresh char events.
+        virtual = getattr(self, '_virtual_pressed_keys', None)
+        if virtual:
+            virtual.clear()
+
+    def _time_based_repeat_fire(self, state_key, mapped_key, mods_match,
+                                initial_delay=_REPEAT_INITIAL_DELAY_S,
+                                interval=_REPEAT_INTERVAL_S):
+        """Return True if a held shortcut should fire this frame.
+
+        Keyed off `imgui.is_key_down` + per-shortcut timestamps rather
+        than `imgui.is_key_pressed(key, repeat=True)`. The latter needs
+        GLFW to forward OS KEY_REPEAT events; some devices never emit
+        them, so the built-in auto-repeat silently fails to fire.
+
+        Fires once on fresh keydown, then again after `initial_delay`,
+        then paced by `interval`. Releasing the key (or mods no longer
+        matching) clears the timer so the next press starts clean.
+        """
+        state_dict = getattr(self, '_shortcut_repeat_state', None)
+        if state_dict is None:
+            self._shortcut_repeat_state = {}
+            state_dict = self._shortcut_repeat_state
+
+        if not (mods_match and imgui.is_key_down(mapped_key)):
+            state_dict.pop(state_key, None)
+            return False
+
+        now = time.monotonic()
+        state = state_dict.get(state_key)
+        if state is None:
+            state_dict[state_key] = {'pressed_at': now, 'last_fire': now}
+            return True
+
+        if (now - state['pressed_at']) < initial_delay:
+            return False
+        if (now - state['last_fire']) < interval:
+            return False
+        state['last_fire'] = now
+        return True
+
+    def _nav_log(self, action, frm, to, path, dur_ms, **extra):
+        """One-line nav debug trace. Gated on debug_nav_logging setting."""
+        if not _nav_dbg_enabled(self.app):
+            return
+        kv = " ".join(f"{k}={v}" for k, v in extra.items())
+        self.app.logger.info(
+            f"NAV {action:<14} from={frm} to={to} delta={to - frm:+d} "
+            f"path={path:<10} dur={dur_ms:.1f}ms {kv}")
+
     def _handle_arrow_navigation(self):
-        """Optimized arrow key navigation with continuous scrolling support"""
+        """Right arrow: tap = one frame forward. Hold >= HOLD_PLAYBACK_S
+        = forward playback. Hold >= HOLD_MAXSPEED_S = MAX_SPEED playback.
+        Release = stop playback.
+
+        Left arrow: tap = one frame back. Hold = repeated step-back paced
+        by our own time-based repeat (we can't reverse-play the engine,
+        and the OS repeat path is unreliable on some BLE keyboards)."""
         io = imgui.get_io()
         current_shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
         current_time = time.time()
 
-        # Update seek interval based on video FPS for natural navigation speed
-        # Use FPS override if enabled, otherwise fall back to video FPS
-        app_state = self.app.app_state_ui
-        if app_state.fps_override_enabled and app_state.fps_override_value > 0:
-            target_nav_fps = max(15, min(240, app_state.fps_override_value))
-            self.arrow_key_state['seek_interval'] = 1.0 / target_nav_fps
-        elif self.app.processor and self.app.processor.fps > 0:
-            # Use video FPS but cap at reasonable limits for responsiveness
-            video_fps = self.app.processor.fps
-            # Allow faster navigation for high FPS videos, slower for low FPS
-            target_nav_fps = max(15, min(60, video_fps))
-            self.arrow_key_state['seek_interval'] = 1.0 / target_nav_fps
-
-        # Get arrow key mappings
         left_shortcut = current_shortcuts.get("seek_prev_frame", "LEFT_ARROW")
         right_shortcut = current_shortcuts.get("seek_next_frame", "RIGHT_ARROW")
 
         left_map = self.app._map_shortcut_to_glfw_key(left_shortcut)
         right_map = self.app._map_shortcut_to_glfw_key(right_shortcut)
-
         if not left_map or not right_map:
             return
 
         left_key, left_mods = left_map
         right_key, right_mods = right_map
 
-        # Check if keys are held down (no modifier keys for arrow navigation)
-        left_held = (imgui.is_key_down(left_key) and
-                    left_mods['ctrl'] == io.key_ctrl and
-                    left_mods['alt'] == io.key_alt and
-                    left_mods['shift'] == io.key_shift and
-                    left_mods['super'] == io.key_super)
+        def _mods_match(m):
+            return (m['ctrl'] == io.key_ctrl and m['alt'] == io.key_alt
+                    and m['shift'] == io.key_shift and m['super'] == io.key_super)
 
-        right_held = (imgui.is_key_down(right_key) and
-                     right_mods['ctrl'] == io.key_ctrl and
-                     right_mods['alt'] == io.key_alt and
-                     right_mods['shift'] == io.key_shift and
-                     right_mods['super'] == io.key_super)
+        left_held = imgui.is_key_down(left_key) and _mods_match(left_mods)
+        right_held = imgui.is_key_down(right_key) and _mods_match(right_mods)
 
-        # Update key state
         self.arrow_key_state['left_pressed'] = left_held
         self.arrow_key_state['right_pressed'] = right_held
 
-        # Determine seek direction and apply rate limiting
         seek_direction = 0
         if left_held and not right_held:
             seek_direction = -1
         elif right_held and not left_held:
             seek_direction = 1
 
-        # Reset direction tracking and acceleration when key is released
+        # Release: stop any playback we started and reset timing.
         if seek_direction == 0:
+            if self.arrow_key_state.get('arrow_triggered_playback'):
+                self._end_arrow_playback()
             self.arrow_key_state['last_direction'] = 0
-            self.arrow_key_state['continuous_start_time'] = 0
+            self.arrow_key_state['nav_phase'] = 'idle'
             self._reading_fps_frames.clear()
             self._reading_fps_display = 0.0
+            return
 
-        # Apply navigation with proper frame-by-frame then continuous logic
-        if seek_direction != 0:
-            time_since_last = current_time - self.arrow_key_state['last_seek_time']
-            key_just_pressed = (left_held and imgui.is_key_pressed(left_key)) or (right_held and imgui.is_key_pressed(right_key))
+        # Direction changed (swapped keys, or keydown from rest). Mark the
+        # fresh press, fire a single frame-step (tap ergonomics), and reset
+        # the hold timer. If we were driving playback the other way, end
+        # it first so we don't seek backwards through a live pipe.
+        if self.arrow_key_state.get('last_direction') != seek_direction:
+            if self.arrow_key_state.get('arrow_triggered_playback'):
+                self._end_arrow_playback()
+            self.arrow_key_state['last_direction'] = seek_direction
+            self.arrow_key_state['initial_press_time'] = current_time
+            self._perform_frame_seek(seek_direction)
+            self.arrow_key_state['last_seek_time'] = current_time
+            return
 
-            should_navigate = False
-            frames_this_tick = 1  # how many frames to read this GUI tick
+        hold_time = current_time - self.arrow_key_state.get(
+            'initial_press_time', current_time)
 
-            if key_just_pressed:
-                # INITIAL KEY PRESS: Only navigate if this is a new direction
-                if self.arrow_key_state['last_direction'] != seek_direction:
-                    should_navigate = True
-                    self.arrow_key_state['initial_press_time'] = current_time
-                    self.arrow_key_state['last_direction'] = seek_direction
-                    self.arrow_key_state['continuous_start_time'] = 0
-            else:
-                if self.arrow_key_state['last_direction'] != seek_direction:
-                    # DIRECTION CHANGED while key already held (e.g., released one of two held keys)
-                    should_navigate = True
-                    self.arrow_key_state['initial_press_time'] = current_time
-                    self.arrow_key_state['last_direction'] = seek_direction
-                    self.arrow_key_state['continuous_start_time'] = 0
-                else:
-                    # KEY HELD DOWN in same direction: continuous navigation
-                    time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
-
-                    if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
-                        # Mark when continuous mode begins
-                        if self.arrow_key_state['continuous_start_time'] == 0:
-                            self.arrow_key_state['continuous_start_time'] = current_time
-
-                        base_interval = self.arrow_key_state['seek_interval']
-
-                        # Ramp speed from 1x to unbounded over _ARROW_ACCEL_RAMP_S
-                        # seconds; one seek per GUI tick jumps straight to the
-                        # computed target (no intermediate frame decodes).
-                        hold_duration = current_time - self.arrow_key_state['continuous_start_time']
-                        t = min(1.0, hold_duration / _ARROW_ACCEL_RAMP_S)
-                        speed = 1.0 / max(0.01, 1.0 - t)
-                        video_fps = 60.0
-                        if self.app.processor and self.app.processor.fps > 0:
-                            video_fps = self.app.processor.fps
-                        frames_this_tick = max(1, round(speed * video_fps * time_since_last))
-                        should_navigate = True
-                    # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
-
-            if should_navigate:
-                # Clear point selection on frame navigation so nudge state doesn't carry over
-                gui = self.app.gui_instance
-                if gui:
-                    for tl in [getattr(gui, 'timeline_editor1', None),
-                               getattr(gui, 'timeline_editor2', None)]:
-                        if tl and hasattr(tl, 'multi_selected_action_indices') and tl.multi_selected_action_indices:
-                            tl.multi_selected_action_indices.clear()
-
-                if frames_this_tick <= 1:
-                    self._perform_frame_seek(seek_direction)
-                else:
-                    # One seek per tick to the target frame (no intermediate decodes).
-                    self._perform_accelerated_seek(seek_direction * frames_this_tick)
+        # Left held: repeated step-back on our own timer. Previously this
+        # used imgui.is_key_pressed(left_key, True), which needed OS
+        # KEY_REPEAT events — BLE HID / remapped-hardware keyboards don't
+        # always emit them, so "hold Left to pan" would degrade to one
+        # step per physical keypress. Time-based pacing fires identically
+        # on all devices as long as is_key_down stays True, and reuses
+        # the arrow_key_state timestamps already tracked for the tap +
+        # hold-to-play state machine above.
+        if seek_direction < 0:
+            initial = self.arrow_key_state.get(
+                'initial_press_time', current_time)
+            last_fire = self.arrow_key_state.get('last_seek_time', 0.0)
+            if ((current_time - initial) >= _REPEAT_INITIAL_DELAY_S
+                    and (current_time - last_fire) >= _REPEAT_INTERVAL_S):
+                self._perform_frame_seek(-1)
                 self.arrow_key_state['last_seek_time'] = current_time
+            return
+
+        # Right held: transition to hold-to-play once the tap window is past.
+        # Before HOLD_PLAYBACK_S: do nothing extra (the single step fired on
+        # the initial keydown; we don't step on auto-repeat because that
+        # would race with the hold-to-play decision).
+        if hold_time < _ARROW_REALTIME_HOLD_S:
+            return
+
+        # Past threshold: engage playback (REALTIME first, MAX_SPEED at the
+        # longer threshold). _maybe_drive_arrow_playback is idempotent and
+        # keeps transitioning as hold_time grows.
+        if self._maybe_drive_arrow_playback(current_time):
+            self.arrow_key_state['last_seek_time'] = current_time
+
+    def _arrow_playback_available(self) -> bool:
+        proc = self.app.processor
+        if not proc or not proc.video_info:
+            return False
+        tracker = getattr(self.app, 'tracker', None)
+        if tracker is not None and getattr(tracker, 'tracking_active', False):
+            return False
+        mpv_ctl = getattr(self.app, '_mpv_controller', None)
+        if mpv_ctl is not None and getattr(mpv_ctl, 'is_active', False):
+            return False
+        already_playing = proc.is_processing and not proc.pause_event.is_set()
+        if already_playing and not self.arrow_key_state.get('arrow_triggered_playback'):
+            return False
+        return True
+
+    def _maybe_drive_arrow_playback(self, current_time: float) -> bool:
+        if not self._arrow_playback_available():
+            return False
+
+        initial = self.arrow_key_state.get('initial_press_time') or current_time
+        hold = current_time - initial
+        if hold < _ARROW_REALTIME_HOLD_S:
+            return False
+
+        try:
+            from config.constants import ProcessingSpeedMode
+        except Exception:
+            return False
+
+        target_mode = (ProcessingSpeedMode.MAX_SPEED
+                       if hold >= _ARROW_MAXSPEED_HOLD_S
+                       else ProcessingSpeedMode.REALTIME)
+        target_phase = 'maxspeed' if hold >= _ARROW_MAXSPEED_HOLD_S else 'realtime'
+
+        if not self.arrow_key_state.get('arrow_triggered_playback'):
+            self._begin_arrow_playback(target_mode, target_phase)
+        elif self.arrow_key_state.get('nav_phase') != target_phase:
+            self.app.app_state_ui.selected_processing_speed_mode = target_mode
+            self.arrow_key_state['nav_phase'] = target_phase
+        return True
+
+    def _begin_arrow_playback(self, mode, phase: str) -> None:
+        app_state = self.app.app_state_ui
+        self.arrow_key_state['saved_speed_mode'] = getattr(
+            app_state, 'selected_processing_speed_mode', None)
+        app_state.selected_processing_speed_mode = mode
+        self.arrow_key_state['arrow_triggered_playback'] = True
+        self.arrow_key_state['nav_phase'] = phase
+        proc = self.app.processor
+        already_playing = proc.is_processing and not proc.pause_event.is_set()
+        if not already_playing:
+            proc.start_processing()
+
+    def _end_arrow_playback(self) -> None:
+        proc = self.app.processor
+        saved_mode = self.arrow_key_state.get('saved_speed_mode')
+        self.arrow_key_state['arrow_triggered_playback'] = False
+        self.arrow_key_state['saved_speed_mode'] = None
+        self.arrow_key_state['nav_phase'] = 'idle'
+        if proc and proc.is_processing and not proc.pause_event.is_set():
+            try:
+                proc.pause_processing()
+            except Exception as e:
+                self.logger.debug(f"arrow playback pause failed: {e}")
+        if saved_mode is not None:
+            try:
+                self.app.app_state_ui.selected_processing_speed_mode = saved_mode
+            except Exception:
+                pass
+
+    def _auto_pause_for_nav(self, proc, reason: str) -> None:
+        """Pause playback so arrow-nav can run on the well-behaved paused
+        path. Without this, every arrow press mid-playback called seek_video,
+        which tore down the ffmpeg pipe and sometimes lost the subprocess
+        entirely. Triggered by left arrow during play, or by any nav during
+        right-held playback that we ourselves engaged."""
+        if proc.is_processing and not proc.pause_event.is_set():
+            self._nav_log('auto_pause', proc.current_frame_index,
+                          proc.current_frame_index, 'pause_only', 0.0,
+                          reason=reason)
+            try:
+                proc.pause_processing()
+            except Exception as e:
+                self.app.logger.debug(f"auto-pause for nav failed: {e}")
 
     def _perform_accelerated_seek(self, frames_delta):
-        """Accelerated arrow seek.
-
-        Small delta: step frame-by-frame through the pyav fast-path (pump, no
-        keyframe seek). Large delta: one libavformat seek to the target. The
-        crossover depends on per-frame decode cost vs keyframe-seek cost;
-        ~10 frames is a decent default on 1080p h264/h265. A time budget
-        caps GUI-thread blocking so we always render a frame this tick.
-        """
+        # Small delta: step one frame at a time. Large delta: one seek.
         proc = self.app.processor
         if not proc or not proc.video_info:
             return
 
         is_actively_playing = (proc.is_processing and not proc.pause_event.is_set())
         is_tracking = self.app.tracker and self.app.tracker.tracking_active
-        if is_actively_playing or is_tracking:
+        if is_tracking:
             self._perform_frame_seek(1 if frames_delta >= 0 else -1)
+            return
+        if is_actively_playing:
+            # If the user is running their own playback (spacebar) and holds
+            # an arrow, don't hijack the transport with a scrub ramp. Just
+            # let playback run. Progressive-hold-forward already has its own
+            # path that took over when appropriate.
+            if not self.arrow_key_state.get('arrow_triggered_playback'):
+                self._nav_log('accel_skip', proc.current_frame_index,
+                              proc.current_frame_index, 'user_playing',
+                              0.0, reason='not_hijacking')
+                return
+            # Otherwise this is our own arrow-triggered playback; leave it be.
             return
 
         total_frames = proc.total_frames
@@ -353,24 +521,22 @@ class ShortcutHandlerMixin:
         if target == cur:
             return
 
-        SEEK_CROSSOVER = 10  # frames
+        SEEK_CROSSOVER = 10
         t0 = time.perf_counter()
         budget_end = t0 + _ARROW_TICK_BUDGET_S
         last_frame = None
         frames_read = 0
         forward = target > cur
+        jump_style = "single-jump" if abs(target - cur) > SEEK_CROSSOVER else "step"
 
         if abs(target - cur) > SEEK_CROSSOVER:
-            # Single jump; seek + keyframe decode is cheaper than stepping.
             if forward:
                 last_frame = proc.arrow_nav_forward(target)
             else:
                 last_frame = proc.arrow_nav_backward(target)
             frames_read = 1 if last_frame is not None else 0
         else:
-            # Step-by-step: forward uses pyav +1 fast path; backward hits nav
-            # buffer if it's warm. Bail when we hit the per-tick time budget
-            # so the UI stays responsive.
+            # Time-budgeted step-by-step so the GUI always renders this tick.
             step = 1 if forward else -1
             idx = cur
             while (forward and idx < target) or (not forward and idx > target):
@@ -393,6 +559,9 @@ class ShortcutHandlerMixin:
                 proc.current_frame = last_frame
                 proc._frame_version += 1
 
+        self._nav_log('accel_seek', cur, target, jump_style, elapsed * 1000,
+                      frames_read=frames_read, ok=bool(last_frame is not None))
+
         self.track_frame_seek_time(elapsed * 1000, path="arrow")
         self._reading_fps_frames.append((time.time(), frames_read))
         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
@@ -401,74 +570,89 @@ class ShortcutHandlerMixin:
         self.app.energy_saver.reset_activity_timer()
 
     def _perform_frame_seek(self, delta_frames):
-        """Arrow key navigation with rolling backward buffer"""
         if not self.app.processor or not self.app.processor.video_info:
             return
 
         proc = self.app.processor
-
-        # Skip if already seeking to avoid frame jump issues
-        if False:
-            return
 
         new_frame = proc.current_frame_index + delta_frames
         total_frames = proc.total_frames
         new_frame = max(0, min(new_frame, total_frames - 1 if total_frames > 0 else 0))
 
         if new_frame == proc.current_frame_index:
-            return  # No change needed
+            return
+
+        try:
+            self.app.app_state_ui.last_nav_activity_time = time.monotonic()
+        except Exception:
+            pass
 
         t0 = time.perf_counter()
+        cur = proc.current_frame_index
 
-        # Use fast pipe/buffer path when idle or paused (paused = pipe available)
         is_actively_playing = (proc.is_processing
                                and not proc.pause_event.is_set())
         is_tracking = self.app.tracker and self.app.tracker.tracking_active
+        # Auto-pause on arrow nav mid-playback so we can run the paused
+        # path (cache lookup + disposable frame fetch) instead of tearing
+        # down the live ffmpeg pipe with a seek_video.
+        if is_actively_playing and not is_tracking:
+            self._auto_pause_for_nav(proc, reason='frame_seek')
+            is_actively_playing = False
+
         if not is_actively_playing and not is_tracking:
             if delta_frames > 0:
                 frame = proc.arrow_nav_forward(new_frame)
-                if frame is not None:
-                    with proc.frame_lock:
-                        proc.current_frame = frame
-                        proc._frame_version += 1
+                path_taken = 'nav_fwd'
             else:
                 frame = proc.arrow_nav_backward(new_frame)
-                if frame is not None:
-                    with proc.frame_lock:
-                        proc.current_frame = frame
-                        proc._frame_version += 1
+                path_taken = 'nav_back'
+            if frame is not None:
+                with proc.frame_lock:
+                    proc.current_frame = frame
+                    proc._frame_version += 1
+            try:
+                mpv_disp = getattr(self.app.gui_instance,
+                                   'mpv_display', None) if self.app.gui_instance else None
+                if mpv_disp is not None and getattr(mpv_disp, 'is_loaded', False):
+                    if delta_frames == 1 and hasattr(mpv_disp, 'step_forward'):
+                        mpv_disp.step_forward()
+                    elif delta_frames == -1 and hasattr(mpv_disp, 'step_backward'):
+                        mpv_disp.step_backward()
+                    elif hasattr(proc, '_mpv_seek_to_frame'):
+                        proc._mpv_seek_to_frame(new_frame)
+            except Exception:
+                pass
+            self._nav_log('frame_seek', cur, new_frame, path_taken,
+                          (time.perf_counter() - t0) * 1000,
+                          ok=bool(frame is not None))
         else:
-            # During tracking/processing: use standard cache-based seek
-            frame_from_cache = None
-            with proc.frame_cache_lock:
-                if new_frame in proc.frame_cache:
-                    frame_from_cache = proc.frame_cache[new_frame]
-                    proc.frame_cache.move_to_end(new_frame)
-
+            # Only reached during active tracking. Cache or fall through to
+            # a seek_video, which the tracker's pipe handles via its own
+            # seek plumbing.
+            frame_from_cache = proc.get_cached_frame(new_frame)
             if frame_from_cache is not None:
                 proc.current_frame_index = new_frame
                 with proc.frame_lock:
                     proc.current_frame = frame_from_cache
                     proc._frame_version += 1
+                self._nav_log('frame_seek', cur, new_frame, 'cache_hit',
+                              (time.perf_counter() - t0) * 1000)
             else:
                 proc.current_frame_index = new_frame
                 proc.seek_video(new_frame)
+                self._nav_log('frame_seek', cur, new_frame, 'seek_video',
+                              (time.perf_counter() - t0) * 1000)
 
-        # Report to perf monitor so it shows as "ArrowNavDecode" instead of
-        # being lumped into "GlobalShortcuts"
         elapsed = time.perf_counter() - t0
         self.track_frame_seek_time(elapsed * 1000, path="arrow")
-        # Report 1 frame read this tick for status bar averaging
         self._reading_fps_frames.append((time.time(), 1))
 
-        # Update UI
         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
         if self.app.project_manager:
             self.app.project_manager.project_dirty = True
         self.app.energy_saver.reset_activity_timer()
 
-    # Removed complex predictive caching - it was blocking the UI
-    # Keep navigation simple: cache check first, then single frame fetch if needed
 
     def _handle_unified_undo(self):
         desc = self.app.undo_manager.undo(self.app)
@@ -701,7 +885,7 @@ class ShortcutHandlerMixin:
         proc = self.app.processor
         if not proc or proc.total_frames <= 0:
             return
-        n = int(self.app.app_settings.get("seek_n_frames", 5))
+        n = self.app.app_settings.config.navigation.seek_n_frames
         target = max(0, min(proc.total_frames - 1,
                             proc.current_frame_index + direction * n))
         if target == proc.current_frame_index:
@@ -793,7 +977,7 @@ class ShortcutHandlerMixin:
         if self.app.project_manager:
             self.app.project_manager.project_dirty = True
         status = "shown" if app_state.show_funscript_interactive_timeline2 else "hidden"
-        self.app.logger.info(f"Timeline 2 {status}", extra={'status_message': True})
+        self.app.logger.info(f"Funscript 2 {status}", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
 
     def _handle_toggle_3d_simulator_shortcut(self):
@@ -852,7 +1036,7 @@ class ShortcutHandlerMixin:
         """Handle keyboard shortcut for toggling video feed overlay (F)"""
         app_state = self.app.app_state_ui
         app_state.show_video_feed = not app_state.show_video_feed
-        self.app.app_settings.set("show_video_feed", app_state.show_video_feed)
+        self.app.app_settings.config.ui.show_video_feed = app_state.show_video_feed
         if self.app.project_manager:
             self.app.project_manager.project_dirty = True
         status = "shown" if app_state.show_video_feed else "hidden"
@@ -971,8 +1155,15 @@ class ShortcutHandlerMixin:
             or imgui.is_any_item_active()
             or imgui.is_any_item_focused()):
                 interaction_detected_this_frame = True
-        if hasattr(io, 'keys_down'):
-            for i in range(len(io.keys_down)):
-                if imgui.is_key_pressed(i): interaction_detected_this_frame = True; break
+        # Modifiers + common nav keys as an interaction proxy: 0.2 us vs
+        # 120 us for any(io.keys_down), which iterates 512 pyimgui proxies.
+        if not interaction_detected_this_frame:
+            if (io.key_ctrl or io.key_alt or io.key_shift or io.key_super
+                    or imgui.is_key_down(imgui.KEY_SPACE)
+                    or imgui.is_key_down(imgui.KEY_LEFT_ARROW)
+                    or imgui.is_key_down(imgui.KEY_RIGHT_ARROW)
+                    or imgui.is_key_down(imgui.KEY_UP_ARROW)
+                    or imgui.is_key_down(imgui.KEY_DOWN_ARROW)):
+                interaction_detected_this_frame = True
         if interaction_detected_this_frame:
             self.app.energy_saver.reset_activity_timer()

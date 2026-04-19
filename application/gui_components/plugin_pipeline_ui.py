@@ -20,6 +20,7 @@ except ImportError:
     imgui = None
 
 from application.classes.plugin_pipeline import PluginPipeline, timeline_label_to_axis
+from config.constants_colors import CurrentTheme
 
 _CATEGORY_ORDER = ["Autotune", "Quickfix Tools", "Transform", "Smoothing", "Timing & Generation", "General"]
 
@@ -46,7 +47,7 @@ class PluginPipelineUI:
             return
 
         imgui.set_next_window_size(460, 420, condition=imgui.ONCE)
-        visible, opened = imgui.begin("Plugin Pipeline", closable=True)
+        visible, opened = imgui.begin("FunGen: Plugin Pipeline", closable=True)
 
         if getattr(app_state, 'show_plugin_pipeline') != opened:
             app_state.show_plugin_pipeline = opened
@@ -87,7 +88,7 @@ class PluginPipelineUI:
         # Error display
         if self._last_errors:
             imgui.spacing()
-            imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.4, 0.4, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.RED_LIGHT)
             for err in self._last_errors:
                 imgui.text_wrapped(err)
             imgui.pop_style_color()
@@ -155,7 +156,7 @@ class PluginPipelineUI:
         steps = self.pipeline.steps
         if not steps:
             imgui.spacing()
-            imgui.text_colored("No steps. Add a plugin above.", 0.5, 0.5, 0.5, 1.0)
+            imgui.text_colored("No steps. Add a plugin above.", *CurrentTheme.GRAY_MEDIUM)
             imgui.spacing()
             return
 
@@ -175,7 +176,7 @@ class PluginPipelineUI:
             # Step label (collapsible header for params)
             header_label = f"{i + 1}. {step.plugin_name}"
             if not step.enabled:
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.5, 1.0)
+                imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.GRAY_MEDIUM)
 
             header_open = imgui.tree_node(header_label)
 
@@ -324,7 +325,7 @@ class PluginPipelineUI:
 
         presets = self.pipeline.get_available_presets()
         preset_names = ["--"] + sorted(presets.keys())
-        assignments = self.app.app_settings.get("auto_pipeline_assignments", {})
+        assignments = self.app.app_settings.config.plugin_pipeline.auto_assignments
         changed = False
 
         axis_labels = self._get_axis_choices()
@@ -348,7 +349,7 @@ class PluginPipelineUI:
                 changed = True
 
         if changed:
-            self.app.app_settings.set("auto_pipeline_assignments", assignments)
+            self.app.app_settings.config.plugin_pipeline.auto_assignments = assignments
 
     def _get_timeline_editor(self):
         """Get the active timeline editor (T1)."""

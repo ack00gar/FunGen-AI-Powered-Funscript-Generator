@@ -3,27 +3,27 @@
 import imgui
 from contextlib import contextmanager
 from config.element_group_colors import CardColors
+from config import ui_metrics
 
 
-# Tier presets
 _TIER_PRESETS = {
     "primary": {
-        "bg": CardColors.PRIMARY_BG,
-        "rounding": 6.0,
-        "accent_width": 4.0,
-        "padding": 8.0,
+        "bg_attr": "PRIMARY_BG",
+        "rounding": ui_metrics.CARD_ROUNDING_PRIMARY,
+        "accent_width": ui_metrics.CARD_ACCENT_WIDTH_PRIMARY,
+        "padding": ui_metrics.CARD_PAD_PRIMARY,
     },
     "secondary": {
-        "bg": CardColors.SECONDARY_BG,
-        "rounding": 4.0,
+        "bg_attr": "SECONDARY_BG",
+        "rounding": ui_metrics.CARD_ROUNDING_SECONDARY,
         "accent_width": 0.0,
-        "padding": 6.0,
+        "padding": ui_metrics.CARD_PAD_SECONDARY,
     },
     "inline": {
-        "bg": CardColors.INLINE_BG,
-        "rounding": 3.0,
+        "bg_attr": "INLINE_BG",
+        "rounding": ui_metrics.CARD_ROUNDING_INLINE,
         "accent_width": 0.0,
-        "padding": 4.0,
+        "padding": ui_metrics.CARD_PAD_INLINE,
     },
 }
 
@@ -52,7 +52,9 @@ def section_card(label, tier="primary", accent_color=None, open_by_default=True)
     global _channel_split_depth
 
     preset = _TIER_PRESETS.get(tier, _TIER_PRESETS["primary"])
-    bg = preset["bg"]
+    # Re-read the bg tuple from CardColors on every call so live theme toggles
+    # pick up the new value (CardColors attrs are refreshed when the theme swaps).
+    bg = getattr(CardColors, preset["bg_attr"])
     rounding = preset["rounding"]
     accent_width = preset["accent_width"]
     padding = preset["padding"]

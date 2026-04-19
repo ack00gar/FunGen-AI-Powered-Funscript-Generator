@@ -3,6 +3,9 @@
 /logs/*
 config.json
 
+# Local dev probes and one-off diagnostic harnesses
+scratch/
+
 # Ultralytics project-local config (contains machine-specific UUID, auto-created at runtime)
 config/ultralytics/
 

@@ -70,6 +70,8 @@ MIN_ROI_SIZE = 16
 
 
 class HybridFlowTracker(BaseTracker):
+    mutates_input_frame = False
+
     """
     Live tracker combining sparse YOLO detection with per-frame DIS optical flow.
 

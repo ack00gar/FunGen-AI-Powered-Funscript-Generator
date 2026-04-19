@@ -1,3 +1,4 @@
+import math
 import time
 import imgui
 import logging
@@ -9,6 +10,7 @@ from application.utils import get_logo_texture_manager, get_icon_texture_manager
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from common.frame_utils import frame_to_ms
+from config.constants_colors import CurrentTheme
 
 # Module-level logger for Handy debug output (disabled by default)
 _handy_debug_logger = logging.getLogger(__name__ + '.handy')
@@ -125,7 +127,7 @@ class VideoOverlaysMixin:
         )
 
         imgui.push_style_var(imgui.STYLE_ALPHA, alpha)
-        imgui.text_colored(status, 0.5, 0.9, 0.5, alpha)
+        imgui.text_colored(status, *CurrentTheme.GREEN[:3], alpha)
         imgui.pop_style_var()  # STYLE_ALPHA
 
         imgui.end()
@@ -240,18 +242,24 @@ class VideoOverlaysMixin:
         if img_rect['w'] <= 0 or img_rect['h'] <= 0:
             return
 
-        c_left, c_top, c_right, c_bottom = app_state.get_processing_content_uv_rect()
-        c_w, c_h = c_right - c_left, c_bottom - c_top
-        buf_size = self.app.yolo_input_size
-        uv_span_x = c_w / app_state.video_zoom_factor
-        uv_span_y = c_h / app_state.video_zoom_factor
+        # Use the SAME UVs imgui.image uses (clipped to the displayed-rect
+        # aspect by get_video_uv_coords), not c_w/zoom. The two diverge
+        # whenever the panel isn't square and the user zooms in: a square
+        # source gets a wider-than-tall display rect which trims uv_span_y
+        # but leaves uv_span_x at full width. The old c_w/zoom assumption
+        # produced 2x horizontal scale and 1x vertical, stretching every
+        # square overlay (oscillation grid, ROI rect) into a rectangle.
+        uv0_x, uv0_y, uv1_x, uv1_y = app_state.get_video_uv_coords()
+        uv_span_x = uv1_x - uv0_x
+        uv_span_y = uv1_y - uv0_y
         if uv_span_x <= 0 or uv_span_y <= 0:
             return
+        buf_size = self.app.yolo_input_size
 
         scale_x = img_rect['w'] / (uv_span_x * buf_size)
         scale_y = img_rect['h'] / (uv_span_y * buf_size)
-        off_x = img_rect['min_x'] - (c_left + app_state.video_pan_normalized[0] * c_w) * buf_size * scale_x
-        off_y = img_rect['min_y'] - (c_top + app_state.video_pan_normalized[1] * c_h) * buf_size * scale_y
+        off_x = img_rect['min_x'] - uv0_x * buf_size * scale_x
+        off_y = img_rect['min_y'] - uv0_y * buf_size * scale_y
 
         def to_screen(vx, vy):
             return vx * scale_x + off_x, vy * scale_y + off_y
@@ -298,7 +306,6 @@ class VideoOverlaysMixin:
             draw_list.add_line(sx1, sy1, sx2, sy2, color_u32, thickness)
             # Arrow tip if requested
             if line.get('arrow', False):
-                import math
                 dx, dy = sx2 - sx1, sy2 - sy1
                 length = math.sqrt(dx * dx + dy * dy)
                 if length > 0:
@@ -562,7 +569,7 @@ class VideoOverlaysMixin:
 
     def _render_component_overlays(self, app_state):
         """Render 3D simulator overlay and subtitle overlay on video display."""
-        simulator_3d_overlay = self.app.app_settings.get('simulator_3d_overlay_mode', False)
+        simulator_3d_overlay = self.app.app_settings.config.ui.simulator_3d_overlay_mode
         if simulator_3d_overlay and app_state.show_simulator_3d:
             img_rect = self._actual_video_image_rect_on_screen
             if img_rect:
@@ -687,8 +694,8 @@ class VideoOverlaysMixin:
         imgui.set_next_window_size(overlay_width, overlay_height, condition=imgui.ALWAYS)
 
         # Fully transparent background, no border
-        imgui.push_style_color(imgui.COLOR_WINDOW_BACKGROUND, 0.0, 0.0, 0.0, 0.0)
-        imgui.push_style_color(imgui.COLOR_BORDER, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_color(imgui.COLOR_WINDOW_BACKGROUND, *CurrentTheme.TRANSPARENT)
+        imgui.push_style_color(imgui.COLOR_BORDER, *CurrentTheme.TRANSPARENT)
         imgui.push_style_var(imgui.STYLE_WINDOW_ROUNDING, 0.0)
 
         window_flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_SCROLLBAR |

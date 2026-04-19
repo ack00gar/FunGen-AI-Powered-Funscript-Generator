@@ -49,23 +49,11 @@ class AppEnergySaver:
 
     def update_settings_from_app(self):
         """Called by AppLogic when settings are loaded or project is loaded."""
-        defaults = self.app_settings.get_default_settings()
-        self.energy_saver_enabled = self.app_settings.get(
-            "energy_saver_enabled",
-            defaults.get("energy_saver_enabled", True)
-        )
-        self.energy_saver_threshold_seconds = self.app_settings.get(
-            "energy_saver_threshold_seconds",
-            defaults.get("energy_saver_threshold_seconds", 60.0)
-        )
-        self.energy_saver_fps = self.app_settings.get(
-            "energy_saver_fps",
-            defaults.get("energy_saver_fps", 1)
-        )
-        self.main_loop_normal_fps_target = self.app_settings.get(
-            "main_loop_normal_fps_target",
-            defaults.get("main_loop_normal_fps_target", 60)
-        )
+        es = self.app_settings.config.energy_saver
+        self.energy_saver_enabled = es.enabled
+        self.energy_saver_threshold_seconds = es.threshold_seconds
+        self.energy_saver_fps = es.fps
+        self.main_loop_normal_fps_target = self.app_settings.config.performance.main_loop_normal_fps_target
         # If energy_saver_enabled is now false, ensure energy_saver_active is also false
         if not self.energy_saver_enabled and self.energy_saver_active:
             self.energy_saver_active = False
@@ -74,7 +62,8 @@ class AppEnergySaver:
 
     def save_settings_to_app(self):
         """Called by AppLogic when app settings are to be saved."""
-        self.app_settings.set("energy_saver_enabled", self.energy_saver_enabled)
-        self.app_settings.set("energy_saver_threshold_seconds", self.energy_saver_threshold_seconds)
-        self.app_settings.set("energy_saver_fps", self.energy_saver_fps)
-        self.app_settings.set("main_loop_normal_fps_target", self.main_loop_normal_fps_target)
+        cfg = self.app_settings.config
+        cfg.energy_saver.enabled = self.energy_saver_enabled
+        cfg.energy_saver.threshold_seconds = self.energy_saver_threshold_seconds
+        cfg.energy_saver.fps = self.energy_saver_fps
+        cfg.performance.main_loop_normal_fps_target = self.main_loop_normal_fps_target

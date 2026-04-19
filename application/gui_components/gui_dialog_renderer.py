@@ -2,6 +2,7 @@
 import imgui
 import os
 from application.utils.imgui_helpers import center_next_window, begin_modal_centered
+from config.constants_colors import CurrentTheme
 
 
 class DialogRendererMixin:
@@ -23,24 +24,24 @@ class DialogRendererMixin:
         )
 
         if imgui.begin_popup_modal("Batch Processing Setup", True)[0]:
-            imgui.text(f"Found {len(self.batch_videos_data)} videos for batch processing.")
+            imgui.text(f"Found {len(self.batch_state.videos_data)} videos for batch processing.")
             imgui.separator()
 
             imgui.text("Overwrite Strategy:")
             imgui.same_line()
-            if imgui.radio_button("Skip existing FunGen scripts", self.batch_overwrite_mode_ui == 0): self.batch_overwrite_mode_ui = 0
+            if imgui.radio_button("Skip existing FunGen scripts", self.batch_state.overwrite_mode_ui == 0): self.batch_state.overwrite_mode_ui = 0
             imgui.same_line()
-            if imgui.radio_button("Skip if ANY script exists", self.batch_overwrite_mode_ui == 1): self.batch_overwrite_mode_ui = 1
+            if imgui.radio_button("Skip if ANY script exists", self.batch_state.overwrite_mode_ui == 1): self.batch_state.overwrite_mode_ui = 1
             imgui.same_line()
-            if imgui.radio_button("Overwrite all existing scripts", self.batch_overwrite_mode_ui == 2): self.batch_overwrite_mode_ui = 2
+            if imgui.radio_button("Overwrite all existing scripts", self.batch_state.overwrite_mode_ui == 2): self.batch_state.overwrite_mode_ui = 2
 
-            if self.batch_overwrite_mode_ui != self.last_overwrite_mode_ui:
-                for video in self.batch_videos_data:
+            if self.batch_state.overwrite_mode_ui != self.batch_state.last_overwrite_mode_ui:
+                for video in self.batch_state.videos_data:
                     status = video["funscript_status"]
-                    if self.batch_overwrite_mode_ui == 0: video["selected"] = status != 'fungen'
-                    elif self.batch_overwrite_mode_ui == 1: video["selected"] = status is None
-                    elif self.batch_overwrite_mode_ui == 2: video["selected"] = True
-                self.last_overwrite_mode_ui = self.batch_overwrite_mode_ui
+                    if self.batch_state.overwrite_mode_ui == 0: video["selected"] = status != 'fungen'
+                    elif self.batch_state.overwrite_mode_ui == 1: video["selected"] = status is None
+                    elif self.batch_state.overwrite_mode_ui == 2: video["selected"] = True
+                self.batch_state.last_overwrite_mode_ui = self.batch_state.overwrite_mode_ui
 
             imgui.separator()
 
@@ -49,11 +50,11 @@ class DialogRendererMixin:
             imgui.text("Set all overrides:")
             imgui.same_line()
             imgui.set_next_item_width(160)
-            _, self.batch_set_all_format_idx = imgui.combo("##set_all_format", self.batch_set_all_format_idx, video_format_options)
+            _, self.batch_state.set_all_format_idx = imgui.combo("##set_all_format", self.batch_state.set_all_format_idx, video_format_options)
             imgui.same_line()
             if imgui.button("Apply to All"):
-                for video_data in self.batch_videos_data:
-                    video_data["override_format_idx"] = self.batch_set_all_format_idx
+                for video_data in self.batch_state.videos_data:
+                    video_data["override_format_idx"] = self.batch_state.set_all_format_idx
 
             if imgui.begin_child("VideoList", height=-120):
                 table_flags = imgui.TABLE_BORDERS | imgui.TABLE_SIZING_STRETCH_PROP | imgui.TABLE_SCROLL_Y
@@ -69,7 +70,7 @@ class DialogRendererMixin:
 
                     imgui.table_headers_row()
 
-                    for i, video_data in enumerate(self.batch_videos_data):
+                    for i, video_data in enumerate(self.batch_state.videos_data):
                         imgui.table_next_row()
                         imgui.table_set_column_index(0); imgui.push_id(f"sel_{i}")
                         _, video_data["selected"] = imgui.checkbox("##select", video_data["selected"])
@@ -99,7 +100,7 @@ class DialogRendererMixin:
                             if imgui.is_item_hovered():
                                 imgui.set_tooltip(creation_date)
                         else:
-                            imgui.text_colored("-", 0.5, 0.5, 0.5, 1.0)
+                            imgui.text_colored("-", *CurrentTheme.GRAY_MEDIUM)
 
                         # Tracker/model column
                         imgui.table_set_column_index(3)
@@ -107,7 +108,7 @@ class DialogRendererMixin:
                         if tracker_name:
                             imgui.text(tracker_name)
                         else:
-                            imgui.text_colored("-", 0.5, 0.5, 0.5, 1.0)
+                            imgui.text_colored("-", *CurrentTheme.GRAY_MEDIUM)
 
                         # FunGen version column
                         imgui.table_set_column_index(4)
@@ -115,7 +116,7 @@ class DialogRendererMixin:
                         if fungen_version:
                             imgui.text(fungen_version)
                         else:
-                            imgui.text_colored("-", 0.5, 0.5, 0.5, 1.0)
+                            imgui.text_colored("-", *CurrentTheme.GRAY_MEDIUM)
 
                         # Git hash column
                         imgui.table_set_column_index(5)
@@ -126,7 +127,7 @@ class DialogRendererMixin:
                             if imgui.is_item_hovered():
                                 imgui.set_tooltip(git_hash)
                         else:
-                            imgui.text_colored("-", 0.5, 0.5, 0.5, 1.0)
+                            imgui.text_colored("-", *CurrentTheme.GRAY_MEDIUM)
 
                         imgui.table_set_column_index(6); imgui.text(video_data["detected_format"])
 
@@ -177,22 +178,22 @@ class DialogRendererMixin:
 
             # Create dropdown
             imgui.set_next_item_width(300)
-            changed, self.selected_batch_method_idx_ui = imgui.combo(
+            changed, self.batch_state.selected_method_idx_ui = imgui.combo(
                 "##batch_tracker",
-                self.selected_batch_method_idx_ui,
+                self.batch_state.selected_method_idx_ui,
                 batch_compatible_trackers
             )
 
             # Store the selected tracker's internal name for later use
-            if 0 <= self.selected_batch_method_idx_ui < len(tracker_internal_names):
-                self.selected_batch_tracker_name = tracker_internal_names[self.selected_batch_method_idx_ui]
+            if 0 <= self.batch_state.selected_method_idx_ui < len(tracker_internal_names):
+                self.selected_batch_tracker_name = tracker_internal_names[self.batch_state.selected_method_idx_ui]
             else:
                 self.selected_batch_tracker_name = None
 
             imgui.text("Output Options:")
-            _, self.batch_apply_ultimate_autotune_ui = imgui.checkbox("Apply Ultimate Autotune", self.batch_apply_ultimate_autotune_ui)
+            _, self.batch_state.apply_ultimate_autotune_ui = imgui.checkbox("Apply Ultimate Autotune", self.batch_state.apply_ultimate_autotune_ui)
             imgui.same_line()
-            _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video", self.batch_copy_funscript_to_video_location_ui)
+            _, self.batch_state.copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video", self.batch_state.copy_funscript_to_video_location_ui)
             imgui.same_line()
 
             # Check if selected tracker supports roll file generation (3-stage trackers)
@@ -204,11 +205,11 @@ class DialogRendererMixin:
 
             from application.utils.imgui_helpers import DisabledScope
             with DisabledScope(not has_3_stages):
-                sec_axis_label = self.app.app_settings.get("default_secondary_axis", "roll") if hasattr(self.app, 'app_settings') else "roll"
-                _, self.batch_generate_roll_file_ui = imgui.checkbox(f"Generate .{sec_axis_label} file", self.batch_generate_roll_file_ui if has_3_stages else False)
+                sec_axis_label = self.app.app_settings.config.performance.default_secondary_axis if hasattr(self.app, 'app_settings') else "roll"
+                _, self.batch_state.generate_roll_file_ui = imgui.checkbox(f"Generate .{sec_axis_label} file", self.batch_state.generate_roll_file_ui if has_3_stages else False)
 
             # Adaptive performance tuning checkbox
-            _, self.batch_adaptive_tuning_ui = imgui.checkbox("Adaptive performance tuning", self.batch_adaptive_tuning_ui)
+            _, self.batch_state.adaptive_tuning_ui = imgui.checkbox("Adaptive performance tuning", self.batch_state.adaptive_tuning_ui)
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Progressively optimizes pipeline thread settings during batch.\n"
                                   "Starts conservative, tests small improvements after each video.\n"
@@ -221,15 +222,15 @@ class DialogRendererMixin:
                 if t_info and t_info.category == TrackerCategory.OFFLINE:
                     is_offline_tracker = True
             if is_offline_tracker:
-                _, self.batch_save_preprocessed_video_ui = imgui.checkbox(
-                    "Save preprocessed video", self.batch_save_preprocessed_video_ui)
+                _, self.batch_state.save_preprocessed_video_ui = imgui.checkbox(
+                    "Save preprocessed video", self.batch_state.save_preprocessed_video_ui)
                 if imgui.is_item_hovered():
                     imgui.set_tooltip("Keep the preprocessed (resized/unwarped) video for each processed file.\n"
                                       "WARNING: Uses significant disk space (~200-500MB per video).\n"
                                       "Only enable if you plan to re-run analysis on the same videos.")
             cur_p = app.stage_processor.num_producers_stage1
             cur_c = app.stage_processor.num_consumers_stage1
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.5, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.GRAY_MEDIUM)
             imgui.text(f"  Current pipeline: {cur_p} producers / {cur_c} consumers")
             imgui.pop_style_color()
 
@@ -312,7 +313,7 @@ class DialogRendererMixin:
         """Optimized popup rendering - only renders visible/active popups."""
         app_state = self.app.app_state_ui
 
-        if getattr(app_state, 'show_simulator_3d', False) and not self.app.app_settings.get('simulator_3d_overlay_mode', False):
+        if getattr(app_state, 'show_simulator_3d', False) and not self.app.app_settings.config.ui.simulator_3d_overlay_mode:
             self.simulator_3d_window_ui.render()
 
         if getattr(app_state, 'show_script_gauge', False):
@@ -418,7 +419,7 @@ class DialogRendererMixin:
             imgui.spacing()
 
             if is_complete:
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.2, 0.9, 0.2, 1.0)
+                imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.GREEN)
                 imgui.text("Setup complete! You're ready to go.")
                 imgui.pop_style_color()
                 imgui.spacing()
@@ -426,7 +427,7 @@ class DialogRendererMixin:
                     app.show_first_run_setup_popup = False
                     imgui.close_current_popup()
             elif is_failed:
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.3, 0.3, 1.0)
+                imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.RED_LIGHT)
                 imgui.text_wrapped(
                     "Setup failed. You can download models manually via AI menu > Download Models."
                 )

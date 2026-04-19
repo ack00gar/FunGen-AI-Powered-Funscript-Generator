@@ -3,7 +3,8 @@
 import os
 import platform
 
-from ultralytics import YOLO
+# `ultralytics.YOLO` is lazy-imported inside methods that actually need it —
+# it pulls torch (~2s cold) and must stay off the startup path.
 
 from config.constants import DEFAULT_MODELS_DIR, MODEL_DOWNLOAD_URLS
 
@@ -23,13 +24,13 @@ class AppModelManager:
 
         if model_type == 'detection':
             self.app.yolo_detection_model_path_setting = ""
-            self.app.app_settings.set("yolo_det_model_path", "")
+            self.app.app_settings.config.models.yolo_det_path = ""
             if self.app.tracker:
                 self.app.tracker.unload_detection_model()
             self.app.logger.info("YOLO Detection Model unloaded.", extra={'status_message': True})
         elif model_type == 'pose':
             self.app.yolo_pose_model_path_setting = ""
-            self.app.app_settings.set("yolo_pose_model_path", "")
+            self.app.app_settings.config.models.yolo_pose_path = ""
             if self.app.tracker:
                 self.app.tracker.unload_pose_model()
             self.app.logger.info("YOLO Pose Model unloaded.", extra={'status_message': True})
@@ -70,6 +71,7 @@ class AppModelManager:
             return
 
         try:
+            from ultralytics import YOLO  # lazy: pulls torch
             self.app.logger.info(f"Temporarily loading model to cache class names: {os.path.basename(model_path)}")
             # This is the potentially slow operation that can freeze the UI.
             temp_model = YOLO(model_path)
@@ -169,23 +171,24 @@ class AppModelManager:
                     if is_mac_arm:
                         self.app.logger.info(f"Attempting to convert detection model to CoreML (is_mac_arm={is_mac_arm})...")
                         try:
+                            from ultralytics import YOLO  # lazy: pulls torch
                             model = YOLO(det_model_path_pt)
                             self.app.logger.info(f"YOLO model loaded, starting export to CoreML format...")
                             model.export(format="coreml")
                             self.app.logger.info(f"Converted detection model to CoreML: {det_model_path_mlpackage}")
                             # Set the CoreML model path in settings
-                            self.app.app_settings.set("yolo_det_model_path", det_model_path_mlpackage)
+                            self.app.app_settings.config.models.yolo_det_path = det_model_path_mlpackage
                             self.app.yolo_detection_model_path_setting = det_model_path_mlpackage
                             self.app.yolo_det_model_path = det_model_path_mlpackage
                         except Exception as e:
                             self.app.logger.error(f"Failed to convert detection model to CoreML: {e}")
                             # Fall back to PT model if CoreML conversion fails
-                            self.app.app_settings.set("yolo_det_model_path", det_model_path_pt)
+                            self.app.app_settings.config.models.yolo_det_path = det_model_path_pt
                             self.app.yolo_detection_model_path_setting = det_model_path_pt
                             self.app.yolo_det_model_path = det_model_path_pt
                     else:
                         # Set the PT model path in settings for non-macOS ARM
-                        self.app.app_settings.set("yolo_det_model_path", det_model_path_pt)
+                        self.app.app_settings.config.models.yolo_det_path = det_model_path_pt
                         self.app.yolo_detection_model_path_setting = det_model_path_pt
                         self.app.yolo_det_model_path = det_model_path_pt
                 else:
@@ -193,16 +196,16 @@ class AppModelManager:
             else:
                 self.app.logger.info("Detection model already exists")
                 # Check if path is not set in settings and auto-configure
-                current_setting = self.app.app_settings.get("yolo_det_model_path", "")
+                current_setting = self.app.app_settings.config.models.yolo_det_path
                 if not current_setting or not os.path.exists(current_setting):
                     # Prefer .mlpackage on macOS ARM if it exists
                     if is_mac_arm and os.path.exists(det_model_path_mlpackage):
-                        self.app.app_settings.set("yolo_det_model_path", det_model_path_mlpackage)
+                        self.app.app_settings.config.models.yolo_det_path = det_model_path_mlpackage
                         self.app.yolo_detection_model_path_setting = det_model_path_mlpackage
                         self.app.yolo_det_model_path = det_model_path_mlpackage
                         self.app.logger.info(f"Auto-configured detection model path to: {det_model_path_mlpackage}")
                     elif os.path.exists(det_model_path_pt):
-                        self.app.app_settings.set("yolo_det_model_path", det_model_path_pt)
+                        self.app.app_settings.config.models.yolo_det_path = det_model_path_pt
                         self.app.yolo_detection_model_path_setting = det_model_path_pt
                         self.app.yolo_det_model_path = det_model_path_pt
                         self.app.logger.info(f"Auto-configured detection model path to: {det_model_path_pt}")
@@ -224,23 +227,24 @@ class AppModelManager:
                     if is_mac_arm:
                         self.app.logger.info(f"Attempting to convert pose model to CoreML (is_mac_arm={is_mac_arm})...")
                         try:
+                            from ultralytics import YOLO  # lazy: pulls torch
                             model = YOLO(pose_model_path_pt)
                             self.app.logger.info(f"YOLO pose model loaded, starting export to CoreML format...")
                             model.export(format="coreml")
                             self.app.logger.info(f"Converted pose model to CoreML: {pose_model_path_mlpackage}")
                             # Set the CoreML model path in settings
-                            self.app.app_settings.set("yolo_pose_model_path", pose_model_path_mlpackage)
+                            self.app.app_settings.config.models.yolo_pose_path = pose_model_path_mlpackage
                             self.app.yolo_pose_model_path_setting = pose_model_path_mlpackage
                             self.app.yolo_pose_model_path = pose_model_path_mlpackage
                         except Exception as e:
                             self.app.logger.error(f"Failed to convert pose model to CoreML: {e}")
                             # Fall back to PT model if CoreML conversion fails
-                            self.app.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
+                            self.app.app_settings.config.models.yolo_pose_path = pose_model_path_pt
                             self.app.yolo_pose_model_path_setting = pose_model_path_pt
                             self.app.yolo_pose_model_path = pose_model_path_pt
                     else:
                         # Set the PT model path in settings for non-macOS ARM
-                        self.app.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
+                        self.app.app_settings.config.models.yolo_pose_path = pose_model_path_pt
                         self.app.yolo_pose_model_path_setting = pose_model_path_pt
                         self.app.yolo_pose_model_path = pose_model_path_pt
                 else:
@@ -248,11 +252,11 @@ class AppModelManager:
             else:
                 self.app.logger.info("Pose model already exists")
                 # Check if path is not set in settings and auto-configure existing model
-                current_setting = self.app.app_settings.get("yolo_pose_model_path", "")
+                current_setting = self.app.app_settings.config.models.yolo_pose_path
                 if not current_setting or not os.path.exists(current_setting):
                     if os.path.exists(pose_model_path_pt):
                         self.app.logger.info("Auto-configuring existing pose model path in settings")
-                        self.app.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
+                        self.app.app_settings.config.models.yolo_pose_path = pose_model_path_pt
                         self.app.yolo_pose_model_path_setting = pose_model_path_pt
                         self.app.yolo_pose_model_path = pose_model_path_pt
 

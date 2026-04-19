@@ -44,9 +44,8 @@ class MainMenu:
         return ""
 
     def _tl_label(self, t_num):
-        """Short timeline label with axis, e.g. 'T1 (stroke)'."""
         axis = self._axis_label_for(t_num)
-        return f"T{t_num} ({axis})" if axis else f"Timeline {t_num}"
+        return f"F{t_num} ({axis})" if axis else f"Funscript {t_num}"
 
     def _get_focused_timeline_editor(self):
         """Get the timeline editor that was last edited."""
@@ -200,12 +199,11 @@ class MainMenu:
         if not app_state.show_timeline_selection_popup:
             return
 
-        name = "Select Reference Timeline##TimelineSelectPopup"
-        # 450x220 used for centering; height auto
+        name = "Select Reference Funscript##TimelineSelectPopup"
         if begin_modal_centered(name, 450, 220):
-            imgui.text("Which timeline has the correct timing?")
+            imgui.text("Which funscript has the correct timing?")
             imgui.text_wrapped(
-                "The offset will be calculated for the other timeline "
+                "The offset will be calculated for the other funscript "
                 "and applied to it."
             )
             imgui.separator()
@@ -237,7 +235,7 @@ class MainMenu:
         if not app_state.show_timeline_comparison_results_popup:
             return
 
-        name = "Timeline Comparison Results##TimelineResultsPopup"
+        name = "Funscript Comparison Results##TimelineResultsPopup"
         if begin_modal_centered(name, 400, 240): # 400x240 used for centering; height auto
             results = app_state.timeline_comparison_results
             if results:
@@ -258,13 +256,13 @@ class MainMenu:
                     else:
                         frame_suffix = ""
 
-                imgui.text("Reference: Timeline %d (%d strokes)" % (ref_num, ref_strokes))
-                imgui.text("Target:    Timeline %s (%d strokes)" % (str(target_num), target_strokes))
+                imgui.text("Reference: Funscript %d (%d strokes)" % (ref_num, ref_strokes))
+                imgui.text("Target:    Funscript %s (%d strokes)" % (str(target_num), target_strokes))
                 imgui.separator()
 
                 imgui.text_wrapped(
-                    "The Target (T%s) appears to be delayed relative to the "
-                    "Reference (T%d) by:" % (str(target_num), ref_num)
+                    "The Target (F%s) appears to be delayed relative to the "
+                    "Reference (F%d) by:" % (str(target_num), ref_num)
                 )
                 imgui.push_style_color(imgui.COLOR_TEXT, *self.FRAME_OFFSET)
                 imgui.text("  %d milliseconds%s" % (offset_ms, frame_suffix))
@@ -272,7 +270,7 @@ class MainMenu:
                 imgui.separator()
 
                 if imgui.button(
-                    "Apply Offset to Timeline %s" % str(target_num), width=-1
+                    "Apply Offset to Funscript %s" % str(target_num), width=-1
                 ):
                     fs_proc = app.funscript_processor
                     op_desc = "Apply Timeline Offset (%dms)" % offset_ms
@@ -287,7 +285,7 @@ class MainMenu:
                         funscript_obj.shift_points_time(axis=axis_name, time_delta_ms=-offset_ms)
                         fs_proc._post_mutation_refresh(target_num, op_desc)
                         app.logger.info(
-                            "Applied %dms offset to Timeline %s." % (offset_ms, str(target_num)),
+                            "Applied %dms offset to Funscript %s." % (offset_ms, str(target_num)),
                             extra={"status_message": True},
                         )
 
@@ -388,24 +386,13 @@ class MainMenu:
         self._feat_device = _is_feature_available("device_control")
         self._feat_streamer = _is_feature_available("streamer")
 
-        # Track when the project first went dirty since last save (for pulse).
-        pm = getattr(self.app, 'project_manager', None)
-        if pm is not None:
-            if pm.project_dirty and pm.first_dirty_time is None:
-                import time as _t
-                pm.first_dirty_time = _t.time()
-            elif not pm.project_dirty:
-                pm.first_dirty_time = None
-
         if imgui.begin_main_menu_bar():
-            # Slow red pulse over the menu bar after N minutes of unsaved edits
-            self._render_unsaved_pulse(pm)
-            # Render logo at the start of menu bar
             self._render_menu_bar_logo()
 
             self._render_file_menu(app_state, file_mgr)
             self._render_edit_menu(app_state)
             self._render_markers_menu(app_state)
+            self._render_video_menu(app_state)
             self._render_view_menu(app_state, stage_proc)
             self._render_tools_menu(app_state, file_mgr)
             self._render_update_menu()
@@ -417,9 +404,6 @@ class MainMenu:
 
             # Render Streamer indicator
             self._render_native_sync_indicator()
-
-            # Render Supporter badge (lit only when a real supporter addon is installed)
-            self._render_supporter_badge()
 
             imgui.end_main_menu_bar()
 
@@ -690,7 +674,6 @@ class MainMenu:
 
             imgui.separator()
 
-            # GUI Scale
             _settings = self.app.app_settings
             if imgui.begin_menu("GUI Scale"):
                 import config.constants as _cfg
@@ -700,6 +683,21 @@ class MainMenu:
                     if imgui.menu_item(label, selected=is_selected)[0] and not is_selected:
                         _settings.set("global_font_scale", val)
                         _settings.set("auto_system_scaling_enabled", False)
+                imgui.end_menu()
+
+            if imgui.begin_menu("Theme"):
+                cur_theme = str(_settings.get("theme", "dark")).lower()
+                for label, val in (("Dark", "dark"), ("Light", "light")):
+                    is_selected = cur_theme == val
+                    if imgui.menu_item(label, selected=is_selected)[0] and not is_selected:
+                        _settings.set("theme", val)
+                        try:
+                            from config.theme_manager import apply_theme_live
+                            apply_theme_live(val)
+                            self.app.notify(f"Switched to {label} theme.", "success", 2.0)
+                        except Exception as e:
+                            self.app.logger.warning(f"Live theme swap failed: {e}")
+                            self.app.notify("Theme applied; restart if anything looks wrong.", "info", 3.0)
                 imgui.end_menu()
 
             imgui.separator()
@@ -763,6 +761,7 @@ class MainMenu:
 
         # Quad-block toggles (fixed mode only)
         if imgui.begin_menu("Side Blocks"):
+            ui_cfg = self.app.app_settings.config.ui
             for label, attr in (
                 ("Left Top: Control Panel", "show_left_top_block"),
                 ("Left Bottom: Chapters & Bookmarks", "show_left_bottom_block"),
@@ -773,6 +772,7 @@ class MainMenu:
                 clicked, val = imgui.menu_item(label, selected=cur)
                 if clicked:
                     setattr(app_state, attr, val)
+                    setattr(ui_cfg, attr, val)
                     pm.project_dirty = True
             imgui.end_menu()
 
@@ -785,7 +785,7 @@ class MainMenu:
         pm = app.project_manager
         settings = app.app_settings
 
-        if imgui.begin_menu("Timelines"):
+        if imgui.begin_menu("Funscripts"):
             # Helper to get axis label from tracker's funscript
             def _axis_label_for(t_num):
                 if app.tracker and hasattr(app.tracker, 'funscript'):
@@ -798,7 +798,7 @@ class MainMenu:
                 (2, "show_funscript_interactive_timeline2", "toggle_timeline2"),
             ):
                 axis_label = _axis_label_for(t_num)
-                label = f"Timeline {t_num} ({axis_label})" if axis_label else f"Interactive Timeline {t_num}"
+                label = f"Funscript {t_num} ({axis_label})" if axis_label else f"Funscript {t_num}"
                 cur = getattr(app_state, attr)
                 hint = self._get_shortcut_display(sc_key) if sc_key else ""
                 clicked, val = imgui.menu_item(label, hint, selected=cur)
@@ -820,7 +820,7 @@ class MainMenu:
                     vis_attr = f"show_funscript_interactive_timeline{t_num}"
                     cur = getattr(app_state, vis_attr, False)
                     axis_label = _axis_label_for(t_num)
-                    label = f"Timeline {t_num} ({axis_label})" if axis_label else f"Interactive Timeline {t_num}"
+                    label = f"Funscript {t_num} ({axis_label})" if axis_label else f"Funscript {t_num}"
                     clicked, val = imgui.menu_item(label, selected=cur)
                     if clicked:
                         setattr(app_state, vis_attr, val)
@@ -967,6 +967,85 @@ class MainMenu:
 
             imgui.end_menu()
 
+    def _render_video_menu(self, app_state):
+        """Top-level "Video" menu: Source Type / Display Mode / VR Eye radios."""
+        import threading
+        processor = getattr(self.app, 'processor', None)
+        if processor is None:
+            return
+        settings = self.app.app_settings
+        video_loaded = bool(getattr(self.app.file_manager, 'video_path', None))
+
+        if not imgui.begin_menu("Video", True):
+            return
+
+        is_vr = (processor.determined_video_type == 'VR'
+                 or processor.video_type_setting == 'VR')
+
+        imgui.text_disabled("Source Type")
+        cur_src = getattr(processor, 'video_type_setting', 'auto')
+        for label, val in (("Auto-detect", "auto"),
+                           ("Force 2D", "2D"),
+                           ("Force VR", "VR")):
+            clicked, _ = imgui.menu_item(label, selected=(cur_src == val))
+            if clicked and cur_src != val:
+                processor.set_active_video_type_setting(val)
+                if video_loaded:
+                    threading.Thread(
+                        target=processor.reapply_video_settings,
+                        daemon=True, name='SourceTypeReapply').start()
+
+        imgui.separator()
+
+        imgui.text_disabled("Display Mode")
+        cur_mode = settings.get('vr_display_mode', 'shader_dewarp')
+        if cur_mode == 'v360_baked':
+            cur_mode = 'shader_dewarp'
+        for label, val in (("Shader dewarp", "shader_dewarp"),
+                           ("Passthrough (raw)", "passthrough")):
+            clicked, _ = imgui.menu_item(
+                label, selected=(cur_mode == val), enabled=is_vr)
+            if clicked and cur_mode != val and is_vr:
+                settings.set('vr_display_mode', val)
+                if video_loaded:
+                    threading.Thread(
+                        target=processor.reapply_display_settings,
+                        daemon=True, name='DisplayModeReapply').start()
+
+        cur_lock = bool(settings.get('vr_shader_lock_to_tracker', False))
+        lock_enabled = is_vr and cur_mode == 'shader_dewarp'
+        clicked, new_lock = imgui.menu_item(
+            "Lock view to tracker (yaw=0)",
+            selected=cur_lock, enabled=lock_enabled)
+        if clicked and lock_enabled and new_lock != cur_lock:
+            settings.set('vr_shader_lock_to_tracker', bool(new_lock))
+
+        cur_ss = bool(settings.get('vr_shader_supersample', True))
+        clicked, new_ss = imgui.menu_item(
+            "Supersample shader (2x)",
+            selected=cur_ss, enabled=lock_enabled or cur_mode == 'shader_dewarp')
+        if clicked and new_ss != cur_ss:
+            settings.set('vr_shader_supersample', bool(new_ss))
+
+        imgui.separator()
+
+        imgui.text_disabled("VR Eye")
+        from video import vr_panel as _vr_panel
+        cur_eye = _vr_panel.read_setting(settings, default=_vr_panel.EYE_LEFT)
+        for label, val in (("Left", _vr_panel.EYE_LEFT),
+                           ("Right", _vr_panel.EYE_RIGHT),
+                           ("Full (both panels)", _vr_panel.EYE_FULL)):
+            clicked, _ = imgui.menu_item(
+                label, selected=(cur_eye == val), enabled=is_vr)
+            if clicked and cur_eye != val and is_vr:
+                settings.set('vr_panel_selection', val)
+                if video_loaded:
+                    threading.Thread(
+                        target=processor.reapply_video_settings,
+                        daemon=True, name='VREyeReapply').start()
+
+        imgui.end_menu()
+
     def _render_video_overlays_submenu(self, app_state, stage_proc):
         pm = self.app.project_manager
         app = self.app
@@ -979,7 +1058,7 @@ class MainMenu:
             )
             if clicked:
                 app_state.show_video_feed = val
-                app.app_settings.set("show_video_feed", val)
+                app.app_settings.config.ui.show_video_feed = val
                 pm.project_dirty = True
 
             imgui.separator()
@@ -1017,10 +1096,10 @@ class MainMenu:
             # Overlay mode for 3D Simulator
             clicked, val = imgui.menu_item(
                 "3D Simulator on Video",
-                selected=app.app_settings.get('simulator_3d_overlay_mode', False)
+                selected=app.app_settings.config.ui.simulator_3d_overlay_mode
             )
             if clicked:
-                app.app_settings.set('simulator_3d_overlay_mode', val)
+                app.app_settings.config.ui.simulator_3d_overlay_mode = val
 
             imgui.end_menu()
 
@@ -1070,22 +1149,21 @@ class MainMenu:
                 and fs_proc.get_actions("primary")
                 and fs_proc.get_actions("secondary")
             )
-            if _menu_item_simple("Compare Timelines...", enabled=can_compare):
+            if _menu_item_simple("Compare Funscripts...", enabled=can_compare):
                 trigger = getattr(app, "trigger_timeline_comparison", None)
                 if trigger:
                     trigger()
             if imgui.is_item_hovered():
                 imgui.set_tooltip(
-                    "Compares the signals on Timeline 1 and Timeline 2 to "
+                    "Compares the signals on Funscript 1 and Funscript 2 to "
                     "calculate the optimal time offset."
                 )
 
             imgui.separator()
 
-            # TensorRT compilation (CUDA only)
             if not hasattr(app, "tensorrt_compiler_window"):
                 app.tensorrt_compiler_window = None
-            if _menu_item_simple("Compile CUDA .engine..."):
+            if getattr(app_state, 'show_advanced_options', False) and _menu_item_simple("Compile CUDA .engine..."):
                 from application.gui_components.engine_compiler.tensorrt_compiler_window import (  # noqa: E501
                     TensorRTCompilerWindow,
                 )
@@ -1161,6 +1239,7 @@ class MainMenu:
         app = self.app
         settings = app.app_settings
         updater = app.updater
+        show_advanced = getattr(app.app_state_ui, 'show_advanced_options', False)
 
         if imgui.begin_menu("Update", True):
             in_progress = getattr(updater, "update_in_progress", False)
@@ -1186,23 +1265,24 @@ class MainMenu:
                 if imgui.is_item_hovered():
                     imgui.set_tooltip("Check the remote for a newer version.")
 
-            imgui.separator()
+            if show_advanced:
+                imgui.separator()
 
-            for key, label, default in (
-                ("updater_check_on_startup", "Check for Updates on Startup", True),
-                ("updater_check_periodically", "Check Periodically (Hourly)", True),
-            ):
-                cur = settings.get(key, default)
-                clicked, new_val = imgui.menu_item(label, selected=cur)
-                if clicked and new_val != cur:
-                    settings.set(key, new_val)
+                for key, label, default in (
+                    ("updater_check_on_startup", "Check for Updates on Startup", True),
+                    ("updater_check_periodically", "Check Periodically (Hourly)", True),
+                ):
+                    cur = settings.get(key, default)
+                    clicked, new_val = imgui.menu_item(label, selected=cur)
+                    if clicked and new_val != cur:
+                        settings.set(key, new_val)
 
-            imgui.separator()
+                imgui.separator()
 
-            if _menu_item_simple("Select Update Commit..."):
-                app.app_state_ui.show_update_settings_dialog = True
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Browse and select a specific version to update to.")
+                if _menu_item_simple("Select Update Commit..."):
+                    app.app_state_ui.show_update_settings_dialog = True
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Browse and select a specific version to update to.")
 
             imgui.end_menu()
 
@@ -1325,29 +1405,6 @@ class MainMenu:
 
             imgui.end_menu()
 
-    def _render_unsaved_pulse(self, pm):
-        """Slow red pulse across the menu bar background after N minutes of
-        unsaved edits. Non-modal nag, silent until threshold elapses.
-        Threshold + period read from settings; defaults match reference editor (300s, 2s)."""
-        if pm is None or not pm.first_dirty_time:
-            return
-        import math as _m
-        import time as _t
-        settings = getattr(self.app, 'app_settings', None)
-        threshold = float(settings.get("unsaved_pulse_threshold_s", 300.0)) if settings else 300.0
-        period = max(0.5, float(settings.get("unsaved_pulse_period_s", 2.0))) if settings else 2.0
-        elapsed = _t.time() - pm.first_dirty_time
-        if elapsed < threshold:
-            return
-        # 0..1 sin wave -> alpha
-        phase = (elapsed % period) / period
-        alpha = 0.10 + 0.20 * (0.5 + 0.5 * _m.sin(phase * 2.0 * _m.pi))
-        dl = imgui.get_window_draw_list()
-        x, y = imgui.get_window_position()
-        w, h = imgui.get_window_size()
-        dl.add_rect_filled(x, y, x + w, y + h,
-                           imgui.get_color_u32_rgba(0.95, 0.20, 0.20, alpha))
-
     def _render_menu_bar_logo(self):
         """Render FunGen logo at the start of menu bar."""
         # Load logo texture
@@ -1369,45 +1426,6 @@ class MainMenu:
 
             # Add spacing after logo before menus
             imgui.same_line(spacing=8)
-
-    def _is_supporter_addon_installed(self) -> bool:
-        """True only when an actual supporter addon is present on disk.
-
-        Distinct from is_feature_available('patreon_features') which is
-        hardcoded True because the original patreon_features modules (live
-        trackers, batch, live capture) now ship in core. The badge is
-        meant to highlight a real paid/supporter addon installation, so
-        we check for an explicit marker file the addon would drop in.
-        """
-        import os
-        marker = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "patreon_features", "__init__.py",
-        )
-        return os.path.exists(marker)
-
-    def _render_supporter_badge(self):
-        """Muted tip-jar badge. Subtle blue-gray by default; dim green when a
-        supporter addon is detected. Click opens paypal.me/k00gar."""
-        installed = self._is_supporter_addon_installed()
-        if installed:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.22, 0.38, 0.26, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.28, 0.46, 0.32, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.18, 0.32, 0.22, 1.0)
-            clicked = imgui.small_button("Tip Jar: supporter")
-            imgui.pop_style_color(3)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Supporter addon detected - thanks!\nClick to open paypal.me/k00gar")
-        else:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.26, 0.30, 0.38, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.34, 0.38, 0.48, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.20, 0.24, 0.32, 1.0)
-            clicked = imgui.small_button("Tip Jar")
-            imgui.pop_style_color(3)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Leave a tip - opens paypal.me/k00gar")
-        if clicked:
-            webbrowser.open("https://paypal.me/k00gar")
 
     def _render_device_control_indicator(self):
         """Render simple device control status indicator button."""
@@ -1482,7 +1500,7 @@ class MainMenu:
                     if self._feat_device:
                         imgui.set_tooltip("Device control not initialized\nCheck Device Control tab in Control Panel")
                     else:
-                        imgui.set_tooltip("Add-on available at paypal.me/k00gar")
+                        imgui.set_tooltip("Available as a FunGen add-on: paypal.me/k00gar")
 
     def _render_native_sync_indicator(self):
         """Render Streamer status indicator button."""
@@ -1549,7 +1567,7 @@ class MainMenu:
                     if self._feat_streamer:
                         imgui.set_tooltip("Streamer not initialized\nCheck Streamer tab in Control Panel")
                     else:
-                        imgui.set_tooltip("Add-on available at paypal.me/k00gar")
+                        imgui.set_tooltip("Available as a FunGen add-on: paypal.me/k00gar")
 
     # ==================== CHAPTER FILE OPERATION CALLBACKS ====================
 

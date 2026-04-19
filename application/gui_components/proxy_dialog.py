@@ -28,6 +28,7 @@ from video.proxy_builder import (
     proxy_path_for, resolve_proxy_target_path, is_valid_proxy,
     is_proxy_filename, should_suggest_proxy,
 )
+from config.constants_colors import CurrentTheme
 
 
 class ProxyController:
@@ -225,7 +226,7 @@ class ProxyController:
                         self._suggest_custom_folder = picked
                 except Exception as e:
                     self.app.logger.warning(f"Folder picker failed: {e}")
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+        imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.DESCRIPTION_TEXT)
         imgui.text_wrapped(f"  -> {resolved_target}")
         imgui.pop_style_color()
         imgui.spacing()
@@ -235,8 +236,12 @@ class ProxyController:
         imgui.spacing()
 
         create_clicked = imgui.button("Create Proxy", width=140)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Transcode the current video to an all-I-frame proxy for instant scrubbing. Original file untouched.")
         imgui.same_line()
         skip_clicked = imgui.button("Skip", width=100)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Continue without a proxy. Scrubbing stays slow, original video plays normally.")
 
         if create_clicked:
             self._apply_dont_ask()
@@ -291,7 +296,7 @@ class ProxyController:
                            0.85, 0.85, 0.95, 1.0)
         imgui.spacing()
         imgui.text(os.path.basename(self._progress_source))
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.65, 1.0)
+        imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.GRAY_SUBDUED)
         imgui.text_wrapped(f"-> {self._progress_target}")
         imgui.pop_style_color()
         imgui.separator()
@@ -313,7 +318,7 @@ class ProxyController:
             # Placeholder while ffmpeg warms up so the modal doesn't
             # suddenly grow by 300px on the first frame.
             placeholder_h = 200.0
-            imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.10, 0.10, 0.12, 1.0)
+            imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, *CurrentTheme.PANEL_BG_DARK)
             imgui.begin_child("##proxy_prev_placeholder",
                               width=0, height=placeholder_h, border=True)
             msg = "Waiting for first preview frame..."
@@ -369,7 +374,7 @@ class ProxyController:
 
     def _apply_dont_ask(self) -> None:
         if self._suggest_dont_ask:
-            self.app.app_settings.set("video_proxy_ask_dismissed", True)
+            self.app.app_settings.config.proxy.ask_dismissed = True
 
     def _start_encode(self, source: str, vr_format: str,
                       duration_s: float, info: dict) -> None:
@@ -418,12 +423,22 @@ class ProxyController:
             self._progress_eta_s = eta_s
             self._last_progress_ts = time.time()
 
+        width = int(info.get("width", 0) or 0)
+        height = int(info.get("height", 0) or 0)
+        proc = self.app.processor
+        vr_fov = int(getattr(proc, "vr_fov", 0) or 0) if proc else 0
+        vr_pitch = float(getattr(proc, "vr_pitch", 0.0) or 0.0) if proc else 0.0
+
         job = ProxyJob(
             source_path=source,
             vr_input_format=vr_format,
             duration_s=duration_s,
             source_nb_frames=nb_frames,
             source_fps=fps,
+            source_width=width,
+            source_height=height,
+            vr_fov=vr_fov,
+            vr_pitch=vr_pitch,
             progress_cb=_on_progress,
             cancel_event=self._cancel_event,
             target_path=target,
@@ -527,7 +542,7 @@ class ProxyController:
                                       extra={"status_message": True})
             return
         # Success: offer to swap source.
-        if self.app.app_settings.get("video_proxy_autoswitch_on_complete", True):
+        if self.app.app_settings.config.proxy.autoswitch_on_complete:
             self._swap_to_proxy()
         self.app.logger.info("Proxy ready.",
                              extra={"status_message": True})

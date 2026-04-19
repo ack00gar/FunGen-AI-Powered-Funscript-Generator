@@ -1,8 +1,8 @@
 """
-VR Hybrid Chapter-Aware Tracker V2 — Single-pass architecture.
+VR Hybrid Chapter-Aware Tracker V2 - Single-pass architecture.
 
 Same output as V1 but ~1.7x faster:
-- Single FFmpeg pass: v360 dewarp → sparse YOLO + continuous DIS flow
+- Single FFmpeg pass: v360 dewarp -> sparse YOLO + continuous DIS flow
 - No preprocessed video encoding/decoding, no disk I/O
 - Sparse ROI interpolation (reuses last known ROI between YOLO frames)
 - ROI shift detection to prevent fake flow spikes
@@ -59,14 +59,14 @@ except ImportError:
 
 from config import constants as config_constants
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+# -- Constants -----------------------------------------------------------------
 
 SPARSE_FPS = 2            # Chapter classification YOLO rate
 ROI_YOLO_INTERVAL = 5     # ROI tracking: run YOLO every Nth frame for tight ROI
 DEFAULT_CONFIDENCE = 0.25
 ROI_PADDING_FACTOR = 0.3
 MIN_ROI_SIZE = 16
-ROI_SHIFT_THRESHOLD = 12  # pixels — reset prev_gray if ROI shifts more than this
+ROI_SHIFT_THRESHOLD = 12  # pixels - reset prev_gray if ROI shifts more than this
 
 # Post-processing (same as V1)
 FLOW_MEDIAN_WINDOW = 5
@@ -104,7 +104,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
         return TrackerMetadata(
             name="OFFLINE_VR_HYBRID_CHAPTER",
             display_name="VR Hybrid Chapter-Aware (ROI Flow)",
-            description="v2.0.0 — Single-pass: sparse YOLO + continuous DIS flow, ~4x faster",
+            description="v2.0.0 - Single-pass: sparse YOLO + continuous DIS flow, ~4x faster",
             category="offline",
             version="2.0.0",
             author="FunGen",
@@ -202,7 +202,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
             raw_flow = result['raw_flow']  # {frame_idx: (time_ms, dy, dx)}
             fps = result['fps']
             sparse_detections = result['sparse_detections']
-            frame_boxes = result['frame_boxes']  # frame_idx → {penis, contacts}
+            frame_boxes = result['frame_boxes']  # frame_idx -> {penis, contacts}
 
             self.logger.info(f"Detected {len(chapters)} chapters:")
             for ch in chapters:
@@ -295,7 +295,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
             self.processing_active = False
             return OfflineProcessingResult(success=False, error_message=str(e))
 
-    # ─── Settings ──────────────────────────────────────────────────────────────
+    # --- Settings --------------------------------------------------------------
 
     def _load_settings(self):
         if self.app:
@@ -306,7 +306,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                 self.vr_fov = getattr(self.app.processor, 'vr_fov', 190)
                 self.vr_pitch = getattr(self.app.processor, 'vr_pitch', 0)
 
-    # ─── Single Pass ──────────────────────────────────────────────────────────
+    # --- Single Pass ----------------------------------------------------------
 
     def _single_pass(self, video_path: str, output_dir: str,
                      progress_callback: Optional[Callable]) -> Optional[Dict]:
@@ -359,14 +359,21 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
         frame_positions = {}
         penis_frames = set()
         frame_contact_info = {}
-        frame_boxes = {}  # frame_idx → {penis: tuple, contacts: [tuple]}
+        frame_boxes = {}  # frame_idx -> {penis: tuple, contacts: [tuple]}
         sparse_detections = {}
-        raw_flow = {}  # frame_idx → (time_ms, dy, dx)
+        raw_flow = {}  # frame_idx -> (time_ms, dy, dx)
         upper_motion_sum = 0.0
         lower_motion_sum = 0.0
         yolo_count = 0
         flow_count = 0
         t_start = time.time()
+
+        # Rolling 5s fps window: deque of (timestamp, frame_idx) so the
+        # progress callback can report current throughput instead of the
+        # lifetime average that drags through any cold-start hiccups.
+        from collections import deque as _deque
+        _fps_window = _deque(maxlen=512)
+        _FPS_WINDOW_S = 5.0
 
         # Per-stage timing (printed once at end) to spot future regressions.
         t_decode = t_cvt = t_yolo = t_dis = 0.0
@@ -458,12 +465,28 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                 if self.stop_event and self.stop_event.is_set():
                     break
 
+                # Publish the decoded frame so the GUI display path can
+                # render a live preview during the offline pass. The
+                # video_display loop's CPU upload path picks this up via
+                # the version bump; cost is two assignments + a glTexSubImage.
+                with vp.frame_lock:
+                    vp.current_frame = frame
+                    vp.current_frame_index = frame_idx
+                    vp._frame_version += 1
+
                 _t0 = time.perf_counter()
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 t_cvt += time.perf_counter() - _t0
                 h, w = gray.shape[:2]
 
-                # ── YOLO: submit async (runs on worker thread) + drain results ──
+                # Rolling 5s fps window: trim entries older than 5 s and
+                # append the current sample.
+                _now_w = time.time()
+                _fps_window.append((_now_w, frame_idx))
+                while _fps_window and (_now_w - _fps_window[0][0]) > _FPS_WINDOW_S:
+                    _fps_window.popleft()
+
+                # -- YOLO: submit async (runs on worker thread) + drain results --
                 is_chapter_frame = (frame_idx % chapter_skip == 0)
                 run_yolo = (frame_idx % roi_skip == 0) or is_chapter_frame
                 if run_yolo:
@@ -471,7 +494,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                         yolo_count += 1
                 yolo_worker.drain()
 
-                # ── DIS flow (every frame) ──
+                # -- DIS flow (every frame) --
                 roi = current_roi
                 if roi is None:
                     # Fallback: center 60% of frame
@@ -496,7 +519,16 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                 if progress_callback and frame_idx % 500 == 0 and total_frames > 0:
                     pct = min(75, int(75 * frame_idx / total_frames))
                     elapsed = time.time() - t_start
-                    avg_fps = frame_idx / max(0.001, elapsed)
+                    # avg_fps reports the rolling 5 s window so the user
+                    # sees current throughput; falls back to lifetime
+                    # average until the window has at least two samples.
+                    if len(_fps_window) >= 2:
+                        _w_t0, _w_i0 = _fps_window[0]
+                        _w_t1, _w_i1 = _fps_window[-1]
+                        _w_dt = _w_t1 - _w_t0
+                        avg_fps = (_w_i1 - _w_i0) / _w_dt if _w_dt > 0 else 0.0
+                    else:
+                        avg_fps = frame_idx / max(0.001, elapsed)
                     eta_s = (total_frames - frame_idx) / avg_fps if avg_fps > 0 else 0.0
                     # Average per-frame ms for the Video Pipeline perf tab.
                     # YOLO timing is read from the async worker's running
@@ -575,7 +607,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
             'lower_motion_sum': lower_motion_sum,
         }
 
-    # ─── Helpers ──────────────────────────────────────────────────────────────
+    # --- Helpers --------------------------------------------------------------
 
     def _roi_shifted(self, old_roi, new_roi) -> bool:
         if old_roi is None or new_roi is None:
@@ -589,7 +621,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
         """Detect motion inversion from upper/lower flow ratio within chapter."""
         upper_sum = 0.0
         lower_sum = 0.0
-        # Use the global sums (simple approach — could be per-chapter)
+        # Use the global sums (simple approach - could be per-chapter)
         # For now rely on the stored raw_flow dy signs
         # TODO: per-chapter inversion detection
         return False  # Default: no inversion (same as V1 for most content)
@@ -639,7 +671,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
             dx = np.median(flow[..., 0])
         return dy, dx
 
-    # ─── Post-processing (same as V1) ────────────────────────────────────────
+    # --- Post-processing (same as V1) ----------------------------------------
 
     def _postprocess_chapter_signal(self, raw_positions, chapter_type, fps, invert):
         if len(raw_positions) < SAVGOL_WINDOW:
@@ -725,12 +757,12 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
             seen[a['at']] = a
         primary_actions = sorted(seen.values(), key=lambda a: a['at'])
 
-        self.logger.info(f"  Post-process: {len(raw_positions)} raw → {len(primary_actions)} keyframes "
+        self.logger.info(f"  Post-process: {len(raw_positions)} raw -> {len(primary_actions)} keyframes "
                          f"({len(peaks)} peaks, {len(valleys)} valleys)")
 
         return primary_actions, []
 
-    # ─── Merge ────────────────────────────────────────────────────────────────
+    # --- Merge ----------------------------------------------------------------
 
     def _merge_chapter_results(self, chapters, chapter_results, fps):
         from funscript.multi_axis_funscript import MultiAxisFunscript
@@ -750,7 +782,7 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                         all_secondary.extend(result['secondary_actions'])
                     continue
 
-            # Non-dense or failed → hold at 100
+            # Non-dense or failed -> hold at 100
             if ch['position'] in ('Close up', 'Not Relevant') or not ch.get('dense'):
                 all_primary.append({'at': start_ms, 'pos': 100})
                 all_primary.append({'at': end_ms, 'pos': 100})

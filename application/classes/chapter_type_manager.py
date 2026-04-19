@@ -247,7 +247,7 @@ class ChapterTypeManager:
         self.recent_types.insert(0, short_name)
 
         # Keep only recent N types
-        max_recent = self.app.app_settings.get("chapter_type_recent_max", 5)
+        max_recent = self.app.app_settings.config.chapter.type_recent_max
         self.recent_types = self.recent_types[:max_recent]
 
     def get_usage_count(self, short_name: str) -> int:

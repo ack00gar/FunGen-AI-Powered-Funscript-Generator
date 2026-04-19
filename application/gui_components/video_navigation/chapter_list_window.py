@@ -28,7 +28,7 @@ class ChapterListWindow:
         imgui.set_next_window_size(850, 400, condition=imgui.APPEARING)
 
         is_open, app_state.show_chapter_list_window = imgui.begin(
-            "Chapter List##ChapterListWindow",
+            "FunGen: Chapter List##ChapterListWindow",
             closable=True,
             flags=window_flags
         )

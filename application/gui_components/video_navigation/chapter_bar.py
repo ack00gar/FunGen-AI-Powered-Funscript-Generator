@@ -13,45 +13,15 @@ class ChapterBarMixin:
     """Mixin fragment for VideoNavigationUI."""
 
     def _render_chapter_bar(self, fs_proc, total_video_frames: int, bar_width: float, bar_height: float):
-        # Reset flag at start of each frame to prevent stale state
-        self.context_menu_opened_this_frame = False
+        self._ci.context_menu_opened_this_frame = False
+        self._assign_chapter_colors_if_needed(fs_proc)
 
-        ###########################################################################################
-        # TEMPORARY: Assign random colors to chapters for visual distinction when all chapters have the same position_short_name (e.g., 'NR').
-        # Remove this logic once position detection is implemented for "Scene Detection without AI analysis"
-
-        # AI Analysis = fixed colors per position
-        # Scene Detection without AI analysis = returns all 'NR', will then assign random colors
-        ###########################################################################################
-
-        if hasattr(self, '_last_chapter_count'):
-            last_count = self._last_chapter_count
-        else:
-            last_count = -1
-        current_count = len(fs_proc.video_chapters)
-        if current_count > 0 and current_count != last_count:
-            # If all chapters have the same position_short_name, assign random colors for visual distinction
-            unique_short_names = set(seg.position_short_name for seg in fs_proc.video_chapters)
-            if len(unique_short_names) == 1:
-                VideoSegment.assign_random_colors_to_segments(fs_proc.video_chapters)
-            else:
-                VideoSegment.assign_colors_to_segments(fs_proc.video_chapters)
-        self._last_chapter_count = current_count
-
-        # END OF TEMPORARY COLOR SELECTION LOGIC
-        ###########################################################################################
-
-        style = imgui.get_style()  # Get style for frame_padding
         draw_list = imgui.get_window_draw_list()
         cursor_screen_pos = imgui.get_cursor_screen_pos()
-
-        # bar_start_x and bar_width define the full extent of the chapter bar background
         bar_start_x = cursor_screen_pos[0]
         bar_start_y = cursor_screen_pos[1]
-        # bar_width is nav_content_width
 
         bg_col = imgui.get_color_u32_rgba(*VideoNavigationColors.BACKGROUND)
-        # Draw the background for the chapter bar using full bar_width
         draw_list.add_rect_filled(bar_start_x, bar_start_y, bar_start_x + bar_width, bar_start_y + bar_height, bg_col)
 
         if total_video_frames <= 0:
@@ -60,7 +30,6 @@ class ChapterBarMixin:
             imgui.spacing()
             return
 
-        # Empty state hint when no chapters exist (non-blocking, mouse interaction still runs)
         if not fs_proc.video_chapters:
             hint = "No chapters - use I/O keys, drag on bar, or run chapter detection"
             hint_size = imgui.calc_text_size(hint)
@@ -69,14 +38,56 @@ class ChapterBarMixin:
             draw_list.add_text(hint_x, hint_y,
                                imgui.get_color_u32_rgba(0.5, 0.5, 0.55, 0.6), hint)
 
-        # For marker alignment with slider track, calculate effective start_x and width
-        effective_marker_area_start_x = bar_start_x + style.frame_padding[0]
-        effective_marker_area_width = bar_width - (style.frame_padding[0] * 2)
+        action_on_segment_this_frame = self._render_chapter_segments_and_handle_clicks(
+            fs_proc, total_video_frames, bar_start_x, bar_start_y, bar_width, bar_height
+        )
 
+        io = imgui.get_io()
+        mouse_pos = io.mouse_pos
+
+        action_on_segment_this_frame = self._handle_chapter_resize(
+            fs_proc, total_video_frames, bar_start_x, bar_start_y, bar_width, bar_height,
+            mouse_pos, action_on_segment_this_frame
+        )
+
+        is_mouse_over_bar = (
+            bar_start_x <= mouse_pos[0] <= bar_start_x + bar_width
+            and bar_start_y <= mouse_pos[1] <= bar_start_y + bar_height
+        )
+
+        self._handle_empty_space_right_click_create(
+            fs_proc, total_video_frames, bar_start_x, bar_width,
+            mouse_pos, is_mouse_over_bar, action_on_segment_this_frame
+        )
+
+        self._handle_empty_space_left_click_gap_or_drag(
+            fs_proc, total_video_frames, bar_start_x, bar_start_y, bar_width, bar_height,
+            mouse_pos, is_mouse_over_bar, action_on_segment_this_frame
+        )
+
+        self._handle_chapter_keyboard_shortcuts(fs_proc)
+
+        imgui.set_cursor_screen_pos((bar_start_x, bar_start_y + bar_height))
+        imgui.spacing()
+
+
+    def _assign_chapter_colors_if_needed(self, fs_proc):
+        last_count = self._ci.last_chapter_count
+        current_count = len(fs_proc.video_chapters)
+        if current_count > 0 and current_count != last_count:
+            unique_short_names = set(seg.position_short_name for seg in fs_proc.video_chapters)
+            if len(unique_short_names) == 1:
+                VideoSegment.assign_random_colors_to_segments(fs_proc.video_chapters)
+            else:
+                VideoSegment.assign_colors_to_segments(fs_proc.video_chapters)
+        self._ci.last_chapter_count = current_count
+
+
+    def _render_chapter_segments_and_handle_clicks(self, fs_proc, total_video_frames, bar_start_x, bar_start_y, bar_width, bar_height):
+        draw_list = imgui.get_window_draw_list()
         self.chapter_tooltip_segment = None
         action_on_segment_this_frame = False
 
-        # Pre-compute constants outside the segment loop
         text_line_height = imgui.get_text_line_height()
         icon_color_u32 = imgui.get_color_u32_rgba(*VideoNavigationColors.ICON)
         scripting_border_u32 = imgui.get_color_u32_rgba(*VideoNavigationColors.SCRIPTING_BORDER)
@@ -86,11 +97,9 @@ class ChapterBarMixin:
         text_white_u32 = imgui.get_color_u32_rgba(*VideoNavigationColors.TEXT_WHITE)
         default_gray_color = (*CurrentTheme.GRAY_MEDIUM[:3], 0.7)
 
-        # Pre-compute selection lookup sets for O(1) membership tests
         sel_primary_id = self.context_selected_chapters[0].unique_id if len(self.context_selected_chapters) > 0 else None
         sel_secondary_id = self.context_selected_chapters[1].unique_id if len(self.context_selected_chapters) > 1 else None
 
-        # Pre-compute scripting chapter id
         scripting_chapter_id = None
         if fs_proc.scripting_range_active and fs_proc.selected_chapter_for_scripting:
             scripting_chapter_id = fs_proc.selected_chapter_for_scripting.unique_id
@@ -149,9 +158,7 @@ class ChapterBarMixin:
                 text_color = text_black_u32 if lum > 0.6 else text_white_u32
                 draw_list.add_text(text_pos_x, text_pos_y, text_color, text_to_draw)
 
-            # Expand clickable area to include selection borders (which extend 2px beyond segment)
-            # to ensure clicks on borders are properly detected
-            border_expansion = 3  # Slightly larger than the largest border offset (2px)
+            border_expansion = 3
             expanded_start_x = seg_start_x - border_expansion
             expanded_start_y = bar_start_y - border_expansion
             expanded_width = seg_width + (border_expansion * 2)
@@ -173,35 +180,31 @@ class ChapterBarMixin:
                             self.app.processor.seek_video(segment.end_frame_id)
                         else:
                             self.app.processor.seek_video(segment.start_frame_id)
-                        # Ensure timeline synchronization after seeking
                         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
                 elif imgui.is_item_clicked(0):
-                    # Check if this is a resize anchor click first
                     io = imgui.get_io()
                     mouse_pos = io.mouse_pos
-                    edge_tolerance = 8  # Same as resize logic
-                    
-                    # Calculate edge positions for this segment
+                    edge_tolerance = 8
+
                     start_x_norm = segment.start_frame_id / total_video_frames
                     end_x_norm = segment.end_frame_id / total_video_frames
                     seg_start_x = bar_start_x + start_x_norm * bar_width
                     seg_end_x = bar_start_x + end_x_norm * bar_width
-                    
-                    # Check if click is near an edge of a selected chapter
+
                     is_anchor_click = False
                     if segment in self.context_selected_chapters:
                         near_left_edge = abs(mouse_pos[0] - seg_start_x) <= edge_tolerance
                         near_right_edge = abs(mouse_pos[0] - seg_end_x) <= edge_tolerance
                         if near_left_edge or near_right_edge:
-                            # This is an anchor click - start resize mode
-                            self.is_resizing_chapter = True
-                            self.resize_chapter_id = segment.unique_id
-                            self.resize_edge = 'left' if near_left_edge else 'right'
+                            self._ci.is_resizing_chapter = True
+                            self._ci.resize_chapter_id = segment.unique_id
+                            self._ci.resize_edge = 'left' if near_left_edge else 'right'
+                            self._ci.resize_old_start = int(segment.start_frame_id)
+                            self._ci.resize_old_end = int(segment.end_frame_id)
                             action_on_segment_this_frame = True
                             is_anchor_click = True
-                    
+
                     if not is_anchor_click:
-                        # Handle normal chapter selection
                         action_on_segment_this_frame = True
                         is_shift_held = io.key_shift
                         if is_shift_held:
@@ -235,74 +238,58 @@ class ChapterBarMixin:
                     if segment not in self.context_selected_chapters:
                         self.context_selected_chapters.clear()
                         self.context_selected_chapters.append(segment)
-                    # Store current frame position for chapter split operation
-                    self.context_menu_opened_at_frame = self.app.processor.current_frame_index if self.app.processor else None
-                    # Set flag to prevent create dialog from opening in the same frame
-                    self.context_menu_opened_this_frame = True
+                    self._ci.context_menu_opened_at_frame = self.app.processor.current_frame_index if self.app.processor else None
+                    self._ci.context_menu_opened_this_frame = True
                     self.app.logger.debug(
-                        f"Right clicked on chapter {segment.unique_id} at frame {self.context_menu_opened_at_frame}. Current selection: {[s.unique_id for s in self.context_selected_chapters]}. Opening context menu: {self.chapter_bar_popup_id}")
+                        f"Right clicked on chapter {segment.unique_id} at frame {self._ci.context_menu_opened_at_frame}. Current selection: {[s.unique_id for s in self.context_selected_chapters]}. Opening context menu: {self.chapter_bar_popup_id}")
                     imgui.open_popup(self.chapter_bar_popup_id)
 
-        # Smart chapter resizing - check for edge hover and handle resize drags
-        io = imgui.get_io()
-        mouse_pos = io.mouse_pos
-        edge_tolerance = 8  # pixels near edge to trigger resize
-        
-        # Handle ongoing resize
-        if self.is_resizing_chapter and imgui.is_mouse_dragging(0):
-            # Find the chapter being resized
+        return action_on_segment_this_frame
+
+
+    def _handle_chapter_resize(self, fs_proc, total_video_frames, bar_start_x, bar_start_y, bar_width, bar_height,
+                                mouse_pos, action_on_segment_this_frame):
+        edge_tolerance = 8
+
+        if self._ci.is_resizing_chapter and imgui.is_mouse_dragging(0):
             resize_chapter = None
             for chapter in fs_proc.video_chapters:
-                if chapter.unique_id == self.resize_chapter_id:
+                if chapter.unique_id == self._ci.resize_chapter_id:
                     resize_chapter = chapter
                     break
-            
+
             if resize_chapter:
-                # Calculate new frame position
                 dragged_x_on_bar = mouse_pos[0] - bar_start_x
                 norm_drag_pos = max(0, min(1, dragged_x_on_bar / bar_width))
                 new_frame = int(norm_drag_pos * total_video_frames)
                 chapters_sorted = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
 
-                if self.resize_edge == 'left':
-                    # Resizing left edge (start)
+                if self._ci.resize_edge == 'left':
                     new_start = new_frame
                     new_end = resize_chapter.end_frame_id
-                    # Constrain to prevent invalid range
-                    new_start = min(new_start, new_end - 1)  # At least 1 frame duration
-                    # Constrain to prevent overlap with previous chapter
+                    new_start = min(new_start, new_end - 1)
                     for i, chapter in enumerate(chapters_sorted):
-                        if chapter.unique_id == self.resize_chapter_id and i > 0:
+                        if chapter.unique_id == self._ci.resize_chapter_id and i > 0:
                             prev_chapter = chapters_sorted[i - 1]
                             new_start = max(new_start, prev_chapter.end_frame_id + 1)
                             break
-                    new_start = max(0, new_start)  # Don't go below 0
-
-                    # Update chapter
+                    new_start = max(0, new_start)
                     resize_chapter.start_frame_id = new_start
                 else:
-                    # Resizing right edge (end)
                     new_start = resize_chapter.start_frame_id
                     new_end = new_frame
-                    # Constrain to prevent invalid range
-                    new_end = max(new_end, new_start + 1)  # At least 1 frame duration
-                    # Constrain to prevent overlap with next chapter
+                    new_end = max(new_end, new_start + 1)
                     for i, chapter in enumerate(chapters_sorted):
-                        if chapter.unique_id == self.resize_chapter_id and i < len(chapters_sorted) - 1:
+                        if chapter.unique_id == self._ci.resize_chapter_id and i < len(chapters_sorted) - 1:
                             next_chapter = chapters_sorted[i + 1]
                             new_end = min(new_end, next_chapter.start_frame_id - 1)
                             break
-
-                    # Update chapter
                     resize_chapter.end_frame_id = new_end
 
-                # Show preview tooltip with video frame at new boundary position
-                # Update preview frame if it changed
-                if self.resize_preview_frame != new_frame:
-                    self.resize_preview_frame = new_frame
-                    self.resize_preview_data = None  # Clear old data, will be fetched immediately
+                if self._ci.resize_preview_frame != new_frame:
+                    self._ci.resize_preview_frame = new_frame
+                    self.resize_preview_data = None
 
-                    # Async fetch frame for preview (instant loading)
                     import threading
                     def fetch_resize_preview():
                         try:
@@ -312,190 +299,194 @@ class ChapterBarMixin:
                                     self.resize_preview_data = {
                                         'frame': new_frame,
                                         'frame_data': frame_data,
-                                        'edge': self.resize_edge
+                                        'edge': self._ci.resize_edge
                                     }
                         except Exception as e:
                             self.app.logger.warning(f"Failed to fetch resize preview frame: {e}")
 
                     threading.Thread(target=fetch_resize_preview, daemon=True).start()
 
-                # Render preview tooltip (always show during resize drag)
-                self._render_resize_preview_tooltip(new_frame, self.resize_edge)
+                self._render_resize_preview_tooltip(new_frame, self._ci.resize_edge)
 
-        # End resize on mouse release
-        elif self.is_resizing_chapter and imgui.is_mouse_released(0):
-            self.is_resizing_chapter = False
-            self.resize_chapter_id = None
-            self.resize_edge = None
-            self.resize_preview_frame = None
+            return action_on_segment_this_frame
+
+        if self._ci.is_resizing_chapter and imgui.is_mouse_released(0):
+            resized_chapter = None
+            if self._ci.resize_chapter_id is not None:
+                for ch in fs_proc.video_chapters:
+                    if ch.unique_id == self._ci.resize_chapter_id:
+                        resized_chapter = ch
+                        break
+            if (resized_chapter is not None
+                and self._ci.resize_old_start is not None
+                and self._ci.resize_old_end is not None
+                and (int(resized_chapter.start_frame_id) != self._ci.resize_old_start
+                     or int(resized_chapter.end_frame_id) != self._ci.resize_old_end)):
+                undo_mgr = getattr(self.app, 'undo_manager', None)
+                if undo_mgr is not None:
+                    from application.classes.undo_manager import ResizeChapterCmd
+                    undo_mgr.push_done(ResizeChapterCmd(
+                        resized_chapter.unique_id,
+                        self._ci.resize_old_start,
+                        self._ci.resize_old_end,
+                        int(resized_chapter.start_frame_id),
+                        int(resized_chapter.end_frame_id),
+                    ))
+            self._ci.is_resizing_chapter = False
+            self._ci.resize_chapter_id = None
+            self._ci.resize_edge = None
+            self._ci.resize_preview_frame = None
+            self._ci.resize_old_start = None
+            self._ci.resize_old_end = None
             self.resize_preview_data = None
-            action_on_segment_this_frame = True  # Prevent other interactions
             self.app.logger.info("Chapter resized", extra={'status_message': True})
-        
-        # Check for resize initiation and draw resize handles when hovering near edges
-        elif not self.is_resizing_chapter and not action_on_segment_this_frame:
-            # Only show resize handles for selected chapters
+            return True
+
+        if not self._ci.is_resizing_chapter and not action_on_segment_this_frame:
             if len(self.context_selected_chapters) > 0:
-                # For each selected chapter, check for edge proximity
+                draw_list = imgui.get_window_draw_list()
                 closest_distance = float('inf')
                 closest_segment = None
                 closest_edge_type = None
                 closest_edge_x = None
-                
+
                 for selected_chapter in self.context_selected_chapters:
                     start_x_norm = selected_chapter.start_frame_id / total_video_frames
                     end_x_norm = selected_chapter.end_frame_id / total_video_frames
                     seg_start_x = bar_start_x + start_x_norm * bar_width
                     seg_end_x = bar_start_x + end_x_norm * bar_width
-                    
-                    # Check if mouse is within vertical bounds
+
                     if bar_start_y <= mouse_pos[1] <= bar_start_y + bar_height:
-                        # Check distance to left edge
                         left_distance = abs(mouse_pos[0] - seg_start_x)
                         if left_distance <= edge_tolerance and left_distance < closest_distance:
                             closest_distance = left_distance
                             closest_segment = selected_chapter
                             closest_edge_type = 'left'
                             closest_edge_x = seg_start_x
-                        
-                        # Check distance to right edge
+
                         right_distance = abs(mouse_pos[0] - seg_end_x)
                         if right_distance <= edge_tolerance and right_distance < closest_distance:
                             closest_distance = right_distance
                             closest_segment = selected_chapter
                             closest_edge_type = 'right'
                             closest_edge_x = seg_end_x
-                
-                # Draw anchor point for closest edge of selected chapter
+
                 if closest_segment and closest_edge_type:
-                    handle_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.9)  # White
-                    border_color = imgui.get_color_u32_rgba(0.3, 0.3, 0.3, 1.0)  # Dark border
+                    handle_color = imgui.get_color_u32_rgba(*CurrentTheme.HIGHLIGHT_OVERLAY)
+                    border_color = imgui.get_color_u32_rgba(*CurrentTheme.GRAY_DARK)
                     radius = 3.5
                     center_y = bar_start_y + bar_height / 2
-                    
-                    # Draw filled circle
+
                     draw_list.add_circle_filled(closest_edge_x, center_y, radius, handle_color)
-                    # Draw border circle
                     draw_list.add_circle(closest_edge_x, center_y, radius, border_color, thickness=1.5)
-                    
+
                     imgui.set_mouse_cursor(imgui.MOUSE_CURSOR_RESIZE_EW)
                     if imgui.is_mouse_clicked(0):
-                        self.is_resizing_chapter = True
-                        self.resize_chapter_id = closest_segment.unique_id
-                        self.resize_edge = closest_edge_type
-                        action_on_segment_this_frame = True
+                        self._ci.is_resizing_chapter = True
+                        self._ci.resize_chapter_id = closest_segment.unique_id
+                        self._ci.resize_edge = closest_edge_type
+                        self._ci.resize_old_start = int(closest_segment.start_frame_id)
+                        self._ci.resize_old_end = int(closest_segment.end_frame_id)
+                        return True
 
-        # Playhead marker is drawn once in _core.render() spanning all nav bars.
+        return action_on_segment_this_frame
 
-        # Note: io and mouse_pos already defined above for resize logic
-        full_bar_rect_min = (bar_start_x, bar_start_y)
-        full_bar_rect_max = (bar_start_x + bar_width, bar_start_y + bar_height)
 
-        is_mouse_over_bar = full_bar_rect_min[0] <= mouse_pos[0] <= full_bar_rect_max[0] and full_bar_rect_min[1] <= mouse_pos[1] <= full_bar_rect_max[1]
+    def _handle_empty_space_right_click_create(self, fs_proc, total_video_frames, bar_start_x, bar_width,
+                                                mouse_pos, is_mouse_over_bar, action_on_segment_this_frame):
+        if not is_mouse_over_bar or not imgui.is_mouse_clicked(1):
+            return
+        if action_on_segment_this_frame or self._ci.context_menu_opened_this_frame:
+            return
+        if imgui.is_popup_open(self.chapter_bar_popup_id, imgui.POPUP_ANY_POPUP_ID):
+            return
 
-        # Prevent create dialog if context menu or any other dialog is already open
-        is_any_popup_open = imgui.is_popup_open(self.chapter_bar_popup_id, imgui.POPUP_ANY_POPUP_ID)
+        clicked_x_on_bar = mouse_pos[0] - bar_start_x
+        norm_click_pos = clicked_x_on_bar / bar_width
+        clicked_frame_id = int(norm_click_pos * total_video_frames)
+        self.app.logger.info(
+            f"Right-clicked on empty chapter bar space at frame: {clicked_frame_id}. Triggering create dialog.")
 
-        # Additional check: prevent create dialog if context menu was just opened this frame
-        # This is needed because is_popup_open returns False immediately after open_popup is called
-        if is_mouse_over_bar and imgui.is_mouse_clicked(1) and not action_on_segment_this_frame and not is_any_popup_open and not self.context_menu_opened_this_frame:
+        chapters_sorted = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
+        prev_ch = None
+        for ch_idx, ch in enumerate(chapters_sorted):
+            if ch.end_frame_id < clicked_frame_id:
+                if prev_ch is None or ch.end_frame_id > prev_ch.end_frame_id:
+                    prev_ch = ch
+            else:
+                break
 
-            clicked_x_on_bar = mouse_pos[0] - bar_start_x
-            norm_click_pos = clicked_x_on_bar / bar_width
-            clicked_frame_id = int(norm_click_pos * total_video_frames)
-            self.app.logger.info(
-                f"Right-clicked on empty chapter bar space at frame: {clicked_frame_id}. Triggering create dialog.")
+        next_ch = None
+        for ch_idx in range(len(chapters_sorted) - 1, -1, -1):
+            ch = chapters_sorted[ch_idx]
+            if ch.start_frame_id > clicked_frame_id:
+                if next_ch is None or ch.start_frame_id < next_ch.start_frame_id:
+                    next_ch = ch
+            else:
+                break
 
-            chapters_sorted = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
-            prev_ch = None
-            for ch_idx, ch in enumerate(chapters_sorted):
-                if ch.end_frame_id < clicked_frame_id:
-                    if prev_ch is None or ch.end_frame_id > prev_ch.end_frame_id:
-                        prev_ch = ch
-                else:
-                    break
+        fps = self._get_current_fps()
+        default_duration_frames = int(fps * 5)
 
-            next_ch = None
-            for ch_idx in range(len(chapters_sorted) - 1, -1, -1):
-                ch = chapters_sorted[ch_idx]
-                if ch.start_frame_id > clicked_frame_id:
-                    if next_ch is None or ch.start_frame_id < next_ch.start_frame_id:
-                        next_ch = ch
-                else:
-                    break
+        start_f = clicked_frame_id
+        end_f = clicked_frame_id + default_duration_frames - 1
 
-            fps = self._get_current_fps()
-            default_duration_frames = int(fps * 5)
+        if prev_ch is not None:
+            start_f = prev_ch.end_frame_id + 1
+        if next_ch is not None:
+            end_f = next_ch.start_frame_id - 1
+        if prev_ch is not None and next_ch is None:
+            end_f = start_f + default_duration_frames - 1
+        elif prev_ch is None and next_ch is not None:
+            start_f = end_f - default_duration_frames + 1
 
+        if start_f > end_f:
             start_f = clicked_frame_id
-            end_f = clicked_frame_id + default_duration_frames - 1
+            end_f = clicked_frame_id
 
-            if prev_ch is not None:
-                start_f = prev_ch.end_frame_id + 1
-            if next_ch is not None:
-                end_f = next_ch.start_frame_id - 1
-            if prev_ch is not None and next_ch is None:
-                end_f = start_f + default_duration_frames - 1
-            elif prev_ch is None and next_ch is not None:
-                start_f = end_f - default_duration_frames + 1
+        start_f = max(0, start_f)
+        end_f = min(total_video_frames - 1, end_f)
+        start_f = min(start_f, end_f)
+        end_f = max(start_f, end_f)
 
-            if start_f > end_f:
-                start_f = clicked_frame_id
-                end_f = clicked_frame_id
+        default_pos_key = self.position_short_name_keys[0] if self.position_short_name_keys else "N/A"
+        self.chapter_edit_data = {
+            "start_frame_str": str(start_f),
+            "end_frame_str": str(end_f),
+            "segment_type": "SexAct",
+            "position_short_name_key": default_pos_key,
+            "source": "manual_bar_rclick"
+        }
+        try:
+            self.selected_position_idx_in_dialog = self.position_short_name_keys.index(default_pos_key)
+        except (ValueError, IndexError):
+            self.selected_position_idx_in_dialog = 0
 
-            start_f = max(0, start_f)
-            end_f = min(total_video_frames - 1, end_f)
-            start_f = min(start_f, end_f)  # Ensure start is not after end
-            end_f = max(start_f, end_f)  # Ensure end is not before start
+        self._update_timecode_from_frame("start")
+        self._update_timecode_from_frame("end")
 
-            default_pos_key = self.position_short_name_keys[0] if self.position_short_name_keys else "N/A"
-            self.chapter_edit_data = {
-                "start_frame_str": str(start_f),
-                "end_frame_str": str(end_f),
-                "segment_type": "SexAct",
-                "position_short_name_key": default_pos_key,
-                "source": "manual_bar_rclick"
-            }
-            try:
-                self.selected_position_idx_in_dialog = self.position_short_name_keys.index(default_pos_key)
-            except (ValueError, IndexError):
-                self.selected_position_idx_in_dialog = 0
+        self.show_create_chapter_dialog = True
+        self.context_selected_chapters.clear()
 
-            # Initialize timecode fields
-            self._update_timecode_from_frame("start")
-            self._update_timecode_from_frame("end")
 
-            self.show_create_chapter_dialog = True
-            self.context_selected_chapters.clear()
-
-        # Enhanced UX: Click in gap between chapters to fill it
-        # Click behavior:
-        # - If no chapters exist: do nothing (require drag to create first chapter)
-        # - If click is in a gap between chapters: fill the gap automatically
-        # - Otherwise: require drag to create chapter (don't create on simple click)
+    def _handle_empty_space_left_click_gap_or_drag(self, fs_proc, total_video_frames, bar_start_x, bar_start_y,
+                                                    bar_width, bar_height, mouse_pos, is_mouse_over_bar,
+                                                    action_on_segment_this_frame):
         if is_mouse_over_bar and not action_on_segment_this_frame and imgui.is_mouse_clicked(0):
             clicked_x_on_bar = mouse_pos[0] - bar_start_x
             norm_click_pos = clicked_x_on_bar / bar_width
             clicked_frame = int(norm_click_pos * total_video_frames)
 
-            # Check if click is in a gap between two chapters
             gap_detected = False
             if fs_proc.video_chapters:
                 chapters_sorted = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
-
-                # Find if clicked frame is in a gap
                 for i in range(len(chapters_sorted) - 1):
                     current_chapter = chapters_sorted[i]
                     next_chapter = chapters_sorted[i + 1]
-
                     gap_start = current_chapter.end_frame_id + 1
                     gap_end = next_chapter.start_frame_id - 1
-
-                    # Check if click is within this gap
                     if gap_start <= clicked_frame <= gap_end:
                         gap_detected = True
-
-                        # Create chapter to fill the gap
                         default_pos_key = self.position_short_name_keys[0] if self.position_short_name_keys else "N/A"
                         chapter_data = {
                             "start_frame_str": str(gap_start),
@@ -504,50 +495,40 @@ class ChapterBarMixin:
                             "position_short_name_key": default_pos_key,
                             "source": "gap_fill_click"
                         }
-
                         if self.app.funscript_processor:
                             self.app.funscript_processor.create_new_chapter_from_data(chapter_data)
                             self.app.logger.info(f"Created chapter to fill gap ({gap_end - gap_start + 1} frames)", extra={'status_message': True})
                         break
 
-            # Only start drag mode if gap was not filled
-            # This allows creating chapters via drag-and-drop in any empty space
             if not gap_detected:
-                # Start dragging for manual chapter creation
-                self.drag_start_frame = clicked_frame
-                self.drag_current_frame = clicked_frame  # Initialize to start position
-                self.is_dragging_chapter_range = True
+                self._ci.drag_start_frame = clicked_frame
+                self._ci.drag_current_frame = clicked_frame
+                self._ci.is_dragging_chapter_range = True
 
-        # Handle ongoing drag (separate check)
         if is_mouse_over_bar and not action_on_segment_this_frame:
-            if self.is_dragging_chapter_range and imgui.is_mouse_dragging(0):
-                # Update drag end position
+            if self._ci.is_dragging_chapter_range and imgui.is_mouse_dragging(0):
                 dragged_x_on_bar = mouse_pos[0] - bar_start_x
                 norm_drag_pos = max(0, min(1, dragged_x_on_bar / bar_width))
-                self.drag_current_frame = int(norm_drag_pos * total_video_frames)
-                
-                # Draw drag preview
-                start_frame = min(self.drag_start_frame, self.drag_current_frame)
-                end_frame = max(self.drag_start_frame, self.drag_current_frame)
-                
+                self._ci.drag_current_frame = int(norm_drag_pos * total_video_frames)
+
+                start_frame = min(self._ci.drag_start_frame, self._ci.drag_current_frame)
+                end_frame = max(self._ci.drag_start_frame, self._ci.drag_current_frame)
+
                 start_x = bar_start_x + (start_frame / total_video_frames) * bar_width
                 end_x = bar_start_x + (end_frame / total_video_frames) * bar_width
                 preview_width = max(2, end_x - start_x)
-                
-                # Draw semi-transparent preview rectangle
-                preview_color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 0.4)  # Green with transparency
+
+                draw_list = imgui.get_window_draw_list()
+                preview_color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 0.4)
                 draw_list.add_rect_filled(start_x, bar_start_y, start_x + preview_width, bar_start_y + bar_height, preview_color)
-                
-                # Draw border
                 border_color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 0.8)
                 draw_list.add_rect(start_x, bar_start_y, start_x + preview_width, bar_start_y + bar_height, border_color, thickness=2.0)
 
-            if self.is_dragging_chapter_range and imgui.is_mouse_released(0):
-                # Finish drag and create chapter
-                start_frame = min(self.drag_start_frame, self.drag_current_frame)
-                end_frame = max(self.drag_start_frame, self.drag_current_frame)
-                
-                if end_frame - start_frame >= 1:  # Minimum 1 frame difference (prevents click-only creation)
+            if self._ci.is_dragging_chapter_range and imgui.is_mouse_released(0):
+                start_frame = min(self._ci.drag_start_frame, self._ci.drag_current_frame)
+                end_frame = max(self._ci.drag_start_frame, self._ci.drag_current_frame)
+
+                if end_frame - start_frame >= 1:
                     default_pos_key = self.position_short_name_keys[0] if self.position_short_name_keys else "N/A"
                     chapter_data = {
                         "start_frame_str": str(start_frame),
@@ -556,111 +537,99 @@ class ChapterBarMixin:
                         "position_short_name_key": default_pos_key,
                         "source": "drag_create"
                     }
-
                     if self.app.funscript_processor:
-                        # Chapter creation will auto-adjust for overlaps
                         self.app.funscript_processor.create_new_chapter_from_data(chapter_data)
                         self.app.logger.info(f"Created chapter via drag ({end_frame - start_frame + 1} frames)", extra={'status_message': True})
-                # If drag was too small (< 1 frame), silently ignore - no chapter created
-                
-                self.is_dragging_chapter_range = False
 
-        # Reset drag if mouse leaves bar area
-        if self.is_dragging_chapter_range and not is_mouse_over_bar:
-            self.is_dragging_chapter_range = False
+                self._ci.is_dragging_chapter_range = False
 
-        # Chapter keyboard shortcuts (when chapters are context-selected)
-        if len(self.context_selected_chapters) > 0 and self.app.shortcut_manager.should_handle_shortcuts():
-            shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
-            io = imgui.get_io()
+        if self._ci.is_dragging_chapter_range and not is_mouse_over_bar:
+            self._ci.is_dragging_chapter_range = False
 
-            # Check if active timeline has point selection (DELETE prefers points over chapters)
-            _active_tl_num = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
-            _active_editor = self.gui_instance.timeline_editor1 if _active_tl_num == 1 else getattr(self.gui_instance, 'timeline_editor2', None)
-            _timeline_has_point_selection = bool(_active_editor and _active_editor.multi_selected_action_indices)
 
-            # Check Select Points in Chapter (E key) - must come before delete checks
-            sel_pts_sc_str = shortcuts.get("select_points_in_chapter", "E")
-            sel_pts_key_tuple = self.app._map_shortcut_to_glfw_key(sel_pts_sc_str)
-            if sel_pts_key_tuple and (
-                imgui.is_key_pressed(sel_pts_key_tuple[0]) and
-                sel_pts_key_tuple[1]['ctrl'] == io.key_ctrl and
-                sel_pts_key_tuple[1]['alt'] == io.key_alt and
-                sel_pts_key_tuple[1]['shift'] == io.key_shift and
-                sel_pts_key_tuple[1]['super'] == io.key_super
-            ):
-                # Dispatch to the active timeline editor
-                active_tl = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
-                editor = self.gui_instance.timeline_editor1 if active_tl == 1 else self.gui_instance.timeline_editor2
-                if editor:
-                    editor.select_points_in_chapter()
+    def _handle_chapter_keyboard_shortcuts(self, fs_proc):
+        if not self.context_selected_chapters:
+            return
+        if not self.app.shortcut_manager.should_handle_shortcuts():
+            return
 
-            # Check Delete Points in Chapter FIRST (SHIFT+DELETE or SHIFT+BACKSPACE) - must come before regular delete
-            del_points_sc_str = shortcuts.get("delete_points_in_chapter", "SHIFT+DELETE")
-            del_points_alt_sc_str = shortcuts.get("delete_points_in_chapter_alt", "SHIFT+BACKSPACE")
-            del_points_key_tuple = self.app._map_shortcut_to_glfw_key(del_points_sc_str)
-            del_points_alt_key_tuple = self.app._map_shortcut_to_glfw_key(del_points_alt_sc_str)
-            delete_points_pressed = False
+        shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
+        io = imgui.get_io()
 
-            if del_points_key_tuple and (
-                imgui.is_key_pressed(del_points_key_tuple[0]) and
-                del_points_key_tuple[1]['ctrl'] == io.key_ctrl and
-                del_points_key_tuple[1]['alt'] == io.key_alt and
-                del_points_key_tuple[1]['shift'] == io.key_shift and
-                del_points_key_tuple[1]['super'] == io.key_super
-            ):
-                delete_points_pressed = True
+        active_tl_num = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
+        active_editor = self.gui_instance.timeline_editor1 if active_tl_num == 1 else getattr(self.gui_instance, 'timeline_editor2', None)
+        timeline_has_point_selection = bool(active_editor and active_editor.multi_selected_action_indices)
 
-            if (not delete_points_pressed and del_points_alt_key_tuple and (
-                imgui.is_key_pressed(del_points_alt_key_tuple[0]) and
-                del_points_alt_key_tuple[1]['ctrl'] == io.key_ctrl and
-                del_points_alt_key_tuple[1]['alt'] == io.key_alt and
-                del_points_alt_key_tuple[1]['shift'] == io.key_shift and
-                del_points_alt_key_tuple[1]['super'] == io.key_super
-            )):
-                delete_points_pressed = True
+        sel_pts_sc_str = shortcuts.get("select_points_in_chapter", "E")
+        sel_pts_key_tuple = self.app._map_shortcut_to_glfw_key(sel_pts_sc_str)
+        if sel_pts_key_tuple and (
+            imgui.is_key_pressed(sel_pts_key_tuple[0]) and
+            sel_pts_key_tuple[1]['ctrl'] == io.key_ctrl and
+            sel_pts_key_tuple[1]['alt'] == io.key_alt and
+            sel_pts_key_tuple[1]['shift'] == io.key_shift and
+            sel_pts_key_tuple[1]['super'] == io.key_super
+        ):
+            editor = self.gui_instance.timeline_editor1 if active_tl_num == 1 else self.gui_instance.timeline_editor2
+            if editor:
+                editor.select_points_in_chapter()
 
-            if delete_points_pressed and self.context_selected_chapters:
-                # Delete points in the selected chapters
-                fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
-                self.app.logger.info(f"Deleted points in {len(self.context_selected_chapters)} chapter(s) via keyboard shortcut", extra={'status_message': True})
-            elif not _timeline_has_point_selection:
-                # Only check regular delete if delete-points wasn't pressed
-                # AND timeline has no point selection (points take priority over chapters)
-                del_sc_str = shortcuts.get("delete_selected_chapter", "DELETE")
-                del_alt_sc_str = shortcuts.get("delete_selected_chapter_alt", "BACKSPACE")
-                del_key_tuple = self.app._map_shortcut_to_glfw_key(del_sc_str)
-                bck_key_tuple = self.app._map_shortcut_to_glfw_key(del_alt_sc_str)
-                delete_pressed = False
+        del_points_sc_str = shortcuts.get("delete_points_in_chapter", "SHIFT+DELETE")
+        del_points_alt_sc_str = shortcuts.get("delete_points_in_chapter_alt", "SHIFT+BACKSPACE")
+        del_points_key_tuple = self.app._map_shortcut_to_glfw_key(del_points_sc_str)
+        del_points_alt_key_tuple = self.app._map_shortcut_to_glfw_key(del_points_alt_sc_str)
+        delete_points_pressed = False
 
-                if del_key_tuple and (
-                    imgui.is_key_pressed(del_key_tuple[0]) and
-                    all(m == io_m for m, io_m in
-                        zip(del_key_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))
-                ):
-                    delete_pressed = True
+        if del_points_key_tuple and (
+            imgui.is_key_pressed(del_points_key_tuple[0]) and
+            del_points_key_tuple[1]['ctrl'] == io.key_ctrl and
+            del_points_key_tuple[1]['alt'] == io.key_alt and
+            del_points_key_tuple[1]['shift'] == io.key_shift and
+            del_points_key_tuple[1]['super'] == io.key_super
+        ):
+            delete_points_pressed = True
 
-                if (not delete_pressed and bck_key_tuple and (
-                    imgui.is_key_pressed(bck_key_tuple[0]) and
-                    all(m == io_m for m, io_m in
-                        zip(bck_key_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))
-                )):
-                    delete_pressed = True
+        if (not delete_points_pressed and del_points_alt_key_tuple and (
+            imgui.is_key_pressed(del_points_alt_key_tuple[0]) and
+            del_points_alt_key_tuple[1]['ctrl'] == io.key_ctrl and
+            del_points_alt_key_tuple[1]['alt'] == io.key_alt and
+            del_points_alt_key_tuple[1]['shift'] == io.key_shift and
+            del_points_alt_key_tuple[1]['super'] == io.key_super
+        )):
+            delete_points_pressed = True
 
-                if delete_pressed and self.context_selected_chapters:
-                    # Record undo action before deletion
-                    chapter_names = [ch.position_short_name for ch in self.context_selected_chapters]
-                    op_desc = f"Deleted {len(self.context_selected_chapters)} Selected Chapter(s) (Key): {', '.join(chapter_names)}"
+        if delete_points_pressed and self.context_selected_chapters:
+            fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
+            self.app.logger.info(f"Deleted points in {len(self.context_selected_chapters)} chapter(s) via keyboard shortcut", extra={'status_message': True})
+            return
 
-                    # Delete the chapters
-                    ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
-                    fs_proc.delete_video_chapters_by_ids(ch_ids)
-                    self.context_selected_chapters.clear()
+        if timeline_has_point_selection:
+            return
 
-                    self.app.logger.info(f"Deleted {len(ch_ids)} chapters via keyboard shortcut", extra={'status_message': True})
+        del_sc_str = shortcuts.get("delete_selected_chapter", "DELETE")
+        del_alt_sc_str = shortcuts.get("delete_selected_chapter_alt", "BACKSPACE")
+        del_key_tuple = self.app._map_shortcut_to_glfw_key(del_sc_str)
+        bck_key_tuple = self.app._map_shortcut_to_glfw_key(del_alt_sc_str)
+        delete_pressed = False
 
-        imgui.set_cursor_screen_pos((bar_start_x, bar_start_y + bar_height))
-        imgui.spacing()
+        if del_key_tuple and (
+            imgui.is_key_pressed(del_key_tuple[0]) and
+            all(m == io_m for m, io_m in
+                zip(del_key_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))
+        ):
+            delete_pressed = True
+
+        if (not delete_pressed and bck_key_tuple and (
+            imgui.is_key_pressed(bck_key_tuple[0]) and
+            all(m == io_m for m, io_m in
+                zip(bck_key_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))
+        )):
+            delete_pressed = True
+
+        if delete_pressed and self.context_selected_chapters:
+            ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
+            fs_proc.delete_video_chapters_by_ids(ch_ids)
+            self.context_selected_chapters.clear()
+            self.app.logger.info(f"Deleted {len(ch_ids)} chapters via keyboard shortcut", extra={'status_message': True})
 
 
     def _render_chapter_context_menu(self):
@@ -801,7 +770,7 @@ class ChapterBarMixin:
 
             # Split Chapter at Cursor
             can_split = False
-            split_frame = self.context_menu_opened_at_frame
+            split_frame = self._ci.context_menu_opened_at_frame
             split_pos_key = None
             if num_selected == 1 and self.context_selected_chapters:
                 chapter = self.context_selected_chapters[0]
@@ -817,23 +786,61 @@ class ChapterBarMixin:
             if imgui.menu_item("Split Chapter at Cursor", enabled=can_split)[0]:
                 if can_split and split_frame is not None and split_pos_key is not None:
                     original_end_frame = chapter.end_frame_id
+
+                    old_fields = {
+                        'start_frame_id': chapter.start_frame_id,
+                        'end_frame_id': chapter.end_frame_id,
+                        'position_short_name': chapter.position_short_name,
+                        'position_long_name': chapter.position_long_name,
+                        'class_name': chapter.class_name,
+                        'segment_type': chapter.segment_type,
+                        'source': chapter.source,
+                        'color': chapter.color,
+                    }
+
                     fs_proc.update_chapter_from_data(
                         chapter.unique_id,
                         {
                             "start_frame_str": str(chapter.start_frame_id),
                             "end_frame_str": str(split_frame),
                             "position_short_name_key": split_pos_key
-                        }
+                        },
+                        _skip_undo_record=True,
                     )
-                    fs_proc.create_new_chapter_from_data(
-                        {
-                            "start_frame_str": str(split_frame + 1),
-                            "end_frame_str": str(original_end_frame),
-                            "position_short_name_key": split_pos_key,
-                            "segment_type": chapter.segment_type,
-                            "source": chapter.source
-                        }
+
+                    new_fields = {
+                        'start_frame_id': chapter.start_frame_id,
+                        'end_frame_id': chapter.end_frame_id,
+                        'position_short_name': chapter.position_short_name,
+                        'position_long_name': chapter.position_long_name,
+                        'class_name': chapter.class_name,
+                        'segment_type': chapter.segment_type,
+                        'source': chapter.source,
+                        'color': chapter.color,
+                    }
+
+                    new_chapter_data = {
+                        "start_frame_str": str(split_frame + 1),
+                        "end_frame_str": str(original_end_frame),
+                        "position_short_name_key": split_pos_key,
+                        "segment_type": chapter.segment_type,
+                        "source": chapter.source,
+                    }
+                    new_chapter = fs_proc.create_new_chapter_from_data(
+                        new_chapter_data,
+                        return_chapter_object=True,
+                        _skip_undo_record=True,
                     )
+
+                    undo_mgr = getattr(self.app, 'undo_manager', None)
+                    if undo_mgr is not None and new_chapter is not None:
+                        from application.classes.undo_manager import (
+                            CompoundCmd, CreateChapterCmd, UpdateChapterCmd,
+                        )
+                        update_cmd = UpdateChapterCmd(chapter.unique_id, old_fields, new_fields)
+                        create_cmd = CreateChapterCmd(new_chapter.unique_id, new_chapter_data)
+                        undo_mgr.push_done(CompoundCmd([update_cmd, create_cmd], "Split Chapter"))
+
                     self.context_selected_chapters.clear()
                     imgui.close_current_popup()
                     imgui.end_popup()
@@ -893,11 +900,11 @@ class ChapterBarMixin:
                 plugin_label = f"Apply Plugin ({num_selected})" if num_selected > 1 else "Apply Plugin"
                 if imgui.begin_menu(plugin_label, enabled=can_apply_plugin):
                     if can_apply_plugin and self.context_selected_chapters:
-                        if imgui.begin_menu("Timeline 1 (Primary)"):
+                        if imgui.begin_menu("Funscript 1 (Primary)"):
                             self._render_chapter_plugin_menu('primary')
                             imgui.end_menu()
                         timeline2_visible = self.app.app_state_ui.show_funscript_interactive_timeline2
-                        if imgui.begin_menu("Timeline 2 (Secondary)", enabled=timeline2_visible):
+                        if imgui.begin_menu("Funscript 2 (Secondary)", enabled=timeline2_visible):
                             self._render_chapter_plugin_menu('secondary')
                             imgui.end_menu()
                     imgui.end_menu()
@@ -1120,8 +1127,8 @@ class ChapterBarMixin:
                     f"Exported clip to {v_path} (+ funscript)", extra={'status_message': True})
                 self.app.notify("Chapter clip exported", "success", 2.0)
             except Exception as e:
-                self.app.logger.error(f"Chapter clip export failed: {e}", exc_info=True)
-                self.app.notify("Clip export failed (see log)", "error", 3.0)
+                from application.utils.error_reporting import report_error
+                report_error(self.app, "Chapter clip export failed (see log)", e)
 
         try:
             dlg.show(

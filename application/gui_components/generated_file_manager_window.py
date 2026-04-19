@@ -10,7 +10,7 @@ from application.utils.imgui_helpers import DisabledScope, begin_modal_centered
 class GeneratedFileManagerWindow:
     def __init__(self, app_instance):
         self.app = app_instance
-        self.output_folder = self.app.app_settings.get("output_folder_path", "output")
+        self.output_folder = self.app.app_settings.config.output.folder_path
         self.sort_by = 'name'
         self.file_manager = GeneratedFileManager(self.output_folder, logger=self.app.logger, delete_funscript_files=False)
         self.file_manager._scan_files()
@@ -27,7 +27,7 @@ class GeneratedFileManagerWindow:
         imgui.set_next_window_size_constraints((600, 300), (1200, 800))
 
         center_next_window_pivot()
-        is_open, new_visibility = imgui.begin("Generated File Manager", closable=True, flags=imgui.WINDOW_NO_COLLAPSE)
+        is_open, new_visibility = imgui.begin("FunGen: Generated File Manager", closable=True, flags=imgui.WINDOW_NO_COLLAPSE)
         if new_visibility != app_state.show_generated_file_manager:
             app_state.show_generated_file_manager = new_visibility
         if is_open:
@@ -96,6 +96,8 @@ class GeneratedFileManagerWindow:
         imgui.text(f"Total Disk Space Used: {self.file_manager.total_size:.2f} MB")
         imgui.separator()
         if imgui.button("Refresh File List"): self.file_manager._scan_files()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Re-scan the output folder and update the file tree below.")
         imgui.same_line()
         imgui.text("Sort by:")
         imgui.same_line()
@@ -176,9 +178,10 @@ class GeneratedFileManagerWindow:
         imgui.same_line(imgui.get_window_width() - 200)
         imgui.text_disabled(f"({dir_data['total_size_mb']:.2f} MB)")
         imgui.same_line(imgui.get_window_width() - 80)
-        # Folder deletion
         if imgui.button("Delete"):
             self._delete_path_with_status(dir_data['path'], self.file_manager.delete_folder, "folder")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Delete this entire folder and every file under it (respects the 'Delete .funscript files' checkbox above).")
         if is_node_open:
             imgui.indent()
             for file_info in dir_data['files']:
@@ -203,6 +206,11 @@ class GeneratedFileManagerWindow:
             with destructive_button_style():
                 if imgui.button("Delete"):
                     self._delete_path_with_status(file_info['path'], self.file_manager.delete_file, "file")
+                if imgui.is_item_hovered(imgui.HOVERED_FLAGS_ALLOW_WHEN_DISABLED):
+                    if not delete_enabled:
+                        imgui.set_tooltip(".funscript files are protected. Tick 'Delete .funscript files' above to enable.")
+                    else:
+                        imgui.set_tooltip("Delete this file from disk. Cannot be undone.")
         imgui.pop_id()
 
     def _render_delete_all_popup(self):

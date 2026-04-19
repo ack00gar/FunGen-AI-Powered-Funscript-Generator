@@ -118,7 +118,7 @@ def _validate_preprocessed_video_completeness(video_path: str, expected_frames: 
         from video.frame_source.probe import probe
         p = probe(video_path)
         if p is None:
-            logger.warning(f"PyAV probe failed for preprocessed video: {video_path}")
+            logger.warning(f"ffprobe failed for preprocessed video: {video_path}")
             return False
 
         if p.total_frames > 0:
@@ -521,7 +521,7 @@ def video_processor_producer_proc(
             effective_logger_final.addHandler(handler)
             effective_logger_final.setLevel(logging.INFO)
 
-        # VideoProcessor teardown: close PyAV source (no subprocess to kill).
+        # VideoProcessor teardown: close the frame source.
         if vp_instance is not None:
             try:
                 vp_instance.reset(close_video=True)

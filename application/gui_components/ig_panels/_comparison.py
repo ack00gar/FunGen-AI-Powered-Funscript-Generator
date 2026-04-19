@@ -2,6 +2,7 @@
 import imgui
 from bisect import bisect_left
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
+from config.constants_colors import CurrentTheme
 
 
 class ComparisonMixin:
@@ -55,23 +56,21 @@ class ComparisonMixin:
             if len(timelines) == 1:
                 label = ref_name
 
-            imgui.text_colored(label, 0.3, 0.65, 1.0, 1.0)
+            imgui.text_colored(label, *CurrentTheme.REFERENCE_OVERLAY)
 
-            # --- Always-visible overview ---
             mae = metrics.get('mae', 0)
             corr = metrics.get('correlation', 0)
 
-            # Score color based on peak accuracy
             if total > 0:
                 ratio = good / total
                 if ratio >= 0.8:
-                    score_col = (0.2, 0.8, 0.2, 1.0)
+                    score_col = CurrentTheme.GREEN
                 elif ratio >= 0.5:
-                    score_col = (0.9, 0.7, 0.1, 1.0)
+                    score_col = CurrentTheme.ORANGE
                 else:
-                    score_col = (0.9, 0.2, 0.2, 1.0)
+                    score_col = CurrentTheme.RED
             else:
-                score_col = (0.5, 0.5, 0.5, 1.0)
+                score_col = CurrentTheme.GRAY_MEDIUM
 
             imgui.text("Accuracy:")
             imgui.same_line()
@@ -79,25 +78,24 @@ class ComparisonMixin:
             imgui.same_line()
             imgui.text(f"({good}/{total} peaks)")
             imgui.same_line()
-            imgui.text_colored(f"  MAE: {mae:.1f}", 0.7, 0.7, 0.75, 1.0)
+            imgui.text_colored(f"  MAE: {mae:.1f}", *CurrentTheme.GRAY_SUBDUED)
             imgui.same_line()
-            imgui.text_colored(f"  Corr: {corr:.2f}", 0.7, 0.7, 0.75, 1.0)
+            imgui.text_colored(f"  Corr: {corr:.2f}", *CurrentTheme.GRAY_SUBDUED)
 
-            # Peak breakdown: colored legend
             imgui.text("  ")
             imgui.same_line()
-            imgui.text_colored(f"exact:{classes.get('gold', 0)}", 1.0, 0.85, 0.0, 1.0)
+            imgui.text_colored(f"exact:{classes.get('gold', 0)}", *CurrentTheme.REFERENCE_MATCH_GOLD)
             imgui.same_line()
-            imgui.text_colored(f"close:{classes.get('green', 0)}", 0.2, 1.0, 0.3, 1.0)
+            imgui.text_colored(f"close:{classes.get('green', 0)}", *CurrentTheme.REFERENCE_MATCH_GREEN)
             imgui.same_line()
-            imgui.text_colored(f"off:{classes.get('yellow', 0)}", 1.0, 0.9, 0.2, 1.0)
+            imgui.text_colored(f"off:{classes.get('yellow', 0)}", *CurrentTheme.REFERENCE_MATCH_YELLOW)
             imgui.same_line()
-            imgui.text_colored(f"wrong:{classes.get('red', 0)}", 1.0, 0.2, 0.2, 1.0)
+            imgui.text_colored(f"wrong:{classes.get('red', 0)}", *CurrentTheme.REFERENCE_MATCH_RED)
             unmatched_m = ps.get('unmatched_main', 0)
             unmatched_r = ps.get('unmatched_ref', 0)
             if unmatched_m or unmatched_r:
                 imgui.same_line()
-                imgui.text_colored(f"missing:{unmatched_m + unmatched_r}", 0.5, 0.5, 0.5, 1.0)
+                imgui.text_colored(f"missing:{unmatched_m + unmatched_r}", *CurrentTheme.GRAY_MEDIUM)
 
             # --- Expandable details ---
             if imgui.tree_node(f"Details##RefDetT{timeline_num}"):
@@ -116,11 +114,11 @@ class ComparisonMixin:
                             ch_good = ch_info.get('peaks_good', 0)
                             ch_total = ch_info.get('peaks_total', 0)
                             if ch_acc >= 0.8:
-                                col = (0.2, 0.8, 0.2, 1.0)
+                                col = CurrentTheme.GREEN
                             elif ch_acc >= 0.5:
-                                col = (0.9, 0.7, 0.1, 1.0)
+                                col = CurrentTheme.ORANGE
                             else:
-                                col = (0.9, 0.2, 0.2, 1.0)
+                                col = CurrentTheme.RED
                             imgui.text_colored(f"{ch_name}", *col)
                             imgui.same_line()
                             imgui.text(f"MAE:{ch_mae:.1f}  {ch_good}/{ch_total} ({ch_acc:.0%})")
@@ -139,7 +137,7 @@ class ComparisonMixin:
                             sec_mae = sec.get('mae', 0)
                             imgui.text_colored(
                                 f"{start_s:.1f}s - {end_s:.1f}s ({dur_s:.1f}s) MAE:{sec_mae:.1f}",
-                                0.9, 0.4, 0.4, 1.0
+                                *CurrentTheme.RED_LIGHT
                             )
                         imgui.tree_pop()
 
@@ -153,12 +151,12 @@ class ComparisonMixin:
         processor = self.app.processor
         fs_proc = self.app.funscript_processor
         if not processor or not fs_proc or not processor.video_info:
-            imgui.text_colored("No video loaded", 0.5, 0.5, 0.5, 1.0)
+            imgui.text_colored("No video loaded", *CurrentTheme.GRAY_MEDIUM)
             return
 
         fps = processor.fps
         if fps <= 0:
-            imgui.text_colored("No video loaded", 0.5, 0.5, 0.5, 1.0)
+            imgui.text_colored("No video loaded", *CurrentTheme.GRAY_MEDIUM)
             return
 
         current_time_ms = (processor.current_frame_index / fps) * 1000.0
@@ -166,12 +164,12 @@ class ComparisonMixin:
 
         fs_obj, axis_name = fs_proc._get_target_funscript_object_and_axis(active_tl)
         if not fs_obj or not axis_name:
-            imgui.text_colored("No funscript data", 0.5, 0.5, 0.5, 1.0)
+            imgui.text_colored("No funscript data", *CurrentTheme.GRAY_MEDIUM)
             return
 
         actions = fs_obj.get_axis_actions(axis_name)
         if not actions or len(actions) < 2:
-            imgui.text_colored("Not enough actions", 0.5, 0.5, 0.5, 1.0)
+            imgui.text_colored("Not enough actions", *CurrentTheme.GRAY_MEDIUM)
             return
 
         # Find bounding actions using bisect on cached timestamps
@@ -199,7 +197,7 @@ class ComparisonMixin:
 
         arrow = "UP" if pos_delta > 0 else ("DN" if pos_delta < 0 else "--")
 
-        imgui.text(f"Timeline {active_tl}")
+        imgui.text(f"Funscript {active_tl}")
         imgui.separator()
         imgui.text(f"Interval:  {interval_ms:.0f} ms")
         imgui.text(f"Duration:  {seg_duration_ms:.0f} ms")

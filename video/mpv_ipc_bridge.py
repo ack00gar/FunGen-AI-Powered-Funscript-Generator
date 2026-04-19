@@ -192,6 +192,12 @@ class MpvIPCBridge:
                 self._proc.wait(timeout=3.0)
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+                try:
+                    # Reap after kill so the child doesn't become a zombie and
+                    # keep holding the socket path / port.
+                    self._proc.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    logger.warning("mpv process did not exit after SIGKILL")
         self._proc = None
 
         if sys.platform != "win32" and os.path.exists(self.sock_path):

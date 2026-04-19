@@ -51,7 +51,7 @@ class ProjectManager:
 
         # Set the last opened project to None so it doesn't load on next startup.
         # This does NOT affect the recent projects list.
-        self.app.app_settings.set("last_opened_project_path", None)
+        self.app.app_settings.config.project.last_opened_path = None
         self.app.logger.info("Last project reference cleared. App will start fresh next time.")
 
         # Delegate to ApplicationLogic's comprehensive reset method
@@ -59,10 +59,9 @@ class ProjectManager:
 
         # ProjectManager specific resets
         self.project_file_path = None
-        self.project_dirty = False  # A new project starts clean
+        self.project_dirty = False
         self.last_autosave_time = time.time()
-        self.first_dirty_time: Optional[float] = None  # Set by render loop when dirty arms
-        self.nudge_metadata: bool = True  # Auto-open metadata tab once on new project
+        self.nudge_metadata: bool = True
 
     def get_suggested_save_path_and_dir(self, save_as: bool) -> Optional[Tuple[str, str]]:
         if self.app.file_manager.video_path:
@@ -102,7 +101,7 @@ class ProjectManager:
         # Ensure we're working with an absolute path for consistency
         abs_filepath = os.path.abspath(filepath)
 
-        recent_list = self.app.app_settings.get("recent_projects", [])
+        recent_list = self.app.app_settings.config.project.recent_projects
 
         # Remove any existing instance of this path to avoid duplicates and move it to the top
         if abs_filepath in recent_list:
@@ -116,7 +115,7 @@ class ProjectManager:
         trimmed_list = recent_list[:max_recent_files]
 
         # Persist the changes to settings
-        self.app.app_settings.set("recent_projects", trimmed_list)
+        self.app.app_settings.config.project.recent_projects = trimmed_list
 
     def load_project(self, filepath: str, is_autosave: bool = False):  # Added is_autosave
         if not is_autosave and self.project_dirty:
@@ -152,7 +151,7 @@ class ProjectManager:
             abs_filepath = os.path.abspath(filepath)
             
             # Update recent projects list
-            recent_list = self.app.app_settings.get("recent_projects", [])
+            recent_list = self.app.app_settings.config.project.recent_projects
             if abs_filepath in recent_list:
                 recent_list.remove(abs_filepath)
             recent_list.insert(0, abs_filepath)
@@ -180,11 +179,11 @@ class ProjectManager:
         except Exception as e:
             self.app.logger.error(f"Error loading project '{os.path.basename(filepath)}': {e}", exc_info=True, extra={'status_message': True})
             # If loading fails, remove the bad path from the recent list
-            recent_list = self.app.app_settings.get("recent_projects", [])
+            recent_list = self.app.app_settings.config.project.recent_projects
             abs_filepath = os.path.abspath(filepath)
             if abs_filepath in recent_list:
                 recent_list.remove(abs_filepath)
-                self.app.app_settings.set("recent_projects", recent_list)
+                self.app.app_settings.config.project.recent_projects = recent_list
             if is_autosave:
                 self.app.logger.error(f"Autosave restoration from '{os.path.basename(filepath)}' failed critically.")
 
@@ -224,11 +223,10 @@ class ProjectManager:
                 self.app.gui_instance.track_disk_io_time("ProjectSave", io_time)
             self.project_file_path = filepath
             self.project_dirty = False
-            self.first_dirty_time = None
 
             # On successful save, update the recent projects list
             self._add_to_recent_projects(filepath)
-            self.app.app_settings.set("last_opened_project_path", os.path.abspath(filepath))
+            self.app.app_settings.config.project.last_opened_path = os.path.abspath(filepath)
 
             self.app.logger.info(f"Project saved to '{os.path.basename(filepath)}'.", extra={'status_message': True})
             self.app.notify(f"Project saved", "success", 2.0)
@@ -241,7 +239,7 @@ class ProjectManager:
         Performs an autosave of the current project file if autosave is enabled
         and the project state is dirty. The save is video-specific.
         """
-        if not self.app.app_settings.get("autosave_enabled", True):
+        if not self.app.app_settings.config.autosave.enabled:
             if is_exit_save:
                 self.app.logger.info("Autosave on exit skipped: Autosave is disabled in settings.")
             return
@@ -376,8 +374,9 @@ class ProjectManager:
     def _apply_project_state_from_dict(self, project_data: Dict):
         """Applies loaded project data to the relevant app logic sub-modules."""
         # Data for AppLogic itself (or to be passed to AppSettings if they become project-specific)
-        project_yolo_detection_model_path_setting = project_data.get("yolo_detection_model_path_setting", self.app.app_settings.get("yolo_det_model_path"))
-        project_yolo_pose_model_path_setting = project_data.get("yolo_pose_model_path_setting", self.app.app_settings.get("yolo_pose_model_path"))
+        _models_cfg = self.app.app_settings.config.models
+        project_yolo_detection_model_path_setting = project_data.get("yolo_detection_model_path_setting", _models_cfg.yolo_det_path)
+        project_yolo_pose_model_path_setting = project_data.get("yolo_pose_model_path_setting", _models_cfg.yolo_pose_path)
         if os.path.exists(project_yolo_detection_model_path_setting):
             self.app.yolo_detection_model_path_setting = project_yolo_detection_model_path_setting
             self.app.yolo_det_model_path = self.app.yolo_detection_model_path_setting
@@ -442,14 +441,15 @@ class ProjectManager:
 
         # Data for AppStateUI
         app_state = self.app.app_state_ui
-        app_state.timeline_pan_offset_ms = project_data.get("timeline_pan_offset_ms",self.app.app_settings.get("timeline_pan_offset_ms", 0.0))
-        app_state.timeline_zoom_factor_ms_per_px = project_data.get("timeline_zoom_factor_ms_per_px", self.app.app_settings.get("timeline_zoom_factor_ms_per_px", 20.0))
-        app_state.show_funscript_interactive_timeline = project_data.get("show_funscript_interactive_timeline", self.app.app_settings.get("show_funscript_interactive_timeline",True))
-        app_state.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2", self.app.app_settings.get("show_funscript_interactive_timeline2", False))
-        app_state.show_simulator_3d = project_data.get("show_simulator_3d", self.app.app_settings.get("show_simulator_3d", False))
-        app_state.show_heatmap = project_data.get("show_heatmap", self.app.app_settings.get("show_heatmap", True))
-        app_state.show_stage2_overlay = project_data.get("show_stage2_overlay", self.app.app_settings.get("show_stage2_overlay", True))
-        app_state.show_audio_waveform = project_data.get("show_audio_waveform", self.app.app_settings.get("show_audio_waveform", True))
+        ui_cfg = self.app.app_settings.config.ui
+        app_state.timeline_pan_offset_ms = project_data.get("timeline_pan_offset_ms", ui_cfg.timeline_pan_offset_ms)
+        app_state.timeline_zoom_factor_ms_per_px = project_data.get("timeline_zoom_factor_ms_per_px", ui_cfg.timeline_zoom_factor_ms_per_px)
+        app_state.show_funscript_interactive_timeline = project_data.get("show_funscript_interactive_timeline", ui_cfg.show_funscript_interactive_timeline)
+        app_state.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2", ui_cfg.show_funscript_interactive_timeline2)
+        app_state.show_simulator_3d = project_data.get("show_simulator_3d", ui_cfg.show_simulator_3d)
+        app_state.show_heatmap = project_data.get("show_heatmap", ui_cfg.show_heatmap)
+        app_state.show_stage2_overlay = project_data.get("show_stage2_overlay", ui_cfg.show_stage2_overlay)
+        app_state.show_audio_waveform = project_data.get("show_audio_waveform", ui_cfg.show_audio_waveform)
         # Data for Audio Waveform
         loaded_waveform_list = project_data.get("audio_waveform_data")
         if loaded_waveform_list is not None and isinstance(loaded_waveform_list, list):

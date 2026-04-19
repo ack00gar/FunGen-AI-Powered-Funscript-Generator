@@ -7,6 +7,7 @@ import logging
 
 from application.utils.logo_texture import get_logo_texture_manager
 from application.utils.system_scaling import get_system_scaling_info
+from config.constants_colors import CurrentTheme
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class FirstRunWizard:
         scaling_factor, self._detected_dpi, self._platform_name = get_system_scaling_info()
         self._detected_scale_pct = int(round(scaling_factor * 100))
         # Pre-select closest scale option
-        current_scale = app.app_settings.get("global_font_scale", 1.0)
+        current_scale = app.app_settings.config.ui.global_font_scale
         self._selected_scale_idx = 0
         best_dist = 999
         for i, (_, val) in enumerate(_SCALE_OPTIONS):
@@ -55,7 +56,7 @@ class FirstRunWizard:
                 self._selected_scale_idx = i
 
         # Step 3 — output folder
-        self._output_folder = app.app_settings.get("output_folder_path", "output")
+        self._output_folder = app.app_settings.config.output.folder_path
 
         # Step 5 — model download
         self._download_thread = None
@@ -132,7 +133,7 @@ class FirstRunWizard:
         for i in range(self.NUM_STEPS):
             x = start_x + i * spacing
             if i == self._step:
-                col = imgui.get_color_u32_rgba(0.4, 0.7, 1.0, 1.0)
+                col = imgui.get_color_u32_rgba(*CurrentTheme.REFERENCE_OVERLAY)
                 draw_list.add_circle_filled(x, cy, radius, col)
             else:
                 col = imgui.get_color_u32_rgba(0.5, 0.5, 0.5, 0.6)
@@ -186,10 +187,10 @@ class FirstRunWizard:
             # Card styling
             if selected:
                 imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.2, 0.4, 0.7, 0.8)
-                imgui.push_style_color(imgui.COLOR_BORDER, 0.4, 0.7, 1.0, 1.0)
+                imgui.push_style_color(imgui.COLOR_BORDER, *CurrentTheme.REFERENCE_OVERLAY)
             else:
                 imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.15, 0.15, 0.15, 0.8)
-                imgui.push_style_color(imgui.COLOR_BORDER, 0.3, 0.3, 0.3, 0.5)
+                imgui.push_style_color(imgui.COLOR_BORDER, *CurrentTheme.DISABLED_OVERLAY)
 
             imgui.push_style_var(imgui.STYLE_CHILD_ROUNDING, 6.0)
             imgui.begin_child(f"##scale_{i}", width=card_w, height=80, border=True)
@@ -217,7 +218,7 @@ class FirstRunWizard:
                 self._selected_scale_idx = i
                 # Live preview
                 imgui.get_io().font_global_scale = scale_val
-                self.app.app_settings.set("global_font_scale", scale_val)
+                self.app.app_settings.config.ui.global_font_scale = scale_val
 
     def _render_step_output(self):
         imgui.dummy(0, 20)
@@ -229,11 +230,13 @@ class FirstRunWizard:
 
         imgui.text("Current path:")
         imgui.same_line()
-        imgui.text_colored(self._output_folder, 0.6, 0.8, 1.0, 1.0)
+        imgui.text_colored(self._output_folder, *CurrentTheme.REFERENCE_OVERLAY)
 
         imgui.dummy(0, 10)
         if imgui.button("Browse...", width=120):
             self._open_folder_dialog()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Pick a folder where FunGen will save generated funscripts, overlays, and cached data.")
 
     def _render_step_models(self):
         imgui.dummy(0, 20)
@@ -280,7 +283,7 @@ class FirstRunWizard:
 
         if self._download_failed:
             imgui.dummy(0, 8)
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.4, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.RED_LIGHT)
             imgui.text_wrapped(
                 "Download failed. You can retry later via AI menu > Download Models."
             )
@@ -391,7 +394,7 @@ class FirstRunWizard:
     def _on_folder_selected(self, path):
         if path:
             self._output_folder = path
-            self.app.app_settings.set("output_folder_path", path)
+            self.app.app_settings.config.output.folder_path = path
 
     def _start_model_download(self):
         """Kick off model download using existing app_logic method."""
@@ -399,7 +402,7 @@ class FirstRunWizard:
 
     def _finish(self):
         """Mark first run complete, persist all settings."""
-        self.app.app_settings.set("is_first_run_complete", True)
+        self.app.app_settings.config.first_run.complete = True
         self.app.app_settings.is_first_run = False
         self.app.app_settings.save_settings()
         logger.info("First-run wizard completed")

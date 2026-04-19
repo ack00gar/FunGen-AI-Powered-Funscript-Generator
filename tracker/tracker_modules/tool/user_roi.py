@@ -25,6 +25,8 @@ except ImportError:
 
 
 class UserRoiTracker(BaseTracker):
+    mutates_input_frame = False  # process_frame only reads input; cvtColor + ROI slice don't mutate
+
     """
     User-defined fixed ROI tracker.
     
@@ -131,7 +133,7 @@ class UserRoiTracker(BaseTracker):
                 )
                 # Keep flow history window at 3 for responsiveness (matches original tracker)
                 self.flow_history_window_smooth = 3  # Don't override with settings
-                self.sensitivity = settings.get('live_tracker_sensitivity', 10.0)
+                self.sensitivity = settings.config.tracking.live_sensitivity
                 self.adaptive_flow_scale = settings.get('adaptive_flow_scale', False)
                 self.y_offset = settings.get('y_offset', 0)
                 self.x_offset = settings.get('x_offset', 0)
@@ -447,11 +449,11 @@ class UserRoiTracker(BaseTracker):
                     self.user_roi_tracking_box_size = (self.user_roi_tracking_box_size[0], nh)
 
         # Sensitivity
-        cur_sens = settings.get("live_tracker_sensitivity", self.sensitivity)
+        cur_sens = settings.config.tracking.live_sensitivity
         ch, ns = imgui.slider_float("Sensitivity##UserROISens", cur_sens, 0.0, 100.0, "%.1f")
         _tip("How responsive the output is to motion")
         if ch and ns != cur_sens:
-            settings.set("live_tracker_sensitivity", ns)
+            settings.config.tracking.live_sensitivity = ns
             self.sensitivity = ns
 
         # Adaptive flow scale
@@ -513,8 +515,8 @@ class UserRoiTracker(BaseTracker):
     # Private helper methods
     
     def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Basic frame preprocessing."""
-        return frame.copy()
+        """Basic frame preprocessing (no-op: downstream cvtColor/ROI extract don't mutate)."""
+        return frame
     
     def _process_user_roi(self, current_frame_gray: np.ndarray, frame_shape: Tuple[int, int]) -> Tuple[int, int]:
         """Process the user-defined ROI region."""
@@ -857,7 +859,7 @@ class UserRoiTracker(BaseTracker):
         """Calculate effective amplification factor with real-time settings updates."""
         # Read from app settings in real-time for control panel responsiveness
         if hasattr(self.app, 'app_settings') and self.app.app_settings:
-            base_factor = self.app.app_settings.get('live_tracker_base_amplification', 1.0)
+            base_factor = self.app.app_settings.config.tracking.live_base_amplification
         else:
             base_factor = 1.0
         return base_factor
@@ -874,6 +876,6 @@ class UserRoiTracker(BaseTracker):
     def _get_current_sensitivity(self) -> float:
         """Get current sensitivity with real-time settings updates."""
         if hasattr(self.app, 'app_settings') and self.app.app_settings:
-            return self.app.app_settings.get('live_tracker_sensitivity', self.sensitivity)
+            return self.app.app_settings.config.tracking.live_sensitivity
         else:
             return self.sensitivity

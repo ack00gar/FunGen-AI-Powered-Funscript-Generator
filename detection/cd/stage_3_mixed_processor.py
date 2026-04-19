@@ -888,30 +888,32 @@ def perform_mixed_stage_analysis(
         # Track processing time
         start_time = time.time()
         
-        # Open video for frame processing via PyAV (in-process libav).
-        import av
+        # Video source for per-frame ROI extraction. Random-access seek uses
+        # one-shot ffmpeg subprocesses. BJ/HJ tracking frames are a small
+        # subset so spawn overhead amortizes; keeps this stateless and
+        # process-isolated from the rest of the Stage 3 pipeline.
+        import subprocess as _subprocess
+        from video.ffmpeg_helpers import find_ffmpeg, subprocess_flags
+        from video.frame_source.probe import probe as _probe
+
         video_source = preprocessed_video_path_arg or video_path
-        container = av.open(video_source)
-        try:
-            pyav_stream = container.streams.video[0]
-        except (IndexError, AttributeError):
-            container.close()
-            raise RuntimeError(f"No video stream in {video_source}")
-        pyav_stream.thread_type = "AUTO"
-        pyav_time_base = pyav_stream.time_base
 
         # Prefer fps from common_app_config (probe-based, set by _resolve_video_fps)
         # over the stream's rate which can be unreliable for VR SBS videos.
         config_fps = common_app_config.get('video_fps', 0)
-        stream_fps = float(pyav_stream.average_rate or pyav_stream.guessed_rate or 0)
         if config_fps and config_fps > 0:
             video_fps = float(config_fps)
-        elif stream_fps and stream_fps > 0:
-            video_fps = stream_fps
-            logger.warning(f"Using PyAV stream fps={video_fps:.2f} (config video_fps not set)")
         else:
-            video_fps = 30.0
-            logger.warning("No reliable FPS source, using fallback 30.0")
+            probe_info = _probe(video_source)
+            if probe_info is not None and probe_info.fps > 0:
+                video_fps = probe_info.fps
+                logger.warning(f"Using ffprobe fps={video_fps:.2f} (config video_fps not set)")
+            else:
+                video_fps = 30.0
+                logger.warning("No reliable FPS source, using fallback 30.0")
+
+        _ffmpeg_bin = find_ffmpeg()
+        _proc_flags = subprocess_flags()
         
         # Create a mapping of frame_id -> segment for efficient lookup
         frame_to_segment = {}
@@ -945,21 +947,27 @@ def perform_mixed_stage_analysis(
             is_tracking_frame = frame_id in bj_hj_frames
             
             if is_tracking_frame:
-                # Use ROI tracking for BJ/HJ frames — random-access seek + decode.
+                # Use ROI tracking for BJ/HJ frames. One-shot ffmpeg seek +
+                # single-frame decode. Each BJ/HJ frame = one subprocess; the
+                # spawn cost (~150-300 ms) dominates on heavy sources.
                 frame = None
                 try:
-                    target_pts = int(frame_id / video_fps / pyav_time_base)
-                    container.seek(target_pts, backward=True, any_frame=False, stream=pyav_stream)
-                    for packet in container.demux(pyav_stream):
-                        decoded = False
-                        for av_frame in packet.decode():
-                            frame = av_frame.to_ndarray(format="bgr24")
-                            decoded = True
-                            break
-                        if decoded:
-                            break
-                except Exception as seek_err:
-                    logger.debug(f"PyAV seek for frame {frame_id} failed: {seek_err}")
+                    seek_t = frame_id / video_fps if video_fps > 0 else 0.0
+                    _cmd = [
+                        _ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-nostats",
+                        "-ss", f"{seek_t:.6f}", "-i", video_source,
+                        "-frames:v", "1",
+                        "-f", "image2pipe", "-c:v", "bmp", "-",
+                    ]
+                    _r = _subprocess.run(
+                        _cmd, stdout=_subprocess.PIPE, stderr=_subprocess.PIPE,
+                        timeout=10.0, creationflags=_proc_flags,
+                    )
+                    if _r.returncode == 0 and _r.stdout:
+                        _buf = np.frombuffer(_r.stdout, dtype=np.uint8)
+                        frame = cv2.imdecode(_buf, cv2.IMREAD_COLOR)
+                except (OSError, _subprocess.TimeoutExpired) as seek_err:
+                    logger.debug(f"ffmpeg seek for frame {frame_id} failed: {seek_err}")
                     frame = None
                 if frame is None:
                     logger.warning(f"Could not read frame {frame_id}, falling back to Stage 2 signal")
@@ -1016,9 +1024,8 @@ def perform_mixed_stage_analysis(
                     processing_fps, time_elapsed, eta_seconds
                 )
         
-        try: container.close()
-        except Exception: pass
-        
+        # (no persistent decoder to close; each BJ/HJ frame was a subprocess.)
+
         # Create funscript object - start with Stage 2 funscript if available
         if stage2_funscript and hasattr(stage2_funscript, 'primary_actions'):
             # Start with the Stage 2 funscript and replace BJ/HJ chapters

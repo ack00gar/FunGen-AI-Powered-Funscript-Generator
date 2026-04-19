@@ -75,7 +75,7 @@ class AppBatchProcessor:
         if not self.app._check_model_paths(): return
         if self.app.is_batch_processing_active: return
         gui = self.app.gui_instance
-        if not gui or not gui.batch_videos_data:
+        if not gui or not gui.batch_state.videos_data:
             self.app.logger.error("Batch start requested, but GUI data is missing.")
             self._cancel_batch_processing_from_confirmation()
             return
@@ -83,7 +83,7 @@ class AppBatchProcessor:
         videos_to_process = []
         video_format_options = ["Auto (Heuristic)", "2D", "VR (he_sbs)", "VR (he_tb)", "VR (fisheye_sbs)", "VR (fisheye_tb)"]
 
-        for video_data in gui.batch_videos_data:
+        for video_data in gui.batch_state.videos_data:
             if video_data.get("selected", False):
                 override_idx = video_data.get("override_format_idx", 0)
                 override_format = video_format_options[override_idx] if 0 <= override_idx < len(video_format_options) else "Auto (Heuristic)"
@@ -96,12 +96,12 @@ class AppBatchProcessor:
 
         # Use the dynamically selected tracker name
         self.app.batch_tracker_name = gui.selected_batch_tracker_name
-        self.app.batch_apply_ultimate_autotune = gui.batch_apply_ultimate_autotune_ui
-        self.app.batch_copy_funscript_to_video_location = gui.batch_copy_funscript_to_video_location_ui
-        self.app.batch_overwrite_mode = gui.batch_overwrite_mode_ui
-        self.app.batch_generate_roll_file = gui.batch_generate_roll_file_ui
-        self.app.batch_adaptive_tuning_enabled = getattr(gui, 'batch_adaptive_tuning_ui', False)
-        self.app.batch_save_preprocessed_video = getattr(gui, 'batch_save_preprocessed_video_ui', False)
+        self.app.batch_apply_ultimate_autotune = gui.batch_state.apply_ultimate_autotune_ui
+        self.app.batch_copy_funscript_to_video_location = gui.batch_state.copy_funscript_to_video_location_ui
+        self.app.batch_overwrite_mode = gui.batch_state.overwrite_mode_ui
+        self.app.batch_generate_roll_file = gui.batch_state.generate_roll_file_ui
+        self.app.batch_adaptive_tuning_enabled = getattr(gui.batch_state, 'adaptive_tuning_ui', False)
+        self.app.batch_save_preprocessed_video = getattr(gui.batch_state, 'save_preprocessed_video_ui', False)
 
         self.app.logger.info(f"User confirmed. Starting batch with {len(videos_to_process)} videos.")
         self.app.batch_video_paths = videos_to_process # Now a list of dicts
@@ -113,7 +113,7 @@ class AppBatchProcessor:
         self.app.batch_processing_thread.start()
 
         self.app.show_batch_confirmation_dialog = False
-        gui.batch_videos_data.clear()
+        gui.batch_state.videos_data.clear()
 
     def _cancel_batch_processing_from_confirmation(self):
         """[Private] Called from the GUI when the user clicks 'Cancel'."""
@@ -121,7 +121,7 @@ class AppBatchProcessor:
         # Clear the confirmation dialog state
         self.app.show_batch_confirmation_dialog = False
         if self.app.gui_instance:
-            self.app.gui_instance.batch_videos_data.clear()
+            self.app.gui_instance.batch_state.videos_data.clear()
 
     def abort_batch_processing(self):
         if not self.app.is_batch_processing_active:
@@ -227,8 +227,9 @@ class AppBatchProcessor:
         """Persist best discovered P/C to settings and stage processor."""
         if state is None or state.best_fps <= 0:
             return
-        self.app.app_settings.set("num_producers_stage1", state.best_producers)
-        self.app.app_settings.set("num_consumers_stage1", state.best_consumers)
+        _perf = self.app.app_settings.config.performance
+        _perf.stage1_producers = state.best_producers
+        _perf.stage1_consumers = state.best_consumers
         self.app.stage_processor.num_producers_stage1 = state.best_producers
         self.app.stage_processor.num_consumers_stage1 = state.best_consumers
         self.app.logger.info(f"Adaptive tuning: Persisted best settings P={state.best_producers}/C={state.best_consumers} ({state.best_fps:.1f} FPS)")
@@ -502,7 +503,7 @@ class AppBatchProcessor:
     def _write_batch_error_report(self, failures):
         """Write a batch error report file listing all failed videos."""
         try:
-            output_dir = self.app.app_settings.get("output_folder_path", "output")
+            output_dir = self.app.app_settings.config.output.folder_path
             os.makedirs(output_dir, exist_ok=True)
             date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{date_str}_FunGen_batch_errors.txt"

@@ -47,27 +47,10 @@ class VideoNavigationCoreMixin:
         self.selected_segment_type_idx = 0
         self.selected_source_idx = 0
         
-        # Chapter creation drag state
-        self.is_dragging_chapter_range = False
-        self.drag_start_frame = 0
-        self.drag_current_frame = 0
-        
-        # Chapter resizing state
-        self.is_resizing_chapter = False
-        self.resize_chapter_id = None
-        self.resize_edge = None  # 'left' or 'right'
-        self.resize_original_start = 0
-        self.resize_original_end = 0
+        from application.gui_components.video_navigation.chapter_bar_state import ChapterBarInteractionState
+        self._ci = ChapterBarInteractionState()
 
-        # Chapter edge drag preview state (similar to hover navigation preview)
-        self.resize_preview_frame = None
         self.resize_preview_data = None
-
-        # Store frame position when context menu opens for chapter split
-        self.context_menu_opened_at_frame = None
-
-        # Track if context menu was opened this frame to prevent create dialog from opening
-        self.context_menu_opened_this_frame = False
 
         try:
             self.selected_position_idx_in_dialog = self.position_short_name_keys.index(
@@ -136,7 +119,7 @@ class VideoNavigationCoreMixin:
         if is_floating:
             if not getattr(app_state, 'show_video_navigation_window', True):
                 return
-            is_open, new_visibility = imgui.begin("Video Navigation", closable=True)
+            is_open, new_visibility = imgui.begin("FunGen: Video Navigation", closable=True)
             if new_visibility != app_state.show_video_navigation_window:
                 app_state.show_video_navigation_window = new_visibility
                 self.app.project_manager.project_dirty = True
@@ -191,7 +174,7 @@ class VideoNavigationCoreMixin:
                 playhead_bottom_y = imgui.get_cursor_screen_pos()[1] - 2
                 if playhead_bottom_y > playhead_top_y:
                     dl = imgui.get_window_draw_list()
-                    col = imgui.get_color_u32_rgba(1.0, 0.15, 0.15, 1.0)
+                    col = imgui.get_color_u32_rgba(*CurrentTheme.RED)
                     dl.add_line(marker_x, playhead_top_y, marker_x, playhead_bottom_y, col, thickness=1.5)
             if self.chapter_tooltip_segment and total_frames_for_bars > 0:
                 self._render_chapter_tooltip()

@@ -17,6 +17,7 @@ import imgui
 from application.utils.imgui_helpers import center_next_window_pivot
 import logging
 from typing import Optional, Tuple, Dict, Any
+from config.constants_colors import CurrentTheme
 
 
 class ChapterTypeManagerUI:
@@ -68,7 +69,7 @@ class ChapterTypeManagerUI:
         imgui.set_next_window_size(700, 500, imgui.FIRST_USE_EVER)
 
         center_next_window_pivot()
-        expanded, opened = imgui.begin("Chapter Type Manager", closable=True, flags=window_flags)
+        expanded, opened = imgui.begin("FunGen: Chapter Type Manager", closable=True, flags=window_flags)
 
         if not opened:
             app_state.show_chapter_type_manager = False
@@ -131,7 +132,7 @@ class ChapterTypeManagerUI:
 
         # Render built-in types
         if builtin_types:
-            imgui.text_colored("Built-in Types", 0.7, 0.7, 0.7, 1.0)
+            imgui.text_colored("Built-in Types", *CurrentTheme.DESCRIPTION_TEXT)
             imgui.separator()
 
             for short_name, info in sorted(builtin_types, key=lambda x: x[1].get("long_name", x[0])):
@@ -141,7 +142,7 @@ class ChapterTypeManagerUI:
 
         # Render custom types
         if custom_types:
-            imgui.text_colored("Custom Types", 0.4, 0.8, 1.0, 1.0)
+            imgui.text_colored("Custom Types", *CurrentTheme.REFERENCE_OVERLAY)
             imgui.separator()
 
             for short_name, info in sorted(custom_types, key=lambda x: x[1].get("long_name", x[0])):
@@ -149,10 +150,11 @@ class ChapterTypeManagerUI:
 
             imgui.spacing()
 
-        # Create new type button
         imgui.separator()
         if imgui.button("Create New Type", width=-1):
             self._start_create_new_type()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Define a new custom chapter type with its own short name, full name, category, and color.")
 
     def _render_type_item(self, short_name: str, info: Dict[str, Any], is_builtin: bool):
         """Render a single type item in the list."""
@@ -183,7 +185,7 @@ class ChapterTypeManagerUI:
             imgui.text(f"Category: {info.get('category', 'N/A')}")
             imgui.text(f"Usage Count: {usage_count}")
             if is_builtin:
-                imgui.text_colored("Built-in (read-only)", 0.7, 0.7, 0.7, 1.0)
+                imgui.text_colored("Built-in (read-only)", *CurrentTheme.DESCRIPTION_TEXT)
             imgui.end_tooltip()
 
     def _render_type_details(self, type_mgr):
@@ -197,7 +199,7 @@ class ChapterTypeManagerUI:
         info = all_types[self.selected_type]
         is_builtin = type_mgr.is_builtin_type(self.selected_type)
 
-        imgui.text_colored("Type Details", 0.4, 0.8, 1.0, 1.0)
+        imgui.text_colored("Type Details", *CurrentTheme.REFERENCE_OVERLAY)
         imgui.separator()
         imgui.spacing()
 
@@ -219,7 +221,7 @@ class ChapterTypeManagerUI:
 
         # Action buttons
         if is_builtin:
-            imgui.text_colored("Built-in types cannot be edited or deleted", 0.7, 0.7, 0.7, 1.0)
+            imgui.text_colored("Built-in types cannot be edited or deleted", *CurrentTheme.DESCRIPTION_TEXT)
         else:
             if imgui.button("Edit Type", width=120):
                 self._start_edit_type()
@@ -227,10 +229,12 @@ class ChapterTypeManagerUI:
             imgui.same_line()
 
             # Delete button (destructive)
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 1.0, 0.3, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON, *CurrentTheme.BUTTON_DESTRUCTIVE)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *CurrentTheme.RED_LIGHT)
             if imgui.button("Delete Type", width=120):
                 self._delete_type(type_mgr)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Remove this custom type. Existing chapters using it will fall back to the default type.")
             imgui.pop_style_color(2)
 
     def _render_edit_form(self, type_mgr):
@@ -238,9 +242,9 @@ class ChapterTypeManagerUI:
         is_new = self.selected_type is None
 
         if is_new:
-            imgui.text_colored("Create New Type", 0.4, 0.8, 1.0, 1.0)
+            imgui.text_colored("Create New Type", *CurrentTheme.REFERENCE_OVERLAY)
         else:
-            imgui.text_colored("Edit Type", 0.4, 0.8, 1.0, 1.0)
+            imgui.text_colored("Edit Type", *CurrentTheme.REFERENCE_OVERLAY)
 
         imgui.separator()
         imgui.spacing()
@@ -302,7 +306,7 @@ class ChapterTypeManagerUI:
 
         # Error message
         if self.form_error:
-            imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.3, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.RED_LIGHT)
             imgui.text_wrapped(self.form_error)
             imgui.pop_style_color()
             imgui.spacing()

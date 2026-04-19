@@ -6,6 +6,7 @@ import queue
 import imgui
 
 from application.utils import _format_time, TaskType, TaskPriority
+from config.constants_colors import CurrentTheme
 
 
 class PreviewManagerMixin:
@@ -139,7 +140,7 @@ class PreviewManagerMixin:
         Performs the numpy/cv2 operations to create the timeline image.
         This is called by the worker thread.
         """
-        use_simplified_preview = self.app.app_settings.get("use_simplified_funscript_preview", False)
+        use_simplified_preview = self.app.app_settings.config.ui.use_simplified_funscript_preview
 
         # Create background
         image_data = np.full((target_height, target_width, 4), (38, 31, 31, 255), dtype=np.uint8)
@@ -153,16 +154,22 @@ class PreviewManagerMixin:
             if len(actions) < 2: return image_data
 
             # --- Simplified Min/Max Envelope Drawing ---
+            # Note on perf: tried vectorizing the per-segment interpolation
+            # with np.minimum.at + np.linspace — benchmarks showed ~2.6x
+            # SLOWER at realistic sizes (~5000 actions / 4096 px width)
+            # because most segments span 0-2 pixels and the numpy setup
+            # cost dominates. Keep the tight Python inner loop.
             min_vals = np.full(target_width, target_height, dtype=np.int32)
             max_vals = np.full(target_width, -1, dtype=np.int32)
 
             # Pre-calculate x coordinates and values
-            times_s = np.array([a['at'] for a in actions]) / 1000.0
-            positions = np.array([a['pos'] for a in actions])
+            n = len(actions)
+            times_s = np.fromiter((a['at'] for a in actions), dtype=np.float64, count=n) / 1000.0
+            positions = np.fromiter((a['pos'] for a in actions), dtype=np.float64, count=n)
             x_coords = np.round((times_s / total_duration_s) * (target_width - 1)).astype(np.int32)
             y_coords = np.round((1.0 - positions / 100.0) * (target_height - 1)).astype(np.int32)
 
-            # Find min/max y for each x
+            # Find min/max y for each x (per-pixel interp — fast for short spans)
             for i in range(len(actions) - 1):
                 x1, x2 = x_coords[i], x_coords[i+1]
                 y1, y2 = y_coords[i], y_coords[i+1]
@@ -171,7 +178,6 @@ class PreviewManagerMixin:
                     min_vals[x1] = min(min_vals[x1], y1, y2)
                     max_vals[x1] = max(max_vals[x1], y1, y2)
                 else:
-                    # Interpolate for line segments
                     dx = x2 - x1
                     dy = y2 - y1
                     for x in range(x1, x2 + 1):
@@ -180,18 +186,16 @@ class PreviewManagerMixin:
                         min_vals[x] = min(min_vals[x], y_int)
                         max_vals[x] = max(max_vals[x], y_int)
 
-            # Create polygon points
-            min_points = []
-            max_points_rev = []
-            for x in range(target_width):
-                if max_vals[x] != -1: # Only add points where there is data
-                    min_points.append([x, min_vals[x]])
-                    max_points_rev.append([x, max_vals[x]])
-
-            if not min_points: return image_data
-
-            # Combine to form a closed polygon
-            poly_points = np.array(min_points + max_points_rev[::-1], dtype=np.int32)
+            # Build polygon points from columns that received data (vectorized).
+            valid = max_vals != -1
+            if not valid.any():
+                return image_data
+            valid_x = np.nonzero(valid)[0].astype(np.int32)
+            min_y = min_vals[valid_x]
+            max_y = max_vals[valid_x]
+            min_points = np.stack([valid_x, min_y], axis=1)
+            max_points_rev = np.stack([valid_x[::-1], max_y[::-1]], axis=1)
+            poly_points = np.concatenate([min_points, max_points_rev], axis=0).astype(np.int32)
 
             # Draw the semi-transparent polygon
             overlay = image_data.copy()
@@ -201,22 +205,33 @@ class PreviewManagerMixin:
             cv2.addWeighted(overlay, 0.5, image_data, 0.5, 0, image_data) # Blend with background
 
         else:
-            # --- Detailed, Speed-Colored Line Drawing (Original Logic) ---
+            # --- Detailed, Speed-Colored Line Drawing ---
             if len(actions) > 1:
-                ats = np.array([a['at'] for a in actions], dtype=np.float64) / 1000.0
-                pos = np.array([a['pos'] for a in actions], dtype=np.float32) / 100.0
+                n = len(actions)
+                ats = np.fromiter((a['at'] for a in actions), dtype=np.float64, count=n) / 1000.0
+                pos = np.fromiter((a['pos'] for a in actions), dtype=np.float32, count=n) / 100.0
                 x = np.clip(((ats / total_duration_s) * (target_width - 1)).astype(np.int32), 0, target_width - 1)
                 y = np.clip(((1.0 - pos) * target_height).astype(np.int32), 0, target_height - 1)
                 dt = np.diff(ats)
-                dpos = np.abs(np.diff(pos * 100.0))  # back to 0..100 for speed calc
+                dpos = np.abs(np.diff(pos * 100.0))
                 speeds = np.divide(dpos, dt, out=np.zeros_like(dpos), where=dt > 1e-6)
                 colors_u8 = self.app.utility.get_speed_colors_vectorized_u8(speeds)  # RGBA uint8
-                # Draw per segment; allow OpenCV to optimize internally
+
+                # Pre-convert RGBA→BGRA tuples once (was per-iteration int()
+                # conversion before). Also pre-compute zero-length mask.
+                bgra = colors_u8[:, [2, 1, 0, 3]]  # swap R<->B; vectorized
+                zero_len = (x[:-1] == x[1:]) & (y[:-1] == y[1:])
+                # Convert endpoints to Python ints once, hoist cv2.line to local
+                x_list = x.tolist()
+                y_list = y.tolist()
+                bgra_list = bgra.tolist()
+                _cv_line = cv2.line
                 for i in range(len(speeds)):
-                    if x[i] == x[i+1] and y[i] == y[i+1]:
+                    if zero_len[i]:
                         continue
-                    c = colors_u8[i]
-                    cv2.line(image_data, (int(x[i]), int(y[i])), (int(x[i+1]), int(y[i+1])), (int(c[2]), int(c[1]), int(c[0]), int(c[3])), 1)
+                    c = bgra_list[i]
+                    _cv_line(image_data, (x_list[i], y_list[i]), (x_list[i+1], y_list[i+1]),
+                             (c[0], c[1], c[2], c[3]), 1)
 
         return image_data
 
@@ -319,27 +334,6 @@ class PreviewManagerMixin:
             actual_frame = frame_index
             # Keep frame in BGR format - update_texture will handle BGR→RGB conversion
 
-            # Apply VR panel selection if enabled (user override controls)
-            # Note: ThumbnailExtractor already crops VR to one panel (left for SBS, top for TB)
-            # This section allows user to override and select right panel for SBS content
-            if hasattr(self.app, 'app_settings') and self.app.app_settings:
-                vr_enabled = self.app.app_settings.get('vr_mode_enabled', False)
-                vr_panel = self.app.app_settings.get('vr_panel_selection', 'full')  # 'left', 'right', 'full'
-
-                # Only apply panel selection for SBS content (not TB)
-                # TB content is already cropped to top panel by ThumbnailExtractor
-                vr_format = getattr(self.app.processor, 'vr_input_format', '') if self.app.processor else ''
-                is_sbs = '_sbs' in vr_format.lower() or '_lr' in vr_format.lower() or '_rl' in vr_format.lower()
-
-                if vr_enabled and vr_panel != 'full' and is_sbs:
-                    height, width = frame.shape[:2]
-
-                    if vr_panel == 'left':
-                        # Take left half for preview
-                        frame = frame[:, :width//2]
-                    elif vr_panel == 'right':
-                        # Take right half for preview
-                        frame = frame[:, width//2:]
 
             # Crop out black padding if frame is padded (non-HD 640x640 mode only)
             height, width = frame.shape[:2]
@@ -388,7 +382,7 @@ class PreviewManagerMixin:
             frames_match = actual_frame == tooltip_data['hover_frame']
 
             if show_video_frame and has_frame_data and frames_match:
-                imgui.text_colored(frame_text, 0.0, 1.0, 0.0, 1.0)  # Green = frame and video are synchronized
+                imgui.text_colored(frame_text, *CurrentTheme.GREEN)
             elif show_video_frame and has_frame_data and not frames_match:
                 imgui.text_colored(f"{frame_text} (video: {actual_frame})", 1.0, 1.0, 0.0, 1.0)  # Yellow = mismatch warning
             else:
@@ -434,7 +428,7 @@ class PreviewManagerMixin:
                         # Draw line segment
                         draw_list.add_line(
                             x1, py1, x2, py2,
-                            imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 1.0),
+                            imgui.get_color_u32_rgba(*CurrentTheme.GREEN),
                             2.0
                         )
 
@@ -447,7 +441,7 @@ class PreviewManagerMixin:
 
                         # Highlight if near hover position
                         is_near_hover = abs(action['at'] / 1000.0 - hover_time_s) < 0.1
-                        color = imgui.get_color_u32_rgba(1.0, 1.0, 0.0, 1.0) if is_near_hover else imgui.get_color_u32_rgba(0.4, 1.0, 0.4, 1.0)
+                        color = imgui.get_color_u32_rgba(*CurrentTheme.YELLOW) if is_near_hover else imgui.get_color_u32_rgba(*CurrentTheme.GREEN_LIGHT)
                         radius = 4 if is_near_hover else 3
 
                         draw_list.add_circle_filled(x, py, radius, color)
@@ -502,12 +496,15 @@ class PreviewManagerMixin:
 
                         imgui.image(self.enhanced_preview_texture_id, display_width, display_height)
 
-                        # Show VR panel info only if relevant
+                        # Show VR panel info only if relevant.
                         if hasattr(self.app, 'app_settings') and self.app.app_settings:
-                            vr_enabled = self.app.app_settings.get('vr_mode_enabled', False)
-                            vr_panel = self.app.app_settings.get('vr_panel_selection', 'full')
-                            if vr_enabled and vr_panel != 'full':
-                                imgui.text(f"[{vr_panel.upper()} panel]")
+                            vr_enabled = self.app.app_settings.config.vr_display.mode_enabled
+                            from video import vr_panel as _vr_panel
+                            eye_sel = _vr_panel.read_setting(
+                                self.app.app_settings,
+                                default=_vr_panel.EYE_LEFT)
+                            if vr_enabled and eye_sel != _vr_panel.EYE_FULL:
+                                imgui.text(f"[{eye_sel.upper()} eye]")
                     else:
                         imgui.text_disabled(f"[Frame {tooltip_data['hover_frame']} - no texture available]")
                 elif frame_loading:

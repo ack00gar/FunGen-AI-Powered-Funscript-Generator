@@ -187,7 +187,7 @@ class TensorRTCompilerWindow:
         
         # Begin window
         center_next_window_pivot()
-        is_open, should_show = imgui.begin("YOLO to TensorRT Compiler", True)
+        is_open, should_show = imgui.begin("FunGen: YOLO to TensorRT Compiler", True)
         if not should_show:
             self._close_window()
             imgui.end()

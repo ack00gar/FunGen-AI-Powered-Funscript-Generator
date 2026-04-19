@@ -1,13 +1,18 @@
 """Proxy (edit-time transcode) builder.
 
-For VR sources, run a single ffmpeg invocation that v360-unwarps to a flat
-1920x1080 HEVC file with AAC 160k audio. The proxy is written next to the
-original with a fixed filename suffix and a sidecar JSON that tracks the
-source's mtime + frame count so stale proxies can be detected.
+Runs a single ffmpeg invocation that v360-unwarps VR sources to a flat
+1080x1080 HEVC file (or downscales 2D sources to 1920x1080 with letterbox)
+with AAC 160k audio. The proxy is written with a fixed filename suffix and
+a sidecar JSON that tracks the source's mtime + frame count so stale
+proxies can be detected.
 
-Frame timing is preserved verbatim (fps_mode=passthrough + copyts) so
-funscript timestamps remain valid when the editor swaps its active source
-to the proxy. If the post-encode frame count drifts, the proxy is deleted.
+Frame timing is preserved verbatim so funscript timestamps remain valid
+when the editor swaps its active source to the proxy. If the post-encode
+frame count drifts by more than 5 frames, the proxy is discarded.
+
+Single-ffmpeg design: one ffmpeg process handles decode, v360/scale, and
+encode end-to-end. libavfilter errors surface as stderr text rather than
+in-process C exceptions, and ffmpeg's own progress reporter drives the UI.
 
 This module is pure: no imgui, no app singleton. A ProxyBuilder instance
 runs an encode with progress/cancel callbacks. UI dialogs call into it.
@@ -26,6 +31,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Tuple
+
+from video.ffmpeg_helpers import find_ffmpeg, find_ffprobe, subprocess_flags
 
 PROXY_SUFFIX = ".fungen-proxy.mp4"
 SIDECAR_SUFFIX = ".fungen-proxy.json"
@@ -51,16 +58,10 @@ def _target_dims_for(job) -> tuple:
         return TARGET_VR_W, TARGET_VR_H
     return TARGET_2D_W, TARGET_2D_H
 
-# v360 presets keyed by our internal vr_input_format string. Only the
-# projections we actually handle at read-time are mirrored here; anything
-# else falls back to "he:in_stereo=0" (mono equirect) which is a reasonable
-# default and still produces a usable preview.
-_V360_CHAIN = {
-    "he_sbs":   "v360=he:in_stereo=sbs:output=flat:w={w}:h={h}:v_fov=90:h_fov=90",
-    "he_tb":    "v360=he:in_stereo=tb:output=flat:w={w}:h={h}:v_fov=90:h_fov=90",
-    "fisheye_sbs": "v360=fisheye:ih_fov=190:iv_fov=190:in_stereo=sbs:output=flat:w={w}:h={h}:v_fov=100:h_fov=100",
-    "fisheye_tb":  "v360=fisheye:ih_fov=190:iv_fov=190:in_stereo=tb:output=flat:w={w}:h={h}:v_fov=100:h_fov=100",
-}
+# Default FOV / pitch used when ProxyJob doesn't carry explicit values.
+# Matches v0.8.0's VideoProcessor defaults (190 deg lenses, -21 deg pitch).
+_DEFAULT_VR_FOV = 190
+_DEFAULT_VR_PITCH = -21
 
 
 # ----------------------------------------------------------------- helpers
@@ -264,8 +265,9 @@ def detect_hevc_encoder(logger: Optional[logging.Logger] = None) -> str:
 
     try:
         out = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
+            [find_ffmpeg(), "-hide_banner", "-encoders"],
             capture_output=True, text=True, timeout=5,
+            creationflags=subprocess_flags(),
         ).stdout
     except (OSError, subprocess.TimeoutExpired) as e:
         if logger:
@@ -308,11 +310,18 @@ class ProxyJob:
     duration_s: float
     source_nb_frames: int
     source_fps: float
+    # Source dimensions. Required for VR so the crop filter knows how to
+    # split SBS/TB panels. 0 triggers a fallback ffprobe at encode time.
+    source_width: int = 0
+    source_height: int = 0
+    # VR dewarp params mirrored from VideoProcessor. 0 means "use default".
+    vr_fov: int = 0
+    vr_pitch: float = 0.0
     target_path: str = ""
     # Optional callbacks: (fraction[0..1], out_time_s, speed_x, eta_s)
     progress_cb: Optional[Callable[[float, float, float, float], None]] = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
-    # Live-preview JPEG: if set, ffmpeg writes a 2fps/480-wide JPEG here
+    # Live-preview JPEG: if set, ffmpeg writes a downscaled JPEG here
     # (overwriting the same file). Consumer polls and uploads to a GL
     # texture. Left None = no preview output.
     preview_path: Optional[str] = None
@@ -332,32 +341,66 @@ class ProxyBuilder:
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.logger = logger or logging.getLogger("ProxyBuilder")
 
-    def _filter_chain_str(self, job: ProxyJob) -> str:
-        """Filter chain applied inside our PyAV Graph (NOT passed to ffmpeg)."""
-        w, h = _target_dims_for(job)
-        if job.vr_input_format and job.vr_input_format != "2d":
-            return _V360_CHAIN.get(
-                job.vr_input_format, _V360_CHAIN["he_sbs"],
-            ).format(w=w, h=h) + ",format=bgr24"
-        return (f"scale={w}:{h}"
-                f":force_original_aspect_ratio=decrease,"
-                f"pad={w}:{h}"
-                f":(ow-iw)/2:(oh-ih)/2:black,format=bgr24")
+    def _video_filter_str(self, job: ProxyJob) -> str:
+        """The ffmpeg -vf chain: v360 dewarp for VR, scale+pad for 2D.
 
-    def build_encoder_command(self, job: ProxyJob, encoder: str,
-                              width: int, height: int, fps: float) -> list:
-        """ffmpeg command for the ENCODE-ONLY subprocess.
-
-        Video comes in as raw BGR24 on stdin (pipe:0). Audio is read
-        directly from the source file by ffmpeg (second input). This
-        mirrors the Stage-1 FFmpegEncoder pattern which avoids all the
-        filter_complex / hwaccel pitfalls we hit on Windows + nvenc.
+        Mirrors v0.8.0's ``_get_vr_video_filters`` (video/_vp_ffmpeg_builders.py)
+        verbatim so the proxy's baked-in dewarp looks identical to the
+        runtime preview the user sees when scrubbing the raw source:
+        crop one stereo panel, then v360 with in_stereo=0 output=sg.
         """
-        # Near-all-I-frame: GOP=2 with B-frames disabled gives us an I-P-I-P
-        # pattern. Worst-case backward scrub is 1 extra frame decode (~5 ms),
-        # imperceptible vs true all-I, and the config is accepted by every
-        # encoder build we care about. GOP=1 is rejected by some nvenc
-        # releases even with -bf 0 ("GOP Length should be > B + 1").
+        out_w, out_h = _target_dims_for(job)
+        fmt = (job.vr_input_format or "").lower()
+        is_vr = bool(fmt) and fmt != "2d"
+
+        if not is_vr:
+            # 2D: scale-and-pad to the target frame.
+            return (f"scale={out_w}:{out_h}"
+                    f":force_original_aspect_ratio=decrease,"
+                    f"pad={out_w}:{out_h}"
+                    f":(ow-iw)/2:(oh-ih)/2:black")
+
+        parts = []
+        ow = int(job.source_width or 0)
+        oh = int(job.source_height or 0)
+        # Pre-crop to one stereo panel. Matches v0.8.0's logic exactly:
+        # SBS / LR -> left half, RL -> right half, TB -> top half.
+        if ow > 0 and oh > 0:
+            if "_sbs" in fmt or "_lr" in fmt:
+                parts.append(f"crop={ow // 2}:{oh}:0:0")
+            elif "_rl" in fmt:
+                parts.append(f"crop={ow // 2}:{oh}:{ow // 2}:0")
+            elif "_tb" in fmt:
+                parts.append(f"crop={ow}:{oh // 2}:0:0")
+
+        base_fmt = (fmt.replace("_sbs", "")
+                       .replace("_tb", "")
+                       .replace("_lr", "")
+                       .replace("_rl", "")) or "he"
+        vr_fov = job.vr_fov if job.vr_fov and job.vr_fov > 0 else _DEFAULT_VR_FOV
+        vr_pitch = job.vr_pitch if job.vr_pitch else _DEFAULT_VR_PITCH
+        parts.append(
+            f"v360={base_fmt}:in_stereo=0:output=sg:"
+            f"iv_fov={vr_fov}:ih_fov={vr_fov}:"
+            f"d_fov={vr_fov}:"
+            f"v_fov=90:h_fov=90:"
+            f"pitch={vr_pitch}:yaw=0:roll=0:"
+            f"w={out_w}:h={out_h}:interp=linear"
+        )
+        return ",".join(parts)
+
+    def _build_ffmpeg_command(self, job: ProxyJob, encoder: str,
+                              partial_path: str) -> list:
+        """Single-process ffmpeg command: decode + v360/scale + encode.
+
+        Progress lines are emitted on stdout via ``-progress pipe:1``.
+        The optional preview JPEG is a second output driven by a filter_complex
+        split so no extra processes are needed.
+        """
+        # Near-all-I-frame: GOP=2 with B-frames disabled gives an I-P-I-P
+        # pattern. Worst-case backward scrub is ~1 extra frame decode, and
+        # the config is accepted by every encoder build we care about. GOP=1
+        # is rejected by some nvenc releases ("GOP Length should be > B + 1").
         iframe_args = ["-g", "2", "-keyint_min", "2", "-bf", "0"]
         if encoder == "libx265":
             iframe_args += ["-x265-params",
@@ -367,110 +410,103 @@ class ProxyBuilder:
         elif encoder == "hevc_qsv":
             iframe_args += ["-look_ahead", "0"]
 
-        return [
-            "ffmpeg", "-hide_banner", "-nostats", "-loglevel", "warning",
+        vf = self._video_filter_str(job)
+
+        cmd = [
+            find_ffmpeg(),
+            "-hide_banner", "-nostats", "-loglevel", "warning",
             "-y",
-            # Input 0: rawvideo from our stdin pipe.
-            "-f", "rawvideo",
-            "-pix_fmt", "bgr24",
-            "-s", f"{width}x{height}",
-            "-r", f"{fps:.6f}",
-            "-i", "pipe:0",
-            # Input 1: source file (for audio only).
             "-i", job.source_path,
-            "-map", "0:v:0",
-            "-map", "1:a:0?",
-            "-c:v", encoder,
-            "-b:v", VIDEO_BITRATE,
-            "-pix_fmt", "yuv420p",
-            *iframe_args,
-            "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2",
-            "-movflags", "+faststart",
-            "-f", "mp4",
-            job.target_path + ".partial",
+            "-progress", "pipe:1",
         ]
 
-    def _open_decode_graph(self, job: ProxyJob):
-        """Open the source with PyAV and build the unwarp/scale filter graph.
-
-        Returns (container, stream, graph, fps, nb_frames) or raises.
-        """
-        import av
-        container = av.open(job.source_path)
-        stream = container.streams.video[0]
-        stream.thread_type = "AUTO"
-
-        fps = float(stream.average_rate or stream.guessed_rate or job.source_fps or 30.0)
-        nb_frames = int(stream.frames or 0)
-        if nb_frames <= 0 and job.source_nb_frames > 0:
-            nb_frames = job.source_nb_frames
-
-        graph = av.filter.Graph()
-        src = graph.add_buffer(template=stream)
-        chain = self._filter_chain_str(job).strip().strip(",")
-        prev = src
-        for spec in chain.split(","):
-            spec = spec.strip()
-            if not spec:
-                continue
-            name, _, args = spec.partition("=")
-            node = graph.add(name.strip(), args.strip())
-            prev.link_to(node)
-            prev = node
-        sink = graph.add("buffersink")
-        prev.link_to(sink)
-        graph.configure()
-        return container, stream, graph, fps, nb_frames
+        if job.preview_path:
+            # filter_complex: split the filtered video into the main encode
+            # output plus a low-fps downscaled JPEG written to a side file.
+            # The preview file is overwritten in place (-update 1) so the UI
+            # just polls its mtime.
+            filter_complex = (
+                f"[0:v]{vf},split=2[main][prev];"
+                f"[prev]fps=1/7,scale=480:-2[preview]"
+            )
+            cmd += [
+                "-filter_complex", filter_complex,
+                "-map", "[main]",
+                "-c:v", encoder,
+                "-b:v", VIDEO_BITRATE,
+                "-pix_fmt", "yuv420p",
+                *iframe_args,
+                "-map", "0:a:0?",
+                "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2",
+                "-movflags", "+faststart",
+                "-f", "mp4",
+                partial_path,
+                "-map", "[preview]",
+                "-q:v", "3", "-update", "1",
+                "-f", "image2",
+                job.preview_path,
+            ]
+        else:
+            cmd += [
+                "-vf", vf,
+                "-c:v", encoder,
+                "-b:v", VIDEO_BITRATE,
+                "-pix_fmt", "yuv420p",
+                *iframe_args,
+                "-map", "0:v:0",
+                "-map", "0:a:0?",
+                "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2",
+                "-movflags", "+faststart",
+                "-f", "mp4",
+                partial_path,
+            ]
+        return cmd
 
     def encode(self, job: ProxyJob) -> bool:
-        """Stage 1-style encode: PyAV decode + v360 in Python, raw BGR piped
-        to an ffmpeg encoder subprocess, audio copied from the source file.
-        Preview JPEGs are written directly by this method (no side output
-        from ffmpeg). Safe on any platform where PyAV can open the source
-        and where ffmpeg can run the target encoder."""
-        import av
-        import cv2
-        encoder = detect_hevc_encoder(self.logger)
+        """Run ffmpeg end-to-end: single process does decode, v360/scale,
+        encode, and audio re-encode. Progress arrives via ``-progress pipe:1``
+        on stdout; stderr is drained to a log buffer for error reporting.
+        """
+        # Fallback: if the caller didn't supply source dims (older integration
+        # path), probe now. Only needed for VR so the crop knows panel sizes.
+        if (job.vr_input_format and job.vr_input_format != "2d"
+                and (not job.source_width or not job.source_height)):
+            from video.frame_source.probe import probe as _probe
+            p = _probe(job.source_path)
+            if p is not None and p.width > 0 and p.height > 0:
+                job.source_width = p.width
+                job.source_height = p.height
 
-        # Stage 1: open source + build filter graph up-front so we fail
-        # fast with a clear Python exception if filters are misconfigured
-        # (instead of silently through an ffmpeg stderr tail).
-        try:
-            container, stream, graph, fps, nb_frames = self._open_decode_graph(job)
-        except Exception as e:
-            self.logger.error(f"PyAV decode setup failed: {e}", exc_info=True)
-            return False
+        encoder = detect_hevc_encoder(self.logger)
 
         partial_path = job.target_path + ".partial"
         if os.path.exists(partial_path):
             try: os.remove(partial_path)
             except OSError: pass
 
-        w, h = _target_dims_for(job)
-        cmd = self.build_encoder_command(job, encoder, w, h, fps)
+        cmd = self._build_ffmpeg_command(job, encoder, partial_path)
         self.logger.info(f"Proxy encode start: {os.path.basename(job.source_path)} "
                          f"-> {os.path.basename(job.target_path)} ({encoder})")
         self.logger.info("ffmpeg cmd: " + " ".join(cmd))
 
-        creation_flags = (subprocess.CREATE_NO_WINDOW
-                          if sys.platform == "win32" else 0)
+        nb_frames = int(job.source_nb_frames or 0)
+        fps = float(job.source_fps or 30.0)
+        if fps <= 0:
+            fps = 30.0
+
         try:
             proc = subprocess.Popen(
                 cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=False,
-                creationflags=creation_flags,
+                creationflags=subprocess_flags(),
             )
         except FileNotFoundError:
             self.logger.error("ffmpeg executable not found on PATH")
-            try: container.close()
-            except Exception: pass
             return False
 
-        # Drain ffmpeg stderr in a background thread so its pipe buffer
-        # never fills up and blocks the encoder.
         stderr_lines: list = []
         def _drain_stderr():
             if proc.stderr is None:
@@ -486,98 +522,52 @@ class ProxyBuilder:
             target=_drain_stderr, daemon=True, name="ProxyFFmpegStderr")
         stderr_thread.start()
 
-        # Feed loop.
-        frames_written = 0
-        last_preview_frame = -10 ** 9
-        PREVIEW_EVERY = max(1, int(fps * 7))  # ~1 JPEG every 7 seconds
+        # Progress reader. ffmpeg emits a block every ~0.5 s terminated by
+        # `progress=continue` (or `progress=end` at the tail). Fields are
+        # one per line. We only read the ones we need; the rest are ignored.
         t_start = time.time()
-        write_failed = False
-
+        last_frame = 0
+        last_out_time_s = 0.0
+        canceled = False
         try:
-            for packet in container.demux(stream):
+            if proc.stdout is None:
+                raise IOError("ffmpeg progress pipe is None")
+            for raw in iter(proc.stdout.readline, b""):
                 if job.cancel_event.is_set():
+                    canceled = True
                     break
-                for frame in packet.decode():
-                    if job.cancel_event.is_set():
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                key, _, val = line.partition("=")
+                if key == "frame":
+                    try: last_frame = int(val)
+                    except ValueError: pass
+                elif key == "out_time_ms":
+                    try: last_out_time_s = int(val) / 1_000_000.0
+                    except ValueError: pass
+                elif key == "progress":
+                    # One block complete, fire callback.
+                    if job.progress_cb:
+                        elapsed = max(1e-3, time.time() - t_start)
+                        speed = last_out_time_s / elapsed
+                        frac = (last_frame / nb_frames
+                                if nb_frames > 0 else 0.0)
+                        remain_src = max(0.0,
+                                         (nb_frames - last_frame) / fps) if fps > 0 and nb_frames > 0 else 0.0
+                        eta = remain_src / speed if speed > 0 else 0.0
+                        try:
+                            job.progress_cb(
+                                max(0.0, min(1.0, frac)),
+                                last_out_time_s, speed, eta)
+                        except Exception:
+                            pass
+                    if val == "end":
                         break
-                    graph.push(frame)
-                    while True:
-                        try:
-                            out = graph.pull()
-                        except (av.BlockingIOError, av.FFmpegError):
-                            break
-                        arr = out.to_ndarray(format="bgr24")
-                        try:
-                            proc.stdin.write(arr.tobytes())
-                        except (BrokenPipeError, OSError):
-                            write_failed = True
-                            break
-                        frames_written += 1
+        except Exception as e:
+            self.logger.debug(f"Progress reader ended: {e}")
 
-                        # Preview: save a downscaled JPEG periodically.
-                        if (job.preview_path and
-                                frames_written - last_preview_frame >= PREVIEW_EVERY):
-                            try:
-                                h, w = arr.shape[:2]
-                                nh = max(1, int(h * 480 / max(1, w)))
-                                small = cv2.resize(arr, (480, nh))
-                                cv2.imwrite(job.preview_path, small,
-                                            [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-                            except Exception:
-                                pass
-                            last_preview_frame = frames_written
-
-                        # Progress callback (cheap, every ~30 frames).
-                        if job.progress_cb and frames_written % 30 == 0:
-                            elapsed = max(1e-3, time.time() - t_start)
-                            out_time_s = frames_written / fps if fps > 0 else 0.0
-                            src_seconds_done = out_time_s
-                            speed = src_seconds_done / elapsed
-                            frac = (frames_written / nb_frames
-                                    if nb_frames > 0 else 0.0)
-                            remain_src = max(0.0,
-                                             (nb_frames - frames_written) / fps) if fps > 0 else 0.0
-                            eta = remain_src / speed if speed > 0 else 0.0
-                            try:
-                                job.progress_cb(
-                                    max(0.0, min(1.0, frac)),
-                                    out_time_s, speed, eta)
-                            except Exception:
-                                pass
-                    if write_failed:
-                        break
-                if write_failed:
-                    break
-
-            if not job.cancel_event.is_set() and not write_failed:
-                # Flush the filter graph for any tail frames buffered inside.
-                try:
-                    graph.push(None)
-                    while True:
-                        try:
-                            out = graph.pull()
-                        except (av.BlockingIOError, av.FFmpegError, av.EOFError):
-                            break
-                        arr = out.to_ndarray(format="bgr24")
-                        try:
-                            proc.stdin.write(arr.tobytes())
-                            frames_written += 1
-                        except (BrokenPipeError, OSError):
-                            write_failed = True
-                            break
-                except Exception:
-                    pass
-        finally:
-            try: container.close()
-            except Exception: pass
-            try:
-                if proc.stdin is not None:
-                    proc.stdin.close()
-            except Exception:
-                pass
-
-        # Wait for ffmpeg to finish muxing/flushing.
-        if job.cancel_event.is_set():
+        if canceled or job.cancel_event.is_set():
             self._kill(proc)
         else:
             try:
@@ -586,11 +576,16 @@ class ProxyBuilder:
                 self._kill(proc)
 
         stderr_thread.join(timeout=2.0)
-        ok = (proc.returncode == 0 and not job.cancel_event.is_set()
-              and not write_failed)
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is not None:
+                try: pipe.close()
+                except Exception: pass
+        ok = (proc.returncode == 0
+              and not job.cancel_event.is_set()
+              and not canceled)
 
         if not ok:
-            if job.cancel_event.is_set():
+            if job.cancel_event.is_set() or canceled:
                 self.logger.info("Proxy encode canceled")
             else:
                 self.logger.error(f"Proxy encode failed (rc={proc.returncode})")
@@ -645,13 +640,14 @@ class ProxyBuilder:
         """Best-effort frame count via ffprobe. Returns None if unavailable."""
         try:
             out = subprocess.run(
-                ["ffprobe", "-v", "error",
+                [find_ffprobe(), "-v", "error",
                  "-select_streams", "v:0",
                  "-count_packets",
                  "-show_entries", "stream=nb_read_packets",
                  "-of", "default=nokey=1:noprint_wrappers=1",
                  path],
                 capture_output=True, text=True, timeout=60,
+                creationflags=subprocess_flags(),
             )
             if out.returncode != 0:
                 return None

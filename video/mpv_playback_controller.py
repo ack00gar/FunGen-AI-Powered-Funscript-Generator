@@ -1,15 +1,4 @@
-"""
-MpvPlaybackController — high-level review-mode playback via mpv IPC.
-
-Wraps MpvIPCBridge with app-level integration:
-- Stops FFmpeg audio sync (mpv handles audio natively via CoreAudio/VideoToolbox)
-- Updates processor.current_frame_index from IPC position callbacks
-- Fires processor playback-state callbacks so DeviceControlVideoIntegration stays in sync
-- Routes playback control actions from handle_playback_control
-
-For VR content, a panel-crop is applied so mpv shows the correct eye (left/top).
-No v360 dewarping — VideoToolbox hardware decode stays fully on GPU.
-"""
+"""Review-mode playback via a standalone mpv subprocess (IPC)."""
 
 import logging
 
@@ -19,22 +8,10 @@ logger = logging.getLogger(__name__)
 
 
 class MpvPlaybackController:
-    """
-    Review-mode playback engine backed by mpv.
-
-    Mutually exclusive with FFmpeg-pipe analysis mode: processor stays
-    stopped while mpv is active.  The processor's current_frame_index is
-    updated every time mpv pushes a time-pos event, so the timeline,
-    scrubber, and device-sync code all continue to work without changes.
-    """
 
     def __init__(self, app):
         self._app = app
         self._bridge: MpvIPCBridge | None = None
-
-    # ------------------------------------------------------------------
-    # Public properties
-    # ------------------------------------------------------------------
 
     @property
     def is_active(self) -> bool:
@@ -44,18 +21,7 @@ class MpvPlaybackController:
     def is_playing(self) -> bool:
         return self._bridge is not None and self._bridge.is_playing
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
     def start(self, video_path: str, start_frame: int = 0, fullscreen: bool = False) -> bool:
-        """
-        Launch mpv for review playback.
-
-        For VR (SBS/TB) videos, a panel-crop filter is added so mpv shows
-        the correct eye at the right aspect ratio. Hardware decode (VideoToolbox)
-        is unaffected by a simple crop filter.
-        """
         if self._bridge is not None:
             self.stop()
 
@@ -66,8 +32,7 @@ class MpvPlaybackController:
         extra_args = self._vr_crop_args(processor)
         if extra_args:
             logger.info(
-                f"MpvPlaybackController: VR crop applied "
-                f"({getattr(processor, 'vr_input_format', '?')}): {extra_args}"
+                f"VR crop applied ({getattr(processor, 'vr_input_format', '?')}): {extra_args}"
             )
 
         self._bridge = MpvIPCBridge(
@@ -75,26 +40,45 @@ class MpvPlaybackController:
         )
         if not self._bridge.start():
             self._bridge = None
-            logger.error("MpvPlaybackController: mpv failed to start")
+            logger.error("mpv failed to start")
             return False
 
-        # Disable FFmpeg audio sync — mpv handles audio natively
+        # Mute the embedded display so we don't get two audio streams.
+        self._embedded_was_muted = False
+        gui = getattr(self._app, 'gui_instance', None)
+        embedded = getattr(gui, 'mpv_display', None) if gui else None
+        if embedded is not None and getattr(embedded, 'is_loaded', False):
+            try:
+                embedded.pause()
+                if embedded._player is not None:
+                    self._embedded_was_muted = bool(getattr(embedded._player, 'mute', False))
+                    embedded._player.mute = True
+            except Exception as e:
+                logger.debug(f"embedded mute failed: {e}")
+
         audio_sync = getattr(self._app, '_audio_sync', None)
         if audio_sync:
             audio_sync.stop()
 
         self._bridge.add_position_callback(self._on_position)
         self._bridge.play()
-        logger.info("MpvPlaybackController: review mode started")
+        logger.info("review mode started")
         return True
 
     def stop(self):
-        """Stop mpv and restore FFmpeg audio sync."""
         if self._bridge:
             self._bridge.stop()
             self._bridge = None
 
-        # Seek the processor to the current frame so the video display updates
+        gui = getattr(self._app, 'gui_instance', None)
+        embedded = getattr(gui, 'mpv_display', None) if gui else None
+        if embedded is not None and getattr(embedded, 'is_loaded', False):
+            try:
+                if embedded._player is not None:
+                    embedded._player.mute = bool(getattr(self, '_embedded_was_muted', False))
+            except Exception as e:
+                logger.debug(f"embedded unmute failed: {e}")
+
         processor = getattr(self._app, 'processor', None)
         if processor and hasattr(processor, 'seek_video'):
             processor.seek_video(processor.current_frame_index)
@@ -104,13 +88,19 @@ class MpvPlaybackController:
             try:
                 audio_sync.start()
             except Exception:
-                pass  # already running is fine
+                pass
 
-        logger.info("MpvPlaybackController: review mode stopped")
+        logger.info("review mode stopped")
 
-    # ------------------------------------------------------------------
-    # Playback controls
-    # ------------------------------------------------------------------
+    def poll_external_exit(self) -> bool:
+        # Returns True when the fullscreen subprocess has exited and we cleaned up.
+        if self._bridge is None:
+            return False
+        if self._bridge.is_alive():
+            return False
+        logger.info("fullscreen mpv exited externally")
+        self.stop()
+        return True
 
     def play(self):
         if self._bridge:
@@ -121,23 +111,15 @@ class MpvPlaybackController:
             self._bridge.pause()
 
     def seek(self, frame_index: int):
-        """Seek to a frame index (converts to ms for mpv).
-
-        Also updates processor.current_frame_index immediately so the
-        timeline and UI reflect the new position without waiting for the
-        IPC position callback (which may be delayed when paused).
-        """
         if not self._bridge:
             return
         processor = getattr(self._app, 'processor', None)
         fps = processor.fps if processor and processor.fps > 0 else 30.0
-        # Update frame index immediately for responsive UI
         if processor:
             processor.current_frame_index = max(0, frame_index)
         self._bridge.seek((frame_index / fps) * 1000.0)
 
     def handle_action(self, action_name: str):
-        """Route a playback control action (called from handle_playback_control)."""
         if action_name == "play_pause":
             if self.is_playing:
                 self.pause()
@@ -157,52 +139,29 @@ class MpvPlaybackController:
                 delta = -1 if action_name == "prev_frame" else 1
                 self.seek(max(0, processor.current_frame_index + delta))
 
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
     def _vr_crop_args(self, processor) -> list:
-        """
-        Return mpv --vf crop arg to show the correct eye/panel for VR content.
-
-        SBS / LR (_sbs, _lr): left eye at x=0  — crop left half
-        RL        (_rl):       left eye at x=iw/2 — crop right half as "left"
-        TB        (_tb):       top eye — crop top half
-        Mono / 2D:             no crop
-
-        Panel override from app_settings['vr_panel_selection']:
-          'left' (default) | 'right' | 'full' (no crop)
-        """
+        """Build --vf crop= args for a standalone mpv subprocess."""
         if not processor or processor.determined_video_type != 'VR':
             return []
-
-        fmt = (processor.vr_input_format or '').lower()
+        from video import vr_panel
         app_settings = getattr(self._app, 'app_settings', None)
-        panel = app_settings.get('vr_panel_selection', 'left') if app_settings else 'left'
-
-        if fmt.endswith(('_sbs', '_lr')):
-            if panel == 'full':
-                return []
-            crop = 'crop=iw/2:ih:iw/2:0' if panel == 'right' else 'crop=iw/2:ih:0:0'
-        elif fmt.endswith('_rl'):
-            if panel == 'full':
-                return []
-            crop = 'crop=iw/2:ih:0:0' if panel == 'right' else 'crop=iw/2:ih:iw/2:0'
-        elif fmt.endswith('_tb'):
-            crop = 'crop=iw:ih/2:0:0'  # always top, no panel override
-        else:
+        eye = vr_panel.read_setting(app_settings, default=vr_panel.EYE_LEFT)
+        if eye == vr_panel.EYE_FULL:
             return []
-
+        region = vr_panel.resolve_eye(processor.vr_input_format, eye)
+        if region.is_full():
+            return []
+        def _frac(val: float, axis: str) -> str:
+            if val == 0.0:
+                return "0"
+            if val == 0.5:
+                return f"{axis}/2"
+            return axis
+        crop = (f"crop={_frac(region.w, 'iw')}:{_frac(region.h, 'ih')}"
+                f":{_frac(region.x, 'iw')}:{_frac(region.y, 'ih')}")
         return [f"--vf={crop}"]
 
     def _on_position(self, pos_ms: float, dur_ms: float):
-        """
-        IPC callback — runs on the mpv-ipc-poller background thread.
-
-        Updates processor.current_frame_index so the timeline, scrubber,
-        and device-sync code all read the correct position.
-        Uses round() so pausing snaps to the nearest frame boundary.
-        """
         processor = getattr(self._app, 'processor', None)
         if not processor or processor.fps <= 0:
             return
@@ -210,7 +169,7 @@ class MpvPlaybackController:
         frame_index = round(pos_ms / 1000.0 * processor.fps)
         frame_index = max(0, min(frame_index, processor.total_frames - 1))
 
-        processor.current_frame_index = frame_index  # GIL-safe plain int assignment
+        processor.current_frame_index = frame_index
 
         try:
             processor._notify_playback_state_callbacks(self.is_playing, pos_ms)

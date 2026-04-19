@@ -70,7 +70,7 @@ class AppFileManager:
         """Callback for setting YOLO model paths from file dialogs."""
         if model_type == "detection":
             # Use the settings manager to set and persist the new path immediately.
-            self.app.app_settings.set("yolo_det_model_path", filepath)
+            self.app.app_settings.config.models.yolo_det_path = filepath
 
             # Also update the live application state.
             self.app.yolo_detection_model_path_setting = filepath
@@ -82,7 +82,7 @@ class AppFileManager:
                              extra={'status_message': True})
         elif model_type == "pose":
             # Use the settings manager to set and persist the new path immediately.
-            self.app.app_settings.set("yolo_pose_model_path", filepath)
+            self.app.app_settings.config.models.yolo_pose_path = filepath
 
             # Also update the live application state.
             self.app.yolo_pose_model_path_setting = filepath
@@ -105,7 +105,7 @@ class AppFileManager:
             self.logger.error("Cannot get output path: video_path is empty.")
             return f"error_no_video_path{file_suffix}"
 
-        output_folder_base = self.app.app_settings.get("output_folder_path", "output")
+        output_folder_base = self.app.app_settings.config.output.folder_path
         video_basename = os.path.splitext(os.path.basename(video_path))[0]
         video_specific_output_dir = _safe_makedirs(
             os.path.join(output_folder_base, video_basename), logger=self.logger)
@@ -174,7 +174,7 @@ class AppFileManager:
             meta["tracker_version"] = tracker_version
 
         # Verbose metadata (git info, video info)
-        if self.app_settings.get("metadata_verbose", True):
+        if self.app_settings.config.output.metadata_verbose:
             from application.utils.logger import _GIT_INFO
             if _GIT_INFO and "@" in _GIT_INFO:
                 branch, commit_hash = _GIT_INFO.split("@", 1)
@@ -207,13 +207,14 @@ class AppFileManager:
             except (AttributeError, TypeError):
                 pass
 
-        if self.app_settings.get("performance_metadata", False):
+        if self.app_settings.config.output.performance_metadata:
             # Performance / pipeline settings
             meta["hardware_acceleration"] = getattr(self.app, "hardware_acceleration_method", "none")
-            meta["vr_unwarp_method"] = self.app_settings.get("vr_unwarp_method", "auto")
-            meta["num_producers_stage1"] = self.app_settings.get("num_producers_stage1", 1)
-            meta["num_consumers_stage1"] = self.app_settings.get("num_consumers_stage1", 1)
-            meta["num_workers_stage2_of"] = self.app_settings.get("num_workers_stage2_of", 1)
+            _perf = self.app_settings.config.performance
+            meta["vr_unwarp_method"] = _perf.vr_unwarp_method
+            meta["num_producers_stage1"] = _perf.stage1_producers
+            meta["num_consumers_stage1"] = _perf.stage1_consumers
+            meta["num_workers_stage2_of"] = _perf.stage2_of_workers
 
             # Per-stage and total processing time (clock wall-time)
             try:
@@ -236,7 +237,7 @@ class AppFileManager:
                 pass
 
         # Optional creator identity
-        creator_id = self.app_settings.get("metadata_creator_identity", "")
+        creator_id = self.app_settings.config.output.metadata_creator_identity
         if creator_id:
             meta["creator_identity"] = creator_id
 
@@ -447,7 +448,7 @@ class AppFileManager:
         chapters = self.app.funscript_processor.video_chapters
 
         # Check if copy to video location is enabled
-        save_next_to_video = self.app.app_settings.get("autosave_final_funscript_to_video_location", True)
+        save_next_to_video = self.app.app_settings.config.output.autosave_final_next_to_video
         if self.app.is_batch_processing_active:
             save_next_to_video = self.app.batch_copy_funscript_to_video_location
 
@@ -455,7 +456,7 @@ class AppFileManager:
             self.logger.info("Copy to video location is disabled. Raw funscripts saved only to output folder.")
             return
 
-        skip_raw_prefix = self.app.app_settings.get("export_raw_as_funscript", False)
+        skip_raw_prefix = self.app.app_settings.config.output.export_raw_as_funscript
         raw_infix = "" if skip_raw_prefix else ".raw"
         base, _ = os.path.splitext(video_path)
 
@@ -483,7 +484,7 @@ class AppFileManager:
                 timelines_to_save.append((tl_num, axis_name))
 
         # Determine roll generation setting
-        generate_roll = self.app.app_settings.get("generate_roll_file", True)
+        generate_roll = self.app.app_settings.config.output.generate_roll_file
         if self.app.is_batch_processing_active:
             generate_roll = self.app.batch_generate_roll_file
 
@@ -529,7 +530,7 @@ class AppFileManager:
             self.loaded_funscript_path = funscript_file_path  # T1's own loaded script
             self.funscript_path = funscript_file_path  # Project associated script (if T1)
             self.logger.info(
-                f"Loaded {len(actions)} actions to Timeline 1 from {os.path.basename(funscript_file_path)}",
+                f"Loaded {len(actions)} actions to Funscript 1 from {os.path.basename(funscript_file_path)}",
                 extra={'status_message': True})
 
             # Load chapters only when loading to T1 and if video is present for FPS context
@@ -564,7 +565,7 @@ class AppFileManager:
 
         elif timeline_num == 2:
             self.logger.info(
-                f"Loaded {len(actions)} actions to Timeline 2 from {os.path.basename(funscript_file_path)}",
+                f"Loaded {len(actions)} actions to Funscript 2 from {os.path.basename(funscript_file_path)}",
                 extra={'status_message': True})
 
         # Load embedded axes from unified format into the funscript object
@@ -826,7 +827,7 @@ class AppFileManager:
             self.logger.warning("File dialog not available", extra={"status_message": True})
             return
 
-        output_folder_base = self.app.app_settings.get("output_folder_path", "output")
+        output_folder_base = self.app.app_settings.config.output.folder_path
         initial_path = output_folder_base
 
         # Resolve axis name for per-axis filename
@@ -882,7 +883,7 @@ class AppFileManager:
         # Duration — use last action timestamp to avoid gray tail after script ends
         duration_ms = actions[-1]['at'] if actions else 0
 
-        output_folder = self.app.app_settings.get("output_folder_path", "output")
+        output_folder = self.app.app_settings.config.output.folder_path
         initial_filename = "heatmap.png"
         if self.video_path:
             video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
@@ -923,7 +924,7 @@ class AppFileManager:
             self.logger.warning("No funscript data available to export.", extra={"status_message": True})
             return
 
-        output_folder = self.app.app_settings.get("output_folder_path", "output")
+        output_folder = self.app.app_settings.config.output.folder_path
         initial_path = output_folder
         initial_filename = "unified.funscript"
 
@@ -1055,7 +1056,7 @@ class AppFileManager:
             return
 
         chapters = self.app.funscript_processor.video_chapters
-        save_next_to_video = self.app.app_settings.get("autosave_final_funscript_to_video_location", True)
+        save_next_to_video = self.app.app_settings.config.output.autosave_final_next_to_video
         is_remote = video_path and video_path.startswith(('http://', 'https://'))
 
         # Collect all axes to save: (timeline_num, internal_axis_name)
@@ -1194,61 +1195,10 @@ class AppFileManager:
                         self.logger.info(f"Auto-discovered {len(discovered)} axis funscript(s) next to video.")
 
     def close_video_action(self, clear_funscript_unconditionally=False, skip_tracker_reset=False):
-        if self.app.processor:
-            if self.app.processor.is_processing:
-                self.app.processor.stop_processing()
-            try:
-                self.app.processor.reset(close_video=True, skip_tracker_reset=skip_tracker_reset)  # Resets video info in processor
-            except TypeError:
-                self.app.processor.reset(close_video=True)
-
-        # Clear User ROI and tracking state for new video
-        if self.app.tracker:
-            self.app.tracker.user_roi_fixed = None
-            self.app.tracker.user_roi_initial_point_relative = None
-            self.app.tracker.user_roi_tracked_point_relative = None
-            self.app.tracker.user_roi_current_flow_vector = None
-            self.app.tracker.cleanup()
-
-        self.video_path = ""
-        self.preprocessed_video_path = None
-        self.app.stage_processor.reset_stage_status(stages=("stage1", "stage2", "stage3"))
-        self.app.funscript_processor.video_chapters.clear()
-        self.clear_stage2_overlay_data()
-        # Also clear any mixed debug artifacts
-        if hasattr(self.app, 'stage3_mixed_debug_data'):
-            self.app.stage3_mixed_debug_data = None
-        if hasattr(self.app, 'stage3_mixed_debug_frame_map'):
-            self.app.stage3_mixed_debug_frame_map = None
-
-        # Stop audio playback
-        if self.app._audio_player:
-            self.app._audio_player.stop()
-
-        # Clear audio waveform data
-        self.app.audio_waveform_data = None
-        self.app.app_state_ui.show_audio_waveform = False
-
-        # If funscript was loaded from a file (not generated) and we are not clearing unconditionally, keep T1.
-        # Otherwise, clear T1. Always clear T2.
-        if clear_funscript_unconditionally or not self.loaded_funscript_path:  # loaded_funscript_path is for T1
-            if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
-                self.app.funscript_processor.clear_timeline_history_and_set_new_baseline(1, [], "Video Closed (T1 Cleared)")
-            self.funscript_path = ""  # Project association
-            self.loaded_funscript_path = ""  # T1 specific
-
-        # Always clear T2 on video close unless a specific logic dictates otherwise
-        if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
-            self.app.funscript_processor.clear_timeline_history_and_set_new_baseline(2, [], "Video Closed (T2 Cleared)")
-
-        self.app.funscript_processor.update_funscript_stats_for_timeline(1, "Video Closed")
-        self.app.funscript_processor.update_funscript_stats_for_timeline(2, "Video Closed")
-
-        self.logger.debug("Video closed.", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-        self.app.app_state_ui.heatmap_dirty = True
-        self.app.app_state_ui.funscript_preview_dirty = True
-        self.app.project_manager.project_dirty = True
+        """Delegator — see VideoSession.close."""
+        self.app.video_session.close(
+            clear_funscript_unconditionally=clear_funscript_unconditionally,
+            skip_tracker_reset=skip_tracker_reset)
 
     def load_stage2_overlay_data(self, filepath: str):
         """Load Stage 2 overlay data (supports legacy list format and new dict with frames/segments/metadata)."""
@@ -1354,112 +1304,8 @@ class AppFileManager:
             self.app.stage3_mixed_debug_frame_map = None
 
     def open_video_from_path(self, file_path: str) -> bool:
-        """
-        Opens a video file, updates the application state, and returns success.
-        This is the central method for loading a video.
-        """
-        # Check if file exists (skip check for HTTP URLs - FFmpeg will handle those)
-        is_remote = file_path and file_path.startswith(('http://', 'https://'))
-        if not file_path or (not is_remote and not os.path.exists(file_path)):
-            self.app.logger.error(f"Video file not found: {file_path}")
-            return False
-
-        self.app.logger.info(f"Loading video: {os.path.basename(file_path)}...", extra={'status_message': True})
-        self.app.notify(f"Loading {os.path.basename(file_path)}...", "info", 2.0)
-
-        # Reset relevant states before loading a new video
-        self.close_video_action(clear_funscript_unconditionally=True)
-
-        # Transparent proxy auto-load: if the user opened Foo.mp4 and a valid
-        # Foo.fungen-proxy.mp4 has been registered for it (next to source,
-        # in the output folder, or in a custom dir), open the proxy instead.
-        if not is_remote:
-            try:
-                from video.proxy_builder import (
-                    is_proxy_filename, proxy_path_from_sidecar,
-                )
-                if not is_proxy_filename(file_path):
-                    proxy = proxy_path_from_sidecar(file_path)
-                    if proxy:
-                        self.app.logger.info(
-                            f"Using existing proxy: {os.path.basename(proxy)}",
-                            extra={'status_message': True})
-                        self._original_source_for_proxy = file_path
-                        file_path = proxy
-            except Exception:
-                pass
-
-        # Call the core video opening logic in the VideoProcessor
-        success = self.app.processor.open_video(file_path)
-
-        if success:
-            self.video_path = file_path
-            self.app.project_manager.project_dirty = True
-            # Reset UI states for the new video
-            self.app.app_state_ui.reset_video_zoom_pan()
-            # Park the timeline at t=0 explicitly; force_sync alone is gated by
-            # timeline_interaction_active, which can be stale from a prior file.
-            self.app.app_state_ui.timeline_pan_offset_ms = 0.0
-            self.app.app_state_ui.timeline_interaction_active = False
-            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-            self.app.funscript_processor.update_funscript_stats_for_timeline(1, "Video Loaded")
-            self.app.funscript_processor.update_funscript_stats_for_timeline(2, "Video Loaded")
-
-            # Proxy suggestion on load was removed: the auto-popup was
-            # noisy on every qualifying open, and the proxy only helps
-            # interactive scrubbing anyway (FunGen downscales every frame
-            # to tracker input size regardless). The "Build iframe Proxy..."
-            # menu entry remains as a user-initiated action.
-
-            # Clear existing subtitles, then auto-load .srt if one exists next to the video
-            if _is_feature_available("subtitle_translation"):
-                self.app.subtitle_track = None
-                self._auto_load_subtitles(file_path)
-
-            # Notify audio player of new video
-            if self.app._audio_player:
-                has_audio = self.app.processor.video_info.get("has_audio", False)
-                fps = self.app.processor.fps
-                self.app.logger.info(f"Audio: set_video has_audio={has_audio} fps={fps}")
-                self.app._audio_player.set_video(file_path, has_audio, fps)
-            else:
-                self.app.logger.debug("Audio: _audio_player is None, skipping set_video")
-        else:
-            self.video_path = ""
-            self.app.logger.error(f"Failed to open video file: {os.path.basename(file_path)}", extra={'status_message': True})
-
-        return success
-
-    def _auto_load_subtitles(self, video_path: str):
-        """Auto-load .srt file if one exists with the same base name as the video."""
-        try:
-            import glob
-            base = os.path.splitext(video_path)[0]
-            # Look for any .srt file matching the video name
-            candidates = glob.glob(f"{base}*.srt")
-            if candidates:
-                # Pick the first match (prefer .en.srt or .bilingual.srt)
-                srt_path = candidates[0]
-                for c in candidates:
-                    if '.en.' in c or '.bilingual.' in c:
-                        srt_path = c
-                        break
-
-                from subtitle_translation.srt_importer import import_srt
-                track = import_srt(srt_path)
-                if track and len(track) > 0:
-                    self.app.subtitle_track = track
-                    self.app.logger.info(
-                        f"Auto-loaded {len(track)} subtitles from {os.path.basename(srt_path)}")
-                    # Update control panel subtitle tab if initialized
-                    gui = getattr(self.app, 'gui_instance', None)
-                    cp = gui.control_panel_ui if gui else None
-                    tool = getattr(cp, '_subtitle_tool', None) if cp else None
-                    if tool:
-                        tool.track = track
-                        tool.state = tool.STATE_EDITING
-        except Exception as e:
-            self.app.logger.debug(f"No subtitles auto-loaded: {e}")
+        """Delegator — see VideoSession.open."""
+        return self.app.video_session.open(file_path)
 
     def _scan_folder_for_videos(self, folder_path: str) -> List[str]:
         """Recursively scans a folder for video files."""
@@ -1510,7 +1356,7 @@ class AppFileManager:
             self.app.logger.error("GUI instance not available to show batch dialog.")
             return
 
-        batch_dialog_active = self.app.show_batch_confirmation_dialog or bool(gui.batch_videos_data)
+        batch_dialog_active = self.app.show_batch_confirmation_dialog or bool(gui.batch_state.videos_data)
 
         # Keep historical behavior: a single dropped video opens directly,
         # unless we are already building a batch list.
@@ -1520,7 +1366,7 @@ class AppFileManager:
             return
 
         # Append mode: allow dropping more files/folders multiple times into the same batch setup.
-        existing_paths = {item.get("path") for item in gui.batch_videos_data if isinstance(item, dict)}
+        existing_paths = {item.get("path") for item in gui.batch_state.videos_data if isinstance(item, dict)}
         videos_to_add = [video_path for video_path in unique_videos if video_path not in existing_paths]
 
         if batch_dialog_active:
@@ -1530,15 +1376,15 @@ class AppFileManager:
                 return
             self.app.logger.info(
                 f"Appending {len(videos_to_add)} videos to existing batch list "
-                f"({len(gui.batch_videos_data)} -> {len(gui.batch_videos_data) + len(videos_to_add)})."
+                f"({len(gui.batch_state.videos_data)} -> {len(gui.batch_state.videos_data) + len(videos_to_add)})."
             )
         else:
             self.app.logger.info(f"Found {len(unique_videos)} videos. Preparing batch dialog...")
-            gui.batch_videos_data.clear()
+            gui.batch_state.videos_data.clear()
             videos_to_add = unique_videos
 
         def _default_selected_for_status(status: str) -> bool:
-            mode = gui.batch_overwrite_mode_ui
+            mode = gui.batch_state.overwrite_mode_ui
             if mode == 0:
                 return status != 'fungen'
             if mode == 1:
@@ -1548,7 +1394,7 @@ class AppFileManager:
         for video_path in videos_to_add:
             fs_metadata = ImGuiFileDialog.get_funscript_metadata(video_path, self.app.logger)
             funscript_status = ImGuiFileDialog.get_funscript_status(video_path, self.app.logger)
-            gui.batch_videos_data.append({
+            gui.batch_state.videos_data.append({
                 "path": video_path,
                 "selected": _default_selected_for_status(funscript_status),
                 "funscript_status": funscript_status,
@@ -1562,7 +1408,7 @@ class AppFileManager:
 
         # Fresh batch list still uses existing auto-selection flow.
         if not batch_dialog_active:
-            gui.last_overwrite_mode_ui = -1
+            gui.batch_state.last_overwrite_mode_ui = -1
         self.app.show_batch_confirmation_dialog = True
 
     def update_settings_from_app(self):
@@ -1587,7 +1433,7 @@ class AppFileManager:
             return []
 
         saved_paths = []
-        save_next_to_video = self.app.app_settings.get("autosave_final_funscript_to_video_location", True)
+        save_next_to_video = self.app.app_settings.config.output.autosave_final_next_to_video
         if self.app.is_batch_processing_active:
             save_next_to_video = self.app.batch_copy_funscript_to_video_location
 
@@ -1612,11 +1458,11 @@ class AppFileManager:
             chapters_to_save = self.app.funscript_processor.video_chapters
 
         # Determine roll generation setting
-        generate_roll = self.app.app_settings.get("generate_roll_file", True)
+        generate_roll = self.app.app_settings.config.output.generate_roll_file
         if self.app.is_batch_processing_active:
             generate_roll = self.app.batch_generate_roll_file
 
-        export_format = self.app.app_settings.get("funscript_export_format", "separate")
+        export_format = self.app.app_settings.config.funscript.export_format
 
         # --- Separate files (per-axis) mode ---
         if export_format in ("separate", "both"):

@@ -1,5 +1,4 @@
 import os
-import json
 import orjson
 from typing import Callable, Optional
 import imgui
@@ -80,9 +79,8 @@ class ImGuiFileDialog:
             return None
 
         try:
-            # Reverted to original, working method: text mode with standard json library
-            with open(funscript_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            with open(funscript_path, 'rb') as f:
+                data = orjson.loads(f.read())
 
             metadata = data.get('metadata', {})
             author = data.get('author', '')
@@ -105,8 +103,8 @@ class ImGuiFileDialog:
             return result
 
         try:
-            with open(funscript_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            with open(funscript_path, 'rb') as f:
+                data = orjson.loads(f.read())
             metadata = data.get('metadata', {})
             if isinstance(metadata, dict):
                 result["creation_date"] = metadata.get("creation_date", "")
@@ -192,7 +190,7 @@ class ImGuiFileDialog:
             imgui.spacing()
 
         # 1. Output Directory
-        output_dir = self.app.app_settings.get("output_folder_path", "output")
+        output_dir = self.app.app_settings.config.output.folder_path
         if output_dir and os.path.isdir(output_dir):
             abs_output_dir = os.path.abspath(output_dir)
             if imgui.button("Output Folder", width=130):

@@ -616,7 +616,6 @@ def resilient_tracker_step0(app, frames: List, video_info: Dict, logger: Optiona
 
     CLASS_SPECIFIC_IOU = {
         'hand': 0.4,
-        'finger': 0.35,
         'pussy': 0.6,
         'butt': 0.6,
         'face': 0.55,

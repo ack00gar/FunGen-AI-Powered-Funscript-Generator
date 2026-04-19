@@ -50,7 +50,7 @@ class TimelinePreviewMixin:
 
         # Position + source
         if segment.position_long_name and segment.position_long_name != segment.position_short_name:
-            imgui.text_colored(segment.position_long_name, 0.6, 0.7, 0.8, 1.0)
+            imgui.text_colored(segment.position_long_name, *CurrentTheme.GRAY_LIGHT)
         imgui.text_disabled(f"Source: {segment.source}")
 
         imgui.spacing()
@@ -67,7 +67,7 @@ class TimelinePreviewMixin:
         # ROI badge
         if getattr(segment, 'user_roi_fixed', False):
             imgui.spacing()
-            imgui.text_colored("[R] Has fixed ROI", 0.3, 0.8, 0.5, 1.0)
+            imgui.text_colored("[R] Has fixed ROI", *CurrentTheme.GREEN)
 
         imgui.end_tooltip()
 

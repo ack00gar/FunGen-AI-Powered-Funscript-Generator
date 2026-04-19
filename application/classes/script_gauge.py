@@ -49,7 +49,7 @@ class GaugeInstance:
 
     def window_title(self):
         axis = _AXIS_LABELS.get(self.selected_timeline, f"Axis {self.selected_timeline}")
-        return f"T{self.selected_timeline} - {axis}##{self.gauge_id}"
+        return f"FunGen: F{self.selected_timeline} - {axis}##{self.gauge_id}"
 
 
 class ScriptGaugeWindow:

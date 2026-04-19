@@ -10,6 +10,7 @@ from config.element_group_colors import VideoDisplayColors
 from application.utils import get_logo_texture_manager, get_icon_texture_manager
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.feature_detection import is_feature_available as _is_feature_available
+from config.constants_colors import CurrentTheme
 
 # Module-level logger for Handy debug output (disabled by default)
 _handy_debug_logger = logging.getLogger(__name__ + '.handy')
@@ -337,12 +338,12 @@ class VideoControlsMixin:
             button_enabled = False
         elif self.handy_streaming_active:
             # Show stop streaming button
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
+            imgui.push_style_color(imgui.COLOR_BUTTON, *CurrentTheme.BUTTON_DESTRUCTIVE)  # Red
             button_text = "Stop"  # Stop text
             button_enabled = True
         else:
             # Show start streaming button
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2, 1.0)  # Green
+            imgui.push_style_color(imgui.COLOR_BUTTON, *CurrentTheme.GREEN)  # Green
             button_text = "Handy"  # Handy button text
             button_enabled = True
             

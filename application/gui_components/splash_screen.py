@@ -18,6 +18,8 @@ import warnings
 import gc
 import queue
 
+from application.gui_components import splash_themes
+
 
 class SplashScreen:
     """Animated splash screen with logo, title, and loading animation."""
@@ -353,12 +355,6 @@ class SplashScreen:
 
         # Spacing
         imgui.dummy(1, 30)
-
-        # Add FunScript timeline visualization
-        cursor_pos = imgui.get_cursor_screen_pos()
-        timeline_y = cursor_pos[1]
-        draw_list = imgui.get_window_draw_list()
-        self._render_funscript_timeline(draw_list, window_width, timeline_y, current_time, alpha)
 
         # "Click anywhere to continue" hint (after 1 second)
         if current_time > 1.0:
@@ -817,63 +813,114 @@ class StandaloneSplashWindow:
         # Center logo vertically and horizontally
         if self.logo_texture is not None:
             logo_size = 250  # Logo fills most of the window
-            logo_x = (window_width - logo_size) / 2
             logo_y = (window_height - logo_size) / 2  # Centered vertically
 
-            # Gentle floating animation
-            float_offset = math.sin(current_time * 2.0) * 8.0
+            # Theme-specific animations (picked once per session) — resolved early
+            # so themes like "invaders" can drive the logo's horizontal position.
+            theme_name = self._get_splash_theme()
+            theme_data = self._SPLASH_THEMES[theme_name]
+
+            # Per-theme logo placement overrides. Themes that want to drive
+            # the logo as a character's head / vehicle / falling block
+            # implement ``place_logo`` (see splash_themes/__init__.py).
+            _corner_themes = ('bsod', 'clippy')
+            placement = splash_themes.place_logo(
+                theme_name, self, window_width, window_height, current_time)
+            if placement is not None:
+                logo_x, logo_y, logo_size, float_offset = placement
+            elif theme_name == 'invaders':
+                # Logo IS the player ship — sweep it L-R so it reads as the
+                # shooter firing at the fleet above.
+                sweep_amp = max(80.0, window_width * 0.33)
+                logo_x = (window_width - logo_size) / 2 + math.sin(current_time * 0.55) * sweep_amp
+                float_offset = math.sin(current_time * 2.0) * 8.0
+            elif theme_name in _corner_themes:
+                logo_size = 100
+                logo_x = window_width - logo_size - 30
+                logo_y = 24
+                float_offset = 0.0
+            else:
+                logo_x = (window_width - logo_size) / 2
+                float_offset = math.sin(current_time * 2.0) * 8.0
 
             # Fade in animation (first 0.3 seconds)
             fade_alpha = min(1.0, current_time / 0.3) if current_time < 0.3 else 1.0
 
-            # Theme-specific animations (picked once per session)
-            theme_name = self._get_splash_theme()
-            theme_data = self._SPLASH_THEMES[theme_name]
             dl = imgui.get_window_draw_list()
 
-            # Background animation
-            bg_method = getattr(self, theme_data["bg"], None)
-            if bg_method:
-                bg_method(dl, window_width, window_height, current_time, fade_alpha)
+            # Background animation. Prefer extracted theme modules; fall back
+            # to the method-name dispatch for themes still living on the class.
+            if not splash_themes.render_bg(
+                    theme_name, self, dl, window_width, window_height,
+                    current_time, fade_alpha):
+                bg_method = getattr(self, theme_data["bg"], None)
+                if bg_method:
+                    bg_method(dl, window_width, window_height, current_time, fade_alpha)
 
-            imgui.set_cursor_pos((logo_x, logo_y + float_offset))
-            imgui.image(self.logo_texture, logo_size, logo_size, tint_color=(1, 1, 1, fade_alpha))
+            # Blade Runner: logo represented by the flying spinners in the scene
+            if theme_name != 'blade':
+                imgui.set_cursor_pos((logo_x, logo_y + float_offset))
+                imgui.image(self.logo_texture, logo_size, logo_size, tint_color=(1, 1, 1, fade_alpha))
 
-            # Foreground animation (e.g. laser eyes)
-            fg_name = theme_data.get("fg")
-            if fg_name and current_time > 0.3 and self.quality_level > 0.3:
-                fg_method = getattr(self, fg_name, None)
-                if fg_method:
-                    fg_method(logo_x, logo_y + float_offset, logo_size, current_time - 0.3)
+            # Foreground animation (e.g. laser eyes). Prefer extracted theme
+            # modules; fall back to the class-resident method for the handful
+            # still living on the class (terminator laser eyes, starwars
+            # sabers — deferred until they get their own theme module).
+            if current_time > 0.3 and self.quality_level > 0.3:
+                if not splash_themes.render_fg(
+                        theme_name, self, logo_x, logo_y + float_offset,
+                        logo_size, current_time - 0.3):
+                    fg_name = theme_data.get("fg")
+                    if fg_name:
+                        fg_method = getattr(self, fg_name, None)
+                        if fg_method:
+                            fg_method(logo_x, logo_y + float_offset,
+                                      logo_size, current_time - 0.3)
 
-            # Content below logo
-            if current_time > 0.3:
+            # Content below logo (skipped for themes that bake version/paypal
+            # into their own scene, or drive logo placement themselves — for
+            # those, the logo moves every frame so "below the logo" is a
+            # moving target).
+            _no_centered_content = set(_corner_themes) | {'blade'}
+            _uses_dynamic_logo = placement is not None
+            if (current_time > 0.3
+                    and theme_name not in _no_centered_content
+                    and not _uses_dynamic_logo):
                 from config.constants import APP_VERSION
                 draw_list_text = imgui.get_window_draw_list()
                 cursor_y = logo_y + logo_size + float_offset + 15
 
-                # 1. Version text
+                # 1. Version text (centered, with a drop-shadow so it stays
+                # legible over any theme's busy background)
                 version_text = f"FunGen v{APP_VERSION}"
                 imgui.set_window_font_scale(1.4)
                 ver_size = imgui.calc_text_size(version_text)
                 ver_x = (window_width - ver_size[0]) / 2
-                imgui.set_cursor_pos((ver_x, cursor_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.75, 0.88, 1.0, 0.95 * fade_alpha)
-                imgui.text(version_text)
-                imgui.pop_style_color()
+                draw_list_text.add_text(
+                    ver_x + 2, cursor_y + 2,
+                    imgui.get_color_u32_rgba(0, 0, 0, 0.75 * fade_alpha),
+                    version_text)
+                draw_list_text.add_text(
+                    ver_x, cursor_y,
+                    imgui.get_color_u32_rgba(0.78, 0.90, 1.0, 0.95 * fade_alpha),
+                    version_text)
                 imgui.set_window_font_scale(1.0)
                 cursor_y += ver_size[1] + 6
 
-                # 2. Support text
+                # 2. Support text (centered, also shadowed)
                 support_text = "Support the project at paypal.me/k00gar"
                 imgui.set_window_font_scale(1.1)
                 sup_size = imgui.calc_text_size(support_text)
                 sup_x = (window_width - sup_size[0]) / 2
-                sup_alpha = min(1.0, max(0.0, (current_time - 0.5) / 0.4)) * fade_alpha * 0.85
-                imgui.set_cursor_pos((sup_x, cursor_y - imgui.get_cursor_screen_pos()[1] + imgui.get_cursor_pos()[1]))
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.4, sup_alpha)
-                imgui.text(support_text)
-                imgui.pop_style_color()
+                sup_alpha = min(1.0, max(0.0, (current_time - 0.5) / 0.4)) * fade_alpha * 0.90
+                draw_list_text.add_text(
+                    sup_x + 2, cursor_y + 2,
+                    imgui.get_color_u32_rgba(0, 0, 0, 0.75 * sup_alpha),
+                    support_text)
+                draw_list_text.add_text(
+                    sup_x, cursor_y,
+                    imgui.get_color_u32_rgba(0.95, 0.78, 0.40, sup_alpha),
+                    support_text)
                 imgui.set_window_font_scale(1.0)
                 cursor_y += sup_size[1] + 20
 
@@ -881,11 +928,6 @@ class StandaloneSplashWindow:
                 cursor_y = self._render_boot_log(draw_list_text, window_width, cursor_y,
                                                  current_time, fade_alpha)
                 cursor_y += 20
-
-                # 4. Funscript timeline graph
-                self._render_funscript_timeline(draw_list_text, window_width, cursor_y,
-                                                current_time, fade_alpha)
-                cursor_y += 140
 
         imgui.end()
         imgui.pop_style_color(2)
@@ -1531,13 +1573,118 @@ class StandaloneSplashWindow:
             "color": (0.1, 0.8, 0.2, 0.9),
             "bg": "_render_breaking_formula", "fg": None,
         },
+        "invaders": {
+            "lines": ["INSERT COIN TO CONTINUE", "GAME OVER, PLAYER 1",
+                      "THE INVADERS ARE COMING", "HIGH SCORE: K00GAR",
+                      "1UP   READY   PLAYER 1"],
+            "color": (0.3, 1.0, 0.4, 0.9),
+            "bg": "_render_invaders_scene", "fg": "_render_invaders_player_fire",
+        },
+        "mars": {
+            "lines": ["ACK! ACK! ACK! ACK!", "WE COME IN PEACE",
+                      "DON'T RUN, WE ARE YOUR FRIENDS",
+                      "THEY BLEW UP CONGRESS!", "ATTACK! ATTACK!"],
+            "color": (1.0, 0.3, 0.25, 0.9),
+            "bg": "_render_mars_attacks_scene", "fg": None,
+        },
+        "clippy": {
+            "lines": ["It looks like you're trying to generate a funscript.",
+                      "Would you like help with that?",
+                      "Did you mean to write a cover letter?",
+                      "I see you're opening FunGen again."],
+            "color": (1.0, 1.0, 0.55, 0.95),
+            "bg": "_render_clippy_scene", "fg": None,
+        },
+        "tetris": {
+            "lines": ["TETRIS FOR YOUR LOINS",
+                      "LEVEL 69",
+                      "CLEAR THE LINES",
+                      "GAME OVER MAN"],
+            "color": (0.9, 0.4, 1.0, 0.95),
+            "bg": "_render_tetris_scene", "fg": None,
+        },
+        "pacman": {
+            "lines": ["WAKA WAKA WAKA",
+                      "READY!",
+                      "GAME OVER",
+                      "HIGH SCORE: k00gar"],
+            "color": (1.0, 0.95, 0.1, 0.95),
+            "bg": "_render_pacman_scene", "fg": None,
+        },
+        "blade": {
+            "lines": ["Tears, in rain.",
+                      "I've seen things you people wouldn't believe.",
+                      "More human than human.",
+                      "Have you ever retired a human by mistake?"],
+            "color": (1.0, 0.55, 0.15, 0.95),
+            "bg": "_render_blade_runner_scene", "fg": None,
+        },
+        "bsod": {
+            "lines": ["A fatal amount of fun has occurred.",
+                      "Press any key to continue.",
+                      "Scandisk is currently running.",
+                      "It is now safe to turn off your computer."],
+            "color": (0.7, 0.85, 1.0, 0.95),
+            "bg": "_render_bsod_scene", "fg": None,
+        },
+        "sonic": {
+            "lines": ["Gotta go fast!",
+                      "You're too slow!",
+                      "I'm outta here!",
+                      "Got'em all!",
+                      "SEGA!"],
+            "color": (0.0, 0.65, 1.0, 0.95),
+            "bg": "_render_sonic_scene", "fg": None,
+        },
+        "xfiles": {
+            "lines": ["The truth is out there.",
+                      "I want to believe.",
+                      "Trust no one.",
+                      "Deny everything.",
+                      "Fight the future."],
+            "color": (0.4, 0.85, 0.5, 0.95),
+            "bg": "_render_xfiles_scene", "fg": None,
+        },
+        "tmnt": {
+            "lines": ["Cowabunga!",
+                      "Heroes in a half shell.",
+                      "Turtle power!",
+                      "It's pizza time!",
+                      "Radical!"],
+            "color": (0.2, 0.85, 0.3, 0.95),
+            "bg": "_render_tmnt_scene", "fg": None,
+        },
+        "et": {
+            "lines": ["E.T. phone home.",
+                      "Be good.",
+                      "I'll be right here.",
+                      "Reese's Pieces.",
+                      "Ouuuuch."],
+            "color": (1.0, 0.85, 0.5, 0.95),
+            "bg": "_render_et_scene", "fg": None,
+        },
+        "mario": {
+            "lines": ["It's-a me, Mario!",
+                      "Let's-a go!",
+                      "Mamma mia!",
+                      "Thank you so much for playing my game.",
+                      "Wahoo!"],
+            "color": (0.95, 0.20, 0.15, 0.95),
+            "bg": "_render_mario_scene", "fg": None,
+        },
     }
 
     def _get_splash_theme(self):
-        """Pick a random theme once per session."""
+        """Pick a theme once per session. Set FUNGEN_SPLASH_THEME=<name> to
+        force a specific theme (useful for previewing a single scene)."""
         if not hasattr(self, '_splash_theme'):
+            import os
             import random
-            theme_name = random.choice(list(self._SPLASH_THEMES.keys()))
+            forced = os.environ.get('FUNGEN_SPLASH_THEME')
+            if forced and forced in self._SPLASH_THEMES:
+                theme_name = forced
+            else:
+                theme_name = random.choice(list(self._SPLASH_THEMES.keys()))
             theme = self._SPLASH_THEMES[theme_name]
             self._splash_theme = theme_name
             self._splash_line = random.choice(theme["lines"])
@@ -1567,166 +1714,28 @@ class StandaloneSplashWindow:
         """Render themed one-liner. Returns y after last line."""
         return self._render_themed_line(draw_list, window_width, start_y, current_time, alpha)
 
-    def _render_matrix_rain(self, draw_list, window_width, window_height, current_time, alpha):
-        """Render Matrix-style falling character columns."""
-        if not hasattr(self, '_matrix_columns'):
-            import random
-            n_cols = max(8, int(window_width / 28))
-            self._matrix_columns = []
-            chars = "01{}[]<>|/\\=+-*&%$#@!?abcdefghijklmnopqrstuvwxyz"
-            for i in range(n_cols):
-                x = i * (window_width / n_cols) + random.uniform(0, 12)
-                speed = random.uniform(80, 220)
-                offset = random.uniform(0, window_height * 2)
-                trail_len = random.randint(8, 25)
-                col_chars = [random.choice(chars) for _ in range(trail_len)]
-                self._matrix_columns.append((x, speed, offset, col_chars))
-
-        char_h = 22
-        imgui.set_window_font_scale(1.3)
-        for x, speed, offset, col_chars in self._matrix_columns:
-            total_h = len(col_chars) * char_h
-            head_y = ((current_time * speed + offset) % (window_height + total_h)) - total_h
-            for ci, ch in enumerate(col_chars):
-                cy = head_y + ci * char_h
-                if cy < -char_h or cy > window_height:
-                    continue
-                # Head character is bright white-green, trail fades to dark green
-                t = ci / max(1, len(col_chars) - 1)
-                if ci == 0:
-                    # Head: bright white-green
-                    r, g, b = 0.7, 1.0, 0.7
-                    a = alpha
-                else:
-                    brightness = 1.0 - t * 0.9
-                    r = 0.0
-                    g = 0.85 * brightness
-                    b = 0.15 * brightness
-                    a = alpha * brightness
-                if a < 0.03:
-                    continue
-                draw_list.add_text(x, cy, imgui.get_color_u32_rgba(r, g, b, a), ch)
-        imgui.set_window_font_scale(1.0)
-
-    def _render_terminator_hud(self, draw_list, window_width, window_height, current_time, alpha):
-        """Terminator T-800 POV: red HUD overlay with corner brackets and scrolling data."""
-        a = alpha * 0.7
-        red = imgui.get_color_u32_rgba(1.0, 0.1, 0.05, a * 0.4)
-        red_bright = imgui.get_color_u32_rgba(1.0, 0.15, 0.1, a * 0.8)
-        w, h = window_width, window_height
-
-        # Screen border
-        draw_list.add_rect(4, 4, w - 4, h - 4, red, thickness=1.5)
-
-        # Corner brackets (L-shapes, 60px arms)
-        arm = 60
-        t = 2.5
-        for cx, cy, dx, dy in [(0, 0, 1, 1), (w, 0, -1, 1), (0, h, 1, -1), (w, h, -1, -1)]:
-            draw_list.add_line(cx, cy, cx + dx * arm, cy, red_bright, t)
-            draw_list.add_line(cx, cy, cx, cy + dy * arm, red_bright, t)
-
-        # Crosshair at center
-        cx, cy = w / 2, h / 2
-        gap = 12
-        size = 30
-        for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
-            draw_list.add_line(cx + dx * gap, cy + dy * gap,
-                               cx + dx * size, cy + dy * size, red_bright, 1.5)
-
-        # Scrolling data readouts on left edge
-        data_lines = [
-            "SCAN MODE 439", "MATCH: 0.97", "THREAT LEVEL: NONE", "CPU TEMP: 47C",
-            "TARGET: LOCKED", "FPS: UNLIMITED", "YOLO: ONLINE", "STATUS: NOMINAL",
-            "TRACKING: ACTIVE", "BUFFER: 98%", "NEURAL NET: OK",
-        ]
-        scroll_offset = current_time * 18
-        imgui.set_window_font_scale(0.85)
-        for i, txt in enumerate(data_lines):
-            ty = ((i * 22 - scroll_offset) % (len(data_lines) * 22 + h)) - 50
-            if 0 < ty < h:
-                line_a = a * 0.5 * (0.5 + 0.5 * math.sin(i + current_time * 2))
-                draw_list.add_text(12, ty, imgui.get_color_u32_rgba(1.0, 0.2, 0.1, line_a), txt)
-        imgui.set_window_font_scale(1.0)
-
-        # Subtle red tint overlay
-        draw_list.add_rect_filled(0, 0, w, h, imgui.get_color_u32_rgba(0.3, 0.0, 0.0, a * 0.08))
-
-    def _render_tron_grid(self, draw_list, window_width, window_height, current_time, alpha):
-        """Tron-style perspective grid floor with neon glow."""
-        w, h = window_width, window_height
-        horizon_y = h * 0.42
-        cx = w / 2
-        a = alpha * 0.7
-        cyan_glow = imgui.get_color_u32_rgba(0.0, 0.7, 1.0, a * 0.15)
-        cyan_line = imgui.get_color_u32_rgba(0.0, 0.85, 1.0, a * 0.55)
-
-        # Horizontal lines (get closer together near horizon)
-        n_hlines = 20
-        scroll = (current_time * 0.3) % 1.0
-        for i in range(n_hlines):
-            t = (i + scroll) / n_hlines
-            y = horizon_y + t * t * (h - horizon_y)  # Quadratic spacing
-            if y > h:
-                continue
-            brightness = t  # Brighter closer to viewer
-            draw_list.add_line(0, y, w, y, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, a * 0.1 * brightness), 3.0)
-            draw_list.add_line(0, y, w, y, imgui.get_color_u32_rgba(0.0, 0.85, 1.0, a * 0.4 * brightness), 1.0)
-
-        # Vertical lines converging to vanishing point
-        n_vlines = 16
-        for i in range(n_vlines):
-            vx = (i / (n_vlines - 1)) * w
-            # Line from bottom to horizon, converging at center
-            bx = vx
-            tx = cx + (vx - cx) * 0.05  # Converge toward center at horizon
-            draw_list.add_line(bx, h, tx, horizon_y, cyan_glow, 3.0)
-            draw_list.add_line(bx, h, tx, horizon_y, cyan_line, 1.0)
-
-        # Light cycle trails (a few horizontal streaks)
-        import random
-        if not hasattr(self, '_tron_trails'):
-            self._tron_trails = [(random.uniform(horizon_y + 30, h - 30),
-                                  random.uniform(0.3, 0.8)) for _ in range(3)]
-        for ty, speed in self._tron_trails:
-            trail_x = ((current_time * speed * w) % (w * 1.5)) - w * 0.25
-            trail_len = 120
-            draw_list.add_line(trail_x, ty, trail_x + trail_len, ty,
-                               imgui.get_color_u32_rgba(0.0, 0.9, 1.0, a * 0.4), 2.5)
-            draw_list.add_line(trail_x + trail_len, ty, trail_x + trail_len + 20, ty,
-                               imgui.get_color_u32_rgba(0.0, 0.9, 1.0, a * 0.8), 2.0)
-
-    def _render_starwars_stars(self, draw_list, window_width, window_height, current_time, alpha):
-        """Star Wars background: bright starfield with a few large stars."""
-        w, h = window_width, window_height
-        if not hasattr(self, '_sw_stars'):
-            import random
-            self._sw_stars = [(random.uniform(0, 1), random.uniform(0, 1),
-                               random.uniform(0.3, 1.0), random.uniform(0.5, 3.0))
-                              for _ in range(150)]
-        for sx, sy, brightness, twinkle_speed in self._sw_stars:
-            twinkle = 0.4 + 0.6 * (0.5 + 0.5 * math.sin(current_time * twinkle_speed + sx * 20))
-            a = alpha * brightness * twinkle
-            size = 1.0 + brightness * 1.5
-            draw_list.add_circle_filled(sx * w, sy * h, size,
-                                        imgui.get_color_u32_rgba(1.0, 1.0, 1.0, a))
-
     def _render_starwars_sabers(self, logo_x, logo_y, logo_size, laser_time):
-        """Star Wars foreground: keyframed lightsaber duel with strikes and clashes."""
+        """Star Wars foreground: full lightsaber duel with 5-layer emissive
+        blades, motion trails, proper hilts, hooded wielders, ambient wash,
+        clash arcs, and a brief ignition animation at splash-start.
+
+        The blade geometry is still driven by the same keyframe interpolation
+        as before, but EVERYTHING around the blade has been rebuilt."""
+        import random
         draw_list = imgui.get_window_draw_list()
         window_width, window_height = glfw.get_window_size(self.window)
         w, h = window_width, window_height
         cx, cy = w / 2, h / 2
         t = laser_time + 0.3
-        saber_len = min(w, h) * 0.38
+        hilt_offset = max(260.0, min(w * 0.24, 420.0))
+        saber_len = max(hilt_offset * 1.12, min(w, h) * 0.38)
 
-        # Keyframed fight sequence: (time, blue_angle, red_angle, clash?)
-        # Angles in radians from hilt. Sequence loops every ~4 seconds.
+        # ------- Keyframed fight sequence -------
         fight_keys = [
-            # (time_in_loop, blue_angle, red_angle, is_clash)
-            (0.0,  -0.3,   math.pi + 0.3,  False),  # Guard stance
-            (0.3,  -1.2,   math.pi + 0.3,  False),  # Blue winds up high
+            (0.0,  -0.3,   math.pi + 0.3,  False),  # Guard
+            (0.3,  -1.2,   math.pi + 0.3,  False),  # Blue winds up
             (0.5,   0.4,   math.pi - 0.4,  True),   # CLASH center
-            (0.8,   0.4,   math.pi - 0.4,  True),   # Hold clash
+            (0.8,   0.4,   math.pi - 0.4,  True),   # Hold
             (1.0,  -0.2,   math.pi + 0.2,  False),  # Disengage
             (1.3,  -0.2,   math.pi + 1.3,  False),  # Red winds up
             (1.5,   0.6,   math.pi - 0.6,  True),   # CLASH low
@@ -1736,191 +1745,290 @@ class StandaloneSplashWindow:
             (2.5,  -0.1,   math.pi + 0.1,  True),   # CLASH high
             (2.8,  -0.1,   math.pi + 0.1,  True),   # Hold
             (3.2,   0.5,   math.pi - 0.5,  False),  # Pull back
-            (3.5,  -0.3,   math.pi + 0.3,  False),  # Return to guard
+            (3.5,  -0.3,   math.pi + 0.3,  False),  # Guard
             (4.0,  -0.3,   math.pi + 0.3,  False),  # Loop point
         ]
         loop_dur = fight_keys[-1][0]
-        t_loop = t % loop_dur
 
-        # Interpolate between keyframes
-        blue_a = fight_keys[0][1]
-        red_a = fight_keys[0][2]
-        is_clash = False
-        for ki in range(len(fight_keys) - 1):
-            t0, ba0, ra0, c0 = fight_keys[ki]
-            t1, ba1, ra1, c1 = fight_keys[ki + 1]
-            if t0 <= t_loop < t1:
-                frac = (t_loop - t0) / (t1 - t0)
-                # Smoothstep for natural motion
-                frac = frac * frac * (3 - 2 * frac)
-                blue_a = ba0 + (ba1 - ba0) * frac
-                red_a = ra0 + (ra1 - ra0) * frac
-                is_clash = c1
-                break
+        def angles_at(t_abs):
+            """Interpolated (blue_angle, red_angle, is_clash) at absolute t."""
+            tq = t_abs % loop_dur
+            if tq < 0:
+                tq += loop_dur
+            for ki in range(len(fight_keys) - 1):
+                t0, ba0, ra0, c0 = fight_keys[ki]
+                t1, ba1, ra1, c1 = fight_keys[ki + 1]
+                if t0 <= tq < t1:
+                    frac = (tq - t0) / (t1 - t0)
+                    frac = frac * frac * (3 - 2 * frac)
+                    return (ba0 + (ba1 - ba0) * frac,
+                            ra0 + (ra1 - ra0) * frac,
+                            c1)
+            return fight_keys[0][1], fight_keys[0][2], False
 
-        # Hilt positions (wide apart)
-        blue_hx = cx - 180
+        blue_a, red_a, is_clash = angles_at(t)
+
+        # ------- Hilt positions (fixed) -------
+        blue_hx = cx - hilt_offset
         blue_hy = cy + 60
-        red_hx = cx + 180
+        red_hx = cx + hilt_offset
         red_hy = cy + 60
 
-        blue_tx = blue_hx + math.cos(blue_a) * saber_len
-        blue_ty = blue_hy + math.sin(blue_a) * saber_len
-        red_tx = red_hx + math.cos(red_a) * saber_len
-        red_ty = red_hy + math.sin(red_a) * saber_len
+        # Ignition envelope: 0 -> 1 over the first 0.4s of visible duel
+        ignition = max(0.0, min(1.0, laser_time / 0.4))
+        eff_len = saber_len * ignition
 
-        # Draw sabers
-        def draw_saber(hx, hy, tx, ty, r, g, b):
-            draw_list.add_line(hx, hy, tx, ty, imgui.get_color_u32_rgba(r, g, b, 0.12), 22.0)
-            draw_list.add_line(hx, hy, tx, ty, imgui.get_color_u32_rgba(r, g, b, 0.6), 9.0)
-            draw_list.add_line(hx, hy, tx, ty, imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.85), 3.0)
-            draw_list.add_rect_filled(hx - 4, hy - 14, hx + 4, hy + 14,
-                                       imgui.get_color_u32_rgba(0.55, 0.55, 0.6, 0.8), 2.0)
+        blue_tx = blue_hx + math.cos(blue_a) * eff_len
+        blue_ty = blue_hy + math.sin(blue_a) * eff_len
+        red_tx = red_hx + math.cos(red_a) * eff_len
+        red_ty = red_hy + math.sin(red_a) * eff_len
 
-        draw_saber(blue_hx, blue_hy, blue_tx, blue_ty, 0.2, 0.5, 1.0)
-        draw_saber(red_hx, red_hy, red_tx, red_ty, 1.0, 0.15, 0.05)
+        # Hum flicker (slight brightness pulsation)
+        hum = 0.92 + 0.08 * math.sin(t * 42)
 
-        # Clash sparks at point of contact
+        # ------- 1. Ambient colored wash (fakes blade-cast light) -------
+        # Blue on the left half, red on the right half, concentrated around
+        # each hilt's vertical. Keeps the bottom two-thirds feeling "lit" by
+        # the sabers even before we draw them.
+        wash_alpha_blue = 0.10 * hum * ignition
+        wash_alpha_red = 0.10 * hum * ignition
         if is_clash:
+            wash_alpha_blue *= 1.4
+            wash_alpha_red *= 1.4
+        # Draw as vertical gradient stripes so it reads as directional
+        wash_band_h = h * 0.6
+        wash_top_y = h - wash_band_h
+        for i in range(25):
+            f = i / 25
+            y0 = wash_top_y + f * wash_band_h
+            y1 = wash_top_y + (f + 1 / 25) * wash_band_h + 1
+            # Left side: full blue at hilt x, falling off toward center
+            for x_start, x_end, col_r, col_g, col_b, w_alpha in [
+                (0, cx, 0.25, 0.55, 1.0, wash_alpha_blue * (1.0 - f * 0.5)),
+                (cx, w, 1.0, 0.2, 0.12, wash_alpha_red * (1.0 - f * 0.5)),
+            ]:
+                draw_list.add_rect_filled(
+                    x_start, y0, x_end, y1,
+                    imgui.get_color_u32_rgba(col_r, col_g, col_b, w_alpha))
+
+        # ------- 2. Motion trail ghost blades -------
+        def draw_trail(hx, hy, r, g, b, side):
+            """Sample past-timesteps of the blade angle and draw faded ghosts."""
+            for k in range(6, 0, -1):
+                dt_back = k * 0.035
+                past_blue, past_red, _ = angles_at(t - dt_back)
+                past_angle = past_blue if side == 'blue' else past_red
+                ptx = hx + math.cos(past_angle) * eff_len
+                pty = hy + math.sin(past_angle) * eff_len
+                fade = (6 - k) / 6.0
+                ga = 0.07 * fade
+                gb = 0.14 * fade
+                draw_list.add_line(hx, hy, ptx, pty,
+                                   imgui.get_color_u32_rgba(r, g, b, ga), 22)
+                draw_list.add_line(hx, hy, ptx, pty,
+                                   imgui.get_color_u32_rgba(r, g, b, gb), 11)
+
+        if ignition > 0.5:
+            draw_trail(blue_hx, blue_hy, 0.30, 0.60, 1.0, 'blue')
+            draw_trail(red_hx, red_hy, 1.0, 0.20, 0.10, 'red')
+
+        # ------- 4. Proper hilts (rotated metal cylinders with detail) -------
+        def draw_hilt(hx, hy, angle, accent_r, accent_g, accent_b):
+            # "Back" direction (opposite blade) and perpendicular
+            bdx = -math.cos(angle); bdy = -math.sin(angle)
+            pdx = -math.sin(angle); pdy = math.cos(angle)
+
+            def pt(s, perp_w):
+                return (hx + bdx * s + pdx * perp_w,
+                        hy + bdy * s + pdy * perp_w)
+
+            def quad(s0, s1, w0, w1, col):
+                p1 = pt(s0, -w0); p2 = pt(s1, -w1)
+                p3 = pt(s1, w1); p4 = pt(s0, w0)
+                draw_list.add_quad_filled(
+                    p1[0], p1[1], p2[0], p2[1],
+                    p3[0], p3[1], p4[0], p4[1], col)
+
+            HL = 72  # hilt length in screen pixels
+            metal_dk = imgui.get_color_u32_rgba(0.08, 0.08, 0.09, 1.0)
+            metal    = imgui.get_color_u32_rgba(0.48, 0.48, 0.52, 1.0)
+            metal_lt = imgui.get_color_u32_rgba(0.78, 0.78, 0.82, 1.0)
+            grip_dk  = imgui.get_color_u32_rgba(0.12, 0.10, 0.08, 1.0)
+
+            # Emitter shroud (wider, at hilt mouth where blade extrudes)
+            quad(0, 12, 13, 11, metal_dk)
+            quad(1, 11, 11, 9, metal)
+            # Body (main tube)
+            quad(12, 48, 10, 10, metal_dk)
+            quad(13, 47, 8, 8, metal)
+            # Highlight stripe along one side of the body
+            quad(13, 47, -6, -6, metal_lt)
+            # Grip cross-hatching (4 dark bands)
+            for k in range(4):
+                sb = 16 + k * 7
+                quad(sb, sb + 3, 8, 8, grip_dk)
+            # Activation stud (colored by accent)
+            stud_cx, stud_cy = pt(22, 5.5)
+            draw_list.add_circle_filled(
+                stud_cx, stud_cy, 3.2,
+                imgui.get_color_u32_rgba(accent_r, accent_g, accent_b, 1.0))
+            draw_list.add_circle(
+                stud_cx, stud_cy, 3.2, metal_dk, thickness=1.5)
+            # Pommel (widens back out near the end)
+            quad(48, 62, 10, 12, metal_dk)
+            quad(49, 61, 8, 10, metal)
+            # End cap
+            quad(62, HL, 12, 12, metal_dk)
+
+        draw_hilt(blue_hx, blue_hy, blue_a, 0.3, 0.6, 1.0)
+        draw_hilt(red_hx, red_hy, red_a, 1.0, 0.2, 0.1)
+
+        # ------- 5. 5-layer emissive blade -------
+        def draw_blade(hx, hy, tx, ty, r, g, b):
+            if ignition <= 0.01:
+                return
+            # Ignition can also affect thickness briefly at start
+            t_mul = 1.0
+            # Outer halo / glow layers (saturated color)
+            for (thick, a) in (
+                (42, 0.09 * hum),
+                (26, 0.22 * hum),
+                (15, 0.50 * hum),
+                (8,  0.80 * hum),
+            ):
+                draw_list.add_line(
+                    hx, hy, tx, ty,
+                    imgui.get_color_u32_rgba(r, g, b, a), thick * t_mul)
+            # Near-core: blend toward white
+            draw_list.add_line(
+                hx, hy, tx, ty,
+                imgui.get_color_u32_rgba(
+                    min(1.0, r * 0.45 + 0.55),
+                    min(1.0, g * 0.45 + 0.55),
+                    min(1.0, b * 0.45 + 0.55),
+                    0.90 * hum), 4.5 * t_mul)
+            # White-hot core
+            draw_list.add_line(
+                hx, hy, tx, ty,
+                imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.95 * hum), 2.0)
+            # Sparky tip during ignition
+            if ignition < 1.0:
+                draw_list.add_circle_filled(
+                    tx, ty, 9 * hum,
+                    imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.85 * (1 - ignition)))
+                # Ignition sparks
+                for si in range(6):
+                    sa = t * 30 + si * (math.pi / 3)
+                    slen = 18 + 8 * math.sin(t * 30 + si)
+                    sx = tx + math.cos(sa) * slen
+                    sy = ty + math.sin(sa) * slen
+                    draw_list.add_line(
+                        tx, ty, sx, sy,
+                        imgui.get_color_u32_rgba(1.0, 1.0, 1.0,
+                                                 (1 - ignition) * 0.8), 2)
+
+        draw_blade(blue_hx, blue_hy, blue_tx, blue_ty, 0.30, 0.60, 1.0)
+        draw_blade(red_hx, red_hy, red_tx, red_ty, 1.0, 0.20, 0.10)
+
+        # ------- 6. Clash FX: lightning arcs + screen flash + flying sparks -
+        # Detect clash onset (time-since-clash-start) for a sharp flash beat.
+        clash_starts = (0.5, 1.5, 2.5)
+        t_loop = t % loop_dur
+        tsc = float('inf')
+        for cs in clash_starts:
+            dt_c = t_loop - cs
+            if 0 <= dt_c < tsc:
+                tsc = dt_c
+        clash_flash = max(0.0, 1.0 - tsc / 0.28) if tsc < 0.5 else 0.0
+
+        if is_clash or clash_flash > 0:
             clash_x = (blue_tx + red_tx) / 2
             clash_y = (blue_ty + red_ty) / 2
-            flash_a = 0.5 + 0.5 * math.sin(t * 25)
 
-            draw_list.add_circle_filled(clash_x, clash_y, 45,
-                                        imgui.get_color_u32_rgba(1.0, 1.0, 1.0, flash_a * 0.25))
-            draw_list.add_circle_filled(clash_x, clash_y, 18,
-                                        imgui.get_color_u32_rgba(1.0, 1.0, 0.9, flash_a * 0.8))
-            for si in range(10):
-                sa = t * 14 + si * (math.pi / 5)
-                spark_len = 25 + 30 * math.sin(t * 20 + si * 3)
+            # Screen-wide flash punch (briefly), fades fast
+            if clash_flash > 0:
+                draw_list.add_rect_filled(
+                    0, 0, w, h,
+                    imgui.get_color_u32_rgba(1.0, 1.0, 1.0,
+                                             0.22 * clash_flash))
+
+            # Central hot bloom
+            flicker = 0.6 + 0.4 * math.sin(t * 30)
+            for rr, aa in ((72, 0.18), (42, 0.45), (20, 0.85)):
+                draw_list.add_circle_filled(
+                    clash_x, clash_y, rr,
+                    imgui.get_color_u32_rgba(1.0, 1.0, 0.95, aa * flicker))
+
+            # Lightning arcs between the two blade tips — jagged polylines
+            rng = random.Random(int(t_loop * 200))
+            for arc_i in range(5):
+                pts = [(blue_tx, blue_ty)]
+                n_seg = 8
+                dx = (red_tx - blue_tx) / n_seg
+                dy = (red_ty - blue_ty) / n_seg
+                # Perpendicular direction (for jitter)
+                seg_len = math.hypot(red_tx - blue_tx, red_ty - blue_ty)
+                if seg_len < 1:
+                    break
+                nx = -(red_ty - blue_ty) / seg_len
+                ny = (red_tx - blue_tx) / seg_len
+                for k in range(1, n_seg):
+                    sx = blue_tx + dx * k
+                    sy = blue_ty + dy * k
+                    jitter = rng.uniform(-22, 22)
+                    pts.append((sx + nx * jitter, sy + ny * jitter))
+                pts.append((red_tx, red_ty))
+                arc_a = 0.35 + 0.35 * math.sin(t * 50 + arc_i)
+                arc_a *= (0.5 + 0.5 * flicker)
+                for i in range(1, len(pts)):
+                    draw_list.add_line(
+                        pts[i - 1][0], pts[i - 1][1],
+                        pts[i][0], pts[i][1],
+                        imgui.get_color_u32_rgba(0.9, 0.95, 1.0, arc_a), 2.5)
+                    # Brighter thin core
+                    draw_list.add_line(
+                        pts[i - 1][0], pts[i - 1][1],
+                        pts[i][0], pts[i][1],
+                        imgui.get_color_u32_rgba(1.0, 1.0, 1.0,
+                                                 arc_a * 0.8), 1.0)
+
+            # Radial sparks (classic style) — 14 of them
+            for si in range(14):
+                sa = t * 12 + si * (math.tau / 14)
+                spark_len = 40 + 40 * math.sin(t * 22 + si * 3)
                 sx = clash_x + math.cos(sa) * spark_len
                 sy = clash_y + math.sin(sa) * spark_len
-                draw_list.add_line(clash_x, clash_y, sx, sy,
-                                   imgui.get_color_u32_rgba(1.0, 0.85, 0.3, flash_a * 0.7), 2.0)
+                draw_list.add_line(
+                    clash_x, clash_y, sx, sy,
+                    imgui.get_color_u32_rgba(1.0, 0.82, 0.30, 0.85 * flicker),
+                    2.5)
 
-    def _render_breaking_formula(self, draw_list, window_width, window_height, current_time, alpha):
-        """Breaking Bad: periodic table element boxes + chemical formula."""
-        w, h = window_width, window_height
+            # Falling "displaced" sparks under gravity, fade out
+            n_fall = 10
+            for si in range(n_fall):
+                spark_phase = (si / n_fall + t_loop * 0.3) % 1.0
+                fx = clash_x + math.cos(si * 0.7 + t * 4) * 55
+                gy = clash_y + spark_phase * 180
+                if gy > h - 10:
+                    continue
+                fall_a = (1.0 - spark_phase) * 0.85
+                draw_list.add_circle_filled(
+                    fx, gy, 2.8,
+                    imgui.get_color_u32_rgba(1.0, 0.85, 0.35, fall_a))
+                # Tiny trail
+                draw_list.add_line(
+                    fx, gy, fx, gy - 10,
+                    imgui.get_color_u32_rgba(1.0, 0.75, 0.25, fall_a * 0.6),
+                    1.5)
 
-        # Periodic table element boxes scattered across screen
-        elements = [
-            ("Br", "35", "Bromine"), ("Ba", "56", "Barium"),
-            ("H", "1", "Hydrogen"), ("He", "2", "Helium"),
-            ("C", "6", "Carbon"), ("N", "7", "Nitrogen"),
-            ("O", "8", "Oxygen"), ("F", "9", "Fluorine"),
-            ("Na", "11", "Sodium"), ("Cl", "17", "Chlorine"),
-            ("K", "19", "Potassium"), ("Fe", "26", "Iron"),
-            ("Cu", "29", "Copper"), ("Zn", "30", "Zinc"),
-        ]
-        if not hasattr(self, '_bb_positions'):
-            import random
-            self._bb_positions = [(random.uniform(0.05, 0.9), random.uniform(0.05, 0.9))
-                                  for _ in elements]
 
-        box_size = 55
-        for i, ((sym, num, name), (px, py)) in enumerate(zip(elements, self._bb_positions)):
-            bx = px * w
-            by = py * h
-            # Pulse each element at different phase
-            pulse = 0.3 + 0.3 * math.sin(current_time * 1.5 + i * 0.8)
-            box_a = alpha * pulse
+    # ---------------------------------------------------------------
+    # ---------------------------------------------------------------
 
-            # Box
-            draw_list.add_rect_filled(bx, by, bx + box_size, by + box_size,
-                                       imgui.get_color_u32_rgba(0.05, 0.15, 0.05, box_a * 0.6), 3.0)
-            draw_list.add_rect(bx, by, bx + box_size, by + box_size,
-                               imgui.get_color_u32_rgba(0.1, 0.7, 0.2, box_a * 0.8), 3.0, thickness=1.5)
+    # ---------------------------------------------------------------
+    # ---------------------------------------------------------------
 
-            # Atomic number (small, top-left)
-            draw_list.add_text(bx + 4, by + 2,
-                               imgui.get_color_u32_rgba(0.3, 0.8, 0.3, box_a * 0.6), num)
-
-            # Symbol (large, centered)
-            imgui.set_window_font_scale(1.8)
-            sym_size = imgui.calc_text_size(sym)
-            draw_list.add_text(bx + (box_size - sym_size[0]) / 2, by + 15,
-                               imgui.get_color_u32_rgba(0.1, 0.9, 0.2, box_a), sym)
-            imgui.set_window_font_scale(1.0)
-
-        # Chemical formula at bottom
-        imgui.set_window_font_scale(1.5)
-        formula = "C10H15N  +  AI  =  FunScript"
-        f_size = imgui.calc_text_size(formula)
-        f_a = alpha * 0.25 * (0.5 + 0.5 * math.sin(current_time * 2))
-        draw_list.add_text((w - f_size[0]) / 2, h - 60,
-                           imgui.get_color_u32_rgba(0.1, 0.8, 0.2, f_a), formula)
-        imgui.set_window_font_scale(1.0)
-
-    def _render_funscript_timeline(self, draw_list, window_width, timeline_y, current_time, alpha):
-        """Render a funscript-style zigzag timeline with speed-colored segments."""
-        tl_h = 130  # Tall for visual impact
-        tl_w = window_width * 0.95
-        tl_x = (window_width - tl_w) / 2
-        scroll = current_time * 0.6
-
-        # Generate dense zigzag (alternating peaks/valleys with varied timing and amplitude)
-        n_strokes = 40
-        stroke_points = []
-        for si in range(n_strokes):
-            # Varied spacing between strokes (some fast, some slow)
-            base_t = si * 0.28 + math.sin(si * 1.7) * 0.08 + math.sin(si * 0.6) * 0.05
-            # Alternating peaks/valleys with varied amplitude
-            if si % 2 == 0:
-                pos = 0.82 + math.sin(si * 0.9) * 0.15  # Peaks 67-97%
-            else:
-                pos = 0.18 + math.sin(si * 1.3) * 0.15  # Valleys 3-33%
-            stroke_points.append((base_t, pos))
-
-        # Wrap length for seamless scrolling
-        wrap_len = n_strokes * 0.28
-
-        # Convert to screen coordinates with scrolling
-        points = []
-        for st, sp in stroke_points:
-            sx = tl_x + ((st - scroll) % wrap_len) / wrap_len * tl_w
-            sy = timeline_y + tl_h * (1.0 - sp)
-            points.append((sx, sy, sp))  # keep pos for speed coloring
-        points.sort(key=lambda p: p[0])
-
-        # Speed-colored segments using the same gradient as the interactive timeline
-        from application.utils.heatmap_utils import HeatmapColorMapper
-        mapper = HeatmapColorMapper(max_speed=400.0)
-
-        for i in range(1, len(points)):
-            x1, y1, p1 = points[i - 1]
-            x2, y2, p2 = points[i]
-            dx = abs(x2 - x1)
-            if dx < 1:
-                continue
-            # Convert normalized speed to units/sec (100 units range, time from pixel spacing)
-            dt_sec = (dx / tl_w) * wrap_len * 0.8  # approximate time span in seconds
-            speed_units_per_sec = abs(p2 - p1) * 100.0 / max(0.001, dt_sec)
-            r, g, b, _ = mapper.speed_to_color_rgba(speed_units_per_sec)
-
-            # Glow behind
-            draw_list.add_line(x1, y1, x2, y2,
-                               imgui.get_color_u32_rgba(r, g, b, 0.12 * alpha), 10.0)
-            # Main line
-            draw_list.add_line(x1, y1, x2, y2,
-                               imgui.get_color_u32_rgba(r, g, b, 0.85 * alpha), 3.5)
-
-        # Dots at peaks and valleys
-        for px, py, pp in points:
-            if tl_x < px < tl_x + tl_w:
-                is_peak = pp > 0.5
-                dot_r = 0.0 if is_peak else 0.9
-                dot_g = 1.0 if is_peak else 0.3
-                dot_b = 0.5 if is_peak else 0.3
-                draw_list.add_circle_filled(px, py, 5,
-                                            imgui.get_color_u32_rgba(dot_r, dot_g, dot_b, 0.2 * alpha))
-                draw_list.add_circle_filled(px, py, 3,
-                                            imgui.get_color_u32_rgba(dot_r, dot_g, dot_b, 0.8 * alpha))
-
-        # Horizontal scale lines (0, 50, 100 reference)
-        for frac in (0.0, 0.5, 1.0):
-            gy = timeline_y + tl_h * (1.0 - frac)
-            draw_list.add_line(tl_x, gy, tl_x + tl_w, gy,
-                               imgui.get_color_u32_rgba(0.3, 0.4, 0.5, 0.12 * alpha), 1.0)
+    # ---------------------------------------------------------------
 
     def _render_spinner(self, window_width, window_height, current_time):
         """Render an animated loading spinner."""

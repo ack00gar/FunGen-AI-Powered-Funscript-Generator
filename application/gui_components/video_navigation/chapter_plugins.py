@@ -39,7 +39,7 @@ class ChapterPluginsMixin:
         target_funscript, axis_name = self.app.funscript_processor._get_target_funscript_object_and_axis(timeline_num)
             
         if not timeline_instance or not target_funscript:
-            imgui.text_disabled("Timeline not available")
+            imgui.text_disabled("Funscript not available")
             return
             
         # Get available plugins from the timeline's plugin renderer
@@ -181,7 +181,7 @@ class ChapterPluginsMixin:
                     imgui.separator()
                     
                 # Render group header (non-clickable)
-                imgui.text_colored(group_name, 0.7, 0.7, 0.7, 1.0)
+                imgui.text_colored(group_name, *CurrentTheme.DESCRIPTION_TEXT)
                 
                 for tracker in trackers:
                     display_name = getattr(tracker, 'display_name', tracker.internal_name)
@@ -200,7 +200,7 @@ class ChapterPluginsMixin:
                 
         except Exception as e:
             self.app.logger.error(f"Error loading trackers for chapter analysis: {e}")
-            imgui.text_colored("Error loading trackers", 1.0, 0.3, 0.3, 1.0)
+            imgui.text_colored("Error loading trackers", *CurrentTheme.RED_LIGHT)
             
 
     def _apply_tracker_to_chapter(self, tracker, chapter):

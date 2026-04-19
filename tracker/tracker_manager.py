@@ -6,6 +6,7 @@ import logging
 import numpy as np
 from typing import List, Dict, Tuple, Optional, Any
 
+from config.constants import POSITION_INFO_MAPPING
 from tracker.tracker_modules import tracker_registry
 from funscript.multi_axis_funscript import MultiAxisFunscript
 
@@ -42,8 +43,9 @@ class TrackerManager:
 
         # Apply point simplification setting from app settings
         if app_logic_instance and hasattr(app_logic_instance, 'app_settings'):
-            simplification_enabled = app_logic_instance.app_settings.get('funscript_point_simplification_enabled', True)
-            self.funscript.enable_point_simplification = simplification_enabled
+            _fs_cfg = app_logic_instance.app_settings.config.funscript
+            self.funscript.enable_point_simplification = _fs_cfg.point_simplification_enabled
+            self.funscript.simplification_tolerance = _fs_cfg.point_simplification_tolerance
         
         # Tracking state
         self.tracking_active = False
@@ -122,9 +124,10 @@ class TrackerManager:
         # Rolling Ultimate Autotune for live tracking (streamer mode)
         # Load from settings if app instance is available (disabled by default, requires streamer + connected session)
         if app_logic_instance and hasattr(app_logic_instance, 'app_settings'):
-            self.rolling_autotune_enabled = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_enabled", False)
-            self.rolling_autotune_interval_ms = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_interval_ms", 5000)
-            self.rolling_autotune_window_ms = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_window_ms", 5000)
+            _cfg = app_logic_instance.app_settings.config.tracking
+            self.rolling_autotune_enabled = _cfg.live_rolling_autotune_enabled
+            self.rolling_autotune_interval_ms = _cfg.live_rolling_autotune_interval_ms
+            self.rolling_autotune_window_ms = _cfg.live_rolling_autotune_window_ms
         else:
             self.rolling_autotune_enabled = False  # Disabled by default - requires streamer with connected session
             self.rolling_autotune_interval_ms = 5000  # Apply autotune every 5 seconds
@@ -149,7 +152,7 @@ class TrackerManager:
                 self.logger.error(f"Unknown tracker mode: {mode_name}")
                 return False
                 
-            # Use internal name from tracker_info (resolves aliases like "oscillation" → "LIVE_OSCILLATION")
+            # Use internal name from tracker_info (resolves aliases like "oscillation" -> "LIVE_OSCILLATION")
             tracker_class = tracker_registry.get_tracker(tracker_info.internal_name)
             if not tracker_class:
                 self.logger.error(f"Could not load tracker class for: {mode_name}")
@@ -168,7 +171,7 @@ class TrackerManager:
                 if tracker_info.supports_dual_axis:
                     secondary = tracker_info.secondary_axis
                     if self.app and hasattr(self.app, 'app_settings'):
-                        user_secondary = self.app.app_settings.get("default_secondary_axis")
+                        user_secondary = self.app.app_settings.config.performance.default_secondary_axis
                         if user_secondary and user_secondary != secondary:
                             self.logger.info(f"Using user-configured secondary axis: {user_secondary} (tracker default: {secondary})")
                             secondary = user_secondary
@@ -205,9 +208,11 @@ class TrackerManager:
         if not self._current_tracker:
             self.logger.error("No tracker set - call set_tracking_mode() first")
             return False
-            
+
         try:
             self.tracking_active = True
+            self._suspend_mpv_display_for_tracking()
+            self._suspend_hd_for_live_tracking()
             if hasattr(self._current_tracker, 'start_tracking'):
                 result = self._current_tracker.start_tracking()
                 # Handle different return types
@@ -216,6 +221,8 @@ class TrackerManager:
         except Exception as e:
             self.logger.error(f"Failed to start tracking: {e}")
             self.tracking_active = False
+            self._resume_hd_after_live_tracking()
+            self._resume_mpv_display_after_tracking()
             return False
 
     def stop_tracking(self):
@@ -225,6 +232,8 @@ class TrackerManager:
 
         try:
             self.tracking_active = False
+            self._resume_hd_after_live_tracking()
+            self._resume_mpv_display_after_tracking()
             if hasattr(self._current_tracker, 'stop_tracking'):
                 self._current_tracker.stop_tracking()
             elif hasattr(self._current_tracker, 'cleanup'):
@@ -240,28 +249,104 @@ class TrackerManager:
         except Exception as e:
             self.logger.error(f"Failed to stop tracking: {e}")
 
-    def process_frame(self, frame: np.ndarray, frame_time_ms: int, 
-                     frame_index: Optional[int] = None, 
+    # ---------------------------------------------------- mpv display gating
+
+    def _get_mpv_display(self):
+        """Resolve the GUI's session-wide MpvDisplay (or None if absent)."""
+        if not self.app:
+            return None
+        gui = getattr(self.app, 'gui_instance', None)
+        return getattr(gui, 'mpv_display', None) if gui else None
+
+    def _suspend_mpv_display_for_tracking(self) -> None:
+        # mpv plays at native rate while the tracker pulls frames paced by
+        # target_delay; their audio timelines diverge fast. Mute first so
+        # no sample leaks in the window before pause lands.
+        disp = self._get_mpv_display()
+        if disp is None or not getattr(disp, 'is_loaded', False):
+            return
+        try:
+            self._mpv_pre_tracking_mute = bool(getattr(disp._player, 'mute', False)) if disp._player else False
+            if disp._player is not None:
+                disp._player.mute = True
+            disp.pause()
+        except Exception as e:
+            if self.logger:
+                self.logger.debug(f"mpv suspend-for-tracking failed: {e}")
+
+    def _suspend_hd_for_live_tracking(self) -> None:
+        # Ask the processor to downgrade ffmpeg output to tracker size while
+        # live tracking runs. Skips the per-frame CPU resize in
+        # _make_processing_frame.
+        proc = getattr(self.app, 'processor', None) if self.app else None
+        if proc is None or not hasattr(proc, 'suspend_hd_for_live_tracking'):
+            return
+        try:
+            proc.suspend_hd_for_live_tracking()
+        except Exception as e:
+            if self.logger:
+                self.logger.debug(f"HD suspend for tracking failed: {e}")
+
+    def _resume_hd_after_live_tracking(self) -> None:
+        proc = getattr(self.app, 'processor', None) if self.app else None
+        if proc is None or not hasattr(proc, 'resume_hd_after_live_tracking'):
+            return
+        try:
+            proc.resume_hd_after_live_tracking()
+        except Exception as e:
+            if self.logger:
+                self.logger.debug(f"HD resume after tracking failed: {e}")
+
+    def _resume_mpv_display_after_tracking(self) -> None:
+        disp = self._get_mpv_display()
+        if disp is None or not getattr(disp, 'is_loaded', False):
+            return
+        try:
+            proc = getattr(self.app, 'processor', None) if self.app else None
+            if proc and proc.fps and proc.fps > 0:
+                target_s = proc.current_frame_index / proc.fps
+                # Skip the seek if mpv already sits within one frame of the
+                # tracker cursor; seeking forces a keyframe decode burst
+                # and ~50ms of A/V lag on resume.
+                cur_s = 0.0
+                try:
+                    cur_s = float(getattr(disp, '_last_time_pos', 0.0) or 0.0)
+                except Exception:
+                    cur_s = 0.0
+                if abs(target_s - cur_s) > (1.0 / proc.fps):
+                    disp.seek(target_s, exact=True)
+            if disp._player is not None:
+                disp._player.mute = bool(getattr(self, '_mpv_pre_tracking_mute', False))
+        except Exception as e:
+            if self.logger:
+                self.logger.debug(f"mpv resume-after-tracking failed: {e}")
+
+    def process_frame(self, frame: np.ndarray, frame_time_ms: int,
+                     frame_index: Optional[int] = None,
                      min_write_frame_id: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
         """Process frame with direct tracker call."""
         if not self._current_tracker:
             self.logger.error("No tracker set for process_frame")
             return frame, None
-            
+
         try:
             # Ensure frame is writable for OpenCV operations
             if not frame.flags.writeable:
                 frame = frame.copy()
-                
+
             # Direct call to modular tracker
             result = self._current_tracker.process_frame(frame, frame_time_ms, frame_index)
-            
+
             # Handle TrackerResult object or tuple format
             processed_frame, action_log = self._extract_result_data(result, frame)
-            
-            # Add actions to funscript
-            self._add_actions_to_funscript(action_log)
-            self._add_multi_axis_to_funscript()
+
+            # Compute the Not-Relevant chapter gate once per frame; both
+            # _add_actions_to_funscript and _add_multi_axis_to_funscript
+            # share the same guard and previously did the lookup twice.
+            skip_scripting = self._is_not_relevant_chapter()
+
+            self._add_actions_to_funscript(action_log, skip_scripting)
+            self._add_multi_axis_to_funscript(skip_scripting)
 
             # Apply rolling autotune if enabled (for streamer mode)
             if (self.rolling_autotune_enabled and
@@ -296,36 +381,35 @@ class TrackerManager:
             # Handle TrackerResult object or tuple format
             processed_frame, action_log = self._extract_result_data(result, frame)
             
+            is_oscillation = 'oscillation' in self._current_mode.lower()
+
             # For oscillation trackers, we need to sample positions periodically
-            if 'oscillation' in self._current_mode.lower():
+            if is_oscillation:
                 # Oscillation trackers maintain continuous position, sample it
                 if hasattr(self._current_tracker, 'oscillation_funscript_pos'):
                     position = self._current_tracker.oscillation_funscript_pos
-                    
+
                     # Only add action if position changed or enough time has passed
                     last_action = self.funscript.primary_actions[-1] if self.funscript.primary_actions else None
                     add_action = False
-                    
+
                     if last_action is None:
-                        # First action
                         add_action = True
                     elif position != last_action['pos']:
-                        # Position changed
                         add_action = True
                     elif frame_time_ms - last_action['at'] >= 100:
-                        # At least 100ms since last action (10 Hz sampling)
                         add_action = True
-                    
+
                     if add_action and self.funscript and position is not None:
                         self.funscript.add_action(frame_time_ms, position)
                         # Create action_log for compatibility
                         action_log = [{'at': frame_time_ms, 'pos': position}]
-            else:
-                # Regular trackers use action_log
-                self._add_actions_to_funscript(action_log)
 
-            # Route secondary and multi-axis data regardless of oscillation mode
-            self._add_multi_axis_to_funscript()
+            skip_scripting = self._is_not_relevant_chapter()
+            if not is_oscillation:
+                self._add_actions_to_funscript(action_log, skip_scripting)
+            # Secondary and multi-axis routing for all trackers
+            self._add_multi_axis_to_funscript(skip_scripting)
 
             return processed_frame, action_log
 
@@ -358,15 +442,16 @@ class TrackerManager:
 
         # Reapply point simplification setting
         if self.app and hasattr(self.app, 'app_settings'):
-            simplification_enabled = self.app.app_settings.get('funscript_point_simplification_enabled', True)
-            self.funscript.enable_point_simplification = simplification_enabled
+            _fs_cfg = self.app.app_settings.config.funscript
+            self.funscript.enable_point_simplification = _fs_cfg.point_simplification_enabled
+            self.funscript.simplification_tolerance = _fs_cfg.point_simplification_tolerance
 
         self.tracking_active = False
     
     def _apply_axis_settings(self, app_instance):
         """Apply user's default_secondary_axis setting to the funscript."""
         if app_instance and hasattr(app_instance, 'app_settings'):
-            sec_axis = app_instance.app_settings.get("default_secondary_axis")
+            sec_axis = app_instance.app_settings.config.performance.default_secondary_axis
             if sec_axis:
                 self.funscript.assign_axis(2, sec_axis)
 
@@ -728,38 +813,29 @@ class TrackerManager:
         
         return processed_frame, action_log
 
-    def _add_actions_to_funscript(self, action_log: Optional[List[Dict]]):
+    def _is_not_relevant_chapter(self) -> bool:
+        """True when the current-frame chapter is Not Relevant (skip scripting).
+        Fails open (returns False) if anything can't be resolved."""
+        if self.app is None:
+            return False
+        try:
+            fs_proc = getattr(self.app, 'funscript_processor', None)
+            processor = getattr(self.app, 'processor', None)
+            if not (fs_proc and processor):
+                return False
+            chapter = fs_proc.get_chapter_at_frame(processor.current_frame_index)
+            if chapter is None:
+                return False
+            info = POSITION_INFO_MAPPING.get(chapter.position_short_name, {})
+            return info.get('category', 'Position') == "Not Relevant"
+        except Exception as e:
+            self.logger.warning(f"Could not check chapter type for scripting: {e}")
+            return False
+
+    def _add_actions_to_funscript(self, action_log: Optional[List[Dict]], skip_scripting: bool = False):
         """Add action log entries to the funscript, skipping 'Not Relevant' category chapters."""
-        if not action_log or not self.funscript:
+        if skip_scripting or not action_log or not self.funscript:
             return
-
-        # Check if we're in a "Not Relevant" category chapter - if so, skip scripting
-        if hasattr(self, 'app') and self.app:
-            try:
-                from config.constants import POSITION_INFO_MAPPING
-                fs_proc = getattr(self.app, 'funscript_processor', None)
-                processor = getattr(self.app, 'processor', None)
-
-                if fs_proc and processor:
-                    current_frame = processor.current_frame_index
-                    chapter_at_frame = fs_proc.get_chapter_at_frame(current_frame)
-
-                    # Determine category based on position_short_name (reliable for old and new chapters)
-                    if chapter_at_frame:
-                        position_short_name = chapter_at_frame.position_short_name
-                        position_info = POSITION_INFO_MAPPING.get(position_short_name, {})
-                        category = position_info.get('category', 'Position')  # Default to Position if not in mapping
-
-                        self.logger.debug(f"Frame {current_frame}: Chapter '{position_short_name}', Category '{category}', Scripting: {category != 'Not Relevant'}")
-
-                        if category == "Not Relevant":
-                            return  # Not Relevant category = don't script
-                    else:
-                        self.logger.debug(f"Frame {current_frame}: No chapter, Scripting: YES")
-                    # Otherwise (no chapter or Position category) = continue scripting
-            except Exception as e:
-                self.logger.warning(f"Could not check chapter type for scripting: {e}")
-                # If we can't determine, continue adding actions (fail open)
 
         try:
             for action in action_log:
@@ -774,38 +850,21 @@ class TrackerManager:
         except Exception as e:
             self.logger.error(f"Error adding actions to funscript: {e}")
 
-    def _add_multi_axis_to_funscript(self):
+    def _add_multi_axis_to_funscript(self, skip_scripting: bool = False):
         """Route secondary_action_log and multi_axis_data from the last TrackerResult to the funscript."""
         result = self._last_tracker_result
-        if result is None or not self.funscript:
+        if skip_scripting or result is None or not self.funscript:
             return
 
-        # Check "Not Relevant" chapter skip — reuse same logic as _add_actions_to_funscript
-        if hasattr(self, 'app') and self.app:
-            try:
-                from config.constants import POSITION_INFO_MAPPING
-                fs_proc = getattr(self.app, 'funscript_processor', None)
-                processor = getattr(self.app, 'processor', None)
-                if fs_proc and processor:
-                    current_frame = processor.current_frame_index
-                    chapter_at_frame = fs_proc.get_chapter_at_frame(current_frame)
-                    if chapter_at_frame:
-                        position_short_name = chapter_at_frame.position_short_name
-                        position_info = POSITION_INFO_MAPPING.get(position_short_name, {})
-                        if position_info.get('category', 'Position') == "Not Relevant":
-                            return
-            except Exception:
-                pass  # Fail open — continue adding actions
-
         try:
-            # Route secondary_action_log → secondary axis
+            # Route secondary_action_log -> secondary axis
             secondary_log = getattr(result, 'secondary_action_log', None)
             if secondary_log:
                 for action in secondary_log:
                     if isinstance(action, dict) and 'at' in action and 'pos' in action:
                         self.funscript.add_action(action['at'], primary_pos=None, secondary_pos=action['pos'])
 
-            # Route multi_axis_data → additional axes
+            # Route multi_axis_data -> additional axes
             multi_axis = getattr(result, 'multi_axis_data', None)
             if multi_axis:
                 for axis_name, actions in multi_axis.items():
@@ -996,7 +1055,7 @@ class TrackerManager:
                 self.logger.info("Live tracking device control: No device bridge available")
                 self._no_bridge_warned = True
             if not self.live_device_control_enabled and not hasattr(self, '_not_enabled_warned'):
-                self.logger.info("Live tracking device control: Not enabled - check Control Panel → Global Device Settings → 'Enable Live Tracking Control'")
+                self.logger.info("Live tracking device control: Not enabled - check Control Panel -> Global Device Settings -> 'Enable Live Tracking Control'")
                 self._not_enabled_warned = True
             return
             

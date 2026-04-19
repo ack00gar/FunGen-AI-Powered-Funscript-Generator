@@ -52,6 +52,9 @@ class _Toast:
     type: NotificationType
     duration: float
     created: float = field(default_factory=time.time)
+    # Cached text-size tuple from imgui.calc_text_size; message is immutable
+    # after construction so measuring once is sufficient.
+    _text_size: tuple = None
 
     @property
     def age(self):
@@ -86,7 +89,7 @@ class NotificationManager:
         """Add a notification. type_str: 'success', 'error', 'warning', 'info'."""
         # Check if toasts are disabled in settings
         if self._app and hasattr(self._app, 'app_settings'):
-            if not self._app.app_settings.get("show_toast_notifications", True):
+            if not self._app.app_settings.config.ui.show_toast_notifications:
                 return
         try:
             ntype = NotificationType(type_str)
@@ -129,8 +132,11 @@ class NotificationManager:
             if alpha <= 0.01:
                 continue
 
-            # Measure text
-            text_size = imgui.calc_text_size(toast.message, wrap_width=_TOAST_WIDTH - _ACCENT_WIDTH - _TOAST_PADDING * 2)
+            # Measure text (cache per toast; message is immutable)
+            text_size = toast._text_size
+            if text_size is None:
+                text_size = imgui.calc_text_size(toast.message, wrap_width=_TOAST_WIDTH - _ACCENT_WIDTH - _TOAST_PADDING * 2)
+                toast._text_size = text_size
             toast_h = max(32, text_size[1] + _TOAST_PADDING * 2)
 
             x = vp_x + vp_w - _TOAST_WIDTH - _MARGIN_RIGHT

@@ -7,13 +7,16 @@ import cv2
 import time
 import threading
 import queue
+import ctypes
 import os
 import platform
 from typing import List, Dict
 from collections import deque
 
 from config import constants, element_group_colors
+from config.constants_colors import CurrentTheme
 from application.classes import ImGuiFileDialog, InteractiveFunscriptTimeline, MainMenu, Simulator3DWindow, ScriptGaugeWindow
+from application.classes.batch_state import BatchState
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
 from application.gui_components.bookmark_list_window import BookmarkListWindow
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority, get_icon_texture_manager
@@ -29,8 +32,9 @@ from application.gui_components.side_blocks import (
 )
 from application.utils.notifications import NotificationManager
 from application.gui_components.first_run_wizard import FirstRunWizard
+from config import ui_metrics
 
-_STATUS_STRIP_HEIGHT = 22
+_STATUS_STRIP_HEIGHT = ui_metrics.STATUS_STRIP_PX
 _HINT_ROTATION_INTERVAL_S = 10.0
 _FIXED_PANEL_BASE_WIDTH = 450  # Base width for control panel and info graphs (scaled by font_scale)
 _VIDEO_NAV_BAR_HEIGHT = 150
@@ -41,8 +45,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.app = app = app_logic
         self.window = None
         self.impl = None
-        self.window_width = app.app_settings.get("window_width", 1800)
-        self.window_height = app.app_settings.get("window_height", 1000)
+        self.window_width = app.app_settings.config.ui.window_width
+        self.window_height = app.app_settings.config.ui.window_height
         self.main_menu_bar_height = 0
 
         self.constants = constants
@@ -154,14 +158,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Flag for menu-triggered wizard re-launch
         self._show_setup_wizard = False
 
-        # UI state for the dialog's radio buttons
-        self.selected_batch_method_idx_ui = 0
-        self.batch_overwrite_mode_ui = 0  # 0: Process All, 1: Skip Existing
-        self.batch_copy_funscript_to_video_location_ui = True
-        self.batch_generate_roll_file_ui = True
-        self.batch_apply_ultimate_autotune_ui = True
-        self.batch_adaptive_tuning_ui: bool = True
-
         self.control_panel_ui.timeline_editor1 = self.timeline_editor1
         self.control_panel_ui.timeline_editor2 = self.timeline_editor2
 
@@ -172,32 +168,36 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.last_mouse_pos_for_energy_saver = (0, 0)
         self.app.energy_saver.reset_activity_timer()
         
-        # Simple arrow key navigation state
         current_time = time.time()
         self.arrow_key_state = {
             'last_seek_time': current_time,
-            'seek_interval': 0.033,  # Will be updated based on video FPS
+            'seek_interval': 0.033,
             'initial_press_time': current_time,
-            'continuous_delay': 0.2,  # 200ms delay before continuous playback (allows frame-by-frame taps)
-            'last_direction': 0,  # Track direction to prevent double-navigation
-            'playback_active': False,  # True when hold-forward has engaged the processing loop
-            'continuous_start_time': 0,  # When continuous (accelerating) mode began
+            'continuous_delay': 0.2,
+            'last_direction': 0,
+            'playback_active': False,
+            'continuous_start_time': 0,
+            'arrow_triggered_playback': False,
+            'saved_speed_mode': None,
+            'nav_phase': 'idle',
         }
-        self.arrow_nav_reading_fps = 0.0    # instantaneous frames/sec during arrow key seeking
-        self._reading_fps_frames = deque()  # (timestamp, frame_count) per tick
-        self._reading_fps_display = 0.0   # value shown in status bar (updated once/sec)
-        self._reading_fps_last_update = 0.0  # last time display value was refreshed
+        # Per-shortcut time-based repeat state (see gui_shortcut_handler.py).
+        # Lets held shortcuts repeat on our own timer instead of depending on
+        # OS KEY_REPEAT events, which some BLE / remapped devices never emit.
+        self._shortcut_repeat_state: Dict[str, Dict[str, float]] = {}
+        # GLFW char-input fallback: codepoints -> GLFW keycodes "virtually
+        # pressed" this frame via the char callback. Consumed (and cleared)
+        # by the shortcut dispatcher. See _install_char_input_fallback().
+        self._virtual_pressed_keys: set = set()
+        self._prev_char_callback = None
+        self.arrow_nav_reading_fps = 0.0
+        self._reading_fps_frames = deque()
+        self._reading_fps_display = 0.0
+        self._reading_fps_last_update = 0.0
+        self._tracker_fps_display = 0.0
+        self._tracker_fps_last_update = 0.0
 
-        self.batch_videos_data: List[Dict] = []
-        self.batch_overwrite_mode_ui: int = 0  # 0: Skip own, 1: Skip any, 2: Overwrite all
-        self.batch_set_all_format_idx: int = 1  # Default to "2D" in the set-all dropdown
-        self.batch_processing_method_idx_ui: int = 0
-        self.batch_copy_funscript_to_video_location_ui: bool = True
-        self.batch_generate_roll_file_ui: bool = True
-        self.batch_apply_ultimate_autotune_ui: bool = True
-        self.batch_adaptive_tuning_ui: bool = True
-        self.batch_save_preprocessed_video_ui: bool = False
-        self.last_overwrite_mode_ui: int = -1 # Used to trigger auto-selection logic
+        self.batch_state = BatchState()
 
         # Go to Frame popup
         self._go_to_frame_open = False
@@ -314,18 +314,28 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
     def update_gpu_memory_usage(self):
         """Update GPU memory usage (called periodically)."""
+        # GPUtil only reports NVIDIA GPUs via nvidia-smi. Skip on macOS
+        # (no NVIDIA) and cache an unavailable flag after the first miss so
+        # non-NVIDIA Windows/Linux boxes don't re-import+probe every 2s.
+        if getattr(self, '_gpu_util_unavailable', False):
+            self.gpu_memory_usage = 0
+            return
+        if platform.system() == "Darwin":
+            self._gpu_util_unavailable = True
+            self.gpu_memory_usage = 0
+            return
         try:
             import GPUtil
             gpus = GPUtil.getGPUs()
             if gpus:
-                # Get memory usage from first GPU
                 gpu = gpus[0]
                 self.gpu_memory_usage = gpu.memoryUsed / gpu.memoryTotal * 100
                 self.component_render_times["GPU_MemoryUsage"] = self.gpu_memory_usage
             else:
+                self._gpu_util_unavailable = True
                 self.gpu_memory_usage = 0
         except (ImportError, Exception):
-            # GPUtil not available or GPU not accessible
+            self._gpu_util_unavailable = True
             self.gpu_memory_usage = 0
 
     def _log_performance(self):
@@ -429,7 +439,10 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         imgui.create_context()
 
-        # Load fonts: default Latin + Nerd Symbols merge + optional CJK merge
+        from config.constants_colors import get_active_theme
+        from config.theme_manager import apply_imgui_theme
+        apply_imgui_theme(get_active_theme())
+
         io = imgui.get_io()
         self._cjk_font_loaded = False
         self._icon_font_loaded = False
@@ -503,6 +516,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                     self.app.logger.debug(f"CJK font load failed: {e}")
 
         self.impl = GlfwRenderer(self.window)
+        self._install_char_input_fallback()
         style = imgui.get_style()
         style.window_rounding = 6.0
         style.frame_rounding = 4.0
@@ -519,6 +533,52 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+
+        # mpv display FBO + texture; shared by GL and SW backends.
+        self.mpv_display = None
+        self.mpv_display_texture_id = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.mpv_display_texture_id)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER,
+                           gl.GL_LINEAR_MIPMAP_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_SWIZZLE_A, gl.GL_ONE)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, 1920, 1080, 0,
+                        gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None)
+        gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        self.mpv_display_fbo = gl.glGenFramebuffers(1)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.mpv_display_fbo)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0,
+                                  gl.GL_TEXTURE_2D, self.mpv_display_texture_id, 0)
+        _fbo_status = gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER)
+        if _fbo_status != gl.GL_FRAMEBUFFER_COMPLETE:
+            self.app.logger.error(
+                f"mpv display FBO incomplete: status=0x{_fbo_status:x}")
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        self.mpv_display_w, self.mpv_display_h = 1920, 1080
+
+        # VR dewarp output FBO + texture (shader_dewarp mode only).
+        self.vr_dewarp_texture_id = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.vr_dewarp_texture_id)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_SWIZZLE_A, gl.GL_ONE)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, 1920, 1080, 0,
+                        gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        self.vr_dewarp_fbo = gl.glGenFramebuffers(1)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.vr_dewarp_fbo)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0,
+                                  gl.GL_TEXTURE_2D, self.vr_dewarp_texture_id, 0)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        self.vr_dewarp_w, self.vr_dewarp_h = 1920, 1080
+
+        self._init_mpv_display()
+        self._init_vr_dewarp_shader()
 
         # Tracker debug overlay texture (community trackers can set tracker.debug_frame)
         self._debug_frame_texture_id = gl.glGenTextures(1)
@@ -594,15 +654,15 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             # If timeline 1 is empty or has no loaded script, load the first funscript there.
 
             if not self.app.funscript_processor.get_actions('primary'):
-                self.app.logger.info(f"Loading '{os.path.basename(funscript_files[0])}' into Timeline 1.")
+                self.app.logger.info(f"Loading '{os.path.basename(funscript_files[0])}' into Funscript 1.")
                 self.app.file_manager.load_funscript_to_timeline(funscript_files[0], timeline_num=1)
 
                 if len(funscript_files) > 1:
-                    self.app.logger.info(f"Loading '{os.path.basename(funscript_files[1])}' into Timeline 2.")
+                    self.app.logger.info(f"Loading '{os.path.basename(funscript_files[1])}' into Funscript 2.")
                     self.app.file_manager.load_funscript_to_timeline(funscript_files[1], timeline_num=2)
                     self.app.app_state_ui.show_funscript_interactive_timeline2 = True
             else:
-                self.app.logger.info(f"Timeline 1 has data. Loading '{os.path.basename(funscript_files[0])}' into Timeline 2.")
+                self.app.logger.info(f"Funscript 1 has data. Loading '{os.path.basename(funscript_files[0])}' into Funscript 2.")
                 self.app.file_manager.load_funscript_to_timeline(funscript_files[0], timeline_num=2)
                 self.app.app_state_ui.show_funscript_interactive_timeline2 = True
 
@@ -611,36 +671,319 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             self.app.app_state_ui.heatmap_dirty = True
 
 
+    def _init_mpv_display(self):
+        """Construct the session-wide mpv display (GL or SW backend)."""
+        try:
+            from video.mpv_loader import mpv_available, mpv_load_error
+            if not mpv_available:
+                self.app.logger.info(
+                    f"libmpv not loaded: {mpv_load_error or 'unavailable'}; "
+                    "video display will use the CPU upload path.")
+                return
+
+            import ctypes as _ctypes
+
+            def _get_proc_address(_ctx, name):
+                nm = name.decode("utf-8") if isinstance(name, (bytes, bytearray)) else name
+                addr = glfw.get_proc_address(nm)
+                if not addr:
+                    return 0
+                return _ctypes.cast(addr, _ctypes.c_void_p).value or 0
+
+            # GL backend gets zero-copy hwdec; SW backend stays on -copy.
+            backend = self.app.app_settings.config.mpv.render_backend
+            import platform as _plat
+            _sys = _plat.system()
+            if backend == "gl":
+                if _sys == "Darwin":
+                    _default_hwdec = "videotoolbox"
+                elif _sys == "Windows":
+                    _default_hwdec = "d3d11va"
+                elif _sys == "Linux":
+                    _default_hwdec = "vaapi"
+                else:
+                    _default_hwdec = "no"
+            else:
+                if _sys == "Darwin":
+                    _default_hwdec = "videotoolbox-copy"
+                elif _sys == "Windows":
+                    _default_hwdec = "d3d11va-copy"
+                elif _sys == "Linux":
+                    _default_hwdec = "vaapi-copy"
+                else:
+                    _default_hwdec = "no"
+            hwdec_override = self.app.app_settings.config.mpv.hwdec_override or _default_hwdec
+            disp = None
+
+            if backend == "gl":
+                try:
+                    from video.mpv_display_gl import MpvDisplayGL
+                    refresh_hz = 60.0
+                    try:
+                        monitor = glfw.get_primary_monitor()
+                        if monitor:
+                            vmode = glfw.get_video_mode(monitor)
+                            if vmode and getattr(vmode, 'refresh_rate', 0):
+                                refresh_hz = float(vmode.refresh_rate)
+                    except Exception:
+                        pass
+                    disp = MpvDisplayGL(
+                        video_path="",
+                        hwdec=hwdec_override,
+                        display_fps=refresh_hz,
+                        logger=self.app.logger,
+                    )
+                    self.app.logger.info(
+                        f"MpvDisplayGL backend selected (hwdec={hwdec_override}, "
+                        f"display_fps={refresh_hz:.1f})")
+                    if not disp.open(_get_proc_address):
+                        self.app.logger.warning(
+                            "MpvDisplayGL.open() failed; falling back to SW backend.")
+                        disp = None
+                except Exception as e:
+                    self.app.logger.warning(
+                        f"MpvDisplayGL init failed: {e}; falling back to SW backend.")
+                    disp = None
+
+            if disp is None:
+                from video.mpv_display import MpvDisplay
+                disp = MpvDisplay(video_path="", hwdec=hwdec_override, logger=self.app.logger)
+                self.app.logger.info(f"MpvDisplay (SW) hwdec={hwdec_override}")
+                if not disp.open(_get_proc_address):
+                    self.app.logger.warning(
+                        "MpvDisplay.open() failed; falling back to CPU upload path.")
+                    return
+
+            self.mpv_display = disp
+            try:
+                from video.thumbnail_mpv import ThumbnailMpv, ThumbnailMpvQueue
+                tmb = ThumbnailMpv(logger=self.app.logger)
+                if tmb.open(_get_proc_address):
+                    self.thumbnail_mpv = tmb
+                    self.thumbnail_mpv_queue = ThumbnailMpvQueue(tmb)
+                else:
+                    self.thumbnail_mpv = None
+                    self.thumbnail_mpv_queue = None
+            except Exception as e:
+                self.app.logger.debug(f"ThumbnailMpv init failed: {e}")
+                self.thumbnail_mpv = None
+                self.thumbnail_mpv_queue = None
+            def _mpv_pos_cb(idx):
+                proc = getattr(self.app, 'processor', None)
+                if proc is not None:
+                    try:
+                        proc.on_mpv_position(idx)
+                    except Exception:
+                        pass
+            try:
+                disp.register_position_callback(_mpv_pos_cb)
+            except Exception as e:
+                self.app.logger.debug(f"mpv position callback register failed: {e}")
+            self.app.logger.info(
+                f"{type(disp).__name__} ready (libmpv render API)")
+            # Project-restore catch-up: if open_video already ran (project
+            # loaded at app start before gui_instance existed), the prior
+            # _load_into_mpv_display() call hit a None disp and bailed.
+            # Now that disp exists, fire it so mpv actually loads the file.
+            proc = getattr(self.app, 'processor', None)
+            if proc is not None and getattr(proc, 'video_path', None):
+                self.app.logger.info(
+                    "Project-restore: loading current video into MpvDisplay")
+                try:
+                    proc._load_into_mpv_display()
+                except Exception as e:
+                    self.app.logger.warning(
+                        f"project-restore mpv load failed: {e}")
+        except Exception as e:
+            self.app.logger.warning(f"MpvDisplay init error: {e}; CPU upload fallback in use.")
+            self.mpv_display = None
+
+    def _init_vr_dewarp_shader(self) -> None:
+        """Compile the VR dewarp GLSL program once, after the GL context
+        exists. Failure leaves vr_dewarp_shader=None; the painter falls
+        back to whatever vr_display_mode it can without the shader."""
+        try:
+            from video.vr_dewarp_shader import VRDewarpShader
+            shader = VRDewarpShader(logger=self.app.logger)
+            if shader.compile():
+                self.vr_dewarp_shader = shader
+            else:
+                self.vr_dewarp_shader = None
+                # If the user had selected shader_dewarp but compile failed,
+                # roll them back to passthrough so they see something.
+                try:
+                    if self.app.app_settings.config.vr_display.mode == "shader_dewarp":
+                        self.app.app_settings.config.vr_display.mode = "passthrough"
+                        self.app.logger.warning(
+                            "VR dewarp shader unavailable; reverting "
+                            "vr_display_mode to passthrough.")
+                except Exception:
+                    pass
+        except Exception as e:
+            self.app.logger.warning(f"VR dewarp shader init error: {e}")
+            self.vr_dewarp_shader = None
+
+    def resize_vr_dewarp_target(self, w: int, h: int) -> None:
+        """Reallocate the VR-dewarp FBO + texture (fresh IDs) if the size changed."""
+        w = max(64, int(w))
+        h = max(64, int(h))
+        if w == self.vr_dewarp_w and h == self.vr_dewarp_h:
+            return
+        try:
+            gl.glDeleteFramebuffers(1, [self.vr_dewarp_fbo])
+        except Exception:
+            pass
+        try:
+            gl.glDeleteTextures(1, [self.vr_dewarp_texture_id])
+        except Exception:
+            pass
+        new_tex = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, new_tex)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER,
+                           gl.GL_LINEAR_MIPMAP_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_SWIZZLE_A, gl.GL_ONE)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, w, h, 0,
+                        gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None)
+        gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        new_fbo = gl.glGenFramebuffers(1)
+        _prev_fbo = gl.glGetIntegerv(gl.GL_DRAW_FRAMEBUFFER_BINDING)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, new_fbo)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0,
+                                  gl.GL_TEXTURE_2D, new_tex, 0)
+        _status = gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER)
+        if _status != gl.GL_FRAMEBUFFER_COMPLETE:
+            self.app.logger.error(
+                f"VR dewarp FBO incomplete after fresh alloc at {w}x{h}: "
+                f"status=0x{_status:x}")
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(_prev_fbo))
+        self.vr_dewarp_texture_id = int(new_tex)
+        self.vr_dewarp_fbo = int(new_fbo)
+        self.vr_dewarp_w, self.vr_dewarp_h = w, h
+
+    def reallocate_mpv_display_storage(self, w: int, h: int) -> None:
+        """Per-frame texture realloc, SW backend only (dfaker demo workaround)."""
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.mpv_display_fbo)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.mpv_display_texture_id)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, int(w), int(h), 0,
+                        gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        self.mpv_display_w, self.mpv_display_h = int(w), int(h)
+
+    def resize_mpv_display_target(self, w: int, h: int) -> None:
+        """Reallocate the mpv display FBO + texture (fresh IDs) if the size changed."""
+        w = max(64, int(w))
+        h = max(64, int(h))
+        if w == self.mpv_display_w and h == self.mpv_display_h:
+            return
+        try:
+            gl.glDeleteFramebuffers(1, [self.mpv_display_fbo])
+        except Exception:
+            pass
+        try:
+            gl.glDeleteTextures(1, [self.mpv_display_texture_id])
+        except Exception:
+            pass
+        # Fresh texture.
+        new_tex = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, new_tex)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER,
+                           gl.GL_LINEAR_MIPMAP_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_SWIZZLE_A, gl.GL_ONE)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, w, h, 0,
+                        gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None)
+        gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        new_fbo = gl.glGenFramebuffers(1)
+        _prev_fbo = gl.glGetIntegerv(gl.GL_DRAW_FRAMEBUFFER_BINDING)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, new_fbo)
+        gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0,
+                                  gl.GL_TEXTURE_2D, new_tex, 0)
+        _status = gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER)
+        if _status != gl.GL_FRAMEBUFFER_COMPLETE:
+            self.app.logger.error(
+                f"mpv display FBO incomplete after fresh alloc at {w}x{h}: "
+                f"status=0x{_status:x}")
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(_prev_fbo))
+        self.mpv_display_texture_id = int(new_tex)
+        self.mpv_display_fbo = int(new_fbo)
+        self.mpv_display_w, self.mpv_display_h = w, h
+        self.app.logger.info(
+            f"mpv display FBO re-created fresh at {w}x{h} "
+            f"(tex={self.mpv_display_texture_id}, fbo={self.mpv_display_fbo})")
+
     def update_texture(self, texture_id: int, image: np.ndarray):
         if image is None or image.size == 0: return
         h, w = image.shape[:2]
         if w == 0 or h == 0: return
 
-        # Ensure we have a valid texture ID
         if not gl.glIsTexture(texture_id):
             self.app.logger.error(f"Attempted to update an invalid texture ID: {texture_id}")
             return
 
-        gl.glBindTexture(gl.GL_TEXTURE_2D, texture_id)
-
-        # Cache last texture sizes to prefer glTexSubImage2D when dimensions unchanged
-        if not hasattr(self, '_texture_sizes'):
-            self._texture_sizes = {}
-
-        last_size = self._texture_sizes.get(texture_id)
-
-        # Determine format and upload
+        # Upload BGR frames natively via GL_BGR instead of a CPU-side
+        # cv2.cvtColor(BGR->RGB) that allocates a second copy of the whole
+        # frame. GL_BGR is core since OpenGL 1.2.
         if len(image.shape) == 2:
             internal_fmt = gl.GL_RED; fmt = gl.GL_RED; payload = image
         elif image.shape[2] == 3:
-            internal_fmt = gl.GL_RGB; fmt = gl.GL_RGB; payload = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            internal_fmt = gl.GL_RGB; fmt = gl.GL_BGR; payload = image
         else:
             internal_fmt = gl.GL_RGBA; fmt = gl.GL_RGBA; payload = image
 
-        if last_size and last_size == (w, h, internal_fmt):
-            gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, w, h, fmt, gl.GL_UNSIGNED_BYTE, payload)
-        else:
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, internal_fmt, w, h, 0, fmt, gl.GL_UNSIGNED_BYTE, payload)
+        if not hasattr(self, '_texture_sizes'):
+            self._texture_sizes = {}
+            self._texture_pbos = {}
+            self._pbo_upload_enabled = True
+
+        last_size = self._texture_sizes.get(texture_id)
+        size_changed = (last_size is None) or (last_size != (w, h, internal_fmt))
+
+        gl.glBindTexture(gl.GL_TEXTURE_2D, texture_id)
+
+        # Streaming texture upload via PBO: glBufferData orphans the backing
+        # store so the driver can start the DMA copy without waiting for the
+        # prior frame's upload to finish. Fall back to direct glTexSubImage2D
+        # on any error so a PBO quirk can't wedge rendering.
+        used_pbo = False
+        if self._pbo_upload_enabled and not size_changed and payload.flags['C_CONTIGUOUS']:
+            try:
+                nbytes = int(payload.nbytes)
+                pbo = self._texture_pbos.get(texture_id)
+                if pbo is None:
+                    pbo = int(gl.glGenBuffers(1))
+                    self._texture_pbos[texture_id] = pbo
+                gl.glBindBuffer(gl.GL_PIXEL_UNPACK_BUFFER, pbo)
+                # Pass data directly: implicit orphan via STREAM_DRAW hint.
+                gl.glBufferData(gl.GL_PIXEL_UNPACK_BUFFER, nbytes, payload, gl.GL_STREAM_DRAW)
+                gl.glTexSubImage2D(
+                    gl.GL_TEXTURE_2D, 0, 0, 0, w, h, fmt, gl.GL_UNSIGNED_BYTE,
+                    ctypes.c_void_p(0))
+                gl.glBindBuffer(gl.GL_PIXEL_UNPACK_BUFFER, 0)
+                used_pbo = True
+            except Exception as e:
+                self.app.logger.warning(
+                    f"PBO texture upload failed, falling back to direct: {e}")
+                self._pbo_upload_enabled = False
+                try:
+                    gl.glBindBuffer(gl.GL_PIXEL_UNPACK_BUFFER, 0)
+                except Exception:
+                    pass
+
+        if not used_pbo:
+            if not size_changed:
+                gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, w, h, fmt, gl.GL_UNSIGNED_BYTE, payload)
+            else:
+                gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, internal_fmt, w, h, 0, fmt, gl.GL_UNSIGNED_BYTE, payload)
+                self._texture_sizes[texture_id] = (w, h, internal_fmt)
+        elif size_changed:
             self._texture_sizes[texture_id] = (w, h, internal_fmt)
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
@@ -771,7 +1114,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                             
                             # Show enhanced preview logic
                             hover_duration = time.time() - self._preview_hover_start_time if self._preview_hover_start_time else 0
-                            enhanced_preview_enabled = self.app.app_settings.get("enable_enhanced_funscript_preview", True)
+                            enhanced_preview_enabled = self.app.app_settings.config.funscript.enable_enhanced_preview
                             
                             if enhanced_preview_enabled:
                                 # Always show timestamp + script zoom instantly, then add video frame after delay
@@ -865,7 +1208,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 current_time_s = self.app.processor.current_frame_index / fps
                 normalized_pos = current_time_s / total_duration_s if total_duration_s > 0 else 0
                 marker_x = canvas_p1_x + normalized_pos * current_bar_width_float
-                marker_color = imgui.get_color_u32_rgba(1.0, 0.15, 0.15, 1.0)
+                marker_color = imgui.get_color_u32_rgba(*CurrentTheme.RED)
                 draw_list_marker = imgui.get_window_draw_list()
 
                 # Draw triangle
@@ -977,7 +1320,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
     # ---- Shortcut hint helpers (status strip) ----
 
     def _format_shortcut_hint(self, key_str):
-        """Platform-aware formatting: SUPER→Cmd/Ctrl, arrow symbols, etc."""
+        """Platform-aware formatting: SUPER->Cmd/Ctrl, arrow symbols, etc."""
         d = key_str
         is_mac = platform.system() == "Darwin"
         d = d.replace("SUPER", "Cmd" if is_mac else "Ctrl")
@@ -1009,7 +1352,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             key = shortcuts.get("open_project", "")
             return [(self._format_shortcut_hint(key), "Open Project")] if key else []
 
-        # Timeline hovered with selection → editing hints
+        # Timeline hovered with selection -> editing hints
         if has_selection:
             hints = []
             k = shortcuts.get("delete_selected_point", "")
@@ -1024,7 +1367,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 hints.append((self._format_shortcut_hint(k), "Copy"))
             return hints
 
-        # Timeline hovered, no selection → mode-specific or canvas interaction hints
+        # Timeline hovered, no selection -> mode-specific or canvas interaction hints
         if timeline_hovered:
             if active_mode == TimelineMode.ALTERNATING:
                 return [("Click", "Add Alt Point"), ("Alt+Drag", "Range Select")]
@@ -1267,7 +1610,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 self._time_render(f"TimelineEditor{t_num}", editor.render, timeline_current_y_start, extra_h)
                 timeline_current_y_start += extra_h
 
-    _SASH_THICKNESS = 6  # px — drag handle between top and bottom blocks
+    _SASH_THICKNESS = ui_metrics.SASH_PX
 
     def _render_block_sash(self, side: str, x: float, y: float, w: float,
                            h: float, total_h: float, frac_attr: str,
@@ -1446,7 +1789,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             return
 
         imgui.set_next_window_size(min(w + 16, 520), min(h + 40, 520), imgui.FIRST_USE_EVER)
-        expanded, opened = imgui.begin("Tracker Debug##DebugFrame", True)
+        expanded, opened = imgui.begin("FunGen: Tracker Debug##DebugFrame", True)
         if not opened:
             self._show_debug_frame_window = False
             # Tracker can check this to skip expensive debug frame generation
@@ -1530,7 +1873,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
     def _render_status_center(self, proc, app_state, stage_proc, colors):
         """Render center section: progress %, status message, or shortcut hints."""
-        _has_status_msg = app_state.status_message and time.time() < app_state.status_message_time
+        _status_msg, _status_expire = app_state.peek_status()
+        _has_status_msg = _status_msg and time.time() < _status_expire
 
         if stage_proc.full_analysis_active:
             progress = getattr(stage_proc, 'overall_progress', 0.0)
@@ -1542,17 +1886,15 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             imgui.text(progress_text)
             imgui.pop_style_color()
         elif _has_status_msg:
-            msg = app_state.status_message
             center_x = self.window_width * 0.5
-            text_w = imgui.calc_text_size(msg)[0]
+            text_w = imgui.calc_text_size(_status_msg)[0]
             imgui.same_line(position=center_x - text_w * 0.5)
             imgui.push_style_color(imgui.COLOR_TEXT, *colors.ACCENT)
-            imgui.text(msg)
+            imgui.text(_status_msg)
             imgui.pop_style_color()
         else:
-            # Clear expired messages
-            if app_state.status_message and time.time() >= app_state.status_message_time:
-                app_state.status_message = ""
+            if _status_msg and time.time() >= _status_expire:
+                app_state.set_status("", 0.0)
             # Dynamic shortcut hints
             shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
 
@@ -1603,7 +1945,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 self._hint_rotate_index = (self._hint_rotate_index + 1) % len(self._hint_pool_cache)
                 self._hint_last_rotate = now
 
-            # Build display string: "Key Action · Key Action · Key Action"
+            # Build display string: "Key Action . Key Action . Key Action"
             parts = []
             for key_disp, label in fixed_hints:
                 parts.append(f"{key_disp} {label}")
@@ -1653,6 +1995,36 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             elif proc.fps > 0:
                 video_fps_text = f"Video FPS {proc.fps:.0f}"
 
+        # --- Tracker FPS (only while a live tracker is active) ---
+        # Update the displayed value at most once per second so it doesn't
+        # flicker frame-to-frame like the raw tracker.current_fps does.
+        tracker_fps_text = ""
+        tracker_fps_color = dim_color
+        tracking_now = False
+        cur_tracker_fps = 0.0
+        if proc and getattr(proc, 'enable_tracker_processing', False):
+            tr = getattr(proc, 'tracker', None)
+            if tr is not None and getattr(tr, 'tracking_active', False):
+                tracking_now = True
+                cur_tracker_fps = float(
+                    getattr(getattr(tr, '_current_tracker', None),
+                            'current_fps', 0.0) or 0.0)
+        if not tracking_now:
+            self._tracker_fps_display = 0.0
+            self._tracker_fps_last_update = 0.0
+        elif now_t - self._tracker_fps_last_update >= 1.0:
+            self._tracker_fps_display = cur_tracker_fps
+            self._tracker_fps_last_update = now_t
+        if tracking_now:
+            tracker_fps_text = f"Tracker FPS {self._tracker_fps_display:.0f}"
+            src_fps = float(getattr(proc, 'fps', 0.0) or 0.0)
+            if src_fps > 0 and self._tracker_fps_display > 0:
+                ratio = self._tracker_fps_display / src_fps
+                if ratio < 0.6:
+                    tracker_fps_color = (0.95, 0.45, 0.25, 0.9)   # red-ish: can't keep up
+                elif ratio < 0.9:
+                    tracker_fps_color = (0.95, 0.85, 0.30, 0.9)   # yellow: borderline
+
         # --- Compute Frame Buffer bar ---
         buf_label = "Frame Buffer "
         buf_label_w = imgui.calc_text_size(buf_label)[0]
@@ -1687,6 +2059,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         total_w += gui_fps_w
         if video_fps_text:
             total_w += sep_w + imgui.calc_text_size(video_fps_text)[0]
+        if tracker_fps_text:
+            total_w += sep_w + imgui.calc_text_size(tracker_fps_text)[0]
         if has_buf:
             total_w += sep_w + buf_label_w + bar_w
 
@@ -1702,6 +2076,12 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             imgui.same_line()
             imgui.push_style_color(imgui.COLOR_TEXT, *dim_color)
             imgui.text(sep + video_fps_text)
+            imgui.pop_style_color()
+
+        if tracker_fps_text:
+            imgui.same_line()
+            imgui.push_style_color(imgui.COLOR_TEXT, *tracker_fps_color)
+            imgui.text(sep + tracker_fps_text)
             imgui.pop_style_color()
 
         if has_buf:
@@ -1728,7 +2108,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 draw_list.add_rect_filled(gx0, bar_y, gx1, bar_y + bar_h, fill_color, 3.0)
 
             mx = bx + bar_w * cursor_frac
-            marker_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.9)
+            marker_color = imgui.get_color_u32_rgba(*CurrentTheme.HIGHLIGHT_OVERLAY)
             draw_list.add_line(mx, bar_y, mx, bar_y + bar_h, marker_color, 1.5)
 
             imgui.dummy(bar_w, bar_h)
@@ -1760,7 +2140,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         imgui.set_next_window_size(320, 0)
 
         flags = imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_NO_SAVED_SETTINGS
-        _, self._go_to_frame_open = imgui.begin("Go to Frame##GoToFrame", closable=True, flags=flags)
+        _, self._go_to_frame_open = imgui.begin("FunGen: Go to Frame##GoToFrame", closable=True, flags=flags)
 
         if not self._go_to_frame_open:
             imgui.end()
@@ -1799,7 +2179,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 timecode = VideoSegment._frames_to_timecode(clamped, fps)
                 imgui.text_disabled(f"-> Frame {clamped}  |  {timecode}")
             else:
-                imgui.text_colored("Invalid input", 1.0, 0.4, 0.4, 1.0)
+                imgui.text_colored("Invalid input", *CurrentTheme.RED_LIGHT)
 
         imgui.spacing()
         imgui.separator()
@@ -1873,7 +2253,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         # First-run wizard, full-window overlay, skips all other UI
         if self._first_run_wizard is not None:
-            font_scale = self.app.app_settings.get("global_font_scale", 1.0)
+            font_scale = self.app.app_settings.config.ui.global_font_scale
             imgui.get_io().font_global_scale = font_scale
             wizard_done = self._first_run_wizard.render()
             if wizard_done:
@@ -1908,7 +2288,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Render toolbar
         self._time_render("Toolbar", self.toolbar_ui.render)
 
-        font_scale = self.app.app_settings.get("global_font_scale", 1.0)
+        font_scale = self.app.app_settings.config.ui.global_font_scale
         imgui.get_io().font_global_scale = font_scale
 
         if hasattr(app_state, 'main_menu_bar_height_from_menu_class'):
@@ -1972,6 +2352,96 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             }
             self._frontend_perf_queue.append(current_perf_data)
 
+    def _install_char_input_fallback(self):
+        """Attach a GLFW char callback that supplements pyimgui's key-event
+        path with character-event-driven shortcut dispatch.
+
+        Some devices (BLE HID keyboards, keymacs with remapped profiles, the
+        Contour Shuttle Pro V2 / DaVinci Speed Editor variants the community
+        asked about) reach the OS only through WM_CHAR / text-input events
+        and never raise key events. pyimgui's GlfwRenderer therefore sees
+        `io.keys_down[KEY_F]` stay False forever, so `imgui.is_key_pressed`
+        never fires and single-letter shortcuts ("F", Space, digit-shortcuts)
+        look dead to the user while Ctrl-combos (which DO come through as
+        key events on those devices, because modifiers travel a different
+        HID path) keep working. SDL2 handles this transparently; GLFW does
+        not, which is why the same devices work in OFS and fail here.
+
+        We (1) forward to the renderer's own char handler so text-input
+        widgets keep receiving typed characters, then (2) when no text
+        input is focused, translate the character to a GLFW keycode via
+        the shortcut manager's reverse map and stash it in
+        `_virtual_pressed_keys` for one frame. The shortcut dispatcher
+        consults that set as a fallback for modifier-less shortcuts.
+        """
+        if self.impl is None or self.window is None:
+            return
+        # Grab pyimgui's bound char_callback directly. glfw.set_char_callback
+        # returns the previously-installed Python callable on most builds,
+        # but taking the method explicitly is robust across glfw-python
+        # versions and avoids subtle CFUNCTYPE lifetime issues if GLFW ever
+        # hands us back the C wrapper instead of the Python callable.
+        self._prev_char_callback = getattr(self.impl, 'char_callback', None)
+        try:
+            glfw.set_char_callback(self.window, self._on_char_input)
+        except Exception as e:
+            self.app.logger.debug(f"char-callback install failed: {e}")
+
+    def _on_char_input(self, window, codepoint):
+        """Char callback installed by `_install_char_input_fallback`.
+
+        Runs during `glfw.poll_events()`. Forwards first so pyimgui keeps
+        feeding typed characters into text inputs, then (if no text widget
+        wants them) marks the corresponding keycode as virtually-pressed
+        for the shortcut dispatcher to pick up this same frame.
+        """
+        # 1. Forward to pyimgui so text inputs still receive characters.
+        #    The renderer's own callback just calls io.add_input_character.
+        prev = self._prev_char_callback
+        if prev is not None:
+            try:
+                prev(window, codepoint)
+            except Exception:
+                # Fall through to the inline equivalent; we must not let a
+                # broken forward drop text input for the user entirely.
+                try:
+                    io = imgui.get_io()
+                    if 0 < codepoint < 0x10000:
+                        io.add_input_character(codepoint)
+                except Exception:
+                    pass
+        else:
+            try:
+                io = imgui.get_io()
+                if 0 < codepoint < 0x10000:
+                    io.add_input_character(codepoint)
+            except Exception:
+                pass
+
+        # 2. Shortcut fallback. Skip if a text input is focused — in that
+        #    case the character belongs to the user's typing, not to a
+        #    global shortcut.
+        try:
+            io = imgui.get_io()
+            if io.want_text_input:
+                return
+            if codepoint < 32 or codepoint > 126:
+                return
+            char = chr(codepoint).upper()
+            # Space char has no entry in the reverse map; use the named alias.
+            lookup = 'SPACE' if char == ' ' else char
+            sm = self.app.shortcut_manager
+            if sm is None:
+                return
+            key_code = sm.name_to_glfw_key(lookup)
+            if key_code is None:
+                return
+            self._virtual_pressed_keys.add(key_code)
+        except Exception:
+            # Never let a callback exception bubble through GLFW — it will
+            # segfault the process on some platforms.
+            pass
+
     def run(self):
         colors = self.colors
         if not self.init_glfw(): return
@@ -1996,12 +2466,21 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT)
                 event_time = (time.perf_counter() - event_start) * 1000
                 self.component_render_times["FrameSetup"] = event_time
+
+                # Detect external mpv-fullscreen exit (user closed the window
+                # via the X or pressed q inside mpv). Without this poll, the
+                # bridge stays "active" in app state and FunGen's controls
+                # remain disabled even though the window is gone.
+                mpv_ctl = getattr(self.app, '_mpv_controller', None)
+                if mpv_ctl is not None:
+                    mpv_ctl.poll_external_exit()
                 
                 # GUI rendering (internally timed)
                 self.render_gui()
+                _as_cfg = self.app.app_settings.config.autosave
                 if (
-                    self.app.app_settings.get("autosave_enabled", True)
-                    and time.time() - self.app.project_manager.last_autosave_time > self.app.app_settings.get("autosave_interval_seconds", constants.DEFAULT_AUTOSAVE_INTERVAL_SECONDS)
+                    _as_cfg.enabled
+                    and time.time() - self.app.project_manager.last_autosave_time > _as_cfg.interval_seconds
                 ):
                     self.app.project_manager.perform_autosave()
                 self.app.energy_saver.check_and_update_energy_saver()
@@ -2009,6 +2488,19 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 # Track buffer swap (GPU synchronization)
                 swap_start = time.perf_counter()
                 glfw.swap_buffers(self.window)
+                if self.mpv_display is not None:
+                    try:
+                        _rs = getattr(self.mpv_display, "report_swap", None)
+                        if _rs is not None:
+                            _rs()
+                    except Exception:
+                        pass
+                _tq = getattr(self, 'thumbnail_mpv_queue', None)
+                if _tq is not None:
+                    try:
+                        _tq.tick()
+                    except Exception:
+                        pass
                 swap_time = (time.perf_counter() - swap_start) * 1000
                 self.component_render_times["BufferSwap"] = swap_time
                 
@@ -2024,9 +2516,10 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 elapsed_time_for_frame = time.time() - frame_start_time
                 sleep_duration = current_target_duration - elapsed_time_for_frame
                 
+                _updater_cfg = self.app.app_settings.config.updater
                 if ( # Periodic update checks
-                    self.app.app_settings.get("updater_check_on_startup", True)
-                    and self.app.app_settings.get("updater_check_periodically", True)
+                    _updater_cfg.check_on_startup
+                    and _updater_cfg.check_periodically
                     and time.time() - self.app.updater.last_check_time > 3600  # 1 hour
                 ):
                     self.app.updater.check_for_updates_async()

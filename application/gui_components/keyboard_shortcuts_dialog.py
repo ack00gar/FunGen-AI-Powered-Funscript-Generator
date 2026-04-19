@@ -19,6 +19,7 @@ import glfw
 import platform
 from application.utils.keyboard_layout_detector import get_layout_detector, KeyboardLayout
 from application.utils import get_icon_texture_manager
+from config.constants_colors import CurrentTheme
 
 
 class KeyboardShortcutsDialog:
@@ -78,7 +79,7 @@ class KeyboardShortcutsDialog:
             ],
             "Window Toggles": [
                 ("toggle_video_display", "Toggle Video Display"),
-                ("toggle_timeline2", "Toggle Timeline 2"),
+                ("toggle_timeline2", "Toggle Funscript 2"),
                 ("toggle_3d_simulator", "Toggle 3D Simulator"),
                 ("toggle_script_gauge", "Toggle Gauge"),
                 ("toggle_chapter_list", "Toggle Chapter List"),
@@ -95,10 +96,10 @@ class KeyboardShortcutsDialog:
                 ("reset_timeline_view", "Reset Timeline Zoom/Pan"),
             ],
             "Editing": [
-                ("undo_timeline1", "Undo (Timeline 1)"),
-                ("redo_timeline1", "Redo (Timeline 1)"),
-                ("undo_timeline2", "Undo (Timeline 2)"),
-                ("redo_timeline2", "Redo (Timeline 2)"),
+                ("undo_timeline1", "Undo (Funscript 1)"),
+                ("redo_timeline1", "Redo (Funscript 1)"),
+                ("undo_timeline2", "Undo (Funscript 2)"),
+                ("redo_timeline2", "Redo (Funscript 2)"),
                 ("select_all_points", "Select All Points"),
                 ("deselect_all_points", "Deselect All Points"),
                 ("delete_selected_point", "Delete Point"),
@@ -167,7 +168,7 @@ class KeyboardShortcutsDialog:
             imgui.ONCE
         )
 
-        expanded, opened = imgui.begin("Keyboard Shortcuts", True)
+        expanded, opened = imgui.begin("FunGen: Keyboard Shortcuts", True)
 
         if not opened:
             self.is_open = False
@@ -206,9 +207,10 @@ class KeyboardShortcutsDialog:
         )
         imgui.spacing()
 
-        # Cheat sheet button
         if imgui.button("Cheat Sheet"):
             self.show_cheat_sheet = True
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Open a printable one-page cheat sheet listing every keyboard shortcut grouped by category.")
 
         imgui.spacing()
 
@@ -241,7 +243,7 @@ class KeyboardShortcutsDialog:
                 imgui.image(warning_tex, 20, 20)
                 imgui.same_line()
 
-            imgui.text_colored("Warning: Shortcut conflicts detected!", 1.0, 0.6, 0.0, 1.0)
+            imgui.text_colored("Warning: Shortcut conflicts detected!", *CurrentTheme.ORANGE)
 
             if imgui.is_item_hovered():
                 tooltip = "The following shortcuts are assigned to multiple actions:\n\n"
@@ -398,11 +400,11 @@ class KeyboardShortcutsDialog:
                 imgui.image(edit_tex, 16, 16)
                 imgui.same_line()
 
-            imgui.text_colored("PRESS KEY...", 1.0, 0.5, 0.0, 1.0)
+            imgui.text_colored("PRESS KEY...", *CurrentTheme.ORANGE)
         else:
             # Platform-aware display (show CMD instead of SUPER on macOS)
             display_key = self._platform_aware_key_display(current_key)
-            imgui.text_colored(display_key, 0.6, 0.8, 1.0, 1.0)
+            imgui.text_colored(display_key, *CurrentTheme.REFERENCE_OVERLAY)
 
         # Customize/Cancel button (right aligned)
         imgui.same_line(position=530)
@@ -432,7 +434,7 @@ class KeyboardShortcutsDialog:
         imgui.spacing()
 
         # Keyboard layout section
-        imgui.text_colored("Keyboard Layout Configuration", 0.6, 0.8, 1.0, 1.0)
+        imgui.text_colored("Keyboard Layout Configuration", *CurrentTheme.REFERENCE_OVERLAY)
         imgui.spacing()
 
         imgui.text_wrapped(
@@ -494,7 +496,7 @@ class KeyboardShortcutsDialog:
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
-        imgui.text_colored("Mouse Modifier Keys", 0.6, 0.8, 1.0, 1.0)
+        imgui.text_colored("Mouse Modifier Keys", *CurrentTheme.REFERENCE_OVERLAY)
         imgui.spacing()
         imgui.text_wrapped(
             "Configure modifier keys for mouse-based timeline interactions. "
@@ -527,17 +529,18 @@ class KeyboardShortcutsDialog:
             if imgui.is_item_hovered():
                 imgui.set_tooltip(tooltip)
 
-        # Reset mouse modifiers to defaults
         if imgui.button("Reset Mouse Modifiers to Defaults##ResetModifiers"):
             for setting_key, default, _, _ in _modifier_settings:
                 self.app.app_settings.set(setting_key, default)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Restore all four mouse modifier assignments (pan / marquee / create point / etc) to their default keys.")
 
     def _render_cheat_sheet(self):
         """Render the keyboard shortcuts cheat sheet window"""
         imgui.set_next_window_size(600, 700, imgui.ONCE)
 
         center_next_window_pivot()
-        expanded, opened = imgui.begin("Keyboard Shortcuts Cheat Sheet", True)
+        expanded, opened = imgui.begin("FunGen: Keyboard Shortcuts Cheat Sheet", True)
 
         if not opened:
             self.show_cheat_sheet = False
@@ -557,7 +560,7 @@ class KeyboardShortcutsDialog:
             if imgui.begin_child("CheatSheetContent", height=-40):
                 for category_name, shortcuts_list in self.shortcut_categories.items():
                     # Category header
-                    imgui.text_colored(category_name, 0.6, 0.8, 1.0, 1.0)
+                    imgui.text_colored(category_name, *CurrentTheme.REFERENCE_OVERLAY)
                     imgui.separator()
                     imgui.spacing()
 
@@ -569,7 +572,7 @@ class KeyboardShortcutsDialog:
                         # Format: Action name................Shortcut
                         imgui.text(f"{display_name}")
                         imgui.same_line(position=350)
-                        imgui.text_colored(display_key, 0.8, 0.8, 0.2, 1.0)
+                        imgui.text_colored(display_key, *CurrentTheme.YELLOW_DARK)
 
                     imgui.spacing()
                     imgui.spacing()
@@ -593,7 +596,7 @@ class KeyboardShortcutsDialog:
         )[0]:
             imgui.text("Reset all keyboard shortcuts to default values?")
             imgui.spacing()
-            imgui.text_colored("This cannot be undone.", 0.9, 0.6, 0.2, 1.0)
+            imgui.text_colored("This cannot be undone.", *CurrentTheme.PROMO_BANNER_GOLD)
             imgui.spacing()
 
             # Show warning if customizations exist

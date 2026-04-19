@@ -86,7 +86,7 @@ class ChapterManager:
 
         # Auto-backup if file exists
         if os.path.exists(filepath):
-            backup_enabled = self.app.app_settings.get("chapter_backup_on_regenerate", True)
+            backup_enabled = self.app.app_settings.config.chapter.backup_on_regenerate
             if backup_enabled:
                 self._create_backup(filepath)
 
@@ -178,7 +178,7 @@ class ChapterManager:
         Returns:
             True if saved or skipped (when disabled)
         """
-        if not self.app.app_settings.get("chapter_auto_save_standalone", False):
+        if not self.app.app_settings.config.chapter.auto_save_standalone:
             return True  # Not an error, just disabled
 
         if not video_path or not chapters:

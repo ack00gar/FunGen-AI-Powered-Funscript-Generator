@@ -21,6 +21,7 @@ from application.utils import primary_button_style, destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card
 from common.frame_utils import frame_to_ms
+from config.constants_colors import CurrentTheme
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class SubtitleToolUI:
             return
 
         imgui.set_next_window_size(720, 560, imgui.FIRST_USE_EVER)
-        expanded, opened = imgui.begin("Subtitles##SubTool", closable=True,
+        expanded, opened = imgui.begin("FunGen: Subtitles##SubTool", closable=True,
                                         flags=imgui.WINDOW_NO_COLLAPSE)
         if not opened:
             self.is_open = False
@@ -185,7 +186,7 @@ class SubtitleToolUI:
             if o:
                 for start, end, name in steps:
                     if p >= end:
-                        imgui.text_colored(f"  \u2713 {name}", 0.3, 0.8, 0.3, 1.0)
+                        imgui.text_colored(f"  \u2713 {name}", *CurrentTheme.GREEN)
                     elif p >= start:
                         step_p = (p - start) / (end - start)
                         pct = int(step_p * 100)
@@ -247,7 +248,7 @@ class SubtitleToolUI:
         if imgui.button("Regen", width=bw):
             self._start_generate()
         imgui.same_line()
-        imgui.push_style_color(imgui.COLOR_BUTTON, 0.5, 0.12, 0.12, 1.0)
+        imgui.push_style_color(imgui.COLOR_BUTTON, *CurrentTheme.DESTRUCTIVE_BG_DARK)
         if imgui.button("Clear", width=bw):
             imgui.open_popup("Clear Subtitles?##SubClearConfirm")
         imgui.pop_style_color()
@@ -287,7 +288,7 @@ class SubtitleToolUI:
             # Multi-selection actions
             imgui.text_disabled(f"  {n_sel} selected")
             imgui.same_line(spacing=8)
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.5, 0.12, 0.12, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON, *CurrentTheme.DESTRUCTIVE_BG_DARK)
             if imgui.small_button("Delete selected"):
                 self._delete_selected()
             imgui.pop_style_color()
@@ -471,7 +472,7 @@ class SubtitleToolUI:
             imgui.dummy(10, 0)
             imgui.same_line(spacing=0)
             if dur_s < 0.5:
-                imgui.text_colored(f"{dur_s:.1f}", 1.0, 0.4, 0.4, 1.0)
+                imgui.text_colored(f"{dur_s:.1f}", *CurrentTheme.RED_LIGHT)
             else:
                 imgui.text_disabled(f"{dur_s:.1f}")
             imgui.next_column()
@@ -487,10 +488,10 @@ class SubtitleToolUI:
                 cps = n_chars / max(0.1, dur_s)  # chars per second
                 if cps > 25:
                     imgui.same_line()
-                    imgui.text_colored(f"{n_chars}ch {cps:.0f}cps", 1.0, 0.4, 0.2, 1.0)
+                    imgui.text_colored(f"{n_chars}ch {cps:.0f}cps", *CurrentTheme.RED_LIGHT)
                 elif n_chars > 50:
                     imgui.same_line()
-                    imgui.text_colored(f"{n_chars}ch", 0.9, 0.8, 0.3, 1.0)
+                    imgui.text_colored(f"{n_chars}ch", *CurrentTheme.YELLOW)
                 if changed:
                     self.track._push_undo()
                     seg.text_translated = self._edit_buf
@@ -559,7 +560,7 @@ class SubtitleToolUI:
             if re_disabled:
                 imgui.pop_style_var()
             imgui.separator()
-            imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.3, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.RED_LIGHT)
             if imgui.menu_item("Delete (Del)")[0]:
                 self.track.remove_segment(seg.index)
                 self._selected = max(-1, min(self._selected, len(self.track) - 1))
@@ -764,8 +765,8 @@ class SubtitleToolUI:
                         changed += 1
                 self.app.notify(f"Re-translated {changed} subtitles", "success", 2.0)
             except Exception as e:
-                logger.error(f"Batch re-translate failed: {e}", exc_info=True)
-                self.app.notify(f"Re-translate failed: {e}", "error", 4.0)
+                from application.utils.error_reporting import report_error
+                report_error(self.app, "Batch re-translate failed", e)
 
         self._gen_thread = threading.Thread(target=_run, daemon=True, name="SubBatchRetrans")
         self._gen_thread.start()
@@ -844,11 +845,11 @@ class SubtitleToolUI:
 
                 imgui.text(f"Subtitles: {total}")
                 if untranslated > 0 and self._export_format_idx == 0:
-                    imgui.text_colored(f"Untranslated: {untranslated}", 1.0, 0.6, 0.2, 1.0)
+                    imgui.text_colored(f"Untranslated: {untranslated}", *CurrentTheme.ORANGE)
                 if short > 0:
-                    imgui.text_colored(f"Very short (<0.5s): {short}", 0.9, 0.7, 0.3, 1.0)
+                    imgui.text_colored(f"Very short (<0.5s): {short}", *CurrentTheme.YELLOW)
                 if low_conf > 0:
-                    imgui.text_colored(f"Low confidence: {low_conf}", 0.9, 0.5, 0.3, 1.0)
+                    imgui.text_colored(f"Low confidence: {low_conf}", *CurrentTheme.ORANGE)
 
                 # Preview first 3 subtitles
                 imgui.spacing()
@@ -963,8 +964,8 @@ class SubtitleToolUI:
                 else:
                     self.app.notify("Re-translate returned same text", "warning", 2.0)
             except Exception as e:
-                logger.error(f"Re-translate failed: {e}", exc_info=True)
-                self.app.notify(f"Re-translate failed: {e}", "error", 4.0)
+                from application.utils.error_reporting import report_error
+                report_error(self.app, "Re-translate failed", e)
 
         self._gen_thread = threading.Thread(target=_run, daemon=True, name="SubRetrans")
         self._gen_thread.start()

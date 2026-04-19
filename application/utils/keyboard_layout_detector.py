@@ -91,7 +91,7 @@ class KeyboardLayoutDetector:
         """
         # Priority 1: Check saved user preference
         if self.app_settings:
-            saved_layout = self.app_settings.get("keyboard_layout", None)
+            saved_layout = self.app_settings.config.keyboard_layout.saved_layout
             if saved_layout in [KeyboardLayout.QWERTY, KeyboardLayout.AZERTY, KeyboardLayout.QWERTZ]:
                 self.detected_layout = KeyboardLayout(saved_layout)
                 return
@@ -229,7 +229,7 @@ class KeyboardLayoutDetector:
             self.detected_layout = KeyboardLayout(layout_name)
             # Save user preference
             if self.app_settings:
-                self.app_settings.set("keyboard_layout", layout_name)
+                self.app_settings.config.keyboard_layout.saved_layout = layout_name
 
     def get_available_layouts(self):
         """Get list of available layout names"""

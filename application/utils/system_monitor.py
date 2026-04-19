@@ -18,6 +18,13 @@ except Exception:
     NVIDIA_SMI_AVAILABLE = False
 
 
+# powermetrics GPU-stats patterns; compiled once at import so each poll cycle
+# (0.5-1 Hz) skips the internal re._cache lookup.
+_PM_GPU_USAGE = re.compile(r"GPU\s+usage:\s*([0-9.]+)\s*%", re.I)
+_PM_GPU_MEMORY = re.compile(r"GPU\s+memory:\s*([0-9.]+)\s*%", re.I)
+_PM_GPU_TEMP = re.compile(r"GPU\s+die\s+temperature:\s*([0-9.]+)", re.I)
+
+
 def _bytes_to_gb(value_bytes: float) -> float:
     return value_bytes / (1024**3)
 
@@ -301,13 +308,13 @@ class SystemMonitor:
             )
             if result.returncode == 0 and result.stdout:
                 out = result.stdout
-                m_usage = re.search(r"GPU\s+usage:\s*([0-9.]+)\s*%", out, re.I)
+                m_usage = _PM_GPU_USAGE.search(out)
                 if m_usage:
                     usage_percent = float(m_usage.group(1))
-                m_mem = re.search(r"GPU\s+memory:\s*([0-9.]+)\s*%", out, re.I)
+                m_mem = _PM_GPU_MEMORY.search(out)
                 if m_mem:
                     mem_usage_percent = float(m_mem.group(1))
-                m_temp = re.search(r"GPU\s+die\s+temperature:\s*([0-9.]+)", out, re.I)
+                m_temp = _PM_GPU_TEMP.search(out)
                 if m_temp:
                     temp_celsius = float(m_temp.group(1))
         except FileNotFoundError:

@@ -306,3 +306,56 @@ class ButtonColors:
     DESTRUCTIVE_ACTIVE = CurrentTheme.BUTTON_DESTRUCTIVE_ACTIVE
 
     # SECONDARY buttons use ImGui's default styling (no constants needed)
+
+
+def _build_theme_refresh_map():
+    """Parse THIS source file to find every `Name = CurrentTheme.X` class-body
+    assignment. Returns a list of (class_obj, attr_name, theme_attr_name) tuples.
+
+    Each assignment is evaluated once at class-definition time and then cached
+    as a class attribute (a raw tuple). Since the CurrentTheme proxy delegates
+    attribute lookup lazily, the VALUE captured here is frozen at import time —
+    swapping the active theme later doesn't re-evaluate these class attributes.
+    This map lets refresh_from_theme() reapply them from the live theme.
+    """
+    import ast, os
+    try:
+        src_path = __file__
+        if not os.path.exists(src_path):
+            return []
+        with open(src_path, 'r') as f:
+            tree = ast.parse(f.read())
+    except Exception:
+        return []
+    mod_globals = globals()
+    mapping = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        cls_obj = mod_globals.get(node.name)
+        if cls_obj is None:
+            continue
+        for stmt in node.body:
+            if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1):
+                continue
+            tgt = stmt.targets[0]
+            val = stmt.value
+            if not (isinstance(tgt, ast.Name) and isinstance(val, ast.Attribute)):
+                continue
+            if isinstance(val.value, ast.Name) and val.value.id == 'CurrentTheme':
+                mapping.append((cls_obj, tgt.id, val.attr))
+    return mapping
+
+
+_THEME_REFRESH_MAP = _build_theme_refresh_map()
+
+
+def refresh_from_theme():
+    """Re-apply every `X = CurrentTheme.Y` class attribute against the current
+    active theme. Call after swapping the active theme so every class-level
+    cached tuple gets repopulated with the new palette's values."""
+    for cls, attr, theme_attr in _THEME_REFRESH_MAP:
+        try:
+            setattr(cls, attr, getattr(CurrentTheme, theme_attr))
+        except Exception:
+            pass

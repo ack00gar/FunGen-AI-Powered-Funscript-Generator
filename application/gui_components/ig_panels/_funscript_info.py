@@ -4,6 +4,7 @@ import os
 import time
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 from funscript.quality_validator import FunscriptQualityValidator, IssueSeverity
+from config.constants_colors import CurrentTheme
 
 
 class FunscriptInfoMixin:
@@ -88,11 +89,11 @@ class FunscriptInfoMixin:
 
         score = report.score
         if score >= 80:
-            bar_color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 1.0)
+            bar_color = imgui.get_color_u32_rgba(*CurrentTheme.GREEN)
         elif score >= 50:
             bar_color = imgui.get_color_u32_rgba(0.9, 0.7, 0.1, 1.0)
         else:
-            bar_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 1.0)
+            bar_color = imgui.get_color_u32_rgba(*CurrentTheme.RED)
 
         bg_color = imgui.get_color_u32_rgba(0.15, 0.15, 0.15, 1.0)
         draw_list = imgui.get_window_draw_list()

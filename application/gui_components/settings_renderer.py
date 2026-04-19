@@ -13,6 +13,7 @@ from application.utils.imgui_helpers import DisabledScope as _DisabledScope, too
 from application.utils.section_card import section_card
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from funscript.axis_registry import FunscriptAxis, file_suffix_for_axis, tcode_for_axis
+from config.constants_colors import CurrentTheme
 
 _logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ class SettingsRenderer:
         discovery = get_tracker_discovery()
         info = discovery.get_tracker_info(tmode)
         display_name = info.display_name if info else tmode
-        imgui.text_colored(display_name, 0.4, 0.8, 1.0, 1.0)
+        imgui.text_colored(display_name, *CurrentTheme.REFERENCE_OVERLAY)
         if info and info.description:
             imgui.text_wrapped(info.description)
         imgui.spacing()
@@ -149,14 +150,22 @@ class SettingsRenderer:
 
         kw = {
             "profiles": "profiles preset save load delete",
-            "interface": "interface font scale timeline pan speed performance overlay",
-            "video": "video hw acceleration hardware decoding videotoolbox",
-            "energy": "energy saver idle fps timeout power performance",
-            "logging": "logging autosave log debug verbose interval",
-            "output": "file output save export path format funscript axis assignment tcode ofs batch overwrite simplification",
+            "interface": "interface font scale timeline pan speed performance overlay theme dark light color toolbar tooltips toast notification advanced options novice",
+            "video": "video hw acceleration hardware decoding videotoolbox vr unwarp supersample shader dewarp passthrough eye panel pitch aspect ratio hd display",
+            "energy": "energy saver idle fps timeout power performance target framerate",
+            "logging": "logging autosave log debug verbose interval dirty",
+            "output": "file output save export path format funscript axis assignment tcode ofs batch overwrite simplification roll twist pitch stroke secondary",
             "processing": "analysis stage rerun force preprocessed video database cache output delay workers producers consumers",
             "api": "api websocket ws external tools control port",
-            "trackers": "tracker settings detection optical flow confidence class filtering",
+            "trackers": "tracker settings detection optical flow confidence class filtering legacy experimental community tool model ai yolo pose",
+            "subtitle": "subtitle subtitles translation whisper vad language caption",
+            "translation": "subtitle subtitles translation whisper vad language caption",
+            "proxy": "proxy proxies iframe transcode edit ffmpeg",
+            "proxies": "proxy proxies iframe transcode edit ffmpeg",
+            "iframe": "proxy proxies iframe transcode edit ffmpeg",
+            "transcode": "proxy proxies iframe transcode edit ffmpeg",
+            "websocket": "api websocket ws external tools control port",
+            "ws": "api websocket ws external tools control port",
         }
 
         def matches(key):
@@ -651,7 +660,7 @@ class SettingsRenderer:
             api = getattr(self.app, '_ws_api', None)
             if api and api._running:
                 _row_label("  Status", "")
-                imgui.text_colored("Active", 0.3, 0.9, 0.3, 1.0)
+                imgui.text_colored("Active", *CurrentTheme.GREEN)
                 imgui.same_line()
                 imgui.text_disabled(f"ws://127.0.0.1:{settings.get('ws_api_port', 8769)}")
                 _row_end()
@@ -684,23 +693,25 @@ class SettingsRenderer:
         _row_end()
 
         sec_axis = settings.get("default_secondary_axis", "roll")
-        _row_label(f"Generate .{sec_axis} File", f"Generate a separate .{sec_axis}.funscript file from Timeline 2.")
-        ch, v = imgui.checkbox("Enabled##GenRoll", settings.get("generate_roll_file", True))
+        _out_cfg = settings.config.output
+        _fs_cfg = settings.config.funscript
+        _row_label(f"Generate .{sec_axis} File", f"Generate a separate .{sec_axis}.funscript file from Funscript 2.")
+        ch, v = imgui.checkbox("Enabled##GenRoll", _out_cfg.generate_roll_file)
         if ch:
-            settings.set("generate_roll_file", v)
+            _out_cfg.generate_roll_file = v
         _row_end()
 
         _row_label("Skip .raw Prefix", "Export directly as .funscript instead of .raw.funscript\nwhen no post-processing is applied.")
-        ch, v = imgui.checkbox("Enabled##ExpRaw", settings.get("export_raw_as_funscript", False))
+        ch, v = imgui.checkbox("Enabled##ExpRaw", _out_cfg.export_raw_as_funscript)
         if ch:
-            settings.set("export_raw_as_funscript", v)
+            _out_cfg.export_raw_as_funscript = v
         _row_end()
 
         _row_label("Point Simplification", "Remove redundant collinear/flat points on-the-fly.\nReduces file size by 50-80% with negligible CPU overhead.")
-        cur_s = settings.get("funscript_point_simplification_enabled", True)
+        cur_s = _fs_cfg.point_simplification_enabled
         ch, nv = imgui.checkbox("Enabled##PtSimp", cur_s)
         if ch and nv != cur_s:
-            settings.set("funscript_point_simplification_enabled", nv)
+            _fs_cfg.point_simplification_enabled = nv
             if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
                 self.app.processor.tracker.funscript.enable_point_simplification = nv
         _row_end()
@@ -739,7 +750,7 @@ class SettingsRenderer:
 
         # Default Secondary Axis
         _row_label("T2 Default Axis",
-                    "Which axis Timeline 2 defaults to when a tracker is activated.\n"
+                    "Which axis Funscript 2 defaults to when a tracker is activated.\n"
                     "e.g. 'twist' for SSR2, 'roll' for OSR2.")
         imgui.push_item_width(-1)
         sec_options = [fa.value for fa in FunscriptAxis if fa != FunscriptAxis.STROKE]
@@ -805,7 +816,7 @@ class SettingsRenderer:
             imgui.columns(1)
             imgui.separator()
         else:
-            imgui.text_colored("No funscript loaded.", 0.5, 0.5, 0.5, 1.0)
+            imgui.text_colored("No funscript loaded.", *CurrentTheme.GRAY_MEDIUM)
 
     # ================================================================ #
     #  Processing                                                      #
@@ -943,7 +954,7 @@ class SettingsRenderer:
                 continue
 
             cat_label = cat_labels.get(cat, str(cat))
-            imgui.text_colored(cat_label, 0.6, 0.6, 0.6, 1.0)
+            imgui.text_colored(cat_label, *CurrentTheme.GRAY_SUBDUED)
             imgui.spacing()
 
             for tinfo in trackers:
@@ -1008,7 +1019,7 @@ class SettingsRenderer:
                 if tracker_inst.render_settings_ui():
                     return
             except Exception as exc:
-                imgui.text_colored("Settings UI error: %s" % exc, 1.0, 0.3, 0.3, 1.0)
+                imgui.text_colored("Settings UI error: %s" % exc, *CurrentTheme.RED_LIGHT)
                 return
 
         # Schema-based rendering (works for both active and lazy instances)
@@ -1076,7 +1087,7 @@ class SettingsRenderer:
             new_list = sorted(list(discarded))
             if new_list != app.discarded_tracking_classes:
                 app.discarded_tracking_classes = new_list
-                app.app_settings.set("discarded_tracking_classes", new_list)
+                app.app_settings.config.tracking.discarded_classes = new_list
                 app.project_manager.project_dirty = True
                 app.logger.info("Discarded classes updated: %s" % new_list,
                                 extra={"status_message": True})
@@ -1086,7 +1097,7 @@ class SettingsRenderer:
         if imgui.button("Clear All Discards##ClearDF", width=-1):
             if app.discarded_tracking_classes:
                 app.discarded_tracking_classes.clear()
-                app.app_settings.set("discarded_tracking_classes", [])
+                app.app_settings.config.tracking.discarded_classes = []
                 app.project_manager.project_dirty = True
                 app.logger.info("All class filters cleared.", extra={"status_message": True})
                 app.energy_saver.reset_activity_timer()

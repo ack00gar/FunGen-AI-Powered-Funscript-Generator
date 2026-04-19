@@ -4,6 +4,7 @@ from application.utils import primary_button_style, destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope, tooltip_if_hovered as _tooltip_if_hovered
 from application.utils.section_card import section_card as _section_card
 from config.element_group_colors import ControlPanelColors as _CPColors
+from config.constants_colors import CurrentTheme
 
 
 class TrackerSettingsMixin:
@@ -30,7 +31,7 @@ class TrackerSettingsMixin:
             if tracker_instance.render_settings_ui():
                 return True
         except Exception as exc:
-            imgui.text_colored("Settings UI error: %s" % exc, 1.0, 0.3, 0.3, 1.0)
+            imgui.text_colored("Settings UI error: %s" % exc, *CurrentTheme.RED_LIGHT)
             return False
 
         # Path B: Schema auto-render
@@ -107,7 +108,7 @@ class TrackerSettingsMixin:
         is_dual_axis = tracker_info.supports_dual_axis if tracker_info else True
         primary_name = (tracker_info.primary_axis if tracker_info else "stroke").capitalize()
         # Use user's default secondary axis if set, otherwise tracker's declared axis
-        user_secondary = self.app.app_settings.get("default_secondary_axis") if hasattr(self.app, 'app_settings') else None
+        user_secondary = self.app.app_settings.config.performance.default_secondary_axis if hasattr(self.app, 'app_settings') else None
         if user_secondary and tracker_info and tracker_info.supports_dual_axis:
             secondary_name = user_secondary.capitalize()
         else:
@@ -116,9 +117,9 @@ class TrackerSettingsMixin:
         # Show which axes this tracker outputs
         if tracker_info:
             if is_dual_axis:
-                imgui.text_colored(f"T1: {primary_name}  |  T2: {secondary_name}", 0.6, 0.8, 1.0, 1.0)
+                imgui.text_colored(f"T1: {primary_name}  |  T2: {secondary_name}", *CurrentTheme.REFERENCE_OVERLAY)
             else:
-                imgui.text_colored(f"T1: {primary_name}  (single axis)", 0.6, 0.8, 1.0, 1.0)
+                imgui.text_colored(f"T1: {primary_name}  (single axis)", *CurrentTheme.REFERENCE_OVERLAY)
             _tooltip_if_hovered(
                 "Axis assignments set by the tracker.\n"
                 "Override in Advanced Settings > Axis Assignments."
@@ -162,12 +163,12 @@ class TrackerSettingsMixin:
                 if old_mode != self.app.tracking_axis_mode:
                     self.app.project_manager.project_dirty = True
                     self.app.logger.info(f"Tracking axis mode set to: {self.app.tracking_axis_mode}", extra={'status_message': True})
-                    self.app.app_settings.set("tracking_axis_mode", self.app.tracking_axis_mode)
+                    self.app.app_settings.config.tracking.axis_mode = self.app.tracking_axis_mode
                     self.app.energy_saver.reset_activity_timer()
 
             if is_dual_axis and self.app.tracking_axis_mode != "both":
                 imgui.text("Output Single Axis To:")
-                output_targets = [f"Timeline 1 ({primary_name})", f"Timeline 2 ({secondary_name})"]
+                output_targets = [f"Funscript 1 ({primary_name})", f"Funscript 2 ({secondary_name})"]
                 current_output_target_idx = 1 if self.app.single_axis_output_target == "secondary" else 0
 
                 imgui.set_next_item_width(-1)
@@ -178,7 +179,7 @@ class TrackerSettingsMixin:
                     if old_target != self.app.single_axis_output_target:
                         self.app.project_manager.project_dirty = True
                         self.app.logger.info(f"Single axis output target set to: {self.app.single_axis_output_target}", extra={'status_message': True})
-                        self.app.app_settings.set("single_axis_output_target", self.app.single_axis_output_target)
+                        self.app.app_settings.config.tracking.single_axis_output_target = self.app.single_axis_output_target
                         self.app.energy_saver.reset_activity_timer()
 
     def _render_class_filtering_content(self):
@@ -215,7 +216,7 @@ class TrackerSettingsMixin:
             new_list = sorted(list(discarded))
             if new_list != app.discarded_tracking_classes:
                 app.discarded_tracking_classes = new_list
-                app.app_settings.set("discarded_tracking_classes", new_list)
+                app.app_settings.config.tracking.discarded_classes = new_list
                 app.project_manager.project_dirty = True
                 app.logger.info("Discarded classes updated: %s" % new_list, extra={"status_message": True})
                 app.energy_saver.reset_activity_timer()
@@ -227,7 +228,7 @@ class TrackerSettingsMixin:
         ):
             if app.discarded_tracking_classes:
                 app.discarded_tracking_classes.clear()
-                app.app_settings.set("discarded_tracking_classes", [])
+                app.app_settings.config.tracking.discarded_classes = []
                 app.project_manager.project_dirty = True
                 app.logger.info("All class discard filters cleared.", extra={"status_message": True})
                 app.energy_saver.reset_activity_timer()

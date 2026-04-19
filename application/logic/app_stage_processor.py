@@ -48,7 +48,11 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
         self.current_analysis_stage: int = 0
         self.stage_thread: Optional[threading.Thread] = None
         self.stop_stage_event = multiprocessing.Event()
-        self.gui_event_queue = Queue()
+        # Bounded so a stalled GUI consumer can't grow this unbounded during a
+        # long batch. 10k events ~= 1 MB worst case; if we ever hit the cap the
+        # stage producer thread will block (user sees frozen progress) instead
+        # of silently OOMing.
+        self.gui_event_queue = Queue(maxsize=10000)
 
         # --- Status and Progress Tracking ---
         self.reset_stage_status(stages=("stage1", "stage2", "stage3"))
@@ -954,7 +958,7 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
 
             if hasattr(self.app, 's2_sqlite_db_path') and self.app.s2_sqlite_db_path:
                 # Check if we should retain the database
-                retain_database = self.app_settings.get("retain_stage2_database", True)
+                retain_database = self.app_settings.config.output.retain_stage2_database
                 
                 # CRITICAL: Never delete database during 3-stage pipeline until Stage 3 completes
                 # Stage 3 depends on the Stage 2 database for processing
@@ -987,7 +991,7 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
                 try:
                     s2_overlay_path = fm.get_output_path_for_file(fm.video_path, "_stage2_overlay.msgpack")
                     if os.path.exists(s2_overlay_path):
-                        retain_database = self.app_settings.get("retain_stage2_database", True)
+                        retain_database = self.app_settings.config.output.retain_stage2_database
                         
                         # Use same logic as database cleanup
                         is_3_stage_pipeline = self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode)
@@ -1069,10 +1073,11 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
         return tracker_ui.get_tracker_display_name(tracker_name)
 
     def update_settings_from_app(self):
-        prod_usr = self.app_settings.get("num_producers_stage1")
-        cons_usr = self.app_settings.get("num_consumers_stage1")
+        _perf = self.app_settings.config.performance
+        prod_usr = _perf.stage1_producers
+        cons_usr = _perf.stage1_consumers
         # Always save preprocessed video for optical flow recovery in Stage 2
-        self.save_preprocessed_video = self.app_settings.get("save_preprocessed_video", True)
+        self.save_preprocessed_video = self.app_settings.config.output.save_preprocessed_video
 
         if not prod_usr or not cons_usr:
             cpu_cores = os.cpu_count() or 4
@@ -1082,8 +1087,7 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
             self.num_producers_stage1 = prod_usr
             self.num_consumers_stage1 = cons_usr
 
-        # MPS (Apple Silicon) memory cap: always enforced regardless of saved settings.
-        # Each consumer loads det + pose models sharing unified memory with the system.
+        # MPS memory guard: cap consumers to fit the unified memory budget.
         if constants.DEVICE == 'mps':
             try:
                 import psutil
@@ -1094,16 +1098,16 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
             mps_max = max(1, int(usable_gb / constants.MPS_MEMORY_PER_CONSUMER_GB))
             if self.num_consumers_stage1 > mps_max:
                 self.logger.info(
-                    f"MPS: {total_gb:.0f}GB memory, capping consumers "
-                    f"from {self.num_consumers_stage1} to {mps_max} "
-                    f"({constants.MPS_MEMORY_PER_CONSUMER_GB}GB/consumer + "
-                    f"{constants.MPS_MEMORY_HEADROOM_GB}GB headroom)")
+                    f"Stage 1: consumers {self.num_consumers_stage1}->{mps_max} "
+                    f"(MPS budget: {usable_gb:.0f}GB usable of {total_gb:.0f}GB, "
+                    f"~{constants.MPS_MEMORY_PER_CONSUMER_GB}GB/consumer)")
                 self.num_consumers_stage1 = mps_max
 
     def save_settings_to_app(self):
-        self.app_settings.set("num_producers_stage1", self.num_producers_stage1)
-        self.app_settings.set("num_consumers_stage1", self.num_consumers_stage1)
-        self.app_settings.set("save_preprocessed_video", self.save_preprocessed_video)
+        _perf = self.app_settings.config.performance
+        _perf.stage1_producers = self.num_producers_stage1
+        _perf.stage1_consumers = self.num_consumers_stage1
+        self.app_settings.config.output.save_preprocessed_video = self.save_preprocessed_video
 
     def get_project_save_data(self) -> Dict:
         return {

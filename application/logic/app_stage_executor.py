@@ -479,8 +479,8 @@ class StageExecutorMixin:
                 vr_input_format_arg=self.app.processor.vr_input_format if self.app.processor else "he",
                 vr_fov_arg=self.app.processor.vr_fov if self.app.processor else 190,
                 vr_pitch_arg=self.app.processor.vr_pitch if self.app.processor else 0,
-                vr_vertical_third_filter_arg=self.app_settings.get("vr_filter_stage2", True),
-                enable_of_debug_prints=self.app_settings.get("debug_prints_stage2", False),
+                vr_vertical_third_filter_arg=self.app_settings.config.vr_display.filter_stage2,
+                enable_of_debug_prints=self.app_settings.config.stage3.debug_prints_stage2,
                 discarded_classes_runtime_arg=self.app.discarded_tracking_classes,
                 scripting_range_active_arg=range_is_active,
                 scripting_range_start_frame_arg=range_start_frame,
@@ -551,29 +551,26 @@ class StageExecutorMixin:
             self.gui_event_queue.put(("stage3_status_update", "Error: S3 Module missing", "Error"))
             return False
 
+        s3 = self.app_settings.config.stage3
+        trk = self.app_settings.config.tracking
         tracker_config_s3 = {
-            "confidence_threshold": self.app_settings.get('tracker_confidence_threshold', 0.4),
-            "roi_padding": self.app_settings.get('tracker_roi_padding', 20),
-            "roi_update_interval": self.app_settings.get('s3_roi_update_interval',
-                                                          constants.DEFAULT_ROI_UPDATE_INTERVAL),
-            "roi_smoothing_factor": self.app_settings.get('tracker_roi_smoothing_factor',
-                                                           constants.DEFAULT_ROI_SMOOTHING_FACTOR),
-            "dis_flow_preset": self.app_settings.get('tracker_dis_flow_preset', "ULTRAFAST"),
+            "confidence_threshold": s3.confidence_threshold,
+            "roi_padding": s3.roi_padding,
+            "roi_update_interval": s3.roi_update_interval,
+            "roi_smoothing_factor": s3.roi_smoothing_factor,
+            "dis_flow_preset": s3.dis_flow_preset,
             "target_size_preprocess": getattr(self.app.tracker, 'target_size_preprocess',
                                               (640, 640)) if self.app.tracker else (640, 640),
-            "flow_history_window_smooth": self.app_settings.get('tracker_flow_history_window_smooth', 3),
-            "adaptive_flow_scale": self.app_settings.get('tracker_adaptive_flow_scale', True),
-            "use_sparse_flow": self.app_settings.get('tracker_use_sparse_flow', False),
-            "base_amplification_factor": self.app_settings.get('tracker_base_amplification',
-                                                                constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION),
-            "class_specific_amplification_multipliers": self.app_settings.get(
-                'tracker_class_specific_multipliers', constants.DEFAULT_CLASS_AMP_MULTIPLIERS),
-            "y_offset": self.app_settings.get('tracker_y_offset', constants.DEFAULT_LIVE_TRACKER_Y_OFFSET),
-            "x_offset": self.app_settings.get('tracker_x_offset', constants.DEFAULT_LIVE_TRACKER_X_OFFSET),
-            "sensitivity": self.app_settings.get('tracker_sensitivity',
-                                                  constants.DEFAULT_LIVE_TRACKER_SENSITIVITY),
-            "oscillation_grid_size": self.app_settings.get('oscillation_detector_grid_size', 20),
-            "oscillation_sensitivity": self.app_settings.get('oscillation_detector_sensitivity', 1.0)
+            "flow_history_window_smooth": s3.flow_history_window_smooth,
+            "adaptive_flow_scale": s3.adaptive_flow_scale,
+            "use_sparse_flow": s3.use_sparse_flow,
+            "base_amplification_factor": s3.base_amplification,
+            "class_specific_amplification_multipliers": s3.class_specific_multipliers,
+            "y_offset": s3.y_offset,
+            "x_offset": s3.x_offset,
+            "sensitivity": s3.sensitivity,
+            "oscillation_grid_size": trk.oscillation_grid_size,
+            "oscillation_sensitivity": trk.oscillation_sensitivity,
         }
 
         video_fps_s3 = self._resolve_video_fps()
@@ -583,21 +580,20 @@ class StageExecutorMixin:
             "yolo_pose_model_path": self.app.yolo_pose_model_path,
             "yolo_input_size": self.app.yolo_input_size,
             "video_fps": video_fps_s3,
-            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10),
-            "roi_narrow_factor_hjbj": self.app_settings.get("roi_narrow_factor_hjbj",
-                                                             constants.DEFAULT_ROI_NARROW_FACTOR_HJBJ),
-            "min_roi_dim_hjbj": self.app_settings.get("min_roi_dim_hjbj", constants.DEFAULT_MIN_ROI_DIM_HJBJ),
+            "num_warmup_frames_s3": s3.num_warmup_frames,
+            "roi_narrow_factor_hjbj": s3.roi_narrow_factor_hjbj,
+            "min_roi_dim_hjbj": s3.min_roi_dim_hjbj,
             "tracking_axis_mode": self.app.tracking_axis_mode,
             "single_axis_output_target": self.app.single_axis_output_target,
-            "s3_show_roi_debug": self.app_settings.get("s3_show_roi_debug", False),
+            "s3_show_roi_debug": s3.show_roi_debug,
             "hardware_acceleration_method": self.app.hardware_acceleration_method,
             "available_ffmpeg_hwaccels": self.app.available_ffmpeg_hwaccels,
             "video_type": self.app.processor.video_type_setting if self.app.processor else "auto",
             "vr_input_format": self.app.processor.vr_input_format if self.app.processor else "he",
             "vr_fov": self.app.processor.vr_fov if self.app.processor else 190,
             "vr_pitch": self.app.processor.vr_pitch if self.app.processor else 0,
-            "s3_chunk_size": self.app.app_settings.get("s3_chunk_size", 1000),
-            "s3_overlap_size": self.app.app_settings.get("s3_overlap_size", 30)
+            "s3_chunk_size": s3.chunk_size,
+            "s3_overlap_size": s3.overlap_size,
         }
 
         sqlite_db_path = getattr(self.app, 's2_sqlite_db_path', None)

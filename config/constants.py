@@ -3,17 +3,15 @@ import os
 from typing import Dict, List, Tuple, Any
 from enum import Enum
 
-# Attempt to import torch for device detection, but fail gracefully if it's not available.
-try:
-    import torch
-except ImportError:
-    torch = None
+# Don't import torch at module load — it's ~1-2s cold, and we only need it
+# to pick a CUDA device (the MPS check is pure platform info). get_device()
+# below defers the torch import to first access.
 
 ####################################################################################################
 # META & VERSIONING
 ####################################################################################################
 APP_NAME = "FunGen"
-APP_VERSION = "0.8.5"
+APP_VERSION = "0.9.0"
 APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION}"
 FUNSCRIPT_AUTHOR = "FunGen"
 
@@ -30,7 +28,6 @@ CONFIG_VERSION = 1
 ####################################################################################################
 SETTINGS_FILE = "settings.json"
 AUTOSAVE_FILE = "autosave.fgnstate"
-DEFAULT_AUTOSAVE_INTERVAL_SECONDS = 300
 
 # --- Logging Configuration ---
 # Maximum size per log file before rotation (bytes) and number of backups to keep
@@ -57,28 +54,64 @@ INTERNET_TEST_HOSTS = [
 ####################################################################################################
 # SYSTEM & PERFORMANCE
 ####################################################################################################
-# Determines the compute device for ML models (e.g., 'cuda', 'mps', 'cpu').
-# This is detected once and used by both Stage 1 and the live tracker.
-DEVICE = 'cpu'
-if torch:
+# Compute device for ML models. Apple Silicon uses MPS (no torch probe
+# needed — pure platform check). Everywhere else defers to torch.cuda
+# probe, which happens on first access via get_device() so we don't pay
+# the torch import cost on startup.
+_DEVICE_CACHE: str = None  # type: ignore[assignment]
+
+
+def get_device() -> str:
+    """Return 'cuda' | 'mps' | 'cpu'. Imports torch lazily when needed."""
+    global _DEVICE_CACHE
+    if _DEVICE_CACHE is not None:
+        return _DEVICE_CACHE
     if platform.machine() == 'arm64' and platform.system() == 'Darwin':
-        DEVICE = 'mps'
-    elif torch.cuda.is_available():
-        DEVICE = 'cuda'
+        _DEVICE_CACHE = 'mps'
+        return _DEVICE_CACHE
+    try:
+        import torch
+        _DEVICE_CACHE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    except ImportError:
+        _DEVICE_CACHE = 'cpu'
+    return _DEVICE_CACHE
+
+
+class _DeviceProxy:
+    """Backwards-compatible accessor for code that references `constants.DEVICE`.
+
+    Behaves like a string: equality, f-string format, and every str method
+    work. The first access triggers the torch probe (on non-Apple platforms).
+    """
+    def __repr__(self):
+        return repr(get_device())
+
+    def __str__(self):
+        return get_device()
+
+    def __eq__(self, other):
+        return get_device() == other
+
+    def __ne__(self, other):
+        return get_device() != other
+
+    def __hash__(self):
+        return hash(get_device())
+
+    def __getattr__(self, name):
+        return getattr(get_device(), name)
+
+
+DEVICE = _DeviceProxy()
 
 # The side length of the square input image for the YOLO model.
 YOLO_INPUT_SIZE = 640
-# Default target height for oscillation processing/downscaling to match model input characteristics
-DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT = YOLO_INPUT_SIZE
 
-# GPU unwarp paths were removed with the subprocess backend; v360 now runs
-# in-process via PyAV's libavfilter graph. Stubs kept for any stray imports.
+# GPU unwarp paths were removed; v360 runs inside the ffmpeg-subprocess
+# filter graph. Stubs kept for any stray imports.
 ENABLE_GPU_UNWARP = False
 GPU_UNWARP_BACKEND = 'none'
 FALLBACK_TO_FFMPEG_V360 = True
-
-# Fallback for determining producer/consumer counts if os.cpu_count() fails.
-DEFAULT_FALLBACK_CPU_CORES = 4
 
 class ProcessingSpeedMode(Enum):
     REALTIME = "Real Time"
@@ -248,7 +281,6 @@ DEFAULT_UI_LAYOUT = "fixed"  # "fixed" or "floating"
 # --- UI Behavior ---
 MAX_HISTORY_DISPLAY = 10  # Max number of actions to show in the Undo/Redo history display.
 UI_PREVIEW_UPDATE_INTERVAL_S = 1.0  # Interval for updating graphs during live tracking.
-DEFAULT_CHAPTER_BAR_HEIGHT = 20  # Height in pixels of the chapter bar.
 
 # --- Timeline & Heatmap Colors (now imported from constants_colors.py) ---
 # Timeline colors are now managed through constants_colors.py
@@ -271,9 +303,6 @@ DEFAULT_TIMELINE_PAN_SPEED = 5
 ENERGY_SAVER_NORMAL_FPS_MIN = 10
 ENERGY_SAVER_THRESHOLD_MIN = 10
 ENERGY_SAVER_IDLE_FPS_MIN = 1
-DEFAULT_ENERGY_SAVER_NORMAL_FPS = 60
-DEFAULT_ENERGY_SAVER_THRESHOLD_SECONDS = 30.0
-DEFAULT_ENERGY_SAVER_IDLE_FPS = 10
 
 
 ####################################################################################################
@@ -427,8 +456,8 @@ CLASS_STABILITY_WINDOW = 10
 DEFAULT_DIS_FLOW_PRESET = "ULTRAFAST"
 DEFAULT_DIS_FINEST_SCALE = 5
 DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW = 3
-INVERSION_DETECTION_SPLIT_RATIO = 4.0
-MOTION_INVERSION_THRESHOLD = 1.2
+INVERSION_DETECTION_SPLIT_RATIO = 3.0
+MOTION_INVERSION_THRESHOLD = 1.5
 
 
 ####################################################################################################
@@ -437,10 +466,9 @@ MOTION_INVERSION_THRESHOLD = 1.2
 STAGE1_FRAME_QUEUE_MAXSIZE = 99
 DEFAULT_S1_NUM_PRODUCERS = 1
 DEFAULT_S1_NUM_CONSUMERS = max(os.cpu_count() // 2, 1) if os.cpu_count() else 2
-# MPS (Apple Silicon) shares unified memory, each consumer loads det + pose models.
-# Real-world: 4 consumers on 48GB still OOM. CoreML/ANE memory is unpredictable.
-MPS_MEMORY_PER_CONSUMER_GB = 12.0  # Conservative: accounts for CoreML + PyTorch + ANE overhead
-MPS_MEMORY_HEADROOM_GB = 10.0      # Reserve for OS, app, video decode, FFmpeg, and other processes
+# MPS heuristic (unified memory). YOLO det+pose + buffers peak ~2-4GB/consumer.
+MPS_MEMORY_PER_CONSUMER_GB = 4.0
+MPS_MEMORY_HEADROOM_GB = 6.0
 
 
 ####################################################################################################

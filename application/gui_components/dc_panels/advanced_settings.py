@@ -5,6 +5,7 @@ from application.utils.imgui_helpers import tooltip_if_hovered as _tooltip_if_ho
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card as _section_card
 from application.utils import primary_button_style, destructive_button_style
+from config.constants_colors import CurrentTheme
 
 
 class AdvancedSettingsMixin:
@@ -13,7 +14,7 @@ class AdvancedSettingsMixin:
     def _render_all_advanced_settings(self):
         """Render all advanced settings in one section."""
         # Performance Settings
-        imgui.text_colored("Performance:", 0.8, 0.8, 0.2)
+        imgui.text_colored("Performance:", *CurrentTheme.YELLOW_DARK)
         config = self.device_manager.config
 
         changed, new_rate = imgui.slider_float("Update Rate##DeviceRate", config.max_position_rate_hz, 1.0, 120.0, "%.1f Hz")
@@ -36,7 +37,7 @@ class AdvancedSettingsMixin:
         imgui.spacing()
 
         # Integration Settings
-        imgui.text_colored("Integration:", 0.8, 0.8, 0.2)
+        imgui.text_colored("Integration:", *CurrentTheme.YELLOW_DARK)
 
         live_tracking_enabled = self.app.app_settings.get("device_control_live_tracking", False)
         changed, new_live_tracking = imgui.checkbox("Live Tracking Control##DeviceLiveTracking", live_tracking_enabled)
@@ -59,7 +60,7 @@ class AdvancedSettingsMixin:
         imgui.spacing()
 
         # Speed Limiting
-        imgui.text_colored("Speed Limiting:", 0.8, 0.8, 0.2)
+        imgui.text_colored("Speed Limiting:", *CurrentTheme.YELLOW_DARK)
 
         speed_limit_enabled = getattr(self.device_manager, '_speed_limit_enabled', False)
         changed, new_enabled = imgui.checkbox("Enable Speed Limit##SpeedLimit", speed_limit_enabled)
@@ -79,7 +80,7 @@ class AdvancedSettingsMixin:
         imgui.spacing()
 
         # Interpolation Mode
-        imgui.text_colored("Interpolation:", 0.8, 0.8, 0.2)
+        imgui.text_colored("Interpolation:", *CurrentTheme.YELLOW_DARK)
 
         try:
             from device_control.bridges.funscript_player_bridge import InterpolationMode
@@ -111,7 +112,7 @@ class AdvancedSettingsMixin:
         imgui.spacing()
 
         # Auto-Home Settings
-        imgui.text_colored("Auto-Home:", 0.8, 0.8, 0.2)
+        imgui.text_colored("Auto-Home:", *CurrentTheme.YELLOW_DARK)
 
         auto_home_enabled = getattr(self.device_manager, '_auto_home_enabled', True)
         changed, new_enabled = imgui.checkbox("Enable Auto-Home##AutoHome", auto_home_enabled)

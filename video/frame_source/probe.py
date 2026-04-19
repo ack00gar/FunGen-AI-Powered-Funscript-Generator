@@ -1,17 +1,16 @@
-"""Lightweight PyAV-backed video metadata probe.
+"""Lightweight video metadata probe backed by ffprobe.
 
-Replaces ad-hoc ``cv2.VideoCapture(path); cap.get(CAP_PROP_FPS)`` calls
-scattered around the app. Single place for "how many frames, what fps,
-what resolution" — uses the same libav that drives the main playback
-pipeline.
+Single place for "how many frames, what fps, what resolution, what duration"
+across the app. Returns a dataclass.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Optional
 
-import av
+from video.ffmpeg_helpers import find_ffprobe, run as ffmpeg_run
 
 
 @dataclass
@@ -24,31 +23,86 @@ class VideoProbe:
     height: int
 
 
-def probe(video_path: str) -> Optional[VideoProbe]:
-    """Open the container, read video-stream metadata, close. Returns
-    ``None`` on failure. Fast (no decode)."""
-    container = None
+def _parse_rational(expr: str, fallback: float = 30.0) -> float:
+    """Parse ffprobe fps expressions like '60000/1001' into a float."""
+    if not expr:
+        return fallback
+    if "/" in expr:
+        num, _, den = expr.partition("/")
+        try:
+            n = float(num)
+            d = float(den)
+            if d > 0:
+                return n / d
+        except ValueError:
+            return fallback
     try:
-        container = av.open(video_path)
-        stream = container.streams.video[0]
-        fps = float(stream.average_rate or stream.guessed_rate or 30.0)
-        total_frames = int(stream.frames or 0)
-        duration_sec = (
-            float(container.duration / 1_000_000) if container.duration else 0.0
-        )
-        if total_frames <= 0 and duration_sec > 0:
-            total_frames = int(duration_sec * fps)
-        return VideoProbe(
-            path=video_path,
-            fps=fps,
-            total_frames=total_frames,
-            duration_sec=duration_sec,
-            width=stream.width,
-            height=stream.height,
-        )
-    except Exception:
+        return float(expr)
+    except ValueError:
+        return fallback
+
+
+def probe(video_path: str, timeout_s: float = 5.0) -> Optional[VideoProbe]:
+    """Run ffprobe on ``video_path``, return video-stream metadata or None.
+
+    Does not decode any frames. Typical cost: 20-80 ms per call.
+    """
+    cmd = [
+        find_ffprobe(),
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries",
+        "stream=width,height,r_frame_rate,avg_frame_rate,nb_frames,duration:format=duration",
+        "-of", "json",
+        video_path,
+    ]
+    try:
+        result = ffmpeg_run(cmd, timeout=timeout_s)
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout.decode("utf-8", errors="replace"))
+    except (OSError, ValueError, json.JSONDecodeError):
         return None
-    finally:
-        if container is not None:
-            try: container.close()
-            except Exception: pass
+
+    streams = data.get("streams") or []
+    if not streams:
+        return None
+    s = streams[0]
+
+    width = int(s.get("width") or 0)
+    height = int(s.get("height") or 0)
+
+    # Prefer r_frame_rate (container-declared) over avg_frame_rate (computed
+    # from frame count, skewed by VFR). Falls back cleanly for weird inputs.
+    fps = _parse_rational(s.get("r_frame_rate", ""), fallback=0.0)
+    if fps <= 0:
+        fps = _parse_rational(s.get("avg_frame_rate", ""), fallback=30.0)
+    if fps <= 0:
+        fps = 30.0
+
+    duration_sec = 0.0
+    dur_raw = s.get("duration") or (data.get("format") or {}).get("duration")
+    if dur_raw:
+        try:
+            duration_sec = float(dur_raw)
+        except ValueError:
+            duration_sec = 0.0
+
+    total_frames = 0
+    nb_raw = s.get("nb_frames")
+    if nb_raw and nb_raw != "N/A":
+        try:
+            total_frames = int(nb_raw)
+        except ValueError:
+            total_frames = 0
+    if total_frames <= 0 and duration_sec > 0:
+        total_frames = int(duration_sec * fps)
+
+    return VideoProbe(
+        path=video_path,
+        fps=fps,
+        total_frames=total_frames,
+        duration_sec=duration_sec,
+        width=width,
+        height=height,
+    )

@@ -49,6 +49,13 @@ class HeatmapColorMapper:
         self.max_speed = max(1.0, max_speed)
         self.highlight_overspeed = highlight_overspeed
         self._gradient = _SPEED_GRADIENT
+        # Pre-materialized numpy views of the gradient so the vectorized
+        # color path (speeds_to_colors_rgba) doesn't rebuild them per call.
+        self._grad_positions = np.array(
+            [g[0] for g in _SPEED_GRADIENT], dtype=np.float32)
+        self._grad_colors = np.array(
+            [g[1] for g in _SPEED_GRADIENT], dtype=np.float32)
+        self._overspeed_np = np.asarray(_OVERSPEED_COLOR, dtype=np.float32)
 
     def speed_to_color_rgba(self, speed: float) -> Tuple[float, float, float, float]:
         """Convert a single speed value (units/sec) to an RGBA color tuple."""
@@ -68,26 +75,33 @@ class HeatmapColorMapper:
         return self._gradient[-1][1]
 
     def speeds_to_colors_rgba(self, speeds: np.ndarray) -> np.ndarray:
-        """Vectorized: convert array of speeds to Nx4 RGBA float array."""
-        t = np.clip(np.abs(speeds) / self.max_speed, 0.0, 1.0)
-        result = np.zeros((len(t), 4), dtype=np.float32)
+        """Vectorized: convert array of speeds to Nx4 RGBA float array.
 
-        for i in range(len(self._gradient) - 1):
-            pos0, col0 = self._gradient[i]
-            pos1, col1 = self._gradient[i + 1]
-            mask = (t >= pos0) & (t <= pos1)
-            if not np.any(mask):
-                continue
-            seg_t = (t[mask] - pos0) / max(0.001, pos1 - pos0)
-            for ch in range(4):
-                result[mask, ch] = col0[ch] + (col1[ch] - col0[ch]) * seg_t
+        One pass: searchsorted to find each speed's gradient interval, then
+        fancy-index into precomputed color endpoints and lerp. Replaces the
+        per-gradient-stop mask loop which dominated heatmap redraw time.
+        """
+        abs_speeds = np.abs(np.asarray(speeds, dtype=np.float32))
+        t = np.clip(abs_speeds / self.max_speed, 0.0, 1.0)
+        positions = self._grad_positions
+        colors = self._grad_colors
+        n_stops = positions.shape[0]
+        # right - 1 picks the interval whose lower bound ≤ t.
+        idx = np.searchsorted(positions, t, side='right') - 1
+        np.clip(idx, 0, n_stops - 2, out=idx)
 
-        # Overspeed: segments faster than max_speed get a distinct lilac
+        pos0 = positions[idx]
+        pos1 = positions[idx + 1]
+        col0 = colors[idx]          # (N, 4)
+        col1 = colors[idx + 1]      # (N, 4)
+        denom = np.maximum(pos1 - pos0, 1e-3)
+        seg_t = ((t - pos0) / denom)[:, None]   # (N, 1)
+        result = col0 + (col1 - col0) * seg_t
+
         if self.highlight_overspeed:
-            over_mask = np.abs(speeds) > self.max_speed
+            over_mask = abs_speeds > self.max_speed
             if np.any(over_mask):
-                for ch in range(4):
-                    result[over_mask, ch] = _OVERSPEED_COLOR[ch]
+                result[over_mask] = self._overspeed_np
 
         return result
 

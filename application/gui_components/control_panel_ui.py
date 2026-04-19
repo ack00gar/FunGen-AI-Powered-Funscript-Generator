@@ -25,6 +25,7 @@ from .cp_tracker_settings_ui import TrackerSettingsMixin
 from .cp_device_control_ui import DeviceControlMixin
 from .cp_streamer_ui import StreamerMixin
 from .cp_batch_ui import BatchMixin
+from .cp_batch_capture_ui import BatchCaptureMixin
 from .cp_metadata_ui import MetadataEditorMixin
 from .cp_subtitle_ui import SubtitleMixin
 
@@ -44,6 +45,7 @@ class ControlPanelUI(
     DeviceControlMixin,
     StreamerMixin,
     BatchMixin,
+    BatchCaptureMixin,
     MetadataEditorMixin,
     SubtitleMixin,
 ):
@@ -121,7 +123,7 @@ class ControlPanelUI(
         x_offset = (avail_w - text_size[0]) * 0.5
         if x_offset > 0:
             imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + x_offset)
-        imgui.text_colored(label, 0.45, 0.45, 0.50, 0.7)
+        imgui.text_colored(label, *CurrentTheme.GRAY_SUBDUED)
         imgui.spacing()
 
     def _render_addon_version_label(self, module_name, display_name):
@@ -129,7 +131,7 @@ class ControlPanelUI(
         try:
             mod = __import__(module_name)
             version = getattr(mod, '__version__', 'unknown')
-            imgui.text_colored(f"{display_name} v{version}", 0.5, 0.5, 0.5, 1.0)
+            imgui.text_colored(f"{display_name} v{version}", *CurrentTheme.GRAY_MEDIUM)
             imgui.spacing()
         except Exception as e:
             import logging
@@ -360,7 +362,7 @@ class ControlPanelUI(
         # Separator
         imgui.spacing()
         sep_pos = imgui.get_cursor_screen_pos()
-        sep_color = imgui.get_color_u32_rgba(0.3, 0.3, 0.3, 0.5)
+        sep_color = imgui.get_color_u32_rgba(*CurrentTheme.DISABLED_OVERLAY)
         draw_list.add_line(sep_pos[0] + 6, sep_pos[1],
                            sep_pos[0] + sidebar_w - 6, sep_pos[1], sep_color)
         imgui.spacing()
@@ -435,7 +437,7 @@ class ControlPanelUI(
                     info = get_feature_detector().get_feature_info(feat_name)
                     if info:
                         desc = f"\n{info.description}"
-                imgui.set_tooltip(f"{tooltip}{desc}\n(Add-on available at paypal.me/k00gar)")
+                imgui.set_tooltip(f"{tooltip}{desc}\n(Available as a FunGen add-on: paypal.me/k00gar)")
             # Hover bg (drawn before text so text stays on top)
             hover_bg = imgui.get_color_u32_rgba(*SidebarColors.HOVER_BG)
             draw_list.add_rect_filled(
@@ -547,6 +549,8 @@ class ControlPanelUI(
                             events.trigger_save_funscript_dialog()
                         elif hasattr(app, 'file_manager'):
                             app.file_manager.save_funscript_dialog()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Save the current funscript to disk. If autosave-to-video-location is enabled in settings, the default path is next to the source video.")
             else:
                 selected_mode = app.app_state_ui.selected_tracker_name
                 fs_proc = app.funscript_processor
@@ -557,15 +561,27 @@ class ControlPanelUI(
                     with primary_button_style():
                         if imgui.button(label, width=-1, height=32):
                             self._start_live_tracking()
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip(
+                            "Run the selected live tracker against the video as it plays and write funscript actions in real time."
+                            + ("\n\nA scripting range is active, only that range will be tracked." if range_active else "")
+                        )
                 elif self._is_offline_tracker(selected_mode):
                     label = ("Start AI Analysis (Range)##PinnedAction" if range_active
                              else "Start Full AI Analysis##PinnedAction")
                     with primary_button_style():
                         if imgui.button(label, width=-1, height=32):
                             events.handle_start_ai_cv_analysis()
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip(
+                            "Run the full offline pipeline (Analysis Stage 1, then Stage 2, optionally Stage 3) on the loaded video and generate the funscript."
+                            + ("\n\nA scripting range is active, only that range will be analyzed." if range_active else "")
+                        )
                 else:
                     with primary_button_style():
                         imgui.button("Select a Tracker##PinnedAction", width=-1, height=32)
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Pick a tracker in the Tracker dropdown above, then this button will start analysis.")
 
     # ------- Main render -------
 
@@ -582,7 +598,7 @@ class ControlPanelUI(
         if floating:
             if not getattr(app_state, "show_control_panel_window", True):
                 return
-            is_open, new_vis = imgui.begin("Control Panel##ControlPanelFloating", closable=True)
+            is_open, new_vis = imgui.begin("FunGen: Control Panel##ControlPanelFloating", closable=True)
             if new_vis != app_state.show_control_panel_window:
                 app_state.show_control_panel_window = new_vis
             if not is_open:
@@ -649,30 +665,28 @@ class ControlPanelUI(
         """Render a placeholder card for locked add-on features."""
         with section_card(f"{feature_name}##Locked", tier="secondary", open_by_default=True) as _:
             imgui.spacing()
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.DESCRIPTION_TEXT)
             imgui.text_wrapped(description)
             imgui.pop_style_color()
             imgui.spacing()
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.3, 1.0)
-            imgui.text("Add-on available at paypal.me/k00gar")
+            imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.PROMO_BANNER_GOLD)
+            imgui.text("Available as a FunGen add-on: paypal.me/k00gar")
             imgui.pop_style_color()
             imgui.spacing()
 
     def _render_addon_promo_banner(self, feature_name, description):
-        """Gold add-on banner with feature description and PayPal link."""
         imgui.spacing()
-        # Gold accent bar
         draw_list = imgui.get_window_draw_list()
         cursor = imgui.get_cursor_screen_pos()
         avail_w = imgui.get_content_region_available_width()
-        bar_color = imgui.get_color_u32_rgba(0.9, 0.75, 0.3, 0.8)
+        bar_color = imgui.get_color_u32_rgba(*CurrentTheme.PROMO_BANNER_BAR)
         draw_list.add_rect_filled(cursor[0], cursor[1], cursor[0] + avail_w, cursor[1] + 3, bar_color, 1.0)
         imgui.dummy(0, 6)
 
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.3, 1.0)
-        imgui.text(f"{feature_name} - Add-on at paypal.me/k00gar")
+        imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.PROMO_BANNER_GOLD)
+        imgui.text(f"{feature_name}: available as a FunGen add-on at paypal.me/k00gar")
         imgui.pop_style_color()
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+        imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.DESCRIPTION_TEXT)
         imgui.text_wrapped(description)
         imgui.pop_style_color()
         imgui.spacing()
@@ -687,7 +701,7 @@ class ControlPanelUI(
             "Supports OSR2/OSR6, Buttplug.io, Handy, and OSSM devices."
         )
         with _DisabledScope(True):
-            imgui.text_colored("Device: Not Connected", 0.7, 0.3, 0.3, 1.0)
+            imgui.text_colored("Device: Not Connected", *CurrentTheme.RED_LIGHT)
             imgui.separator()
             imgui.text("Connect a Device:")
             imgui.spacing()
@@ -730,19 +744,19 @@ class ControlPanelUI(
             with section_card("Axis Configuration##PreviewAxisConfig", tier="secondary",
                               open_by_default=False) as is_open:
                 if is_open:
-                    imgui.text_colored("Connect a device to configure axes", 0.5, 0.5, 0.5, 1.0)
+                    imgui.text_colored("Connect a device to configure axes", *CurrentTheme.GRAY_MEDIUM)
 
             # Live Control Integration
             with section_card("Live Control Integration##PreviewLiveControl", tier="secondary",
                               open_by_default=False) as is_open:
                 if is_open:
-                    imgui.text_colored("Enables real-time device control during video playback", 0.5, 0.5, 0.5, 1.0)
+                    imgui.text_colored("Enables real-time device control during video playback", *CurrentTheme.GRAY_MEDIUM)
 
             # Device Playback
             with section_card("Device Playback##PreviewPlayback", tier="secondary",
                               open_by_default=False) as is_open:
                 if is_open:
-                    imgui.text_colored("Play funscripts on connected devices", 0.5, 0.5, 0.5, 1.0)
+                    imgui.text_colored("Play funscripts on connected devices", *CurrentTheme.GRAY_MEDIUM)
 
     def _render_streamer_preview(self):
         """Render a preview of the Streamer add-on."""
@@ -759,7 +773,7 @@ class ControlPanelUI(
                     imgui.text_colored(
                         "Stream video to browsers/VR headsets with frame-perfect synchronization. "
                         "Supports zoom/pan controls, speed modes, and interactive device control.",
-                        0.7, 0.7, 0.7
+                        *CurrentTheme.DESCRIPTION_TEXT
                     )
                     imgui.pop_text_wrap_pos()
                     imgui.spacing()
@@ -787,7 +801,7 @@ class ControlPanelUI(
                     imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
                     imgui.text_colored(
                         "Browse your XBVR library in the VR viewer with scene thumbnails and funscript availability.",
-                        0.7, 0.7, 0.7
+                        *CurrentTheme.DESCRIPTION_TEXT
                     )
                     imgui.pop_text_wrap_pos()
                     imgui.spacing()
@@ -806,7 +820,7 @@ class ControlPanelUI(
                     imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
                     imgui.text_colored(
                         "Browse and load videos from your Stash library directly in the VR viewer.",
-                        0.7, 0.7, 0.7
+                        *CurrentTheme.DESCRIPTION_TEXT
                     )
                     imgui.pop_text_wrap_pos()
                     imgui.spacing()
@@ -847,14 +861,15 @@ class ControlPanelUI(
         events = app.event_handlers
         # Build set of hidden tracker folders from settings
         _settings = app.app_settings
+        _tcfg = _settings.config.tracking
         _hidden_folders = set()
-        if not _settings.get("tracker_show_legacy", False):
+        if not _tcfg.show_legacy_trackers:
             _hidden_folders.add("legacy")
-        if not _settings.get("tracker_show_experimental", True):
+        if not _tcfg.show_experimental_trackers:
             _hidden_folders.add("experimental")
-        if not _settings.get("tracker_show_community", True):
+        if not _tcfg.show_community_trackers:
             _hidden_folders.add("community")
-        if not _settings.get("tracker_show_tool", False):
+        if not _tcfg.show_tool_trackers:
             _hidden_folders.add("tool")
 
         _supporter_available = self._feat_supporter
@@ -921,28 +936,28 @@ class ControlPanelUI(
                 _tooltip_if_hovered("Filter tracker categories")
 
                 # --- Collapsible filter row ---
-                _chk_legacy = _settings.get("tracker_show_legacy", False)
-                _chk_exp = _settings.get("tracker_show_experimental", True)
-                _chk_comm = _settings.get("tracker_show_community", True)
-                _chk_tool = _settings.get("tracker_show_tool", False)
+                _chk_legacy = _tcfg.show_legacy_trackers
+                _chk_exp = _tcfg.show_experimental_trackers
+                _chk_comm = _tcfg.show_community_trackers
+                _chk_tool = _tcfg.show_tool_trackers
                 if self._tracker_filter_open:
                     imgui.text_disabled("Show:")
                     imgui.same_line()
                     ch_t, nv_t = imgui.checkbox("Tools##TrkFilterTool", _chk_tool)
                     if ch_t:
-                        _settings.set("tracker_show_tool", nv_t)
+                        _tcfg.show_tool_trackers = nv_t
                     imgui.same_line()
                     ch_l, nv_l = imgui.checkbox("Legacy##TrkFilterLeg", _chk_legacy)
                     if ch_l:
-                        _settings.set("tracker_show_legacy", nv_l)
+                        _tcfg.show_legacy_trackers = nv_l
                     imgui.same_line()
                     ch_e, nv_e = imgui.checkbox("Exp.##TrkFilterExp", _chk_exp)
                     if ch_e:
-                        _settings.set("tracker_show_experimental", nv_e)
+                        _tcfg.show_experimental_trackers = nv_e
                     imgui.same_line()
                     ch_c, nv_c = imgui.checkbox("Comm.##TrkFilterComm", _chk_comm)
                     if ch_c:
-                        _settings.set("tracker_show_community", nv_c)
+                        _tcfg.show_community_trackers = nv_c
 
                 if clicked and new_idx != cur_idx:
                     new_mode = modes_enum[new_idx]
@@ -956,7 +971,7 @@ class ControlPanelUI(
                         app_state.selected_tracker_name = new_mode
                         # Persist user choice (store tracker name directly)
                         if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                            app.app_settings.set("selected_tracker_name", new_mode)
+                            app.app_settings.config.tracking.selected_tracker_name = new_mode
 
                         # Set tracker mode using dynamic discovery
                         tr = app.tracker

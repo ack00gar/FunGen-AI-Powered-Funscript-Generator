@@ -12,6 +12,7 @@ from typing import Dict, List
 import imgui
 
 from application.utils.section_card import section_card
+from config.constants_colors import CurrentTheme
 
 
 # Mirrors the flag set used by ControlPanelUI / InfoGraphsUI in fixed mode:
@@ -35,7 +36,7 @@ def _render_panel_label(text: str) -> None:
     x_offset = (avail_w - text_size[0]) * 0.5
     if x_offset > 0:
         imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + x_offset)
-    imgui.text_colored(label, 0.45, 0.45, 0.50, 0.7)
+    imgui.text_colored(label, *CurrentTheme.GRAY_SUBDUED)
     imgui.spacing()
 
 
@@ -58,10 +59,11 @@ class LeftBottomBlock:
             if not getattr(app_state, 'show_left_bottom_block', True):
                 return
             imgui.set_next_window_size(380, 480, condition=imgui.FIRST_USE_EVER)
-            opened, vis = imgui.begin("Chapters & Bookmarks##LeftBottomFloat",
+            opened, vis = imgui.begin("FunGen: Chapters & Bookmarks##LeftBottomFloat",
                                        closable=True, flags=_FLOAT_FLAGS)
             if vis != getattr(app_state, 'show_left_bottom_block', True):
                 app_state.show_left_bottom_block = vis
+                self.app.app_settings.config.ui.show_left_bottom_block = vis
             if not opened:
                 imgui.end()
                 return
@@ -82,9 +84,13 @@ class LeftBottomBlock:
                 return
             if imgui.small_button("Open list...##lb_ch_open"):
                 app_state.show_chapter_list_window = True
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Open the full chapter list window (rename, re-time, delete, seek to any chapter).")
             imgui.same_line()
             if imgui.small_button("Types...##lb_ch_types"):
                 app_state.show_chapter_type_manager = True
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Manage chapter types (add custom categories, change colors).")
 
             if not chapters:
                 imgui.text_disabled("No chapters")
@@ -114,7 +120,7 @@ class LeftBottomBlock:
                 t = ch.start_frame_id / fps if fps else 0
                 is_current = ch.start_frame_id <= cur_frame <= ch.end_frame_id
                 if is_current:
-                    imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.85, 0.3, 1.0)
+                    imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.REFERENCE_MATCH_GOLD)
                 row_x, row_y = imgui.get_cursor_pos()
                 clicked = imgui.selectable(f"##lb_ch_{ch.unique_id}", False)[0]
                 if imgui.is_item_hovered():
@@ -152,9 +158,13 @@ class LeftBottomBlock:
                     mgrs = bm_ui._get_all_bookmark_managers()
                     if mgrs:
                         mgrs[0][1].add(t_ms)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Place a bookmark on Funscript 1 at the current playback time.")
             imgui.same_line()
             if imgui.small_button("Open list...##lb_bm_open"):
                 app_state.show_bookmark_list_window = True
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Open the full bookmark list window (rename, delete, jump to any bookmark).")
 
             if not all_bm:
                 imgui.text_disabled("No bookmarks")
@@ -174,7 +184,7 @@ class LeftBottomBlock:
                     return f"{h:d}:{m:02d}:{s:05.2f}"
                 return f"{int(secs // 60):02d}:{secs % 60:05.2f}"
 
-            tl_labels = [f"T{tl_num}" for tl_num, _, _ in all_bm]
+            tl_labels = [f"F{tl_num}" for tl_num, _, _ in all_bm]
             max_tl_w = max((imgui.calc_text_size(lb)[0] for lb in tl_labels), default=0.0)
             # Probe a representative time string for column width.
             sample_time = _fmt_bm(max_secs if all_bm else 0)
@@ -233,10 +243,11 @@ class RightBottomBlock:
             if not getattr(app_state, 'show_right_bottom_block', True):
                 return
             imgui.set_next_window_size(380, 480, condition=imgui.FIRST_USE_EVER)
-            opened, vis = imgui.begin("Plugins##RightBottomFloat",
+            opened, vis = imgui.begin("FunGen: Plugins##RightBottomFloat",
                                        closable=True, flags=_FLOAT_FLAGS)
             if vis != getattr(app_state, 'show_right_bottom_block', True):
                 app_state.show_right_bottom_block = vis
+                self.app.app_settings.config.ui.show_right_bottom_block = vis
             if not opened:
                 imgui.end()
                 return
@@ -247,6 +258,8 @@ class RightBottomBlock:
 
         if imgui.button("Open Pipeline...##rb_pipe", width=-1, height=24):
             app_state.show_plugin_pipeline = True
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Open the Plugin Pipeline window to chain post-processing plugins and run them as a single sequence.")
 
         if self._plugin_cache is None:
             self._build_cache()
@@ -286,12 +299,17 @@ def render_collapsed_chevron(side: str, x: float, y: float, w: float, h: float, 
     imgui.begin(f"##chev_{side}", flags=_WIN_FLAGS | imgui.WINDOW_NO_SCROLLBAR)
     label = ">" if side == 'left' else "<"
     if imgui.button(f"{label}##chev_btn_{side}", width=max(8, w - 4), height=24):
+        ui_cfg = app_state.app_settings.config.ui
         if side == 'left':
             app_state.show_left_top_block = True
             app_state.show_left_bottom_block = True
+            ui_cfg.show_left_top_block = True
+            ui_cfg.show_left_bottom_block = True
         else:
             app_state.show_right_top_block = True
             app_state.show_right_bottom_block = True
+            ui_cfg.show_right_top_block = True
+            ui_cfg.show_right_bottom_block = True
     if imgui.is_item_hovered():
         imgui.set_tooltip("Show panel")
     imgui.end()

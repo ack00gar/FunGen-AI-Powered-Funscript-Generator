@@ -5,12 +5,16 @@ This module provides the foundation for the plugin-based tracker architecture,
 allowing community developers to easily create new tracking algorithms.
 """
 
+# numpy/cv2 only appear in type hints; PEP 563 lets us skip importing them here.
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
-import numpy as np
 import logging
-import cv2
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 @dataclass
@@ -162,12 +166,16 @@ class TrackerResult:
 class BaseTracker(ABC):
     """
     Base class for all tracking algorithms.
-    
+
     Community developers should inherit from this class and implement all
     abstract methods. The tracker will be automatically discovered and
     made available in the UI.
     """
-    
+
+    # False = process_frame won't write to input. Lets VideoProcessor skip
+    # a 75MB memcpy per frame on 8K VR. Default True for safety.
+    mutates_input_frame: bool = True
+
     def __init__(self):
         self.logger = logging.getLogger(f"Tracker.{self.__class__.__name__}")
         self.app = None

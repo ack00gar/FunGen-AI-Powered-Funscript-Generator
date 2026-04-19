@@ -1,20 +1,20 @@
 """Export a chapter as a stream-copied video clip plus a sliced funscript.
 
-Uses PyAV to remux (no re-encode) the requested time window into a new mp4,
-then writes a sibling .funscript with timestamps rebased to 0. Boundary
-actions are injected at +0.001s from each edge by interpolating the source
-funscript so the clipped script doesn't begin or end mid-stroke at an
-arbitrary value.
+Uses a single ffmpeg subprocess to remux (no re-encode) the requested time
+window into a new mp4, then writes a sibling .funscript with timestamps
+rebased to 0. Boundary actions are injected at +0.001s from each edge by
+interpolating the source funscript so the clipped script doesn't begin or
+end mid-stroke at an arbitrary value.
 """
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 from typing import List, Optional, Tuple
 
-import av
-
 from common.frame_utils import frame_to_ms
+from video.ffmpeg_helpers import find_ffmpeg, subprocess_flags
 
 
 _BOUNDARY_OFFSET_MS = 1  # 0.001s, avoids partial-stroke artifacts at boundaries
@@ -66,33 +66,37 @@ def slice_funscript_actions(actions: List[dict], start_ms: int, end_ms: int) -> 
 
 
 def remux_video_segment(src_path: str, dst_path: str, start_s: float, end_s: float) -> bool:
-    """Stream-copy [start_s, end_s] from src to dst via PyAV (no re-encode)."""
+    """Stream-copy [start_s, end_s] from src to dst via a single ffmpeg call.
+
+    ``-ss`` before ``-i`` is input-level seek (fast, keyframe-aligned), which
+    is correct for stream-copy output: ffmpeg can only cut at keyframes
+    without re-encoding, so frame-accurate seek would produce a broken file.
+    ``-avoid_negative_ts make_zero`` rebases timestamps so the clipped mp4
+    starts at t=0 even if the keyframe landed slightly before start_s.
+    """
     if end_s <= start_s:
         return False
-    in_ = av.open(src_path)
-    out = av.open(dst_path, mode='w')
-    stream_map = {}
-    for s in in_.streams:
-        if s.type in ('video', 'audio'):
-            stream_map[s.index] = out.add_stream_from_template(s)
+    duration_s = end_s - start_s
+    cmd = [
+        find_ffmpeg(),
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", f"{start_s:.3f}",
+        "-i", src_path,
+        "-t", f"{duration_s:.3f}",
+        "-c", "copy",
+        "-avoid_negative_ts", "make_zero",
+        "-map", "0:v:0?",
+        "-map", "0:a:0?",
+        dst_path,
+    ]
     try:
-        in_.seek(int(start_s * av.time_base), any_frame=False, backward=True)
-        for packet in in_.demux():
-            if packet.dts is None or packet.stream.index not in stream_map:
-                continue
-            t = float(packet.pts * packet.stream.time_base) if packet.pts is not None else 0.0
-            if t > end_s:
-                break
-            if t < start_s:
-                continue
-            packet.pts = int((t - start_s) / packet.stream.time_base)
-            packet.dts = packet.pts
-            packet.stream = stream_map[packet.stream.index]
-            out.mux(packet)
-    finally:
-        out.close()
-        in_.close()
-    return True
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=subprocess_flags(),
+        )
+    except OSError:
+        return False
+    return result.returncode == 0 and os.path.isfile(dst_path) and os.path.getsize(dst_path) > 0
 
 
 def export_chapter_clip(src_video: str, dst_dir: str, chapter,

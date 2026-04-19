@@ -7,6 +7,7 @@ from application.utils.imgui_helpers import tooltip_if_hovered as _tooltip_if_ho
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card as _section_card
 from application.utils import primary_button_style, destructive_button_style
+from config.constants_colors import CurrentTheme
 
 # Canonical TCode channel → friendly name mapping (used across axis config UI)
 _CHANNEL_FRIENDLY = {
@@ -111,7 +112,7 @@ class AxisConfigMixin:
 
             # Device header
             device_name = self.device_manager.get_connected_device_name()
-            imgui.text_colored(f"{device_name}", 0.7, 0.7, 0.9)
+            imgui.text_colored(f"{device_name}", *CurrentTheme.PURPLE)
             imgui.same_line()
             if imgui.small_button(f"Auto-Detect##{device_id}"):
                 router.auto_detect(device_id, device_type, axis_assignments)

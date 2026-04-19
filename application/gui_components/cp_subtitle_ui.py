@@ -12,6 +12,7 @@ import time
 from application.utils import primary_button_style, destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card
+from config.constants_colors import CurrentTheme
 
 _logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ class SubtitleMixin:
             if o:
                 for start, end, name in steps:
                     if p >= end:
-                        imgui.text_colored(f"  {name}", 0.3, 0.8, 0.3, 1.0)
+                        imgui.text_colored(f"  {name}", *CurrentTheme.GREEN)
                     elif p >= start:
                         step_p = (p - start) / (end - start)
                         imgui.text(f"  {name}...")
@@ -197,7 +198,7 @@ class SubtitleMixin:
                     imgui.text_colored(f"{translated_count}/{speech_count} translated",
                                        1.0, 0.85, 0.2, 1.0)
                 else:
-                    imgui.text_colored(f"All translated", 0.3, 0.8, 0.3, 1.0)
+                    imgui.text_colored(f"All translated", *CurrentTheme.GREEN)
 
                 if track.source_language:
                     imgui.text_disabled(f"{track.source_language} \u2192 {track.target_language or 'en'}")
@@ -234,7 +235,7 @@ class SubtitleMixin:
                     tool._start_generate()
 
                 imgui.spacing()
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.5, 0.12, 0.12, 1.0)
+                imgui.push_style_color(imgui.COLOR_BUTTON, *CurrentTheme.DESTRUCTIVE_BG_DARK)
                 if imgui.button("Clear All##subclear", width=-1, height=26):
                     imgui.open_popup("Clear Subtitles?##SubClearCP")
                 imgui.pop_style_color()
@@ -267,12 +268,12 @@ class SubtitleMixin:
         """Render subtitle initialization error with retry."""
         err = getattr(self, '_subtitle_init_error', None)
         if err is not None:
-            imgui.text_colored(f"Failed: {err}", 1.0, 0.4, 0.4, 1.0)
+            imgui.text_colored(f"Failed: {err}", *CurrentTheme.RED_LIGHT)
             if isinstance(err, (ImportError, ModuleNotFoundError)):
                 imgui.spacing()
-                imgui.text_colored("Subtitle addon not found.", 1.0, 0.85, 0.2, 1.0)
+                imgui.text_colored("Subtitle addon not found.", *CurrentTheme.YELLOW_LIGHT)
             else:
-                imgui.text_colored("Check logs.", 1.0, 0.5, 0.0, 1.0)
+                imgui.text_colored("Check logs.", *CurrentTheme.ORANGE)
         else:
             imgui.text("Initializing...")
         imgui.spacing()

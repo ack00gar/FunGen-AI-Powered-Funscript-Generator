@@ -14,12 +14,31 @@ from dataclasses import dataclass
 from enum import Enum
 import numpy as np
 
-# GPU context management imports
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
+# GPU context management. torch is lazy-imported inside the methods that
+# actually probe/manage CUDA state so we don't pay ~1-2s on startup when
+# the user isn't on a CUDA machine. We don't even probe availability at
+# module load — `_ensure_torch()` tries the import on first call.
+torch = None
+_TORCH_TRIED = False
+TORCH_AVAILABLE = None  # Tri-state: None = not probed yet, True/False after.
+
+
+def _ensure_torch():
+    """Lazy torch import. Returns the module, or None if unavailable.
+
+    First call does the import; subsequent calls are a cached attribute read.
+    """
+    global torch, _TORCH_TRIED, TORCH_AVAILABLE
+    if _TORCH_TRIED:
+        return torch
+    _TORCH_TRIED = True
+    try:
+        import torch as _torch
+        torch = _torch
+        TORCH_AVAILABLE = True
+    except ImportError:
+        TORCH_AVAILABLE = False
+    return torch
 
 try:
     import cv2
@@ -145,11 +164,18 @@ class ProcessingThreadManager:
             'average_task_time': 0.0
         }
         
-        # GPU context management
-        self.gpu_available = TORCH_AVAILABLE and torch.cuda.is_available()
+        # GPU context management. On Apple Silicon (MPS) we never touch CUDA,
+        # so skip the torch import entirely — platform check is cheap.
+        import platform
+        _is_mac_arm = platform.system() == "Darwin" and platform.machine() == "arm64"
+        if _is_mac_arm:
+            self.gpu_available = False
+        else:
+            _t = _ensure_torch()  # may be first touch of torch in the process
+            self.gpu_available = _t is not None and _t.cuda.is_available()
         self.gpu_context_lock = threading.RLock()
         self.thread_gpu_contexts: Dict[str, bool] = {}
-        
+
         if self.gpu_available:
             self.primary_gpu_device = torch.cuda.current_device()
             self.logger.info(f"GPU available: {torch.cuda.get_device_name()}")

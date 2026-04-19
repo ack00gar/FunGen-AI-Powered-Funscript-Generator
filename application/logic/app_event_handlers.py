@@ -402,6 +402,12 @@ class AppEventHandlers:
         ALWAYS use this method instead of calling processor.seek_video() directly
         to ensure all UI elements stay synchronized.
         """
+        import time as _t
+        try:
+            self.app.app_state_ui.last_nav_activity_time = _t.monotonic()
+        except Exception:
+            pass
+
         # mpv review mode intercept — seek via IPC instead of FFmpeg
         mpv = getattr(self.app, '_mpv_controller', None)
         if mpv and mpv.is_active:

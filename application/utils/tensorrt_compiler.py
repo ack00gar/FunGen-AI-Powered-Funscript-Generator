@@ -19,12 +19,12 @@ except ImportError:
     torch = None
     TORCH_AVAILABLE = False
 
-try:
-    from ultralytics import YOLO
-    ULTRALYTICS_AVAILABLE = True
-except ImportError:
-    YOLO = None
-    ULTRALYTICS_AVAILABLE = False
+# Don't import ultralytics at module load — it pulls torch (~2s cold).
+# Availability probe uses importlib.util.find_spec; actual YOLO class is
+# imported inside the two methods (_validate_file, compile) that need it.
+import importlib.util as _importlib_util
+YOLO = None
+ULTRALYTICS_AVAILABLE = _importlib_util.find_spec("ultralytics") is not None
 
 try:
     import tensorrt
@@ -407,8 +407,9 @@ class TensorRTCompiler:
                 except Exception:
                     pass  # Don't fail compilation if callback fails
 
+            from ultralytics import YOLO  # lazy: pulls torch
             model = YOLO(pt_model_path)
-            
+
             if progress_callback:
                 try:
                     progress_callback("Exporting to TensorRT .engine (this may take a while)...")
@@ -589,6 +590,7 @@ class TensorRTCompiler:
             if not ultralytics_check.success:
                 return False
             
+            from ultralytics import YOLO  # lazy: pulls torch
             model = YOLO(model_path)
             # Try to access model info to verify it's valid
             _ = model.info

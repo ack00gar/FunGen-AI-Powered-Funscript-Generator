@@ -25,8 +25,10 @@ FPS_UPDATE_FRAME_COUNT = 30
 import time
 import numpy as np
 import cv2
-from collections import deque
+from collections import deque, Counter
 from typing import Dict, Any, Optional, List, Tuple
+
+from config import constants
 
 try:
     from ..core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
@@ -39,6 +41,8 @@ except ImportError:
 
 
 class YoloRoiTracker(BaseTracker):
+    mutates_input_frame = False  # process_frame only reads input; YOLO + cvtColor don't mutate it
+
     """
     YOLO-based ROI tracker for automated region detection.
 
@@ -57,10 +61,8 @@ class YoloRoiTracker(BaseTracker):
 
     def __init__(self):
         super().__init__()
-        
-        # Import constants once at the top
-        from config import constants
-        
+
+
         # YOLO model (via YoloDetectionHelper)
         self._yolo_helper = None
         self.yolo_model = None  # backward-compat alias (set to helper.det_model)
@@ -111,9 +113,9 @@ class YoloRoiTracker(BaseTracker):
         self.enable_inversion_detection = False  # Disabled by default, enabled via settings
         self.motion_mode = 'undetermined'  # 'thrusting', 'riding', or 'undetermined'
         self.motion_mode_history = deque(maxlen=30)  # Use deque for automatic size management
-        self.motion_inversion_threshold = 1.5
+        self.motion_inversion_threshold = constants.MOTION_INVERSION_THRESHOLD
         self.motion_mode_history_window = 30
-        self.inversion_detection_split_ratio = 3.0
+        self.inversion_detection_split_ratio = constants.INVERSION_DETECTION_SPLIT_RATIO
         
         # Flow calculation modes
         self.use_sparse_flow = False
@@ -125,10 +127,10 @@ class YoloRoiTracker(BaseTracker):
         self.y_offset = constants.DEFAULT_LIVE_TRACKER_Y_OFFSET
         self.x_offset = constants.DEFAULT_LIVE_TRACKER_X_OFFSET
         
-        # Class priorities for interaction detection
+        # Class priorities for interaction detection (keys match constants.CLASS_NAMES_TO_IDS).
         self.CLASS_PRIORITY = {
-            'face': 1, 'hand': 2, 'finger': 3, 'breast': 4, 
-            'pussy': 5, 'ass': 6, 'dildo': 7, 'other': 99
+            'face': 1, 'hand': 2, 'breast': 3,
+            'pussy': 4, 'butt': 5, 'other': 99
         }
         
         # Penis size tracking for VR optimization
@@ -195,28 +197,25 @@ class YoloRoiTracker(BaseTracker):
             # Load settings from control panel configuration
             if hasattr(app_instance, 'app_settings'):
                 settings = app_instance.app_settings
-                
+                cfg = settings.config.tracking
+
                 # Detection & ROI settings (from control panel)
-                self.confidence_threshold = settings.get('live_tracker_confidence_threshold', 0.7)
-                self.roi_padding = settings.get('live_tracker_roi_padding', 20)
-                self.roi_update_interval = settings.get('live_tracker_roi_update_interval', 3)
-                self.roi_smoothing_factor = settings.get('live_tracker_roi_smoothing_factor', 0.7)
-                self.max_frames_for_roi_persistence = settings.get('live_tracker_roi_persistence_frames', 30)
-                
+                self.confidence_threshold = cfg.live_confidence_threshold
+                self.roi_padding = cfg.live_roi_padding
+                self.roi_update_interval = cfg.live_roi_update_interval
+                self.roi_smoothing_factor = cfg.live_roi_smoothing_factor
+                self.max_frames_for_roi_persistence = cfg.live_roi_persistence_frames
+
                 # Optical flow settings
-                self.use_sparse_flow = settings.get('live_tracker_use_sparse_flow', False)
-                dis_preset = settings.get('live_tracker_dis_flow_preset', 'ULTRAFAST').lower()
-                self.dis_finest_scale = settings.get('live_tracker_dis_finest_scale', 0)
-                
+                self.use_sparse_flow = cfg.live_use_sparse_flow
+                dis_preset = cfg.live_dis_flow_preset.lower()
+                self.dis_finest_scale = cfg.live_dis_finest_scale
+
                 # Output signal generation settings
-                self.sensitivity = settings.get('live_tracker_sensitivity', 10.0)
-                self.base_amplification_factor = settings.get('live_tracker_base_amplification', 1.0)
-                self.class_specific_amplification_multipliers = settings.get('live_tracker_class_amp_multipliers', {
-                    'face': 1.0, 'hand': 1.0, 'finger': 1.0, 'breast': 1.0,
-                    'pussy': 1.2, 'ass': 1.2, 'dildo': 1.0
-                })
-                from config import constants as config_constants
-                self.flow_history_window_smooth = settings.get('live_tracker_flow_smoothing_window', config_constants.DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW)
+                self.sensitivity = cfg.live_sensitivity
+                self.base_amplification_factor = cfg.live_base_amplification
+                self.class_specific_amplification_multipliers = cfg.live_class_amp_multipliers
+                self.flow_history_window_smooth = cfg.live_flow_smoothing_window
                 
                 # Update flow history deques with new window size
                 self.primary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
@@ -251,7 +250,7 @@ class YoloRoiTracker(BaseTracker):
             
             # Fallback: Check app settings for YOLO model path (most common location)
             if not yolo_model_path and hasattr(app_instance, 'app_settings'):
-                yolo_model_path = app_instance.app_settings.get('yolo_det_model_path', None)
+                yolo_model_path = app_instance.app_settings.config.models.yolo_det_path or None
                 if yolo_model_path:
                     self.logger.info(f"Using YOLO model path from app settings: {yolo_model_path}")
             
@@ -281,8 +280,7 @@ class YoloRoiTracker(BaseTracker):
             
             if yolo_model_path:
                 try:
-                    from config import constants as config_constants
-                    device = getattr(config_constants, 'DEVICE', 'auto')
+                    device = getattr(constants, 'DEVICE', 'auto')
 
                     self.yolo_model_path = yolo_model_path
                     self._yolo_helper = YoloDetectionHelper(
@@ -351,28 +349,27 @@ class YoloRoiTracker(BaseTracker):
             if not self.app or not hasattr(self.app, 'app_settings'):
                 return False
                 
-            settings = self.app.app_settings
-            
+            cfg = self.app.app_settings.config.tracking
+
             # Update detection & ROI settings
-            self.confidence_threshold = settings.get('live_tracker_confidence_threshold', self.confidence_threshold)
-            self.roi_padding = settings.get('live_tracker_roi_padding', self.roi_padding)
-            self.roi_update_interval = settings.get('live_tracker_roi_update_interval', self.roi_update_interval)
-            self.roi_smoothing_factor = settings.get('live_tracker_roi_smoothing_factor', self.roi_smoothing_factor)
-            self.max_frames_for_roi_persistence = settings.get('live_tracker_roi_persistence_frames', self.max_frames_for_roi_persistence)
-            
+            self.confidence_threshold = cfg.live_confidence_threshold
+            self.roi_padding = cfg.live_roi_padding
+            self.roi_update_interval = cfg.live_roi_update_interval
+            self.roi_smoothing_factor = cfg.live_roi_smoothing_factor
+            self.max_frames_for_roi_persistence = cfg.live_roi_persistence_frames
+
             # Update optical flow settings
-            self.use_sparse_flow = settings.get('live_tracker_use_sparse_flow', self.use_sparse_flow)
-            dis_preset = settings.get('live_tracker_dis_flow_preset', 'ULTRAFAST').lower()
-            self.dis_finest_scale = settings.get('live_tracker_dis_finest_scale', self.dis_finest_scale)
-            
+            self.use_sparse_flow = cfg.live_use_sparse_flow
+            dis_preset = cfg.live_dis_flow_preset.lower()
+            self.dis_finest_scale = cfg.live_dis_finest_scale
+
             # Update signal generation settings
             old_sensitivity = self.sensitivity
-            self.sensitivity = settings.get('live_tracker_sensitivity', self.sensitivity)
-            self.base_amplification_factor = settings.get('live_tracker_base_amplification', self.base_amplification_factor)
-            self.class_specific_amplification_multipliers = settings.get('live_tracker_class_amp_multipliers', self.class_specific_amplification_multipliers)
-            
-            from config import constants as config_constants
-            self.flow_history_window_smooth = settings.get('live_tracker_flow_smoothing_window', self.flow_history_window_smooth)
+            self.sensitivity = cfg.live_sensitivity
+            self.base_amplification_factor = cfg.live_base_amplification
+            self.class_specific_amplification_multipliers = cfg.live_class_amp_multipliers
+
+            self.flow_history_window_smooth = cfg.live_flow_smoothing_window
             
             # Log significant changes
             if abs(old_sensitivity - self.sensitivity) > 0.1:
@@ -629,72 +626,72 @@ class YoloRoiTracker(BaseTracker):
         if not self.app:
             return False
 
-        settings = self.app.app_settings
+        cfg = self.app.app_settings.config.tracking
 
         if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu")[0]:
-            cur_conf = settings.get("live_tracker_confidence_threshold")
+            cur_conf = cfg.live_confidence_threshold
             ch, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", cur_conf, 0.1, 0.95, "%.2f")
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Minimum confidence for object detection (higher = fewer false positives, lower = more detections)")
             if ch and new_conf != cur_conf:
-                settings.set("live_tracker_confidence_threshold", new_conf)
+                cfg.live_confidence_threshold = new_conf
                 self.confidence_threshold = new_conf
 
-            cur_pad = settings.get("live_tracker_roi_padding")
+            cur_pad = cfg.live_roi_padding
             ch, new_pad = imgui.input_int("ROI Padding##ROIPadTrackerMenu", cur_pad)
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Pixels to expand the region of interest beyond detected object (larger = more context)")
             if ch:
                 v = max(0, new_pad)
                 if v != cur_pad:
-                    settings.set("live_tracker_roi_padding", v)
+                    cfg.live_roi_padding = v
                     self.roi_padding = v
 
-            cur_int = settings.get("live_tracker_roi_update_interval")
+            cur_int = cfg.live_roi_update_interval
             ch, new_int = imgui.input_int("ROI Update Interval (frames)##ROIIntervalTrackerMenu", cur_int)
             if imgui.is_item_hovered():
                 imgui.set_tooltip("How often to run object detection (higher = better performance, lower = more responsive tracking)")
             if ch:
                 v = max(1, new_int)
                 if v != cur_int:
-                    settings.set("live_tracker_roi_update_interval", v)
+                    cfg.live_roi_update_interval = v
                     self.roi_update_interval = v
 
-            cur_sm = settings.get("live_tracker_roi_smoothing_factor")
+            cur_sm = cfg.live_roi_smoothing_factor
             ch, new_sm = imgui.slider_float("ROI Smoothing Factor##ROISmoothTrackerMenu", cur_sm, 0.0, 1.0, "%.2f")
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Smooths ROI position changes between frames (0=instant changes, 1=maximum smoothing)")
             if ch and new_sm != cur_sm:
-                settings.set("live_tracker_roi_smoothing_factor", new_sm)
+                cfg.live_roi_smoothing_factor = new_sm
                 self.roi_smoothing_factor = new_sm
 
-            cur_persist = settings.get("live_tracker_roi_persistence_frames")
+            cur_persist = cfg.live_roi_persistence_frames
             ch, new_pf = imgui.input_int("ROI Persistence (frames)##ROIPersistTrackerMenu", cur_persist)
             if imgui.is_item_hovered():
                 imgui.set_tooltip("How many frames to keep tracking after losing detection (0=stop immediately, higher=keep tracking longer)")
             if ch:
                 v = max(0, new_pf)
                 if v != cur_persist:
-                    settings.set("live_tracker_roi_persistence_frames", v)
+                    cfg.live_roi_persistence_frames = v
                     self.max_frames_for_roi_persistence = v
 
         if imgui.collapsing_header("Output Signal##ROISignalTrackerMenu")[0]:
-            cur_sens = settings.get("live_tracker_sensitivity")
+            cur_sens = cfg.live_sensitivity
             ch, ns = imgui.slider_float("Sensitivity##ROISensTrackerMenu", cur_sens, 0.0, 100.0, "%.1f")
             if imgui.is_item_hovered():
                 imgui.set_tooltip("How responsive the output is to motion changes (higher = more sensitive to small movements)")
             if ch and ns != cur_sens:
-                settings.set("live_tracker_sensitivity", ns)
+                cfg.live_sensitivity = ns
                 self.sensitivity = ns
 
-            cur_amp = settings.get("live_tracker_base_amplification")
+            cur_amp = cfg.live_base_amplification
             ch, na = imgui.slider_float("Amplification##ROIBaseAmpTrackerMenu", cur_amp, 0.1, 5.0, "%.2f")
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Multiplier for output range (higher = more movement, lower = gentler motion)")
             if ch:
                 v = max(0.1, na)
                 if v != cur_amp:
-                    settings.set("live_tracker_base_amplification", v)
+                    cfg.live_base_amplification = v
                     self.base_amplification_factor = v
 
         return True
@@ -737,9 +734,8 @@ class YoloRoiTracker(BaseTracker):
     # Private helper methods
     
     def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Basic frame preprocessing."""
-        # Placeholder for any frame preprocessing needed
-        return frame.copy()
+        """Basic frame preprocessing (no-op: downstream YOLO + cvtColor don't mutate)."""
+        return frame
     
     def _should_run_detection(self) -> bool:
         """Determine if object detection should run this frame."""
@@ -1064,7 +1060,7 @@ class YoloRoiTracker(BaseTracker):
         if self.enable_inversion_detection and is_vr_video:
             # This logic now ONLY runs for VR videos.
             current_dominant_motion = 'undetermined'
-            motion_threshold = getattr(self, 'motion_inversion_threshold', 1.5)
+            motion_threshold = getattr(self, 'motion_inversion_threshold', constants.MOTION_INVERSION_THRESHOLD)
             if lower_mag > upper_mag * motion_threshold:
                 current_dominant_motion = 'thrusting'
             elif upper_mag > lower_mag * motion_threshold:
@@ -1076,7 +1072,6 @@ class YoloRoiTracker(BaseTracker):
                 self.motion_mode_history.pop(0)
 
             if self.motion_mode_history:
-                from collections import Counter
                 most_common_mode, count = Counter(self.motion_mode_history).most_common(1)[0]
                 # Solidly switch mode if a new one is dominant in the history window.
                 if count > window_size // 2 and self.motion_mode != most_common_mode:
@@ -1212,7 +1207,7 @@ class YoloRoiTracker(BaseTracker):
         upper_magnitude = 0.0
 
         if is_vr_video and hasattr(self, 'inversion_detection_split_ratio'):
-            split_ratio = getattr(self, 'inversion_detection_split_ratio', 3.0)
+            split_ratio = getattr(self, 'inversion_detection_split_ratio', constants.INVERSION_DETECTION_SPLIT_RATIO)
             if split_ratio > 1.0:
                 lower_region_h = int(h / split_ratio)
                 if lower_region_h > 0 and lower_region_h < h:
@@ -1221,7 +1216,7 @@ class YoloRoiTracker(BaseTracker):
                     upper_magnitude = np.median(np.abs(upper_region_flow_vertical))
                     lower_magnitude = np.median(np.abs(lower_region_flow_vertical))
 
-                    motion_threshold = getattr(self, 'motion_inversion_threshold', 1.5)
+                    motion_threshold = getattr(self, 'motion_inversion_threshold', constants.MOTION_INVERSION_THRESHOLD)
                     if lower_magnitude > upper_magnitude * motion_threshold:
                         dominant_flow_region = flow[h - lower_region_h:h, :, :]
                         self.logger.debug("Thrusting pattern dominant. Using lower ROI for flow calculation.")
@@ -1319,7 +1314,7 @@ class YoloRoiTracker(BaseTracker):
             # Handle motion mode detection for VR
             if self.enable_inversion_detection and is_vr_video:
                 from collections import Counter
-                motion_threshold = getattr(self, 'motion_inversion_threshold', 1.5)
+                motion_threshold = getattr(self, 'motion_inversion_threshold', constants.MOTION_INVERSION_THRESHOLD)
                 current_dominant_motion = 'undetermined'
                 
                 if lower_mag > upper_mag * motion_threshold:
@@ -1503,13 +1498,17 @@ class YoloRoiTracker(BaseTracker):
         """Get color for a specific class."""
         color_map = {
             'penis': (0, 255, 0),      # Green
-            'face': (255, 0, 0),       # Blue  
+            'glans': (0, 200, 0),      # Dark green
+            'face': (255, 0, 0),       # Blue
             'hand': (0, 255, 255),     # Yellow
-            'finger': (255, 255, 0),   # Cyan
             'breast': (255, 0, 255),   # Magenta
             'pussy': (128, 0, 128),    # Purple
-            'ass': (255, 165, 0),      # Orange
-            'persisting': (128, 128, 128)  # Gray
+            'butt': (255, 165, 0),     # Orange
+            'anus': (200, 100, 50),    # Dark orange
+            'navel': (180, 180, 255),  # Light blue
+            'foot': (120, 200, 120),   # Light green
+            'hips center': (255, 255, 255),  # White
+            'persisting': (128, 128, 128),   # Gray
         }
         return color_map.get(class_name.lower() if class_name else 'persisting', (255, 255, 255))
     
@@ -1517,17 +1516,17 @@ class YoloRoiTracker(BaseTracker):
         """Calculate effective amplification factor with real-time settings updates."""
         # Read from app settings in real-time for control panel responsiveness
         if hasattr(self.app, 'app_settings') and self.app.app_settings:
-            base_factor = self.app.app_settings.get('live_tracker_base_amplification', getattr(self, 'base_amplification_factor', 1.0))
-            class_multipliers = self.app.app_settings.get('live_tracker_class_amp_multipliers', getattr(self, 'class_specific_amplification_multipliers', {}))
+            cfg = self.app.app_settings.config.tracking
+            base_factor = cfg.live_base_amplification
+            class_multipliers = cfg.live_class_amp_multipliers or getattr(self, 'class_specific_amplification_multipliers', {})
         else:
             base_factor = getattr(self, 'base_amplification_factor', 1.0)
             class_multipliers = getattr(self, 'class_specific_amplification_multipliers', {})
         
         if not class_multipliers:
-            # Default multipliers from original constants
             class_multipliers = {
-                'face': 1.0, 'hand': 1.0, 'finger': 1.0, 'breast': 1.0,
-                'pussy': 1.2, 'ass': 1.2, 'dildo': 1.0
+                'face': 1.0, 'hand': 1.0, 'breast': 1.0,
+                'pussy': 1.2, 'butt': 1.2,
             }
         
         # Apply class-specific multiplier if main interaction class is set
@@ -1541,14 +1540,14 @@ class YoloRoiTracker(BaseTracker):
     def _get_current_sensitivity(self) -> float:
         """Get current sensitivity with real-time settings updates."""
         if hasattr(self.app, 'app_settings') and self.app.app_settings:
-            return self.app.app_settings.get('live_tracker_sensitivity', getattr(self, 'sensitivity', 10.0))
+            return self.app.app_settings.config.tracking.live_sensitivity
         else:
             return getattr(self, 'sensitivity', 10.0)
-    
+
     def _get_current_confidence_threshold(self) -> float:
         """Get current confidence threshold with real-time settings updates."""
         if hasattr(self.app, 'app_settings') and self.app.app_settings:
-            return self.app.app_settings.get('live_tracker_confidence_threshold', getattr(self, 'confidence_threshold', 0.7))
+            return self.app.app_settings.config.tracking.live_confidence_threshold
         else:
             return getattr(self, 'confidence_threshold', 0.7)
     

@@ -20,6 +20,10 @@ class AppFunscriptProcessor:
 
         # Chapters and Scripting Range
         self.video_chapters: List[VideoSegment] = []
+        # Playback hot-path cache: (chapter, len at last hit). Length guard
+        # invalidates on any add/remove of chapters.
+        self._last_chapter_hit: Optional[VideoSegment] = None
+        self._last_chapter_list_len: int = 0
         self.chapter_bar_height = 20
 
         # These would be managed and potentially loaded by ProjectManager
@@ -145,42 +149,51 @@ class AppFunscriptProcessor:
         This avoids needing to instantiate a UI class in the logic layer.
         """
         # Note: These setting keys match the ones saved by the UI in interactive_timeline.py
+        fs_cfg = self.app.app_settings.config.funscript
         return {
             'presmoothing': {
-                'enabled': self.app.app_settings.get("timeline1_ultimate_presmoothing_enabled", True),
-                'max_window_size': self.app.app_settings.get("timeline1_ultimate_presmoothing_max_window", 15)
+                'enabled': fs_cfg.t1_presmoothing_enabled,
+                'max_window_size': fs_cfg.t1_presmoothing_max_window
             },
             'peaks': {
-                'enabled': self.app.app_settings.get("timeline1_ultimate_peaks_enabled", True),
-                'prominence': self.app.app_settings.get("timeline1_ultimate_peaks_prominence", 10),
+                'enabled': fs_cfg.t1_peaks_enabled,
+                'prominence': fs_cfg.t1_peaks_prominence,
                 'distance': 1
             },
             'recovery': {
-                'enabled': self.app.app_settings.get("timeline1_ultimate_recovery_enabled", True),
-                'threshold_factor': self.app.app_settings.get("timeline1_ultimate_recovery_threshold", 1.8)
+                'enabled': fs_cfg.t1_recovery_enabled,
+                'threshold_factor': fs_cfg.t1_recovery_threshold
             },
             'normalization': {
-                'enabled': self.app.app_settings.get("timeline1_ultimate_normalization_enabled", True)
+                'enabled': fs_cfg.t1_normalization_enabled
             },
             # Regeneration is disabled
             'speed_limiter': {
-                'enabled': self.app.app_settings.get("timeline1_ultimate_speed_limit_enabled", True),
-                'speed_threshold': self.app.app_settings.get("timeline1_ultimate_speed_threshold", 500.0)
+                'enabled': fs_cfg.t1_speed_limit_enabled,
+                'speed_threshold': fs_cfg.t1_speed_threshold
             }
         }
 
     def get_chapter_at_frame(self, frame_index: int) -> Optional[VideoSegment]:
         """
-        Efficiently finds the chapter that contains the given frame index.
+        Finds the chapter that contains the given frame index.
         Returns None if the frame is not within any chapter (i.e., in a gap).
-        Assumes chapters are sorted by start_frame_id.
         """
-        # This is a simple linear scan. For a huge number of chapters,
-        # a binary search (bisect_right) would be more efficient.
-        # For typical use cases, this is fast enough and simpler.
-        for chapter in self.video_chapters:
+        chapters = self.video_chapters
+        n = len(chapters)
+        # Fast path: during playback consecutive calls target the same chapter.
+        # Length guard invalidates the cache on any add/remove.
+        last = self._last_chapter_hit
+        if (last is not None and self._last_chapter_list_len == n
+                and last.start_frame_id <= frame_index <= last.end_frame_id):
+            return last
+        for chapter in chapters:
             if chapter.start_frame_id <= frame_index <= chapter.end_frame_id:
+                self._last_chapter_hit = chapter
+                self._last_chapter_list_len = n
                 return chapter
+        self._last_chapter_hit = None
+        self._last_chapter_list_len = n
         return None
 
     def get_funscript_obj(self) -> Optional[MultiAxisFunscript]:
@@ -440,7 +453,8 @@ class AppFunscriptProcessor:
         return True
 
     def create_new_chapter_from_data(self, data: Dict,
-                                     return_chapter_object: bool = False):  # Added return_chapter_object
+                                     return_chapter_object: bool = False,
+                                     _skip_undo_record: bool = False):
         self.logger.info(f"Attempting to create new chapter with data: {data}")
         new_chapter = None  # Initialize
         try:
@@ -523,9 +537,9 @@ class AppFunscriptProcessor:
                 f"Successfully created new chapter: {new_chapter.unique_id} ({new_chapter.position_short_name}) with color {new_chapter.color}")
             self.app.set_status_message(f"Chapter '{new_chapter.position_short_name}' created.")
 
-            # Unified undo
-            from application.classes.undo_manager import CreateChapterCmd
-            self.app.undo_manager.push_done(CreateChapterCmd(new_chapter.unique_id, data))
+            if not _skip_undo_record:
+                from application.classes.undo_manager import CreateChapterCmd
+                self.app.undo_manager.push_done(CreateChapterCmd(new_chapter.unique_id, data))
         except ValueError:
             self.logger.error("Invalid frame number format for new chapter.")
             self.app.set_status_message("Error: Frame numbers must be integers.", level=logging.ERROR)
@@ -535,7 +549,8 @@ class AppFunscriptProcessor:
 
         return new_chapter if return_chapter_object else None
 
-    def update_chapter_from_data(self, chapter_id: str, new_data: Dict):
+    def update_chapter_from_data(self, chapter_id: str, new_data: Dict,
+                                 _skip_undo_record: bool = False):
         self.logger.info(f"Attempting to update chapter {chapter_id} with data: {new_data}")
         chapter_to_update = next((ch for ch in self.video_chapters if ch.unique_id == chapter_id), None)
 
@@ -640,8 +655,9 @@ class AppFunscriptProcessor:
                 'source': chapter_to_update.source,
                 'color': chapter_to_update.color,
             }
-            from application.classes.undo_manager import UpdateChapterCmd
-            self.app.undo_manager.push_done(UpdateChapterCmd(chapter_id, _old_fields, _new_fields))
+            if not _skip_undo_record:
+                from application.classes.undo_manager import UpdateChapterCmd
+                self.app.undo_manager.push_done(UpdateChapterCmd(chapter_id, _old_fields, _new_fields))
         except ValueError:
             self.logger.error("Invalid frame number format for chapter update.")
             self.app.set_status_message("Error: Frame numbers must be integers.", level=logging.ERROR)
@@ -1269,7 +1285,8 @@ class AppFunscriptProcessor:
                 self.app.undo_manager.push_done(CompoundCmd(cmds, f"Delete Chapter Points") if len(cmds) > 1 else cmds[0])
 
     def merge_selected_chapters(self, chapter1: VideoSegment, chapter2: VideoSegment,
-                                return_chapter_object: bool = False):
+                                return_chapter_object: bool = False,
+                                _skip_undo_record: bool = False):
         if not chapter1 or not chapter2:
             self.logger.error("Two chapters must be provided for merging.")
             return
@@ -1334,7 +1351,13 @@ class AppFunscriptProcessor:
         self.app.project_manager.project_dirty = True
         self.app.app_state_ui.heatmap_dirty = True
         self.app.app_state_ui.funscript_preview_dirty = True
-        # TODO: Add Undo/Redo record
+
+        if not _skip_undo_record:
+            undo_mgr = getattr(self.app, 'undo_manager', None)
+            if undo_mgr is not None:
+                from application.classes.undo_manager import MergeChaptersCmd
+                undo_mgr.push_done(MergeChaptersCmd(chapter1, chapter2, merged_chapter))
+
         self.app.set_status_message("Chapters merged successfully.")
         self.reset_scripting_range()
         self.app.set_status_message("Chapters merged. Scripting range cleared.")

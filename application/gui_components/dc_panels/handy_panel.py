@@ -6,6 +6,7 @@ from application.utils.imgui_helpers import tooltip_if_hovered as _tooltip_if_ho
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card as _section_card
 from application.utils import primary_button_style, destructive_button_style
+from config.constants_colors import CurrentTheme
 
 
 class HandyPanelMixin:
@@ -69,7 +70,7 @@ class HandyPanelMixin:
                         actions = funscript_obj.get_axis_actions(
                             'primary' if tl_num == 1 else ('secondary' if tl_num == 2 else axis_name))
                         if actions:
-                            label = f"Timeline {tl_num} ({axis_name})"
+                            label = f"Funscript {tl_num} ({axis_name})"
                             # Show upload indicator (uses revision counter for reliable change detection)
                             uploaded_tls = getattr(self, '_handy_uploaded_timelines', {})
                             current_hash = getattr(self.app.funscript_processor, '_revision', 0)
@@ -80,13 +81,13 @@ class HandyPanelMixin:
 
                     if not upload_timelines:
                         upload_timelines = [1]
-                        upload_labels = ["Timeline 1 (stroke)"]
+                        upload_labels = ["Funscript 1 (stroke)"]
 
                     # Timeline combo
                     selected_tl_idx = getattr(self, '_handy_upload_tl_idx', 0)
                     if selected_tl_idx >= len(upload_labels):
                         selected_tl_idx = 0
-                    imgui.text("Upload timeline:")
+                    imgui.text("Upload funscript:")
                     imgui.same_line()
                     avail_w = imgui.get_content_region_available()[0]
                     imgui.push_item_width(avail_w)
@@ -108,7 +109,7 @@ class HandyPanelMixin:
                     script_changed = last_hash is not None and current_hash != last_hash
 
                     if script_changed:
-                        imgui.text_colored("Funscript modified since last upload", 1.0, 0.7, 0.0, 1.0)
+                        imgui.text_colored("Funscript modified since last upload", *CurrentTheme.ORANGE)
 
                         # Auto re-upload on play: invalidate prepared state
                         auto_reupload = self.app.app_settings.get("handy_auto_reupload_on_play", True)
@@ -127,7 +128,7 @@ class HandyPanelMixin:
                         self._upload_funscript_to_handy(timeline_num=selected_tl_num)
                     _tooltip_if_hovered("Upload selected timeline's funscript to Handy for HSSP playback")
                 else:
-                    imgui.text_colored("No funscript loaded", 0.7, 0.5, 0.0)
+                    imgui.text_colored("No funscript loaded", *CurrentTheme.ORANGE_DARK)
                     _tooltip_if_hovered("Load a funscript first")
 
             imgui.spacing()

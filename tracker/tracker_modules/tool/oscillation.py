@@ -32,6 +32,8 @@ import config.constants as constants
 
 
 class OscillationExperimental2Tracker(BaseTracker):
+    mutates_input_frame = False
+
     """
     Hybrid oscillation detector that combines experimental timing precision
     with legacy amplification and signal conditioning.
@@ -103,7 +105,7 @@ class OscillationExperimental2Tracker(BaseTracker):
             self.oscillation_funscript_secondary_pos = 50
             
             # Enhanced signal mastering using helper module
-            live_amp = self.app.app_settings.get("live_oscillation_dynamic_amp_enabled", True) if self.app else True
+            live_amp = self.app.app_settings.config.tracking.oscillation_dynamic_amp_enabled if self.app else True
             self.signal_amplifier = SignalAmplifier(
                 history_size=120,  # 4 seconds @ 30fps
                 enable_live_amp=live_amp,
@@ -606,20 +608,21 @@ class OscillationExperimental2Tracker(BaseTracker):
             "Finer grids (higher numbers) are more precise but use more CPU.\n"
             "8=Very Coarse  20=Balanced  40=Fine  80=Very Fine"
         )
-        cur_grid = settings.get("oscillation_detector_grid_size", 20)
+        cfg = settings.config.tracking
+        cur_grid = cfg.oscillation_grid_size
         imgui.push_item_width(200)
         ch, nv = imgui.slider_int("##GridSize", cur_grid, 8, 80)
         if ch:
             valid = [8, 10, 16, 20, 32, 40, 64, 80]
             closest = min(valid, key=lambda x: abs(x - nv))
             if closest != cur_grid:
-                settings.set("oscillation_detector_grid_size", closest)
+                cfg.oscillation_grid_size = closest
                 self.oscillation_grid_size = closest
                 self.oscillation_block_size = constants.YOLO_INPUT_SIZE // closest
         imgui.same_line()
         if imgui.button("Reset##ResetGridSize"):
             if cur_grid != 20:
-                settings.set("oscillation_detector_grid_size", 20)
+                cfg.oscillation_grid_size = 20
                 self.oscillation_grid_size = 20
                 self.oscillation_block_size = constants.YOLO_INPUT_SIZE // 20
         imgui.pop_item_width()
@@ -666,28 +669,28 @@ class OscillationExperimental2Tracker(BaseTracker):
 
         # --- Decay Behavior ---
         imgui.separator()
-        cur_decay = settings.get("oscillation_enable_decay", True)
+        cur_decay = cfg.oscillation_enable_decay
         ch, nv_decay = imgui.checkbox("Enable Decay Mechanism##EnableDecay", cur_decay)
         if ch and nv_decay != cur_decay:
-            settings.set("oscillation_enable_decay", nv_decay)
+            cfg.oscillation_enable_decay = nv_decay
         _tip("Gradually return to center when no motion is detected")
 
         if cur_decay:
             imgui.text("Hold Duration (ms)")
-            cur_hold = settings.get("oscillation_hold_duration_ms", 250)
+            cur_hold = cfg.oscillation_hold_duration_ms
             imgui.push_item_width(150)
             ch, nv_hold = imgui.slider_int("##HoldDuration", cur_hold, 50, 1000)
             if ch and nv_hold != cur_hold:
-                settings.set("oscillation_hold_duration_ms", nv_hold)
+                cfg.oscillation_hold_duration_ms = nv_hold
             imgui.pop_item_width()
             _tip("How long to hold position before starting decay")
 
             imgui.text("Decay Factor")
-            cur_decay_factor = settings.get("oscillation_decay_factor", 0.95)
+            cur_decay_factor = cfg.oscillation_decay_factor
             imgui.push_item_width(150)
             ch, nv_decay_factor = imgui.slider_float("##DecayFactor", cur_decay_factor, 0.85, 0.99, "%.3f")
             if ch and nv_decay_factor != cur_decay_factor:
-                settings.set("oscillation_decay_factor", nv_decay_factor)
+                cfg.oscillation_decay_factor = nv_decay_factor
             imgui.pop_item_width()
             _tip("How quickly to decay towards center (0.95 = slow, 0.85 = fast)")
 

@@ -304,7 +304,7 @@ class CaptureManager:
     def _get_output_dir(self) -> str:
         """Get the output directory for capture funscripts."""
         if self._app:
-            output_base = self._app.app_settings.get("output_folder_path", "")
+            output_base = self._app.app_settings.config.output.folder_path
             if output_base and os.path.isdir(output_base):
                 capture_dir = os.path.join(output_base, "live_captures")
                 return capture_dir

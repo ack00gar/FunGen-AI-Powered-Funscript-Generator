@@ -98,6 +98,10 @@ class FFmpegBuildersMixin:
             if self.is_hd_active and self.determined_video_type == '2D':
                 display_dims = (self._display_frame_w, self._display_frame_h)
 
+            from video import vr_panel
+            thumb_eye = vr_panel.read_setting(
+                getattr(self.app, 'app_settings', None),
+                default=vr_panel.EYE_LEFT)
             extractor = ThumbnailExtractor(
                 video_path=self._active_video_source_path,
                 fps=self.fps,
@@ -107,6 +111,7 @@ class FFmpegBuildersMixin:
                 vr_fov=getattr(self, 'vr_fov', 190),
                 vr_pitch=getattr(self, 'vr_pitch', 0.0),
                 display_dimensions=display_dims,
+                eye=thumb_eye,
                 logger=self.logger,
             )
             if extractor.is_open:
@@ -120,25 +125,38 @@ class FFmpegBuildersMixin:
             self.logger.warning(f"Failed to initialize thumbnail extractor: {e}")
             self.thumbnail_extractor = None
 
+        gui = getattr(self.app, 'gui_instance', None)
+        tmb = getattr(gui, 'thumbnail_mpv', None) if gui else None
+        if tmb is not None and self._active_video_source_path:
+            try:
+                tmb.load(self._active_video_source_path)
+            except Exception as e:
+                self.logger.debug(f"ThumbnailMpv load failed: {e}")
+
     def get_thumbnail_frame(self, frame_index: int, **_kwargs) -> Optional[np.ndarray]:
-        """
-        Get a frame-accurate thumbnail using FFmpeg input-level seeking.
+        """Returns a BGR24 numpy frame for the given index (or None)."""
+        gui = getattr(self.app, 'gui_instance', None)
+        tq = getattr(gui, 'thumbnail_mpv_queue', None) if gui else None
+        if tq is not None and self.fps > 0:
+            try:
+                time_sec = float(frame_index) / float(self.fps)
+                size = int(self.yolo_input_size) if self.yolo_input_size else 320
+                frame = tq.request(time_sec, w=size, h=size, timeout=3.0)
+                if frame is not None:
+                    return frame
+            except Exception as e:
+                self.logger.debug(f"ThumbnailMpv request failed: {e}")
 
-        For VR content, applies v360 CPU dewarp (negligible cost vs decode).
-        Optimized for random frame access (timeline tooltips, seek preview).
-
-        Returns:
-            Frame as BGR24 numpy array (yolo_input_size x yolo_input_size) or None
-        """
         if self.thumbnail_extractor is None:
-            self.logger.debug("Thumbnail extractor not available, falling back to FFmpeg batch")
-            return self._get_specific_frame(frame_index, update_current_index=False, use_thumbnail=True)
-
+            return self._get_specific_frame(
+                frame_index, update_current_index=False, use_thumbnail=True)
         try:
             return self.thumbnail_extractor.get_frame(frame_index)
         except Exception as e:
-            self.logger.warning(f"Thumbnail extraction failed: {e}, falling back to FFmpeg batch")
-            return self._get_specific_frame(frame_index, update_current_index=False, use_thumbnail=True)
+            self.logger.warning(
+                f"Thumbnail extraction failed: {e}, falling back to FFmpeg batch")
+            return self._get_specific_frame(
+                frame_index, update_current_index=False, use_thumbnail=True)
 
     def _get_vr_video_filters(self) -> List[str]:
         """Builds the list of FFmpeg filter segments for VR video, including cropping and v360."""
@@ -161,45 +179,25 @@ class FFmpegBuildersMixin:
         h_fov = max(60, min(170, int(round(v_fov * aspect))))
 
         vr_filters = []
-        is_sbs_format = '_sbs' in self.vr_input_format
-        is_tb_format = '_tb' in self.vr_input_format
-        is_lr_format = '_lr' in self.vr_input_format
-        is_rl_format = '_rl' in self.vr_input_format
-        is_side_by_side = is_sbs_format or is_lr_format or is_rl_format
-
-        # For "none" (crop only) mode, vr_crop_panel selects which panel to use
-        use_second_panel = (self.vr_unwarp_method_override == 'none'
-                            and getattr(self, 'vr_crop_panel', 'first') == 'second')
-
-        if is_sbs_format and original_width > 0 and original_height > 0:
-            crop_w = original_width / 2
-            crop_h = original_height
-            crop_x = int(original_width / 2) if use_second_panel else 0
-            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:{crop_x}:0")
-            panel_label = "right" if use_second_panel else "left"
-            self.logger.debug(f"Applying SBS pre-crop ({panel_label}): w={int(crop_w)} h={int(crop_h)} x={crop_x} y=0")
-        elif is_tb_format and original_width > 0 and original_height > 0:
-            crop_w = original_width
-            crop_h = original_height / 2
-            crop_y = int(original_height / 2) if use_second_panel else 0
-            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:{crop_y}")
-            panel_label = "bottom" if use_second_panel else "top"
-            self.logger.info(f"Applying TB pre-crop ({panel_label}): w={int(crop_w)} h={int(crop_h)} x=0 y={crop_y}")
-        elif is_lr_format and original_width > 0 and original_height > 0:
-            crop_w = original_width / 2
-            crop_h = original_height
-            crop_x = int(original_width / 2) if use_second_panel else 0
-            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:{crop_x}:0")
-            panel_label = "right" if use_second_panel else "left"
-            self.logger.info(f"Applying LR pre-crop ({panel_label} panel): w={int(crop_w)} h={int(crop_h)} x={crop_x} y=0")
-        elif is_rl_format and original_width > 0 and original_height > 0:
-            # RL format: right panel is first (x=0), left panel is second (x=w/2)
-            crop_w = original_width / 2
-            crop_h = original_height
-            crop_x = 0 if use_second_panel else int(original_width / 2)
-            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:{crop_x}:0")
-            panel_label = "left" if use_second_panel else "right"
-            self.logger.info(f"Applying RL pre-crop ({panel_label} panel): w={int(crop_w)} h={int(crop_h)} x={crop_x} y=0")
+        from video import vr_panel
+        # Unified panel selection. Centralized helper applies the _rl
+        # reversal so the same 'left' selector always yields the LEFT
+        # EYE regardless of source layout flavor.
+        eye = vr_panel.read_setting(getattr(self.app, 'app_settings', None),
+                                    default=vr_panel.EYE_LEFT)
+        # v360 (the default) expects a single-eye input; 'full' would
+        # feed it a squashed SBS frame and produce garbage. Clamp to
+        # 'left' unless the user explicitly chose crop-only mode AND
+        # wants both halves preserved.
+        if eye == vr_panel.EYE_FULL and self.vr_unwarp_method_override != 'none':
+            eye = vr_panel.EYE_LEFT
+        region = vr_panel.resolve_eye(self.vr_input_format, eye)
+        crop = region.ffmpeg_crop(original_width, original_height)
+        if crop:
+            vr_filters.append(crop)
+            self.logger.debug(
+                f"Applying VR pre-crop: fmt={self.vr_input_format} "
+                f"eye={eye} -> {crop}")
 
         # Unwarp method: 'none' (crop only) or default libavfilter v360.
         if self.vr_unwarp_method_override == 'none':

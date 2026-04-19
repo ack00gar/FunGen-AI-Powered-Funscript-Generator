@@ -16,6 +16,7 @@ import logging
 from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 from application.utils import primary_button_style, destructive_button_style
+from config.constants_colors import CurrentTheme
 
 # Device control imports (conditional)
 try:
@@ -150,8 +151,8 @@ class DeviceControlUI:
         # Main device control window with flags to ensure visibility
         window_flags = imgui.WINDOW_NO_COLLAPSE
         center_next_window_pivot()
-        expanded, opened = imgui.begin("Device Control", True, window_flags)
-        
+        expanded, opened = imgui.begin("FunGen: Device Control", True, window_flags)
+
         self.app.logger.debug(f"Device Control: imgui.begin returned expanded={expanded}, opened={opened}")
         
         if not opened:
@@ -219,12 +220,12 @@ class DeviceControlUI:
         imgui.same_line()
         
         if self.device_manager and self.device_manager.is_connected():
-            imgui.text_colored("Connected", 0.0, 1.0, 0.0)
+            imgui.text_colored("Connected", *CurrentTheme.GREEN)
             if self.connected_device_info:
                 imgui.text(f"Device: {self.connected_device_info.get('name', 'Unknown')}")
                 imgui.text(f"Type: {self.connected_device_info.get('device_type', 'Unknown')}")
         else:
-            imgui.text_colored("Disconnected", 1.0, 0.0, 0.0)
+            imgui.text_colored("Disconnected", *CurrentTheme.RED)
         
         imgui.separator()
         
@@ -242,14 +243,14 @@ class DeviceControlUI:
         
         imgui.same_line()
         if self.discovery_in_progress:
-            imgui.text_colored("Scanning network...", 1.0, 1.0, 0.0)
+            imgui.text_colored("Scanning network...", *CurrentTheme.YELLOW)
         else:
             imgui.text(f"Last scan: {time.time() - self.last_discovery_time:.1f}s ago" if self.last_discovery_time > 0 else "Never")
         
         # Handy setup help
         if not self.discovered_devices:
             imgui.separator()
-            imgui.text_colored("Handy Setup Instructions:", 0.0, 1.0, 1.0)
+            imgui.text_colored("Handy Setup Instructions:", *CurrentTheme.CYAN)
             imgui.text("1. Make sure your Handy is connected to the same WiFi network")
             imgui.text("2. Check that local mode is enabled on your Handy")
             imgui.text("3. Try the 'Quick Handy Scan' button for faster detection")
@@ -258,7 +259,7 @@ class DeviceControlUI:
         
         # Discovered devices list
         if self.discovered_devices:
-            imgui.text_colored("Discovered Devices:", 0.0, 1.0, 0.0)
+            imgui.text_colored("Discovered Devices:", *CurrentTheme.GREEN)
             
             for i, device in enumerate(self.discovered_devices):
                 device_name = device.name
@@ -291,7 +292,7 @@ class DeviceControlUI:
                                 if checkmark_tex:
                                     imgui.image(checkmark_tex, 16, 16)
                                     imgui.same_line()
-                            imgui.text_colored("Local WiFi Connection", 0.0, 1.0, 0.0)
+                            imgui.text_colored("Local WiFi Connection", *CurrentTheme.GREEN)
                             if "local_ip" in device.metadata:
                                 imgui.text(f"IP: {device.metadata['local_ip']}")
                         firmware = device.metadata.get("firmware", "unknown")
@@ -447,7 +448,7 @@ class DeviceControlUI:
         
         # Live tracking controls
         if self.live_tracking_active:
-            imgui.text_colored("Live Tracking: ACTIVE", 0.0, 1.0, 0.0)
+            imgui.text_colored("Live Tracking: ACTIVE", *CurrentTheme.GREEN)
             # Stop button (DESTRUCTIVE - stops process)
             with destructive_button_style():
                 if imgui.button("Stop Live Tracking"):
@@ -635,7 +636,7 @@ class DeviceControlUI:
     def _render_live_device_control_toggle(self):
         """Render toggle for live device control during tracking."""
         imgui.text("Live Device Control:")
-        imgui.text_colored("Stream tracking positions to device in real-time", 0.7, 0.7, 0.7)
+        imgui.text_colored("Stream tracking positions to device in real-time", *CurrentTheme.DESCRIPTION_TEXT)
         
         # Get current state from tracker manager
         current_enabled = False
@@ -650,14 +651,14 @@ class DeviceControlUI:
         # Status indicator
         if current_enabled:
             imgui.same_line()
-            imgui.text_colored("* ENABLED", 0.0, 1.0, 0.0)
+            imgui.text_colored("* ENABLED", *CurrentTheme.GREEN)
         else:
             imgui.same_line()
-            imgui.text_colored("* DISABLED", 0.7, 0.7, 0.7)
+            imgui.text_colored("* DISABLED", *CurrentTheme.DESCRIPTION_TEXT)
         
         # Help text
         if current_enabled:
-            imgui.text_colored("Tracker positions will stream to this device during live tracking", 0.0, 1.0, 0.0)
+            imgui.text_colored("Tracker positions will stream to this device during live tracking", *CurrentTheme.GREEN)
         else:
             imgui.text("Enable to stream live tracking positions to connected device")
     
@@ -837,7 +838,7 @@ class DeviceControlUI:
         
         # Main window
         window_flags = imgui.WINDOW_NO_COLLAPSE
-        expanded, opened = imgui.begin("Device Control", True, window_flags)
+        expanded, opened = imgui.begin("FunGen: Device Control", True, window_flags)
 
         if not opened:
             self.app.app_state_ui.show_device_control_window = False
@@ -854,14 +855,14 @@ class DeviceControlUI:
                 if gamepad_tex:
                     imgui.image(gamepad_tex, 20, 20)
                     imgui.same_line()
-            imgui.text_colored("Device Control", 0.2, 0.8, 1.0)
+            imgui.text_colored("Device Control", *CurrentTheme.REFERENCE_OVERLAY)
             imgui.pop_font()
             
             imgui.separator()
             imgui.dummy(0, 10)
             
             # Main message
-            imgui.text_colored("Add-on Feature", 1.0, 0.6, 0.0)
+            imgui.text_colored("Add-on Feature", *CurrentTheme.ORANGE)
             imgui.dummy(0, 10)
 
             imgui.text_wrapped(
@@ -883,7 +884,7 @@ class DeviceControlUI:
                 self._open_support_page()
 
             imgui.dummy(0, 10)
-            imgui.text_colored("How to activate:", 0.0, 0.8, 1.0)
+            imgui.text_colored("How to activate:", *CurrentTheme.REFERENCE_OVERLAY)
             imgui.text_wrapped(
                 "Purchase from paypal.me/k00gar, then use the !device_control "
                 "command in Discord to receive the add-on files. "

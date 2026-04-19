@@ -6,6 +6,7 @@ from application.utils.imgui_helpers import tooltip_if_hovered as _tooltip_if_ho
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card as _section_card
 from application.utils import primary_button_style, destructive_button_style
+from config.constants_colors import CurrentTheme
 
 
 class OSSMPanelMixin:
@@ -18,7 +19,7 @@ class OSSMPanelMixin:
             ossm_available = 'ossm' in (self.device_manager.available_backends if self.device_manager else {})
 
             if not ossm_available:
-                imgui.text_colored("OSSM backend unavailable", 0.7, 0.5, 0.0)
+                imgui.text_colored("OSSM backend unavailable", *CurrentTheme.ORANGE_DARK)
                 imgui.text("Install bleak: pip install bleak>=0.21.0")
                 return
 
@@ -32,7 +33,7 @@ class OSSMPanelMixin:
                 self._render_ossm_disconnected()
 
         except Exception as e:
-            imgui.text_colored(f"OSSM error: {e}", 1.0, 0.3, 0.3)
+            imgui.text_colored(f"OSSM error: {e}", *CurrentTheme.RED_LIGHT)
 
 
     def _render_ossm_connected(self, device_info):
@@ -130,7 +131,7 @@ class OSSMPanelMixin:
                         if address:
                             self._connect_ossm_device(address)
             else:
-                imgui.text_colored("No OSSM devices found", 0.7, 0.5, 0.0)
+                imgui.text_colored("No OSSM devices found", *CurrentTheme.ORANGE_DARK)
                 imgui.spacing()
                 imgui.text("Troubleshooting:")
                 imgui.bullet_text("Ensure OSSM is powered on")

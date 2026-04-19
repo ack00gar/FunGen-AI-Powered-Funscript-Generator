@@ -2,11 +2,14 @@ import imgui
 import logging
 from typing import Optional, Tuple
 
+import OpenGL.GL as gl
+
 import config.constants as constants
 from config.element_group_colors import VideoDisplayColors
 from application.utils import get_logo_texture_manager, get_icon_texture_manager
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.feature_detection import is_feature_available as _is_feature_available
+from config.constants_colors import CurrentTheme
 
 # Module-level logger for Handy debug output (disabled by default)
 _handy_debug_logger = logging.getLogger(__name__ + '.handy')
@@ -177,7 +180,7 @@ class VideoDisplayCoreMixin:
         Uses _frame_version (incremented on every current_frame assignment)
         instead of current_frame_index to detect changes.  This avoids a
         race where seek_video() updates the index immediately but the
-        background worker hasn't delivered the new frame yet — the old
+        background worker hasn't delivered the new frame yet - the old
         frame would be uploaded and the new one silently dropped.
         """
         if not self.app.processor:
@@ -188,15 +191,17 @@ class VideoDisplayCoreMixin:
             return
 
         if self.app.processor.current_frame is not None:
+            # Snapshot ref under lock; upload outside so GL doesn't starve decoder.
             with self.app.processor.frame_lock:
-                if self.app.processor.current_frame is not None and hasattr(self.app.processor.current_frame, 'copy'):
-                    current_frame_for_texture = self.app.processor.current_frame.copy()
-                    self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame_for_texture)
-                    self._last_uploaded_frame_version = frame_version
-                    self._last_uploaded_frame_index = getattr(self.app.processor, 'current_frame_index', None)
-                    self._texture_update_count += 1
+                current_frame = self.app.processor.current_frame
+                current_index = getattr(self.app.processor, 'current_frame_index', None)
+            if current_frame is not None and hasattr(current_frame, 'shape'):
+                self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame)
+                self._last_uploaded_frame_version = frame_version
+                self._last_uploaded_frame_index = current_index
+                self._texture_update_count += 1
         else:
-            # No frame available — invalidate so next video's frame 0 uploads fresh
+            # No frame available - invalidate so next video's frame 0 uploads fresh
             self._last_uploaded_frame_version = -1
             self._last_uploaded_frame_index = None
 
@@ -216,7 +221,7 @@ class VideoDisplayCoreMixin:
                 return
 
             # Begin the window. The second return value `new_visibility` will be False if the user clicks the 'x'.
-            is_expanded, new_visibility = imgui.begin("Video Display", closable=True, flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_COLLAPSE)
+            is_expanded, new_visibility = imgui.begin("FunGen: Video Display", closable=True, flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_COLLAPSE)
 
             # Update our state based on the window's visibility (i.e., if the user closed it).
             if new_visibility != app_state.show_video_display_window:
@@ -239,111 +244,113 @@ class VideoDisplayCoreMixin:
                 self._render_reactivate_feed_button()
             else:
                 # --- Original logic when video feed is enabled ---
-                current_frame_for_texture = None
                 current_frame_index = getattr(self.app.processor, 'current_frame_index', None)
                 frame_version = getattr(self.app.processor, '_frame_version', 0)
 
                 # PERFORMANCE: Check if frame data changed before copying/uploading to GPU
                 frame_changed = (frame_version != self._last_uploaded_frame_version)
+                uploaded_this_frame = False
 
                 if self.app.processor and self.app.processor.current_frame is not None:
+                    # Snapshot ref under lock; upload outside (avoid decoder stall).
                     with self.app.processor.frame_lock:
-                        if self.app.processor.current_frame is not None:
-                            # Check if current_frame is actually a frame (numpy array) and not just a frame number (int)
-                            if hasattr(self.app.processor.current_frame, 'copy'):
-                                # Only copy frame if it changed
-                                if frame_changed:
-                                    current_frame_for_texture = self.app.processor.current_frame.copy()
-                                else:
-                                    # Frame hasn't changed - skip expensive copy
-                                    self._texture_skip_count += 1
-                            # else: current_frame is just an int (frame number), no image to display
+                        current_frame = self.app.processor.current_frame
+                        # shape check: current_frame can be an int sentinel, not a ndarray.
+                        if current_frame is None or not hasattr(current_frame, 'shape'):
+                            current_frame = None
+                    if current_frame is not None:
+                        if frame_changed:
+                            self.gui_instance.update_texture(
+                                self.gui_instance.frame_texture_id, current_frame)
+                            self._last_uploaded_frame_version = frame_version
+                            self._last_uploaded_frame_index = current_frame_index
+                            self._texture_update_count += 1
+                            uploaded_this_frame = True
+                        else:
+                            self._texture_skip_count += 1
                 else:
-                    # No frame available (video closed/switching) — invalidate texture cache
+                    # No frame available (video closed/switching) - invalidate texture cache
                     # so the next video's frame 0 is always uploaded fresh
                     self._last_uploaded_frame_version = -1
                     self._last_uploaded_frame_index = None
 
-                video_frame_available = current_frame_for_texture is not None or (not frame_changed and self._last_uploaded_frame_index is not None)
+                video_frame_available = uploaded_this_frame or (not frame_changed and self._last_uploaded_frame_index is not None)
 
-                # Upload new frame to GPU if we copied one
-                if current_frame_for_texture is not None:
-                    self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame_for_texture)
-                    self._last_uploaded_frame_version = frame_version
-                    self._last_uploaded_frame_index = current_frame_index
-                    self._texture_update_count += 1
+                proc = self.app.processor
+                mpv_display = getattr(self.gui_instance, 'mpv_display', None)
 
-                # Render video (either new frame or reuse existing texture)
-                if video_frame_available:
+                from application.gui_components.video_display.display_route import (
+                    compute_display_route, fit_rect_to_panel,
+                )
+                route = compute_display_route(self.app)
+
+                if video_frame_available or route.source != 'blank':
                     available_w_video, available_h_video = imgui.get_content_region_available()
 
                     if available_w_video > 0 and available_h_video > 0:
-                        display_w, display_h, cursor_x_offset, cursor_y_offset = app_state.calculate_video_display_dimensions(available_w_video, available_h_video)
+                        zoom = float(getattr(app_state, 'video_zoom_factor', 1.0) or 1.0)
+                        if route.fill_panel:
+                            display_w = int(available_w_video)
+                            display_h = int(available_h_video)
+                            cursor_x_offset = 0.0
+                            cursor_y_offset = 0.0
+                            self._cached_fit_size = None
+                        else:
+                            dw, dh, off_x, off_y = fit_rect_to_panel(
+                                route.content_aspect,
+                                available_w_video, available_h_video, zoom)
+                            display_w, display_h = int(dw), int(dh)
+                            cursor_x_offset, cursor_y_offset = off_x, off_y
+
+                        if route.source in ('mpv_shader', 'mpv_direct'):
+                            self._render_mpv_to_fbo(proc, mpv_display)
+                        if route.source == 'mpv_shader':
+                            self._render_shader_dewarp(
+                                proc, app_state,
+                                target_w=display_w, target_h=display_h,
+                                locked=route.shader_locked)
+
                         if display_w > 0 and display_h > 0:
                             self._update_actual_video_image_rect(display_w, display_h, cursor_x_offset, cursor_y_offset)
 
                             win_content_x, win_content_y = imgui.get_cursor_pos()
                             imgui.set_cursor_pos((win_content_x + cursor_x_offset, win_content_y + cursor_y_offset))
 
-                            uv0_x, uv0_y, uv1_x, uv1_y = app_state.get_video_uv_coords()
-                            imgui.image(self.gui_instance.frame_texture_id, display_w, display_h, (uv0_x, uv0_y), (uv1_x, uv1_y))
+                            uv0_x, uv0_y, uv1_x, uv1_y = route.uv
+                            if route.texture_id > 0:
+                                imgui.image(route.texture_id,
+                                            display_w, display_h,
+                                            (uv0_x, uv0_y), (uv1_x, uv1_y))
+                            else:
+                                imgui.dummy(display_w, display_h)
 
-                            # Store the item rect for overlay positioning, AFTER imgui.image
                             self._video_display_rect_min = imgui.get_item_rect_min()
                             self._video_display_rect_max = imgui.get_item_rect_max()
 
-                            # Show "Seeking..." indicator when video is seeking
-                            # (seek_in_progress attribute removed — PyAV seeks are synchronous)
-                            if False:
-                                draw_list = imgui.get_window_draw_list()
-                                # Draw semi-transparent overlay
-                                overlay_color = imgui.get_color_u32_rgba(0.0, 0.0, 0.0, 0.5)
-                                draw_list.add_rect_filled(
-                                    self._video_display_rect_min[0],
-                                    self._video_display_rect_min[1],
-                                    self._video_display_rect_max[0],
-                                    self._video_display_rect_max[1],
-                                    overlay_color
-                                )
+                            if (route.source == 'mpv_shader'
+                                    and not route.shader_locked
+                                    and imgui.is_item_hovered()
+                                    and imgui.is_mouse_dragging(0, 2.0)):
+                                drag = imgui.get_mouse_drag_delta(0, 2.0)
+                                imgui.reset_mouse_drag_delta(0)
+                                _SENS = 0.20
+                                fmt_lc = (getattr(proc, 'vr_input_format', '') or '').lower()
+                                fov_src = float(getattr(proc, 'vr_fov', 0) or 190)
+                                if 'fisheye' in fmt_lc:
+                                    yaw_lim = max(50.0, (fov_src - 90.0) * 0.5 + 45.0)
+                                else:
+                                    yaw_lim = 90.0
+                                new_yaw = app_state.vr_pan_yaw + float(drag.x) * _SENS
+                                new_pitch = app_state.vr_pan_pitch + float(drag.y) * _SENS
+                                app_state.vr_pan_yaw = max(-yaw_lim, min(yaw_lim, new_yaw))
+                                app_state.vr_pan_pitch = max(-80.0, min(80.0, new_pitch))
 
-                                center_x = (self._video_display_rect_min[0] + self._video_display_rect_max[0]) / 2
-                                center_y = (self._video_display_rect_min[1] + self._video_display_rect_max[1]) / 2
-
-                                # Draw "Seeking..." text in center
-                                text = "Seeking..."
-                                text_size = imgui.calc_text_size(text)
-                                text_x = center_x - text_size.x / 2
-                                text_y = center_y - text_size.y / 2 - 30  # Move up to make room for progress bar
-                                text_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 1.0)
-                                draw_list.add_text(text_x, text_y, text_color, text)
-
-                                # Draw progress bar if we're creating frame buffer
-                                if self.app.processor.frame_buffer_progress > 0:
-                                    # Progress text
-                                    progress_text = f"Creating frames buffer: {self.app.processor.frame_buffer_current}/{self.app.processor.frame_buffer_total}"
-                                    progress_text_size = imgui.calc_text_size(progress_text)
-                                    progress_text_x = center_x - progress_text_size.x / 2
-                                    progress_text_y = center_y - 5
-                                    draw_list.add_text(progress_text_x, progress_text_y, text_color, progress_text)
-
-                                    # Progress bar
-                                    bar_width = 300
-                                    bar_height = 20
-                                    bar_x = center_x - bar_width / 2
-                                    bar_y = center_y + 15
-
-                                    # Background
-                                    bg_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.8)
-                                    draw_list.add_rect_filled(bar_x, bar_y, bar_x + bar_width, bar_y + bar_height, bg_color)
-
-                                    # Foreground (progress)
-                                    progress = self.app.processor.frame_buffer_progress
-                                    fg_color = imgui.get_color_u32_rgba(0.2, 0.6, 1.0, 0.9)
-                                    draw_list.add_rect_filled(bar_x, bar_y, bar_x + bar_width * progress, bar_y + bar_height, fg_color)
-
-                                    # Border
-                                    border_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.8)
-                                    draw_list.add_rect(bar_x, bar_y, bar_x + bar_width, bar_y + bar_height, border_color, thickness=2)
+                            if route.overlay_status:
+                                self._render_status_overlay(
+                                    route.overlay_status,
+                                    route.status_busy,
+                                    self._video_display_rect_min,
+                                    self._video_display_rect_max)
 
                             #--- User Defined ROI Drawing/Selection Logic ---
                             io = imgui.get_io()
@@ -675,6 +682,211 @@ class VideoDisplayCoreMixin:
         imgui.pop_style_var()
 
 
+    def _render_mpv_to_fbo(self, proc, mpv_display):
+        if mpv_display is None:
+            return
+        cap = getattr(proc, '_DISPLAY_CHAIN_MAX', 1024)
+        info = getattr(proc, 'video_info', None) or {}
+        src_w = int(info.get('width', 0))
+        src_h = int(info.get('height', 0))
+        if src_w > 0 and src_h > 0:
+            if src_w >= src_h:
+                fbo_w = min(src_w, cap)
+                fbo_h = max(64, int(round(fbo_w * src_h / src_w)))
+            else:
+                fbo_h = min(src_h, cap)
+                fbo_w = max(64, int(round(fbo_h * src_w / src_h)))
+        else:
+            fbo_w = min(int(getattr(proc, '_display_frame_w', 640) or 640), cap)
+            fbo_h = min(int(getattr(proc, '_display_frame_h', 640) or 640), cap)
+        fbo_w = max(64, fbo_w)
+        fbo_h = max(64, fbo_h)
+
+        render_to_fbo = getattr(mpv_display, 'render_to_fbo', None)
+        if render_to_fbo is None:
+            buf = mpv_display.render_to_buffer(fbo_w, fbo_h)
+            if buf is not None:
+                self.gui_instance.update_texture(
+                    self.gui_instance.mpv_display_texture_id, buf)
+            return
+
+        self.gui_instance.resize_mpv_display_target(fbo_w, fbo_h)
+        try:
+            gl.glDisable(gl.GL_BLEND); gl.glDisable(gl.GL_SCISSOR_TEST)
+            gl.glDisable(gl.GL_DEPTH_TEST); gl.glDisable(gl.GL_CULL_FACE)
+            gl.glDisable(gl.GL_STENCIL_TEST)
+            gl.glColorMask(True, True, True, True); gl.glDepthMask(True)
+            gl.glUseProgram(0); gl.glBindVertexArray(0)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+            gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
+            gl.glActiveTexture(gl.GL_TEXTURE0); gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+            gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 4)
+            gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 4)
+        except Exception:
+            pass
+        try:
+            render_to_fbo(self.gui_instance.mpv_display_fbo, fbo_w, fbo_h)
+        finally:
+            try:
+                gl.glBindVertexArray(0); gl.glUseProgram(0)
+                gl.glDisable(gl.GL_SCISSOR_TEST); gl.glDisable(gl.GL_DEPTH_TEST)
+                gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 4)
+            except Exception:
+                pass
+
+    def _render_shader_dewarp(self, proc, app_state,
+                              target_w: int = 0, target_h: int = 0,
+                              locked: bool = False):
+        shader = getattr(self.gui_instance, 'vr_dewarp_shader', None)
+        if shader is None or not shader.is_ready:
+            return
+        from video import vr_panel
+        if target_w <= 0 or target_h <= 0:
+            avail_w, avail_h = imgui.get_content_region_available()
+            target_w = int(avail_w)
+            target_h = int(avail_h)
+        if target_w <= 0 or target_h <= 0:
+            return
+        # Pick the adaptive-quality spec for this frame.
+        from video.vr_render_quality import VRRenderQualityMonitor
+        mon = getattr(self.gui_instance, '_vr_quality_monitor', None)
+        if mon is None:
+            mon = VRRenderQualityMonitor()
+            self.gui_instance._vr_quality_monitor = mon
+        try:
+            mode = self.app.app_settings.config.vr_display.quality_mode
+        except Exception:
+            mode = 'auto'
+        spec = mon.current_spec(mode=mode)
+        ss_factor = spec.supersample_factor
+        cap = 4096 if ss_factor > 1 else 2048
+        dw_w = max(64, min(int(target_w) * ss_factor, cap))
+        dw_h = max(64, min(int(target_h) * ss_factor, cap))
+        self.gui_instance.resize_vr_dewarp_target(dw_w, dw_h)
+        # Apply anisotropic filtering to the input (mpv display) texture.
+        # Free to change each frame since it's a texture parameter.
+        try:
+            import OpenGL.GL.EXT.texture_filter_anisotropic as _aniso_ext
+            aniso_cap = gl.glGetFloatv(
+                _aniso_ext.GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT)
+            aniso = min(spec.aniso_level, float(aniso_cap))
+            gl.glBindTexture(gl.GL_TEXTURE_2D,
+                              self.gui_instance.mpv_display_texture_id)
+            gl.glTexParameterf(gl.GL_TEXTURE_2D,
+                                _aniso_ext.GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                                aniso)
+            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        except Exception:
+            pass
+        # Apply mpv scaler choice (runtime property change is cheap).
+        mpv_display = getattr(self.gui_instance, 'mpv_display', None)
+        if mpv_display is not None:
+            try:
+                cur_scale = getattr(mpv_display, '_current_scale', None)
+                if cur_scale != spec.mpv_scale:
+                    player = getattr(mpv_display, '_player', None) \
+                             or getattr(mpv_display, 'player', None)
+                    if player is not None:
+                        try:
+                            player.scale = spec.mpv_scale
+                        except Exception:
+                            pass
+                    mpv_display._current_scale = spec.mpv_scale
+            except Exception:
+                pass
+
+        fmt = (getattr(proc, 'vr_input_format', '') or '').lower()
+        eye = vr_panel.read_setting(self.app.app_settings,
+                                    default=vr_panel.EYE_LEFT)
+        stereo, use_right_eye = vr_panel.shader_params(fmt, eye)
+        if locked:
+            yaw = 0.0
+            pitch = float(getattr(proc, 'vr_pitch', 0) or 0.0)
+            output_fov = 90.0
+        else:
+            yaw = float(getattr(app_state, 'vr_pan_yaw', 0.0))
+            pitch = float(getattr(app_state, 'vr_pan_pitch', 0.0))
+            output_fov = float(getattr(app_state, 'vr_pan_output_fov_deg', 90.0))
+        projection = "fisheye" if 'fisheye' in fmt else "equirect"
+        fisheye_fov = float(getattr(proc, 'vr_fov', 0) or 190) or 190.0
+        output_projection = 'sg' if locked else 'flat'
+        try:
+            out_scale = self.app.app_settings.config.vr_display.shader_sg_scale
+        except Exception:
+            out_scale = 1.840
+        try:
+            gl.glBindTexture(gl.GL_TEXTURE_2D,
+                              self.gui_instance.mpv_display_texture_id)
+            gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
+            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        except Exception:
+            pass
+        in_w = int(getattr(self.gui_instance, 'mpv_display_w', 0) or 0)
+        in_h = int(getattr(self.gui_instance, 'mpv_display_h', 0) or 0)
+        shader.render_pass(
+            input_texture_id=self.gui_instance.mpv_display_texture_id,
+            output_fbo=self.gui_instance.vr_dewarp_fbo,
+            width=self.gui_instance.vr_dewarp_w,
+            height=self.gui_instance.vr_dewarp_h,
+            params={
+                "fisheye_fov_deg": fisheye_fov,
+                "output_fov_deg": output_fov,
+                "yaw_deg": yaw,
+                "pitch_deg": pitch,
+                "stereo_format": stereo,
+                "use_right_eye": use_right_eye,
+                "projection": projection,
+                "output_projection": output_projection,
+                "output_scale": out_scale,
+                "use_bicubic": spec.use_bicubic,
+                "input_tex_w": in_w,
+                "input_tex_h": in_h,
+            },
+        )
+        # Feed timing back into the monitor so auto mode can adapt next frame.
+        try:
+            mon.record_pass_ms(getattr(shader, '_last_render_ms', None))
+        except Exception:
+            pass
+        try:
+            gl.glBindTexture(gl.GL_TEXTURE_2D,
+                              self.gui_instance.vr_dewarp_texture_id)
+            gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
+            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        except Exception:
+            pass
+
+    def _render_status_overlay(self, text, busy, img_min, img_max):
+        if not text or img_min is None or img_max is None:
+            return
+        draw_list = imgui.get_window_draw_list()
+        x0, y0 = float(img_min[0]), float(img_min[1])
+        x1, y1 = float(img_max[0]), float(img_max[1])
+        cx = (x0 + x1) * 0.5
+        cy = (y0 + y1) * 0.5
+        draw_list.add_rect_filled(
+            x0, y0, x1, y1,
+            imgui.get_color_u32_rgba(0, 0, 0, 0.35))
+        tx_size = imgui.calc_text_size(text)
+        tx_color = imgui.get_color_u32_rgba(1, 1, 1, 0.95)
+        draw_list.add_text(cx - tx_size.x * 0.5,
+                           cy - tx_size.y * 0.5,
+                           tx_color, text)
+        if busy:
+            import math as _m
+            import time as _t
+            t = _t.monotonic() * 2.0
+            r = 14.0
+            cy_spin = cy + tx_size.y + r + 12.0
+            for i in range(8):
+                ang = (i / 8.0) * _m.pi * 2.0 + t
+                px = cx + _m.cos(ang) * r
+                py = cy_spin + _m.sin(ang) * r
+                alpha = 0.15 + 0.7 * ((i / 8.0 + (t % 1.0)) % 1.0)
+                draw_list.add_circle_filled(
+                    px, py, 2.5,
+                    imgui.get_color_u32_rgba(1, 1, 1, alpha))
+
     def _handle_video_mouse_interaction(self, app_state):
         if not (self.app.processor and self.app.processor.current_frame is not None): return
 
@@ -813,7 +1025,7 @@ class VideoDisplayCoreMixin:
             text_y = start_y + display_logo_h + spacing
             text_x = (win_size[0] - text_size[0]) * 0.5 + cursor_start_pos[0]
             imgui.set_cursor_pos((text_x, text_y))
-            imgui.text_colored(text_to_display, 0.7, 0.7, 0.7, 1.0)  # Slightly dimmed text
+            imgui.text_colored(text_to_display, *CurrentTheme.DESCRIPTION_TEXT)  # Slightly dimmed text
         else:
             # Fallback to text-only if logo fails to load
             if win_size[0] > text_size[0] and win_size[1] > text_size[1]:

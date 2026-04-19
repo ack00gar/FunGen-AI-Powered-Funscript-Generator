@@ -341,7 +341,8 @@ class CreateChapterCmd(Command):
         self.chapter_data = chapter_data
 
     def execute(self, app):
-        app.funscript_processor.create_new_chapter_from_data(self.chapter_data)
+        app.funscript_processor.create_new_chapter_from_data(
+            self.chapter_data, _skip_undo_record=True)
 
     def undo(self, app):
         app.funscript_processor.delete_video_chapters_by_ids(
@@ -394,6 +395,64 @@ class UpdateChapterCmd(Command):
 
     def undo(self, app):
         self._apply_fields(app, self.old_fields)
+
+    def finalize(self, app):
+        _finalize_chapters(app, self.description)
+
+
+class ResizeChapterCmd(Command):
+    __slots__ = ('description', 'timestamp', 'chapter_id', 'old_start', 'old_end', 'new_start', 'new_end')
+
+    def __init__(self, chapter_id: str, old_start: int, old_end: int, new_start: int, new_end: int):
+        super().__init__("Resize Chapter")
+        self.chapter_id = chapter_id
+        self.old_start = int(old_start)
+        self.old_end = int(old_end)
+        self.new_start = int(new_start)
+        self.new_end = int(new_end)
+
+    def _apply(self, app, start, end):
+        for ch in app.funscript_processor.video_chapters:
+            if ch.unique_id == self.chapter_id:
+                ch.start_frame_id = start
+                ch.end_frame_id = end
+                break
+
+    def execute(self, app):
+        self._apply(app, self.new_start, self.new_end)
+
+    def undo(self, app):
+        self._apply(app, self.old_start, self.old_end)
+
+    def finalize(self, app):
+        _finalize_chapters(app, self.description)
+
+
+class MergeChaptersCmd(Command):
+    __slots__ = ('description', 'timestamp', 'chapter1', 'chapter2', 'merged_chapter')
+
+    def __init__(self, chapter1, chapter2, merged_chapter):
+        name = getattr(merged_chapter, 'position_short_name', None) or 'merged'
+        super().__init__(f"Merge Chapters ({name})")
+        self.chapter1 = chapter1
+        self.chapter2 = chapter2
+        self.merged_chapter = merged_chapter
+
+    def execute(self, app):
+        fs_proc = app.funscript_processor
+        ids_to_remove = {self.chapter1.unique_id, self.chapter2.unique_id}
+        fs_proc.video_chapters = [ch for ch in fs_proc.video_chapters if ch.unique_id not in ids_to_remove]
+        if not any(ch.unique_id == self.merged_chapter.unique_id for ch in fs_proc.video_chapters):
+            fs_proc.video_chapters.append(self.merged_chapter)
+        fs_proc.video_chapters.sort(key=lambda c: c.start_frame_id)
+
+    def undo(self, app):
+        fs_proc = app.funscript_processor
+        fs_proc.video_chapters = [ch for ch in fs_proc.video_chapters if ch.unique_id != self.merged_chapter.unique_id]
+        for ch in (self.chapter1, self.chapter2):
+            if not any(c.unique_id == ch.unique_id for c in fs_proc.video_chapters):
+                fs_proc.video_chapters.append(ch)
+        fs_proc.video_chapters.sort(key=lambda c: c.start_frame_id)
 
     def finalize(self, app):
         _finalize_chapters(app, self.description)

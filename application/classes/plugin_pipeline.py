@@ -178,7 +178,7 @@ class PluginPipeline:
 
     def get_available_presets(self) -> Dict[str, List[dict]]:
         """Return merged dict of default + user presets."""
-        user_presets = self.app.app_settings.get("plugin_pipeline_presets", {})
+        user_presets = self.app.app_settings.config.plugin_pipeline.presets
         merged = {}
         merged.update(_DEFAULT_PRESETS)
         merged.update(user_presets)
@@ -201,18 +201,18 @@ class PluginPipeline:
 
     def save_preset(self, name: str):
         """Save current pipeline as a user preset (new format with target_axis)."""
-        user_presets = self.app.app_settings.get("plugin_pipeline_presets", {})
+        user_presets = self.app.app_settings.config.plugin_pipeline.presets
         user_presets[name] = self.to_dict()
-        self.app.app_settings.set("plugin_pipeline_presets", user_presets)
+        self.app.app_settings.config.plugin_pipeline.presets = user_presets
 
     def delete_preset(self, name: str) -> bool:
         """Delete a user preset. Cannot delete built-in presets."""
         if name in _DEFAULT_PRESETS:
             return False
-        user_presets = self.app.app_settings.get("plugin_pipeline_presets", {})
+        user_presets = self.app.app_settings.config.plugin_pipeline.presets
         if name in user_presets:
             del user_presets[name]
-            self.app.app_settings.set("plugin_pipeline_presets", user_presets)
+            self.app.app_settings.config.plugin_pipeline.presets = user_presets
             return True
         return False
 

@@ -4,7 +4,6 @@ import threading
 from application.utils.imgui_layout_helpers import (
     begin_settings_columns, end_settings_columns, row_label, row_end, row_separator,
 )
-from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card
 
 
@@ -83,7 +82,7 @@ class VideoSettingsMixin:
         imgui.pop_item_width()
         if changed:
             self.app.hardware_acceleration_method = hw_accel_options[new_idx]
-            self.app.app_settings.set("hardware_acceleration_method", self.app.hardware_acceleration_method)
+            self.app.app_settings.config.performance.hardware_acceleration_method = self.app.hardware_acceleration_method
             self.app.notify(f"HW acceleration: {hw_accel_display[new_idx]}", "info", 2.0)
             if processor.is_video_open():
                 threading.Thread(target=processor.reapply_video_settings, daemon=True, name='HWAccelReapply').start()
@@ -102,17 +101,22 @@ class VideoSettingsMixin:
         row_end()
 
         # HD Video Display — only for 2D videos, disabled during playback/processing
-        is_2d = processor.determined_video_type == '2D' or (processor.determined_video_type is None and processor.video_type_setting != 'VR')
-        is_busy = processor.is_processing
+        from application.utils.imgui_helpers import DisabledScope as _DS
+        is_2d = processor.determined_video_type == '2D' or (
+            processor.determined_video_type is None
+            and processor.video_type_setting != 'VR')
         if is_2d:
-            row_label("HD Video Display", "Decode at higher resolution for sharper preview.\nDisable on slow machines.\nStop playback to change.")
-            with _DisabledScope(is_busy):
-                hd_val = self.app.app_settings.get("hd_video_display", True)
+            row_label("HD Video Display",
+                      "Decode at higher resolution for sharper preview.\n"
+                      "Disable on slow machines. Stop playback to change.")
+            with _DS(processor.is_processing):
+                hd_val = self.app.app_settings.config.ui.hd_video_display
                 changed, hd_val = imgui.checkbox("Enabled##HDVideoVid", hd_val)
-                if changed and not is_busy:
-                    self.app.app_settings.set("hd_video_display", hd_val)
+                if changed and not processor.is_processing:
+                    self.app.app_settings.config.ui.hd_video_display = hd_val
                     if processor.is_video_open():
-                        threading.Thread(target=processor.reapply_video_settings, daemon=True, name='HDVideoReapply').start()
+                        threading.Thread(target=processor.reapply_video_settings,
+                                         daemon=True, name='HDVideoReapply').start()
             row_end()
 
         end_settings_columns()
@@ -130,13 +134,13 @@ class VideoSettingsMixin:
         imgui.spacing()
         if imgui.button("Reset Video Settings##ResetVideoDefaults", width=-1):
             self.app.hardware_acceleration_method = "auto"
-            self.app.app_settings.set("hardware_acceleration_method", "auto")
+            self.app.app_settings.config.performance.hardware_acceleration_method = "auto"
             processor.set_active_video_type_setting("auto")
             if hasattr(processor, 'vr_unwarp_method_override'):
                 processor.vr_unwarp_method_override = "v360"
-                self.app.app_settings.set("vr_unwarp_method", "v360")
+                self.app.app_settings.config.performance.vr_unwarp_method = "v360"
             processor.vr_pitch = 0
-            self.app.app_settings.set("vr_crop_panel", "first")
+            self.app.app_settings.config.vr_display.panel_selection = "left"
             if processor.is_video_open():
                 threading.Thread(target=processor.reapply_video_settings, daemon=True, name='ResetReapply').start()
             self.app.notify("Video settings reset to defaults", "info", 2.0)
@@ -144,71 +148,125 @@ class VideoSettingsMixin:
         self.video_settings_perf.end_timing()
 
     def _render_vr_settings(self, processor):
-        """Render VR-specific settings in harmonized layout."""
+        """VR-specific settings."""
         begin_settings_columns("vr_cols")
 
-        # Display Aspect — widens the v360 stereographic output so VR content
-        # fills more of the available horizontal space. Changing this rebuilds
-        # the pipeline.
-        row_label("Display Aspect", "Output aspect ratio for the VR projection.\n"
-                                      "1.0 = square (legacy), 1.78 = 16:9, 2.0 = ultrawide.\n"
-                                      "Wider aspect widens the horizontal field of view.")
-        aspect_vals = [1.0, 1.33, 1.5, 1.78, 2.0]
-        aspect_disp = ["1:1 (square)", "4:3", "3:2", "16:9", "2:1 (ultrawide)"]
-        cur_aspect = float(self.app.app_settings.get("vr_display_aspect", 1.0))
+        row_label("Display Mode",
+                  "Shader dewarp: GPU shader, rectilinear.\n"
+                  "Passthrough: mpv paints the raw stereo frame.")
+        disp_disp = ["Shader dewarp", "Passthrough (raw)"]
+        disp_val = ["shader_dewarp", "passthrough"]
+        current_disp = self.app.app_settings.config.vr_display.mode
+        if current_disp == 'v360_baked':
+            current_disp = 'shader_dewarp'
         try:
-            cur_aspect_idx = min(range(len(aspect_vals)),
-                                  key=lambda i: abs(aspect_vals[i] - cur_aspect))
+            current_disp_idx = disp_val.index(current_disp)
         except ValueError:
-            cur_aspect_idx = 3
+            current_disp_idx = 0
         imgui.push_item_width(-1)
-        changed, new_idx = imgui.combo("##vrAspect", cur_aspect_idx, aspect_disp)
+        changed_disp, new_disp_idx = imgui.combo("##vrDispMode", current_disp_idx, disp_disp)
         imgui.pop_item_width()
-        if changed:
-            self.app.app_settings.set("vr_display_aspect", float(aspect_vals[new_idx]))
-            if processor.is_video_open():
-                threading.Thread(target=processor.reapply_video_settings,
-                                 daemon=True, name='VRAspectReapply').start()
+        if changed_disp:
+            self.app.app_settings.config.vr_display.mode = disp_val[new_disp_idx]
+            threading.Thread(
+                target=processor.reapply_display_settings,
+                daemon=True, name='VRDisplayModeReapply').start()
         row_end()
 
+        if current_disp == 'shader_dewarp':
+            row_label("Lock to Tracker",
+                      "Force yaw=0, pitch=configured, fov=90 so the "
+                      "shader view matches the tracker's canonical "
+                      "frame. Mouse pan is disabled; tracker overlays "
+                      "line up with the picture.")
+            _vr_cfg = self.app.app_settings.config.vr_display
+            cur_lock = _vr_cfg.shader_lock_to_tracker
+            changed_lock, new_lock = imgui.checkbox(
+                "Enabled##vrLockTracker", cur_lock)
+            if changed_lock:
+                _vr_cfg.shader_lock_to_tracker = new_lock
+            row_end()
+
+            row_label("Supersample (2x)",
+                      "Render the shader output at 2x the display FBO "
+                      "resolution then downsample. Sharper edges on "
+                      "rectilinear output, costs a little more GPU.")
+            cur_ss = _vr_cfg.shader_supersample
+            changed_ss, new_ss = imgui.checkbox(
+                "Enabled##vrSupersample", cur_ss)
+            if changed_ss:
+                _vr_cfg.shader_supersample = new_ss
+            row_end()
+
+            row_label("Dewarp zoom",
+                      "Multiplier on the stereographic scale when "
+                      "locked. 1.0 = v360 default. Larger = zoom out, "
+                      "smaller = zoom in. Dial to match tracker v360.")
+            cur_scale = _vr_cfg.shader_sg_scale
+            imgui.push_item_width(-1)
+            changed_scale, new_scale = imgui.slider_float(
+                "##vrSgScale", cur_scale, 0.25, 3.0, format="%.3f")
+            imgui.pop_item_width()
+            if changed_scale:
+                _vr_cfg.shader_sg_scale = new_scale
+            row_end()
+
+        vr_fmt = getattr(processor, 'vr_input_format', '')
+        is_stereo = ('_sbs' in vr_fmt or '_lr' in vr_fmt
+                     or '_rl' in vr_fmt or '_tb' in vr_fmt)
+        if is_stereo:
+            row_label(
+                "VR Eye",
+                "Which stereo eye to send through the dewarp/tracker "
+                "pipeline. _rl layouts are handled automatically; "
+                "'Left' always yields the left eye.")
+            from video import vr_panel as _vr_panel
+            eye_disp = ["Left eye", "Right eye", "Full (both panels)"]
+            eye_val = [_vr_panel.EYE_LEFT, _vr_panel.EYE_RIGHT, _vr_panel.EYE_FULL]
+            current_eye = _vr_panel.read_setting(
+                self.app.app_settings, default=_vr_panel.EYE_LEFT)
+            try:
+                current_eye_idx = eye_val.index(current_eye)
+            except ValueError:
+                current_eye_idx = 0
+            imgui.push_item_width(-1)
+            changed, new_idx = imgui.combo("##vrEye", current_eye_idx, eye_disp)
+            imgui.pop_item_width()
+            if changed:
+                self.app.app_settings.config.vr_display.panel_selection = eye_val[new_idx]
+                threading.Thread(target=processor.reapply_video_settings,
+                                 daemon=True, name='VREyeReapply').start()
+            row_end()
+
         # Input Format
-        row_label("Input Format", "The stereoscopic layout of the VR video file.")
+        row_label("Input Format",
+                  "The stereoscopic layout of the VR video file.")
         vr_fmt_disp = [
             "Equirectangular (SBS)", "Fisheye (SBS)",
             "Equirectangular (TB)", "Fisheye (TB)",
             "Equirectangular (Mono)", "Fisheye (Mono)",
         ]
-        vr_fmt_val = ["he_sbs", "fisheye_sbs", "he_tb", "fisheye_tb", "he", "fisheye"]
-        current_vr_idx = vr_fmt_val.index(processor.vr_input_format) if processor.vr_input_format in vr_fmt_val else 0
+        vr_fmt_val = ["he_sbs", "fisheye_sbs", "he_tb", "fisheye_tb",
+                      "he", "fisheye"]
+        current_vr_idx = (vr_fmt_val.index(processor.vr_input_format)
+                          if processor.vr_input_format in vr_fmt_val else 0)
         imgui.push_item_width(-1)
         changed, new_idx = imgui.combo("##vrFmt", current_vr_idx, vr_fmt_disp)
         imgui.pop_item_width()
         if changed:
             processor.set_active_vr_parameters(input_format=vr_fmt_val[new_idx])
-            threading.Thread(target=processor.reapply_video_settings, daemon=True, name='VRFormatReapply').start()
+            threading.Thread(target=processor.reapply_video_settings,
+                             daemon=True, name='VRFormatReapply').start()
         row_end()
 
-        # Unwarp Method
-        show_advanced = self.app.app_state_ui.show_advanced_options
-        if show_advanced:
-            row_label("Unwarp Method",
-                      "CPU (v360): FFmpeg v360 filter (recommended, best quality)\n"
-                      "Auto (GPU): choose Metal or OpenGL automatically (experimental)\n"
-                      "GPU Metal: Metal shader, macOS only (experimental)\n"
-                      "GPU OpenGL: OpenGL shader (experimental)\n"
-                      "None (Crop Only): skip unwarping, just crop one panel")
-            unwarp_disp = ["CPU (v360)", "Auto (GPU, experimental)", "GPU Metal (experimental)", "GPU OpenGL (experimental)", "None (Crop Only)"]
-            unwarp_val = ["v360", "auto", "metal", "opengl", "none"]
-        else:
-            row_label("Unwarp Method",
-                      "CPU (v360): FFmpeg v360 filter (recommended)\n"
-                      "None (Crop Only): skip unwarping, just crop")
-            unwarp_disp = ["CPU (v360)", "None (Crop Only)"]
-            unwarp_val = ["v360", "none"]
-        current_unwarp = getattr(processor, 'vr_unwarp_method_override', 'auto')
-        # Map GPU values to v360 when not in advanced mode
-        if not show_advanced and current_unwarp in ("auto", "metal", "opengl"):
-            current_unwarp = "v360"
+        row_label("Unwarp Method",
+                  "CPU (v360): FFmpeg v360 filter (recommended)\n"
+                  "None (Crop Only): skip unwarping, just crop")
+        unwarp_disp = ["CPU (v360)", "None (Crop Only)"]
+        unwarp_val = ["v360", "none"]
+        current_unwarp = getattr(processor, 'vr_unwarp_method_override', 'v360')
+        if current_unwarp not in unwarp_val:
+            current_unwarp = 'v360'
         try:
             current_unwarp_idx = unwarp_val.index(current_unwarp)
         except ValueError:
@@ -218,38 +276,14 @@ class VideoSettingsMixin:
         imgui.pop_item_width()
         if changed:
             processor.vr_unwarp_method_override = unwarp_val[new_idx]
-            self.app.app_settings.set("vr_unwarp_method", unwarp_val[new_idx])
-            threading.Thread(target=processor.reapply_video_settings, daemon=True, name='UnwarpReapply').start()
+            self.app.app_settings.config.performance.vr_unwarp_method = unwarp_val[new_idx]
+            threading.Thread(target=processor.reapply_video_settings,
+                             daemon=True, name='UnwarpReapply').start()
         row_end()
 
-        # Crop Panel (conditional — only when unwarp=none and stereo)
-        vr_fmt = getattr(processor, 'vr_input_format', '')
-        is_sbs = '_sbs' in vr_fmt or '_lr' in vr_fmt or '_rl' in vr_fmt
-        is_tb = '_tb' in vr_fmt
-        if current_unwarp == 'none' and (is_sbs or is_tb):
-            panel_label = "left/right" if is_sbs else "top/bottom"
-            row_label("Crop Panel", f"Select which {panel_label} panel to crop from the stereo frame.")
-            panel_disp = ["Left", "Right"] if is_sbs else ["Top", "Bottom"]
-            panel_val = ["first", "second"]
-            current_panel = self.app.app_settings.get("vr_crop_panel", "first")
-            try:
-                current_panel_idx = panel_val.index(current_panel)
-            except ValueError:
-                current_panel_idx = 0
-            imgui.push_item_width(-1)
-            changed, new_idx = imgui.combo("##vrCropPanel", current_panel_idx, panel_disp)
-            imgui.pop_item_width()
-            if changed:
-                self.app.app_settings.set("vr_crop_panel", panel_val[new_idx])
-                processor.vr_crop_panel = panel_val[new_idx]
-                threading.Thread(target=processor.reapply_video_settings, daemon=True, name='CropPanelReapply').start()
-            row_end()
-
-        # View Pitch (hidden when unwarp=none)
         if current_unwarp != 'none':
             row_label("View Pitch", "Vertical viewing angle offset for VR projection.\nDrag to adjust, release to apply.")
 
-            # Track slider dragging state
             is_slider_hovered = imgui.is_item_hovered()
             is_mouse_down = imgui.is_mouse_down(0)
             is_mouse_released = imgui.is_mouse_released(0)

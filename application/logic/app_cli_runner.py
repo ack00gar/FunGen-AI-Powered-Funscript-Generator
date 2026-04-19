@@ -187,7 +187,7 @@ class AppCLIRunner:
 
             # Set oscillation detector mode for Stage 3 if provided
             if hasattr(args, 'od_mode') and args.od_mode:
-                self.app.app_settings.set("stage3_oscillation_detector_mode", args.od_mode)
+                self.app.app_settings.config.tracking.oscillation_mode = args.od_mode
                 self.app.logger.info(f"Stage 3 Oscillation Detector Mode: {args.od_mode}")
 
             # Overwrite mode: 2 for overwrite, 1 for skip if missing (default), 0 process all except own matching.

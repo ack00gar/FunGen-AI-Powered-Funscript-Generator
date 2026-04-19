@@ -7,6 +7,7 @@ from application.utils.imgui_helpers import tooltip_if_hovered as _tooltip_if_ho
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card as _section_card
 from application.utils import primary_button_style, destructive_button_style
+from config.constants_colors import CurrentTheme
 
 
 class DeviceControlCoreMixin:
@@ -37,36 +38,36 @@ class DeviceControlCoreMixin:
                 imgui.text("Device Control system failed to initialize.")
                 err = getattr(self, '_device_control_init_error', None)
                 if err is not None:
-                    imgui.text_colored(f"Error: {err}", 1.0, 0.4, 0.4, 1.0)
+                    imgui.text_colored(f"Error: {err}", *CurrentTheme.RED_LIGHT)
                     if isinstance(err, (AttributeError, TypeError)):
                         imgui.spacing()
-                        imgui.text_colored("This looks like a version mismatch.", 1.0, 0.85, 0.2, 1.0)
-                        imgui.text_colored("Did you update to the latest Device Control version?", 1.0, 0.85, 0.2, 1.0)
-                        imgui.text_colored("Install the latest device_control zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+                        imgui.text_colored("This looks like a version mismatch.", *CurrentTheme.YELLOW_LIGHT)
+                        imgui.text_colored("Did you update to the latest Device Control version?", *CurrentTheme.YELLOW_LIGHT)
+                        imgui.text_colored("Install the latest device_control zip from your purchase.", *CurrentTheme.GRAY_LIGHT)
                     elif isinstance(err, (ImportError, ModuleNotFoundError)):
                         imgui.spacing()
-                        imgui.text_colored("Device Control addon not found or incomplete.", 1.0, 0.85, 0.2, 1.0)
-                        imgui.text_colored("Install the latest device_control zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+                        imgui.text_colored("Device Control addon not found or incomplete.", *CurrentTheme.YELLOW_LIGHT)
+                        imgui.text_colored("Install the latest device_control zip from your purchase.", *CurrentTheme.GRAY_LIGHT)
                     else:
-                        imgui.text_colored("Check logs for details.", 1.0, 0.5, 0.0, 1.0)
+                        imgui.text_colored("Check logs for details.", *CurrentTheme.ORANGE)
                 else:
-                    imgui.text_colored("Check logs for details.", 1.0, 0.5, 0.0, 1.0)
+                    imgui.text_colored("Check logs for details.", *CurrentTheme.ORANGE)
                 imgui.spacing()
                 if imgui.button("Retry Initialization"):
                     self._device_control_initialized = False
                     self._device_control_init_error = None
 
         except Exception as e:
-            imgui.text_colored(f"Error in Device Control: {e}", 1.0, 0.4, 0.4, 1.0)
+            imgui.text_colored(f"Error in Device Control: {e}", *CurrentTheme.RED_LIGHT)
             if isinstance(e, (AttributeError, TypeError)):
                 imgui.spacing()
-                imgui.text_colored("This looks like a version mismatch.", 1.0, 0.85, 0.2, 1.0)
-                imgui.text_colored("Did you update to the latest Device Control version?", 1.0, 0.85, 0.2, 1.0)
-                imgui.text_colored("Install the latest device_control zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
+                imgui.text_colored("This looks like a version mismatch.", *CurrentTheme.YELLOW_LIGHT)
+                imgui.text_colored("Did you update to the latest Device Control version?", *CurrentTheme.YELLOW_LIGHT)
+                imgui.text_colored("Install the latest device_control zip from your purchase.", *CurrentTheme.GRAY_LIGHT)
             elif isinstance(e, (ImportError, ModuleNotFoundError)):
-                imgui.text_colored("Device Control addon not found or incomplete.", 1.0, 0.85, 0.2, 1.0)
-                imgui.text_colored("Install the latest device_control zip from your purchase.", 0.8, 0.8, 0.8, 1.0)
-            imgui.text_colored("See logs for full details.", 0.7, 0.7, 0.7, 1.0)
+                imgui.text_colored("Device Control addon not found or incomplete.", *CurrentTheme.YELLOW_LIGHT)
+                imgui.text_colored("Install the latest device_control zip from your purchase.", *CurrentTheme.GRAY_LIGHT)
+            imgui.text_colored("See logs for full details.", *CurrentTheme.DESCRIPTION_TEXT)
 
 
     def _initialize_device_control(self):
@@ -341,13 +342,13 @@ class DeviceControlCoreMixin:
 
         # ── Status line ──
         if control_source == 'streamer':
-            imgui.text_colored("[STREAMER CONTROL]", 0.2, 0.5, 0.9)
+            imgui.text_colored("[STREAMER CONTROL]", *CurrentTheme.BUTTON_PRIMARY)
         elif control_source == 'desktop':
-            imgui.text_colored("[DESKTOP CONTROL]", 0.2, 0.7, 0.2)
+            imgui.text_colored("[DESKTOP CONTROL]", *CurrentTheme.GREEN)
         elif connected:
-            imgui.text_colored("[IDLE]", 0.7, 0.7, 0.2)
+            imgui.text_colored("[IDLE]", *CurrentTheme.YELLOW_DARK)
         else:
-            imgui.text_colored("No devices connected", 0.5, 0.5, 0.5)
+            imgui.text_colored("No devices connected", *CurrentTheme.GRAY_MEDIUM)
 
         imgui.spacing()
 
@@ -360,7 +361,7 @@ class DeviceControlCoreMixin:
                 name = getattr(device_info, 'name', device_id)
 
                 # Status dot + name
-                imgui.text_colored("*", 0.2, 0.8, 0.2)  # green dot
+                imgui.text_colored("*", *CurrentTheme.GREEN)  # green dot
                 imgui.same_line()
                 imgui.text(f"{name}")
 
@@ -369,7 +370,7 @@ class DeviceControlCoreMixin:
                     rtd = self.device_manager.get_handy_rtd_ms() if hasattr(self.device_manager, 'get_handy_rtd_ms') else 0
                     if rtd > 0:
                         imgui.same_line()
-                        imgui.text_colored(f"({rtd}ms)", 0.6, 0.6, 0.6)
+                        imgui.text_colored(f"({rtd}ms)", *CurrentTheme.GRAY_SUBDUED)
 
                 # Disconnect button — right-aligned
                 btn_label = f"Disconnect##{device_id}"
@@ -393,11 +394,11 @@ class DeviceControlCoreMixin:
         ]
 
         if unconnected_serial:
-            imgui.text_colored("Detected:", 0.6, 0.6, 0.6)
+            imgui.text_colored("Detected:", *CurrentTheme.GRAY_SUBDUED)
             for port_info in unconnected_serial:
                 port_name = port_info.get('device', 'Unknown')
                 description = port_info.get('description', '')
-                imgui.text_colored("*", 0.6, 0.6, 0.2)  # yellow dot
+                imgui.text_colored("*", *CurrentTheme.YELLOW_DARK)  # yellow dot
                 imgui.same_line()
                 imgui.text(f"{description}")
                 btn_label = f"Connect##{port_name}"
@@ -412,7 +413,7 @@ class DeviceControlCoreMixin:
         unconnected_bp = [d for d in bp_devices if d.device_id not in connected_port_ids]
         if unconnected_bp:
             for device_info in unconnected_bp:
-                imgui.text_colored("*", 0.6, 0.6, 0.2)
+                imgui.text_colored("*", *CurrentTheme.YELLOW_DARK)
                 imgui.same_line()
                 imgui.text(f"{device_info.name}")
                 btn_label = f"Connect##{device_info.device_id}"
@@ -426,7 +427,7 @@ class DeviceControlCoreMixin:
         if not self._is_device_type_connected("handy"):
             connection_key = self.app.app_settings.get("handy_connection_key", "")
             if connection_key:
-                imgui.text_colored("*", 0.6, 0.6, 0.2)
+                imgui.text_colored("*", *CurrentTheme.YELLOW_DARK)
                 imgui.same_line()
                 imgui.text(f"Handy ({connection_key[:4]}...)")
                 btn_label = "Connect##HandyHub"
@@ -479,15 +480,15 @@ class DeviceControlCoreMixin:
 
             # Status line with color indicator
             if control_source == 'streamer':
-                imgui.text_colored("[STREAMER]", 0.2, 0.5, 0.9)  # Blue
+                imgui.text_colored("[STREAMER]", *CurrentTheme.BUTTON_PRIMARY)  # Blue
                 imgui.same_line()
                 imgui.text(f"{device_name}")
             elif control_source == 'desktop':
-                imgui.text_colored("[DESKTOP]", 0.2, 0.7, 0.2)  # Green
+                imgui.text_colored("[DESKTOP]", *CurrentTheme.GREEN)  # Green
                 imgui.same_line()
                 imgui.text(f"{device_name}")
             else:
-                imgui.text_colored("[IDLE]", 0.7, 0.7, 0.2)  # Yellow
+                imgui.text_colored("[IDLE]", *CurrentTheme.YELLOW_DARK)  # Yellow
                 imgui.same_line()
                 imgui.text(f"{device_name}")
 
@@ -498,7 +499,7 @@ class DeviceControlCoreMixin:
             if imgui.small_button("Disconnect"):
                 self._disconnect_current_device()
         else:
-            imgui.text_colored("Device: Not Connected", 0.7, 0.3, 0.3)
+            imgui.text_colored("Device: Not Connected", *CurrentTheme.RED_LIGHT)
 
 
     def _disconnect_current_device(self):

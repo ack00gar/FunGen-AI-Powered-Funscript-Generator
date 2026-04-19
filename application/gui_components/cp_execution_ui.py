@@ -45,8 +45,9 @@ class ExecutionMixin:
             self._render_hybrid_progress_ui(stage_proc, is_analysis_running, active_progress_color, completed_progress_color)
             return
 
-        # Stage 1
-        imgui.text("Stage 1: YOLO Object Detection")
+        imgui.text("Analysis Stage 1: YOLO Object Detection")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("First pass: decode every frame and run YOLO to detect bodies, objects, and (optionally) poses. Writes a per-frame detection msgpack used by Stage 2.")
         if is_analysis_running and stage_proc.current_analysis_stage == 1:
             imgui.text(f"Time: {stage_proc.stage1_time_elapsed_str} | ETA: {stage_proc.stage1_eta_str} | Avg Speed:  {stage_proc.stage1_processing_fps_str}")
             imgui.text_wrapped(f"Progress: {stage_proc.stage1_progress_label}")
@@ -106,9 +107,13 @@ class ExecutionMixin:
         else:
             imgui.text_wrapped(f"Status: {stage_proc.stage1_status_text}")
 
-        # Stage 2
-        s2_title = "Stage 2: Contact Analysis & Funscript" if self._is_stage2_tracker(selected_mode) else "Stage 2: Segmentation"
+        s2_title = "Analysis Stage 2: Contact Analysis & Funscript" if self._is_stage2_tracker(selected_mode) else "Analysis Stage 2: Segmentation"
         imgui.text(s2_title)
+        if imgui.is_item_hovered():
+            if self._is_stage2_tracker(selected_mode):
+                imgui.set_tooltip("Reads Stage 1 detections, analyses contact events between tracked objects, and produces the primary and secondary funscript actions.")
+            else:
+                imgui.set_tooltip("Reads Stage 1 detections and segments the video into scene chapters. Output feeds into Stage 3.")
         if is_analysis_running and stage_proc.current_analysis_stage == 2:
             imgui.text_wrapped(f"Main: {stage_proc.stage2_main_progress_label}")
 
@@ -158,9 +163,13 @@ class ExecutionMixin:
         # Stage 3
         if self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode):
             if self._is_mixed_stage3_tracker(selected_mode):
-                imgui.text("Stage 3: Mixed Processing")
+                imgui.text("Analysis Stage 3: Mixed Processing")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Combines Stage 2 segmentation output with per-chapter optical flow refinement to produce the final funscript.")
             else:
-                imgui.text("Stage 3: Per-Segment Optical Flow")
+                imgui.text("Analysis Stage 3: Per-Segment Optical Flow")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Re-processes each chapter with dense optical flow to refine the funscript curve from Stage 2.")
             if is_analysis_running and stage_proc.current_analysis_stage == 3:
                 imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
 
@@ -286,13 +295,14 @@ class ExecutionMixin:
 
             if has_roi:
                 imgui.same_line()
-                # Clear ROI button (DESTRUCTIVE - clears user data)
                 with destructive_button_style():
                     if imgui.button("Clear ROI##UserClearROI_RunTab", width=btn_w):
                         if tr and hasattr(tr, "clear_user_defined_roi_and_point"):
                             tr.stop_tracking()
                             tr.clear_user_defined_roi_and_point()
                         app.logger.info("User ROI cleared.", extra={"status_message": True})
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Stop tracking and discard the manually drawn ROI box + contact point. You will need to redraw them before resuming.")
                         app.notify("User ROI cleared", "info", 2.0)
                 _tooltip_if_hovered("Remove the current ROI and tracking point.")
 

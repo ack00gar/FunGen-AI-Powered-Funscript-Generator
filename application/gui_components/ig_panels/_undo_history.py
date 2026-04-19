@@ -1,6 +1,7 @@
 """Undo/redo history display mixin for InfoGraphsUI."""
 import imgui
 from application.utils.section_card import section_card
+from config.constants_colors import CurrentTheme
 
 
 class UndoHistoryMixin:
@@ -37,7 +38,7 @@ class UndoHistoryMixin:
 
             # Clickable selectable row
             if is_next:
-                imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 1.0, 1.0)
+                imgui.push_style_color(imgui.COLOR_TEXT, *CurrentTheme.WHITE)
             else:
                 imgui.push_style_color(imgui.COLOR_TEXT, 0.55, 0.55, 0.6, 1.0)
 

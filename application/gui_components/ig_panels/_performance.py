@@ -2,6 +2,7 @@
 import imgui
 import numpy as np
 import time
+from config.constants_colors import CurrentTheme
 
 
 def render_graph(label, data, overlay_text, available_width,
@@ -51,10 +52,10 @@ class PerformanceMixin:
             # Pre-compute outside loop
             dl = imgui.get_window_draw_list()
             bg_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.8)
-            text_color = imgui.get_color_u32_rgba(0.8, 0.8, 0.8, 1.0)
-            color_green = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 1.0)
+            text_color = imgui.get_color_u32_rgba(*CurrentTheme.GRAY_LIGHT)
+            color_green = imgui.get_color_u32_rgba(*CurrentTheme.GREEN)
             color_yellow = imgui.get_color_u32_rgba(1.0, 0.8, 0.2, 1.0)
-            color_red = imgui.get_color_u32_rgba(1.0, 0.2, 0.2, 1.0)
+            color_red = imgui.get_color_u32_rgba(*CurrentTheme.RED)
 
             for i, core_load in enumerate(per_core_usage):
                 bar_x = imgui.get_cursor_screen_pos()[0] + i * (bar_width + spacing)
@@ -113,13 +114,13 @@ class PerformanceMixin:
         if cpu_freq > 0:
             freq_ghz = cpu_freq / 1000.0
             imgui.same_line()
-            imgui.text_colored(f" @ {freq_ghz:.1f}GHz", 0.7, 0.7, 0.7, 1.0)
+            imgui.text_colored(f" @ {freq_ghz:.1f}GHz", *CurrentTheme.DESCRIPTION_TEXT)
 
         # CPU temp if available
         cpu_temp = stats.get("cpu_temp", None)
         if cpu_temp is not None:
             imgui.same_line()
-            imgui.text_colored(f" | {cpu_temp:.0f}C", 0.7, 0.7, 0.7, 1.0)
+            imgui.text_colored(f" | {cpu_temp:.0f}C", *CurrentTheme.DESCRIPTION_TEXT)
 
         imgui.spacing()
 
@@ -173,7 +174,7 @@ class PerformanceMixin:
                 f"Swap: {swap_percent:.1f}% ({swap_gb:.1f}GB)", *swap_color
             )
         else:
-            imgui.text_colored("Swap: Not in use", 0.2, 0.8, 0.2, 1.0)
+            imgui.text_colored("Swap: Not in use", *CurrentTheme.GREEN)
 
         imgui.separator()
 
