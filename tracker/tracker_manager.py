@@ -608,7 +608,7 @@ class TrackerManager:
                 self._current_tracker.pose_model_path = None
             self._load_models()
 
-    def unload_models():
+    def unload_models(self):
         """Unloads models from the current tracker by cleaning up the tracker."""
         self.logger.info("Unloading models by cleaning up the current tracker.")
         self._cleanup_current_tracker()
