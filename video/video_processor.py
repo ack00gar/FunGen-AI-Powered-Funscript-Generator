@@ -810,12 +810,27 @@ class VideoProcessor(
         return resolved
 
     def _resize_gpu(self, display_frame, new_w: int, new_h: int, device: str):
-        """Resize an HWC uint8 frame on a torch device. Returns HWC uint8 numpy."""
+        """Resize an HWC uint8 frame on a torch device. Returns HWC uint8 numpy.
+
+        Uses bilinear interpolation. Antialiasing is preferred for quality but
+        the op is not implemented on MPS, so we sticky-fall-back to the
+        non-AA path after the first exception and remember the choice for the
+        life of the processor.
+        """
         import torch
         import torch.nn.functional as F
-        # Upload HWC uint8 -> NCHW float32 (interpolate requires float on most backends).
         t = torch.from_numpy(display_frame).to(device).permute(2, 0, 1).unsqueeze(0).float()
-        out = F.interpolate(t, size=(new_h, new_w), mode="bilinear", antialias=True, align_corners=False)
+        use_aa = getattr(self, "_resize_gpu_antialias", True)
+        try:
+            out = F.interpolate(t, size=(new_h, new_w), mode="bilinear",
+                                antialias=use_aa, align_corners=False)
+        except Exception:
+            if use_aa:
+                self._resize_gpu_antialias = False
+                out = F.interpolate(t, size=(new_h, new_w), mode="bilinear",
+                                    antialias=False, align_corners=False)
+            else:
+                raise
         out = out.clamp_(0, 255).to(torch.uint8).squeeze(0).permute(1, 2, 0).contiguous()
         return out.cpu().numpy()
 

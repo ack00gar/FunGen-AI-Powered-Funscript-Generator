@@ -90,26 +90,30 @@ def run(device: str, iters: int, warmup: int, imgsz: int, **_) -> Report:
         import torch
         import torch.nn.functional as F
 
-        def torch_resize():
-            # Upload HWC uint8 -> NCHW float32 on device, resize, download.
-            t = torch.from_numpy(hd).to(device).permute(2, 0, 1).unsqueeze(0).float()
-            out = F.interpolate(t, size=(new_h, new_w), mode="bilinear", antialias=True, align_corners=False)
-            out = out.clamp_(0, 255).to(torch.uint8).squeeze(0).permute(1, 2, 0).contiguous()
-            resized = out.cpu().numpy()
-            if pad_top:
-                buf[:pad_top, :, :] = 0
-            if pad_bot:
-                buf[pad_top + new_h:, :, :] = 0
-            if pad_left:
-                buf[pad_top:pad_top + new_h, :pad_left, :] = 0
-            if pad_right:
-                buf[pad_top:pad_top + new_h, pad_left + new_w:, :] = 0
-            buf[pad_top:pad_top + new_h, pad_left:pad_left + new_w] = resized
+        def _make_torch_resize(antialias: bool):
+            def torch_resize():
+                t = torch.from_numpy(hd).to(device).permute(2, 0, 1).unsqueeze(0).float()
+                out = F.interpolate(t, size=(new_h, new_w), mode="bilinear",
+                                    antialias=antialias, align_corners=False)
+                out = out.clamp_(0, 255).to(torch.uint8).squeeze(0).permute(1, 2, 0).contiguous()
+                resized = out.cpu().numpy()
+                if pad_top:
+                    buf[:pad_top, :, :] = 0
+                if pad_bot:
+                    buf[pad_top + new_h:, :, :] = 0
+                if pad_left:
+                    buf[pad_top:pad_top + new_h, :pad_left, :] = 0
+                if pad_right:
+                    buf[pad_top:pad_top + new_h, pad_left + new_w:, :] = 0
+                buf[pad_top:pad_top + new_h, pad_left:pad_left + new_w] = resized
+            return torch_resize
 
-        try:
-            c = measure(torch_resize, iters=iters, warmup=warmup, device=device)
-            r.add(Sample(label=f"torch resize on {device}", samples_s=c, device=device))
-        except Exception as e:
-            r.extra["torch_run_error"] = str(e)
+        for label_suffix, antialias in [("AA=True", True), ("AA=False", False)]:
+            try:
+                c = measure(_make_torch_resize(antialias), iters=iters, warmup=warmup, device=device)
+                r.add(Sample(label=f"torch bilinear {label_suffix} on {device}",
+                             samples_s=c, device=device))
+            except Exception as e:
+                r.extra[f"torch_{label_suffix}_error"] = str(e).splitlines()[0][:200]
 
     return r
