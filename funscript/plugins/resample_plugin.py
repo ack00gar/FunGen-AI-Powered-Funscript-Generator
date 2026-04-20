@@ -193,14 +193,22 @@ class PeakPreservingResamplePlugin(FunscriptTransformationPlugin):
                 # Skip invalid intervals
                 continue
 
+            # math.cos + Python clamp: numpy scalars have ~3 us fixed
+            # overhead each; at 13k new points that dominates runtime.
+            _cos = math.cos
+            _pi = math.pi
             current_time = t1 + resample_rate_ms
             while current_time < t2:
                 progress = (current_time - t1) / duration
-                eased_progress = (1 - np.cos(progress * np.pi)) / 2.0
+                eased_progress = (1.0 - _cos(progress * _pi)) * 0.5
                 new_pos = pos1 + eased_progress * pos_delta
+                if new_pos < 0.0:
+                    new_pos = 0.0
+                elif new_pos > 100.0:
+                    new_pos = 100.0
                 new_actions.append({
                     'at': int(current_time),
-                    'pos': int(round(np.clip(new_pos, 0, 100)))
+                    'pos': int(round(new_pos))
                 })
                 current_time += resample_rate_ms
 
