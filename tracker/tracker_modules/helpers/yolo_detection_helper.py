@@ -64,6 +64,14 @@ def load_model(path: str, task: str = 'detect', *,
         ultralytics.YOLO model instance
     """
     from ultralytics import YOLO
+    # Ultralytics attaches its own StreamHandler to its module logger the
+    # first time it is imported. Strip it and enable propagation so YOLO
+    # info lines like "Loading X for CoreML inference..." get our
+    # timestamp + git-info prefix instead of printing raw.
+    _ul = logging.getLogger("ultralytics")
+    for h in list(_ul.handlers):
+        _ul.removeHandler(h)
+    _ul.propagate = True
     model = YOLO(path, task=task)
     if warmup_device:
         try:

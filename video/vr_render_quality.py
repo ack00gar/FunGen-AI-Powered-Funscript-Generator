@@ -23,30 +23,40 @@ from collections import deque
 @dataclass(frozen=True)
 class QualitySpec:
     name: str
-    supersample_factor: int
+    supersample_factor: float   # float: >1 supersample, <1 render smaller and upscale
     use_bicubic: bool
-    aniso_level: float        # 1.0 = off, 4/8/16 = enabled
-    mpv_scale: str            # mpv scale property value
+    aniso_level: float          # 1.0 = off, 4/8/16 = enabled
+    mpv_scale: str              # mpv scale property value
 
 
 LEVELS = [
     QualitySpec(name="L0",
-                supersample_factor=2,
+                supersample_factor=2.0,
                 use_bicubic=True,
                 aniso_level=16.0,
                 mpv_scale="ewa_lanczos"),
     QualitySpec(name="L1",
-                supersample_factor=2,
+                supersample_factor=2.0,
                 use_bicubic=False,
                 aniso_level=16.0,
                 mpv_scale="spline36"),
     QualitySpec(name="L2",
-                supersample_factor=1,
+                supersample_factor=1.0,
                 use_bicubic=False,
                 aniso_level=4.0,
                 mpv_scale="bilinear"),
     QualitySpec(name="L3",
-                supersample_factor=1,
+                supersample_factor=1.0,
+                use_bicubic=False,
+                aniso_level=1.0,
+                mpv_scale="bilinear"),
+    QualitySpec(name="L4",
+                supersample_factor=0.75,
+                use_bicubic=False,
+                aniso_level=1.0,
+                mpv_scale="bilinear"),
+    QualitySpec(name="L5",
+                supersample_factor=0.5,
                 use_bicubic=False,
                 aniso_level=1.0,
                 mpv_scale="bilinear"),
@@ -54,7 +64,7 @@ LEVELS = [
 
 Mode = Literal["auto", "high", "medium", "low"]
 
-_PIN_MAP = {"high": 0, "medium": 2, "low": 3}
+_PIN_MAP = {"high": 0, "medium": 2, "low": 4}
 
 
 class VRRenderQualityMonitor:
@@ -67,10 +77,10 @@ class VRRenderQualityMonitor:
 
     def __init__(self,
                  target_fps: float = 60.0,
-                 step_down_ratio: float = 0.65,
-                 step_up_ratio: float = 0.25,
-                 min_frames_between_changes: int = 120,
-                 ema_alpha: float = 0.08):
+                 step_down_ratio: float = 0.80,
+                 step_up_ratio: float = 0.50,
+                 min_frames_between_changes: int = 60,
+                 ema_alpha: float = 0.10):
         self.target_fps = target_fps
         # Step down when EMA pass ms exceeds this fraction of the frame budget
         self._budget_ms = 1000.0 / target_fps
@@ -109,14 +119,17 @@ class VRRenderQualityMonitor:
     def _maybe_step_level(self) -> None:
         if self._frames_since_change < self.min_frames_between_changes:
             return
-        # Need sustained over-budget to step DOWN (reduce quality)
+        # Need sustained over-budget to step DOWN (reduce quality).
+        # 30 frames = 0.5s at 60fps -- responsive enough to avoid stutter.
         if self._frames_over_budget >= 30 and self._current_idx < len(LEVELS) - 1:
             self._current_idx += 1
             self._frames_since_change = 0
             self._frames_over_budget = 0
             return
-        # Need sustained under-budget to step UP (increase quality)
-        if self._frames_under_budget >= 240 and self._current_idx > 0:
+        # Need sustained under-budget to step UP (increase quality).
+        # 120 frames = 2s at 60fps -- quickly hunt for best quality when
+        # GPU has headroom, previously 240 which took 4s.
+        if self._frames_under_budget >= 120 and self._current_idx > 0:
             self._current_idx -= 1
             self._frames_since_change = 0
             self._frames_under_budget = 0

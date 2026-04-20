@@ -757,11 +757,23 @@ class VideoDisplayCoreMixin:
             mode = self.app.app_settings.config.vr_display.quality_mode
         except Exception:
             mode = 'auto'
+        try:
+            want_supersample = self.app.app_settings.config.vr_display.shader_supersample
+        except Exception:
+            want_supersample = True
         spec = mon.current_spec(mode=mode)
-        ss_factor = spec.supersample_factor
-        cap = 4096 if ss_factor > 1 else 2048
-        dw_w = max(64, min(int(target_w) * ss_factor, cap))
-        dw_h = max(64, min(int(target_h) * ss_factor, cap))
+        ss_factor = float(spec.supersample_factor) if want_supersample else 1.0
+        # Log level changes so users can see adaptive quality working.
+        _last_level = getattr(self.gui_instance, '_vr_quality_last_level', None)
+        if _last_level != spec.name:
+            self.app.logger.info(
+                f"VR shader quality: {spec.name} (ss={ss_factor:.2f}x "
+                f"bicubic={'on' if spec.use_bicubic else 'off'} "
+                f"aniso={int(spec.aniso_level)}x ema={mon.ema_ms:.1f}ms)")
+            self.gui_instance._vr_quality_last_level = spec.name
+        cap = 4096 if ss_factor > 1.0 else 2048
+        dw_w = max(64, min(int(round(target_w * ss_factor)), cap))
+        dw_h = max(64, min(int(round(target_h * ss_factor)), cap))
         self.gui_instance.resize_vr_dewarp_target(dw_w, dw_h)
         # Apply anisotropic filtering to the input (mpv display) texture.
         # Cache the GL_MAX_TEXTURE_MAX_ANISOTROPY cap on first use (glGetFloatv
