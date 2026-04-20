@@ -2603,6 +2603,13 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                     self._dump_profile_snapshot()
                     glfw.set_window_should_close(self.window, True)
         finally:
+            # Safety net: dump whatever we collected even if the user closed
+            # the window before hitting the target frame count.
+            if self._profile_enabled and self._profile_samples:
+                try:
+                    self._dump_profile_snapshot()
+                except Exception:
+                    pass
             self.app.shutdown_app()
 
             # --- Cleanly shut down all worker threads ---
