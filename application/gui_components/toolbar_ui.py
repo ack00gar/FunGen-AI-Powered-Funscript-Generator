@@ -480,12 +480,34 @@ class ToolbarUI:
 
         imgui.same_line()
 
-        # Max Speed button
+        # Max Speed button -- disabled while mpv drives display (plain
+        # playback / shader dewarp) because MAX_SPEED caps the processing
+        # loop at 20 Hz via the mpv_drives_display branch and mpv's own
+        # speed cap tops out at 4x. Keep it available during live tracking
+        # and offline analysis where it actually changes throughput.
+        proc = self.app.processor
+        tracker = self.app.tracker
+        stage_proc = self.app.stage_processor
+        _tracker_running = bool(tracker and getattr(tracker, 'tracking_active', False))
+        _offline_running = bool(stage_proc and getattr(stage_proc, 'full_analysis_active', False))
+        _max_speed_meaningful = _tracker_running or _offline_running
+        if not _max_speed_meaningful and current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
+            app_state.selected_processing_speed_mode = ProcessingSpeedMode.REALTIME
+            current_speed_mode = ProcessingSpeedMode.REALTIME
+
         if current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
             self._apply_button_active()
 
-        if self._toolbar_button(icon_mgr, 'speed-max.png', btn_size, "Max Speed (no frame delay)"):
+        if not _max_speed_meaningful:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+        clicked = self._toolbar_button(
+            icon_mgr, 'speed-max.png', btn_size,
+            "Max Speed (no frame delay) -- only active during live tracking or offline analysis"
+            if not _max_speed_meaningful else "Max Speed (no frame delay)")
+        if clicked and _max_speed_meaningful:
             app_state.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
+        if not _max_speed_meaningful:
+            imgui.pop_style_var()
 
         if current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
             self._apply_button_default()
