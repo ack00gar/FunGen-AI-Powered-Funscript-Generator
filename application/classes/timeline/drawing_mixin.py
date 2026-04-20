@@ -202,18 +202,13 @@ class DrawingMixin:
 
 
     def _spline_samples_for_view(self, canvas_width_px: float, n_visible_segments: int) -> int:
-        """Pixel-aware sample count per catmull-rom segment.
-
-        Budget ~150 samples per 2000px of canvas, spread over visible segments
-        (so dense scripts don't explode and sparse scripts stay smooth). If the
-        per-segment budget drops below 3, caller should fall back to a straight
-        line, subsampling with <3 points per segment produces visible kinks
-        worse than the straight interpolation.
-        """
+        """Samples per catmull-rom segment. Aim for ~1 sample per 3 pixels of
+        average segment width, clamped to [4, 16]. Previous global 150-sample
+        budget collapsed to straight lines on any dense script."""
         if n_visible_segments <= 0 or canvas_width_px <= 0:
             return 0
-        total_budget = int(150.0 * canvas_width_px / 2000.0)
-        return max(0, total_budget // n_visible_segments)
+        avg_seg_px = canvas_width_px / n_visible_segments
+        return max(4, min(16, int(avg_seg_px / 3.0) + 4))
 
 
     def _point_fade_opacity(self, tf: 'TimelineTransformer') -> float:

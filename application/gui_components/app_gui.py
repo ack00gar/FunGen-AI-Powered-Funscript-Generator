@@ -2023,11 +2023,18 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                     imgui.set_tooltip("Press F1 to see all keyboard shortcuts")
 
     def _render_status_right(self, proc):
-        """Render right section: GUI FPS, Video FPS, Frame Buffer visualization."""
+        """Render right section: dev-only FPS + buffer widgets, gated."""
+        # End users don't care about GUI FPS, Tracker FPS, Frame Buffer internals.
+        # Advanced Options toggle reveals them for scripters / debugging.
+        try:
+            show_advanced = bool(self.app.app_settings.show_advanced_options)
+        except Exception:
+            show_advanced = False
+        if not show_advanced:
+            return
         io = imgui.get_io()
         dim_color = (0.50, 0.50, 0.55, 0.75)
         sep = "  -  "
-        # Cache separator width (constant string, font doesn't change mid-session)
         if not hasattr(self, '_sep_w'):
             self._sep_w = imgui.calc_text_size(sep)[0]
         sep_w = self._sep_w
