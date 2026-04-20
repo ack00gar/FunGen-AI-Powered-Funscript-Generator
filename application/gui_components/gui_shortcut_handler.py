@@ -810,7 +810,7 @@ class ShortcutHandlerMixin:
                     return
 
             from application.classes.timeline_ops import add_point
-            add_point(timeline, current_time_ms, value)
+            add_point(timeline, current_time_ms, value, snap_time=False)
             self.app.logger.info(f"Added point: {value}% at {current_time_ms}ms (Timeline {timeline_num})", extra={'status_message': True})
         else:
             self.app.logger.warning(f"Timeline {timeline_num} not found")
