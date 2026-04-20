@@ -763,28 +763,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                     return 0
                 return _ctypes.cast(addr, _ctypes.c_void_p).value or 0
 
-            # GL backend gets zero-copy hwdec; SW backend stays on -copy.
+            # Use auto-safe so mpv probes codec/profile/device and falls back
+            # cleanly when a given backend can't negotiate. videotoolbox hard-
+            # pinned previously failed on 8K h264 ("Failed setup for format
+            # videotoolbox_vld") and silently dropped us to SW, flooding the
+            # demuxer queue and producing choppy playback.
             backend = self.app.app_settings.config.mpv.render_backend
-            import platform as _plat
-            _sys = _plat.system()
-            if backend == "gl":
-                if _sys == "Darwin":
-                    _default_hwdec = "videotoolbox"
-                elif _sys == "Windows":
-                    _default_hwdec = "d3d11va"
-                elif _sys == "Linux":
-                    _default_hwdec = "vaapi"
-                else:
-                    _default_hwdec = "no"
-            else:
-                if _sys == "Darwin":
-                    _default_hwdec = "videotoolbox-copy"
-                elif _sys == "Windows":
-                    _default_hwdec = "d3d11va-copy"
-                elif _sys == "Linux":
-                    _default_hwdec = "vaapi-copy"
-                else:
-                    _default_hwdec = "no"
+            _default_hwdec = "auto-safe"
+            _sys = __import__("platform").system()
             hwdec_override = self.app.app_settings.config.mpv.hwdec_override or _default_hwdec
             disp = None
 

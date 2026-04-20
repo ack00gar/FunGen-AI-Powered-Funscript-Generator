@@ -28,15 +28,9 @@ log = logging.getLogger(__name__)
 
 
 def _default_hwdec() -> str:
-    # Zero-copy: we render straight to GL, -copy variants round-trip via CPU.
-    sys = platform.system()
-    if sys == "Darwin":
-        return "videotoolbox"
-    if sys == "Windows":
-        return "d3d11va"
-    if sys == "Linux":
-        return "vaapi"
-    return "no"
+    # auto-safe lets mpv probe + fall back when a specific backend can't
+    # negotiate (8K h264 + videotoolbox failed at init and dropped to SW).
+    return "auto-safe"
 
 
 class ThumbnailMpv:

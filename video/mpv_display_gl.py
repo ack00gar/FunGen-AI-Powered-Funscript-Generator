@@ -53,7 +53,7 @@ class MpvDisplayGL:
         self,
         video_path: str,
         vf: Optional[str] = None,
-        hwdec: str = "videotoolbox-copy",
+        hwdec: str = "auto-safe",
         with_audio: bool = True,
         display_fps: float = 60.0,
         logger: Optional[logging.Logger] = None,

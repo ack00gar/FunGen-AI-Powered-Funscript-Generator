@@ -289,14 +289,14 @@ class TrackerManager:
         return getattr(gui, 'mpv_display', None) if gui else None
 
     def _suspend_mpv_display_for_tracking(self) -> None:
-        # mpv plays at native rate while the tracker pulls frames paced by
-        # target_delay; their audio timelines diverge fast. Mute first so
-        # no sample leaks in the window before pause lands.
+        # Save paused/mute state so _resume_ can restore exactly.
         disp = self._get_mpv_display()
         if disp is None or not getattr(disp, 'is_loaded', False):
             return
         try:
             self._mpv_pre_tracking_mute = bool(getattr(disp._player, 'mute', False)) if disp._player else False
+            self._mpv_pre_tracking_paused = bool(getattr(disp, 'is_paused', False))
+            self._mpv_suspended_by_tracker = True
             if disp._player is not None:
                 disp._player.mute = True
             disp.pause()
@@ -328,6 +328,11 @@ class TrackerManager:
                 self.logger.debug(f"HD resume after tracking failed: {e}")
 
     def _resume_mpv_display_after_tracking(self) -> None:
+        # No-op if we never actually suspended (stop_tracking can fire during
+        # startup cleanup before any live session; resuming then would
+        # auto-start playback the user never asked for).
+        if not getattr(self, '_mpv_suspended_by_tracker', False):
+            return
         disp = self._get_mpv_display()
         if disp is None or not getattr(disp, 'is_loaded', False):
             return
@@ -335,9 +340,6 @@ class TrackerManager:
             proc = getattr(self.app, 'processor', None) if self.app else None
             if proc and proc.fps and proc.fps > 0:
                 target_s = proc.current_frame_index / proc.fps
-                # Skip the seek if mpv already sits within one frame of the
-                # tracker cursor; seeking forces a keyframe decode burst
-                # and ~50ms of A/V lag on resume.
                 cur_s = 0.0
                 try:
                     cur_s = float(getattr(disp, '_last_time_pos', 0.0) or 0.0)
@@ -347,12 +349,14 @@ class TrackerManager:
                     disp.seek(target_s, exact=True)
             if disp._player is not None:
                 disp._player.mute = bool(getattr(self, '_mpv_pre_tracking_mute', False))
-            # Matches the unconditional pause in _suspend_...; without it
-            # mpv stays paused and nothing advances post-tracking.
-            disp.play()
+            # Restore only what we clobbered.
+            if not getattr(self, '_mpv_pre_tracking_paused', False):
+                disp.play()
         except Exception as e:
             if self.logger:
                 self.logger.debug(f"mpv resume-after-tracking failed: {e}")
+        finally:
+            self._mpv_suspended_by_tracker = False
 
     def process_frame(self, frame: np.ndarray, frame_time_ms: int,
                      frame_index: Optional[int] = None,
