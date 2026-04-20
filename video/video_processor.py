@@ -1492,9 +1492,13 @@ class VideoProcessor(
         """Generate a waveform by decoding the audio stream via an ffmpeg
         subprocess and downsampling to ``num_samples`` peak-amplitude buckets.
 
-        ffmpeg pipes mono 16-bit PCM at 44.1 kHz to stdout; we read the whole
-        thing (typical movie = 50-200 MB) and reduce to ``num_samples`` peaks
-        for the UI.
+        ffmpeg downsamples to a low-rate mono 16-bit PCM stream (8 kHz by
+        default) before piping to Python. At this rate a feature-length film
+        is ~50 MB instead of ~600 MB, and every downstream step -- pipe I/O,
+        numpy frombuffer, reshape, max-reduce -- scales linearly with that
+        data. 8 kHz still captures envelope peaks for every viewable-width
+        bucket (the UI pool is ~2k samples, so each bucket covers tens of
+        thousands of audio samples; peak fidelity is preserved).
         """
         if not self.video_path or not self.video_info.get("has_audio"):
             self.logger.info("No video loaded or video has no audio stream for waveform generation.")
@@ -1506,11 +1510,12 @@ class VideoProcessor(
         import subprocess as _subprocess
         from video.ffmpeg_helpers import find_ffmpeg as _find_ffmpeg, subprocess_flags as _flags
 
+        target_rate = 8000
         cmd = [
             _find_ffmpeg(), "-hide_banner", "-nostats", "-loglevel", "error",
             "-i", self.video_path,
             "-vn", "-sn",
-            "-ac", "1", "-ar", "44100",
+            "-ac", "1", "-ar", str(target_rate),
             "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1",
         ]
         try:
