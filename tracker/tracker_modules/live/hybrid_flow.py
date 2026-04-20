@@ -145,6 +145,23 @@ class HybridFlowTracker(BaseTracker):
         self._phase_yolo_calls = 0
         self._phase_last_log = 0.0
 
+        # Async YOLO worker: YOLO inference runs on its own thread so
+        # the ~17ms CoreML call does not block the per-frame flow pipeline.
+        # Main thread queues the latest frame each interval and consumes
+        # whatever ROI result is currently published; ROI is at most one
+        # YOLO-round stale which is identical to the sync-path latency
+        # because the sync path still only runs YOLO every N frames.
+        self._yolo_thread = None
+        self._yolo_shutdown = None   # threading.Event, created in start
+        self._yolo_wake = None       # threading.Event
+        self._yolo_pending_lock = None
+        self._yolo_pending_frame = None  # latest BGR frame to infer on
+        self._yolo_result_lock = None
+        self._yolo_result = None     # (roi, penis_box, contact_box) or None
+        self._yolo_inflight = False  # worker is mid-inference
+        self._yolo_calls = 0
+        self._yolo_last_ms = 0.0
+
         # Funscript reference
         self.funscript = None
 
@@ -232,13 +249,66 @@ class HybridFlowTracker(BaseTracker):
     def start_tracking(self) -> bool:
         self.tracking_active = True
         self._reset_state()
+        self._start_yolo_worker()
         self.logger.info("Hybrid Flow tracking started")
         return True
 
     def stop_tracking(self) -> bool:
         self.tracking_active = False
+        self._stop_yolo_worker()
         self.logger.info("Hybrid Flow tracking stopped")
         return True
+
+    def _start_yolo_worker(self) -> None:
+        import threading as _threading
+        if self._yolo_thread is not None and self._yolo_thread.is_alive():
+            return
+        self._yolo_shutdown = _threading.Event()
+        self._yolo_wake = _threading.Event()
+        self._yolo_pending_lock = _threading.Lock()
+        self._yolo_result_lock = _threading.Lock()
+        self._yolo_pending_frame = None
+        self._yolo_result = None
+        self._yolo_inflight = False
+        self._yolo_thread = _threading.Thread(
+            target=self._yolo_worker, name="HybridFlowYOLO", daemon=True)
+        self._yolo_thread.start()
+
+    def _stop_yolo_worker(self) -> None:
+        if self._yolo_shutdown is not None:
+            self._yolo_shutdown.set()
+        if self._yolo_wake is not None:
+            self._yolo_wake.set()
+        t = self._yolo_thread
+        if t is not None and t.is_alive():
+            t.join(timeout=0.5)
+        self._yolo_thread = None
+
+    def _yolo_worker(self) -> None:
+        while not self._yolo_shutdown.is_set():
+            if not self._yolo_wake.wait(timeout=0.2):
+                continue
+            self._yolo_wake.clear()
+            if self._yolo_shutdown.is_set():
+                return
+            with self._yolo_pending_lock:
+                frame = self._yolo_pending_frame
+                self._yolo_pending_frame = None
+            if frame is None:
+                continue
+            self._yolo_inflight = True
+            try:
+                h, w = frame.shape[:2]
+                t0 = time.perf_counter()
+                result = self._run_yolo(frame, h, w)
+                self._yolo_last_ms = (time.perf_counter() - t0) * 1000.0
+                self._yolo_calls += 1
+                with self._yolo_result_lock:
+                    self._yolo_result = result
+            except Exception as e:
+                self.logger.warning(f"YOLO worker error: {e}")
+            finally:
+                self._yolo_inflight = False
 
     def reset(self, reason: Optional[str] = None, **kwargs):
         self.tracking_active = False
@@ -299,15 +369,36 @@ class HybridFlowTracker(BaseTracker):
 
         h, w = frame.shape[:2]
 
-        # --- Step 1: YOLO detection (every N frames) ---
+        # --- Step 1: YOLO detection (every N frames, worker-thread) ---
+        # Main thread only dispatches the latest frame and consumes any
+        # ROI result the worker has published since the last tick.
         _t = time.perf_counter()
-        yolo_ran = False
-        if self._frames_since_yolo >= self._yolo_interval:
-            yolo_ran = True
-            roi, penis_box, contact_box = self._run_yolo(frame, h, w)
-            self._frames_since_yolo = 0
-            self._roi_refreshed_this_frame = False
+        yolo_dispatched = False
+        self._roi_refreshed_this_frame = False
 
+        if self._frames_since_yolo >= self._yolo_interval:
+            # Non-blocking dispatch: overwrite the pending slot with the
+            # latest frame so if the worker is still busy we just drop
+            # the older queued frame. The copy is cheap (~<0.5 ms at
+            # 640x640 BGR) and ensures the worker never races a decoder
+            # that might reuse the buffer.
+            if self._yolo_thread is not None and self._yolo_thread.is_alive():
+                with self._yolo_pending_lock:
+                    self._yolo_pending_frame = frame.copy()
+                self._yolo_wake.set()
+                self._frames_since_yolo = 0
+                yolo_dispatched = True
+
+        # Consume any freshly published YOLO result regardless of dispatch;
+        # lets us pick up late results that arrive mid-interval.
+        result = None
+        if self._yolo_result_lock is not None:
+            with self._yolo_result_lock:
+                if self._yolo_result is not None:
+                    result = self._yolo_result
+                    self._yolo_result = None
+        if result is not None:
+            roi, penis_box, contact_box = result
             if roi is not None:
                 old_roi = self._current_roi
                 self._current_roi = roi
@@ -323,8 +414,6 @@ class HybridFlowTracker(BaseTracker):
                     margin_y = int(h * 0.2)
                     self._current_roi = (margin_x, margin_y, w - margin_x, h - margin_y)
                     self._roi_refreshed_this_frame = True
-        else:
-            self._roi_refreshed_this_frame = False
         t_yolo = (time.perf_counter() - _t) * 1000.0
 
         # --- Step 2: Optical flow in ROI ---
@@ -443,7 +532,7 @@ class HybridFlowTracker(BaseTracker):
         ps['overlay'] += t_overlay
         ps['total'] += t_all
         self._phase_samples += 1
-        if yolo_ran:
+        if yolo_dispatched:
             self._phase_yolo_calls += 1
 
         now = time.monotonic()
@@ -451,11 +540,11 @@ class HybridFlowTracker(BaseTracker):
             self._phase_last_log = now
         elif now - self._phase_last_log >= 1.0 and self._phase_samples > 0:
             n = self._phase_samples
-            yn = max(1, self._phase_yolo_calls)
             self.logger.info(
                 f"[hybrid_flow] {n} frames in {now - self._phase_last_log:.2f}s: "
                 f"total={ps['total']/n:.2f}ms "
-                f"yolo_avg_per_call={ps['yolo']/yn:.2f}ms ({self._phase_yolo_calls}x) "
+                f"yolo_dispatch={ps['yolo']/n:.2f}ms "
+                f"yolo_worker={self._yolo_last_ms:.1f}ms ({self._yolo_calls}x) "
                 f"gray={ps['gray']/n:.2f}ms dis={ps['dis']/n:.2f}ms "
                 f"mwf={ps['mwf']/n:.2f}ms pos={ps['pos']/n:.2f}ms "
                 f"write={ps['write']/n:.2f}ms overlay={ps['overlay']/n:.2f}ms")
