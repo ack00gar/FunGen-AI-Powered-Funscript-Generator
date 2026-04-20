@@ -312,7 +312,14 @@ class FFmpegFrameSource:
             return None
         idx, frame = item
         self._publish(idx, frame)
-        self._cache_put(idx, frame)
+        # Key the cache by the REQUESTED frame_index (not the decoded idx):
+        # ffmpeg keyframe alignment can return a nearby frame whose index
+        # differs from the caller's request, and the caller would then miss
+        # on a straight-line revisit of their own request. Keying by the
+        # request makes the scrub cache actually hit on hover revisits.
+        self._cache_put(frame_index, frame)
+        if idx != frame_index and idx >= 0:
+            self._cache_put(idx, frame)
         return frame
 
     # ---------------------------------------------------------------- consume
