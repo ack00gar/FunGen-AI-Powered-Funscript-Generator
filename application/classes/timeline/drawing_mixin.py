@@ -22,22 +22,48 @@ from common.frame_utils import ms_to_frame
 from config.element_group_colors import TimelineColors
 
 
+_GRID_VALUES = (0, 25, 50, 75, 100)
+_GRID_VALUE_LABELS = ("0", "25", "50", "75", "100")
+
+
+def _u32_from_const(color):
+    """Return the imgui u32 for a theme-constant color tuple; cached."""
+    cache = _u32_from_const.__dict__.setdefault("_cache", {})
+    key = tuple(color)
+    u = cache.get(key)
+    if u is None:
+        u = imgui.get_color_u32_rgba(*key)
+        cache[key] = u
+    return u
+
+
 class DrawingMixin:
     def _draw_background_grid(self, dl, tf: 'TimelineTransformer'):
-        # 1. Background
-        dl.add_rect_filled(tf.x_offset, tf.y_offset, tf.x_offset + tf.width, tf.y_offset + tf.height, 
-                           imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND))
-        
-        # 2. Horizontal Lines (0, 25, 50, 75, 100)
-        # Pre-compute u32 colors used in grid drawing loops
-        grid_major_u32 = imgui.get_color_u32_rgba(*TimelineColors.GRID_MAJOR_LINES)
-        grid_minor_u32 = imgui.get_color_u32_rgba(*TimelineColors.GRID_LINES)
-        grid_labels_u32 = imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS)
-        canvas_bg_u32 = imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND)
+        # Theme-static u32 colors + label text extents cached once per instance.
+        grid_cache = getattr(self, "_grid_cache", None)
+        if grid_cache is None:
+            grid_cache = {
+                "canvas_bg": _u32_from_const(TimelineColors.CANVAS_BACKGROUND),
+                "grid_major": _u32_from_const(TimelineColors.GRID_MAJOR_LINES),
+                "grid_minor": _u32_from_const(TimelineColors.GRID_LINES),
+                "grid_labels": _u32_from_const(TimelineColors.GRID_LABELS),
+                "midline": imgui.get_color_u32_rgba(0.75, 0.75, 0.78, 0.55),
+                "label_sizes": tuple(imgui.calc_text_size(s) for s in _GRID_VALUE_LABELS),
+            }
+            self._grid_cache = grid_cache
+        canvas_bg_u32 = grid_cache["canvas_bg"]
+        grid_major_u32 = grid_cache["grid_major"]
+        grid_minor_u32 = grid_cache["grid_minor"]
+        grid_labels_u32 = grid_cache["grid_labels"]
+        midline_u32 = grid_cache["midline"]
+        label_sizes = grid_cache["label_sizes"]
 
-        # Distinct midline color so the 50% reference is clearly visible
-        midline_u32 = imgui.get_color_u32_rgba(0.75, 0.75, 0.78, 0.55)
-        for val in [0, 25, 50, 75, 100]:
+        # 1. Background
+        dl.add_rect_filled(tf.x_offset, tf.y_offset, tf.x_offset + tf.width, tf.y_offset + tf.height,
+                           canvas_bg_u32)
+
+        # 2. Horizontal Lines (0, 25, 50, 75, 100)
+        for label_idx, val in enumerate(_GRID_VALUES):
             y = tf.val_to_y(val)
             if val == 50:
                 col_u32 = midline_u32
@@ -48,8 +74,8 @@ class DrawingMixin:
             dl.add_line(tf.x_offset, y, tf.x_offset + tf.width, y, col_u32, thick)
 
             # Position labels
-            label_text = str(val)
-            text_size = imgui.calc_text_size(label_text)
+            label_text = _GRID_VALUE_LABELS[label_idx]
+            text_size = label_sizes[label_idx]
 
             if val == 100:
                 # Place below the line
@@ -133,7 +159,7 @@ class DrawingMixin:
             self._waveform_cache_ys_bot = ys_bot
             self._waveform_cache_step = step
 
-        col = imgui.get_color_u32_rgba(*TimelineColors.AUDIO_WAVEFORM)
+        col = _u32_from_const(TimelineColors.AUDIO_WAVEFORM)
 
         # LOD: Lines vs Polylines
         if step > 10:
@@ -306,7 +332,7 @@ class DrawingMixin:
             col_drag = imgui.get_color_u32_rgba(*TimelineColors.POINT_DRAGGING[:3], TimelineColors.POINT_DRAGGING[3] * alpha)
             col_sel = imgui.get_color_u32_rgba(*TimelineColors.POINT_SELECTED[:3], TimelineColors.POINT_SELECTED[3] * alpha)
             col_hover = imgui.get_color_u32_rgba(*TimelineColors.POINT_HOVER[:3], TimelineColors.POINT_HOVER[3] * alpha)
-            col_sel_border = imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER)
+            col_sel_border = _u32_from_const(TimelineColors.SELECTED_POINT_BORDER)
             r_drag = radius + 2
             r_sel = radius + 1
             r_hover = radius + 1
@@ -468,11 +494,11 @@ class DrawingMixin:
         radius = self.app.app_state_ui.timeline_point_radius
         pixels_per_point = tf.width / max(1, len(xs))
         if pixels_per_point > 5:
-            col_default = imgui.get_color_u32_rgba(*TimelineColors.POINT_DEFAULT)
-            col_drag = imgui.get_color_u32_rgba(*TimelineColors.POINT_DRAGGING)
-            col_sel = imgui.get_color_u32_rgba(*TimelineColors.POINT_SELECTED)
-            col_hover = imgui.get_color_u32_rgba(*TimelineColors.POINT_HOVER)
-            col_sel_border = imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER)
+            col_default = _u32_from_const(TimelineColors.POINT_DEFAULT)
+            col_drag = _u32_from_const(TimelineColors.POINT_DRAGGING)
+            col_sel = _u32_from_const(TimelineColors.POINT_SELECTED)
+            col_hover = _u32_from_const(TimelineColors.POINT_HOVER)
+            col_sel_border = _u32_from_const(TimelineColors.SELECTED_POINT_BORDER)
             r_drag, r_sel, r_hover = radius + 2, radius + 1, radius + 1
             r_sel_border = r_sel + 1
             _sel_set = self.multi_selected_action_indices
@@ -540,7 +566,7 @@ class DrawingMixin:
         xs = tf.vec_time_to_x(ats)
         xs = np.clip(xs, tf.x_offset - 100, tf.x_offset + tf.width + 100)
 
-        violation_col = imgui.get_color_u32_rgba(*TimelineColors.SPEED_VIOLATION)
+        violation_col = _u32_from_const(TimelineColors.SPEED_VIOLATION)
         for i in range(len(speeds)):
             if speeds[i] > threshold:
                 x1 = float(xs[i])
@@ -601,8 +627,8 @@ class DrawingMixin:
         """Draw semi-transparent red bands over detected problem sections."""
         if not self._reference_problem_sections:
             return
-        band_col = imgui.get_color_u32_rgba(*TimelineColors.REFERENCE_PROBLEM_FILL)
-        border_col = imgui.get_color_u32_rgba(*TimelineColors.REFERENCE_PROBLEM_BORDER)
+        band_col = _u32_from_const(TimelineColors.REFERENCE_PROBLEM_FILL)
+        border_col = _u32_from_const(TimelineColors.REFERENCE_PROBLEM_BORDER)
         for sec in self._reference_problem_sections:
             x1 = tf.time_to_x(sec['start_ms'])
             x2 = tf.time_to_x(sec['end_ms'])
@@ -629,8 +655,8 @@ class DrawingMixin:
         if fps <= 0:
             return
 
-        fill_col = imgui.get_color_u32_rgba(*TimelineColors.CHAPTER_HIGHLIGHT_FILL)
-        edge_col = imgui.get_color_u32_rgba(*TimelineColors.CHAPTER_HIGHLIGHT_EDGE)
+        fill_col = _u32_from_const(TimelineColors.CHAPTER_HIGHLIGHT_FILL)
+        edge_col = _u32_from_const(TimelineColors.CHAPTER_HIGHLIGHT_EDGE)
 
         for chapter in nav_ui.context_selected_chapters:
             start_ms = (chapter.start_frame_id / fps) * 1000.0
@@ -668,9 +694,9 @@ class DrawingMixin:
         quarter_interval = base_interval / 4.0 if base_interval > 0 else 0
 
         # 3-tier colors: downbeat (bright), quarter (medium), subdivision (faint)
-        downbeat_col = imgui.get_color_u32_rgba(*TimelineColors.BPM_DOWNBEAT)
-        quarter_col = imgui.get_color_u32_rgba(*TimelineColors.BPM_QUARTER)
-        sub_col = imgui.get_color_u32_rgba(*TimelineColors.BPM_SUB)
+        downbeat_col = _u32_from_const(TimelineColors.BPM_DOWNBEAT)
+        quarter_col = _u32_from_const(TimelineColors.BPM_QUARTER)
+        sub_col = _u32_from_const(TimelineColors.BPM_SUB)
 
         for beat_num in range(start_beat, end_beat + 1):
             t_ms = cfg.offset_ms + beat_num * interval_ms
@@ -791,7 +817,7 @@ class DrawingMixin:
         # Round to nearest pixel + 0.5 so the 1px-wide visual center of the
         # 2px line lands exactly on a pixel boundary, and the triangle tip aligns.
         center_x = round(tf.x_offset + tf.width / 2) + 0.5
-        marker_color = imgui.get_color_u32_rgba(*TimelineColors.CENTER_MARKER)
+        marker_color = _u32_from_const(TimelineColors.CENTER_MARKER)
         tri_top = tf.y_offset
         dl.add_triangle_filled(
             center_x - 6, tri_top,
@@ -822,7 +848,7 @@ class DrawingMixin:
         if proc and proc.fps and proc.fps > 0:
             frame_num = ms_to_frame(time_ms, proc.fps)
             txt = f"{txt}  ({frame_num})"
-        dl.add_text(center_x + 6, tf.y_offset + 6, imgui.get_color_u32_rgba(*TimelineColors.TIME_DISPLAY_TEXT), txt)
+        dl.add_text(center_x + 6, tf.y_offset + 6, _u32_from_const(TimelineColors.TIME_DISPLAY_TEXT), txt)
         
         # 2. Marquee Box
         if self.is_marqueeing and self.marquee_start and self.marquee_end:
@@ -831,27 +857,27 @@ class DrawingMixin:
             x_min, x_max = min(p1[0], p2[0]), max(p1[0], p2[0])
             y_min, y_max = min(p1[1], p2[1]), max(p1[1], p2[1])
             
-            dl.add_rect_filled(x_min, y_min, x_max, y_max, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_FILL))
-            dl.add_rect(x_min, y_min, x_max, y_max, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_BORDER))
+            dl.add_rect_filled(x_min, y_min, x_max, y_max, _u32_from_const(TimelineColors.MARQUEE_SELECTION_FILL))
+            dl.add_rect(x_min, y_min, x_max, y_max, _u32_from_const(TimelineColors.MARQUEE_SELECTION_BORDER))
 
         # 3. Range Selection Highlight
         if self.range_selecting:
             t1, t2 = sorted([self.range_start_time, self.range_end_time])
             x1 = tf.time_to_x(t1)
             x2 = tf.time_to_x(t2)
-            dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, imgui.get_color_u32_rgba(*TimelineColors.SELECTION_RANGE_FILL))
-            dl.add_line(x1, tf.y_offset, x1, tf.y_offset+tf.height, imgui.get_color_u32_rgba(*TimelineColors.SELECTION_RANGE_BORDER))
-            dl.add_line(x2, tf.y_offset, x2, tf.y_offset+tf.height, imgui.get_color_u32_rgba(*TimelineColors.SELECTION_RANGE_BORDER))
+            dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, _u32_from_const(TimelineColors.SELECTION_RANGE_FILL))
+            dl.add_line(x1, tf.y_offset, x1, tf.y_offset+tf.height, _u32_from_const(TimelineColors.SELECTION_RANGE_BORDER))
+            dl.add_line(x2, tf.y_offset, x2, tf.y_offset+tf.height, _u32_from_const(TimelineColors.SELECTION_RANGE_BORDER))
 
         # 4. Bookmarks
         self._draw_bookmarks(dl, tf)
 
         # 5. Recording indicator
         if self._recording_capture and self._recording_capture.is_recording:
-            rec_col = imgui.get_color_u32_rgba(*TimelineColors.RECORDING)
+            rec_col = _u32_from_const(TimelineColors.RECORDING)
             dl.add_circle_filled(tf.x_offset + 12, tf.y_offset + 12, 5, rec_col)
             dl.add_text(tf.x_offset + 20, tf.y_offset + 5,
-                        imgui.get_color_u32_rgba(*TimelineColors.RECORDING), "REC")
+                        _u32_from_const(TimelineColors.RECORDING), "REC")
 
         # 6. Calibration modal
         if self._calibration and self._calibration.is_running:
@@ -904,14 +930,14 @@ class DrawingMixin:
         is_read_only = self._is_timeline_read_only(app_state) if is_active else False
 
         if not is_active:
-            border_color = imgui.get_color_u32_rgba(*TimelineColors.STATE_BORDER_NORMAL)
+            border_color = _u32_from_const(TimelineColors.STATE_BORDER_NORMAL)
         else:
             if is_read_only:
                 # Red border for active but read-only
-                border_color = imgui.get_color_u32_rgba(*TimelineColors.STATE_BORDER_LOCKED)
+                border_color = _u32_from_const(TimelineColors.STATE_BORDER_LOCKED)
             else:
                 # Green border for active and editable
-                border_color = imgui.get_color_u32_rgba(*TimelineColors.STATE_BORDER_ACTIVE)
+                border_color = _u32_from_const(TimelineColors.STATE_BORDER_ACTIVE)
 
         # Draw border around canvas area
         x1, y1 = canvas_pos[0], canvas_pos[1]
