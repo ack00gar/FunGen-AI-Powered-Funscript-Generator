@@ -303,7 +303,29 @@ class VideoDisplayCoreMixin:
                             cursor_x_offset, cursor_y_offset = off_x, off_y
 
                         if route.source in ('mpv_shader', 'mpv_direct'):
-                            self._render_mpv_to_fbo(proc, mpv_display)
+                            # Size the mpv FBO to match the downstream needs:
+                            # - shader path: display * supersample (the shader
+                            #   upsamples at its output, so input should match
+                            #   that target so the shader is not starved of
+                            #   source detail). VRRenderQualityMonitor scales
+                            #   this down automatically on slow hardware via
+                            #   the supersample_factor it picks.
+                            # - direct path: match display size, so fullscreen
+                            #   on a 4K monitor actually renders at 4K.
+                            mon = getattr(self.gui_instance, '_vr_quality_monitor', None)
+                            ss = 1.0
+                            if route.source == 'mpv_shader' and mon is not None:
+                                try:
+                                    mode = self.app.app_settings.config.vr_display.quality_mode
+                                except Exception:
+                                    mode = 'auto'
+                                try:
+                                    sup_on = self.app.app_settings.config.vr_display.shader_supersample
+                                except Exception:
+                                    sup_on = True
+                                ss = float(mon.current_spec(mode=mode).supersample_factor) if sup_on else 1.0
+                            mpv_cap = max(256, int(round(max(display_w, display_h) * ss)))
+                            self._render_mpv_to_fbo(proc, mpv_display, target_cap=mpv_cap)
                         if route.source == 'mpv_shader':
                             self._render_shader_dewarp(
                                 proc, app_state,
@@ -682,23 +704,34 @@ class VideoDisplayCoreMixin:
         imgui.pop_style_var()
 
 
-    def _render_mpv_to_fbo(self, proc, mpv_display):
+    def _render_mpv_to_fbo(self, proc, mpv_display, target_cap: int = 0):
+        """Render mpv into the embedded FBO, sized to feed the downstream path.
+
+        target_cap > 0 -- explicit cap from caller (shader path uses the
+        current quality level so slow hardware auto-shrinks the mpv
+        input and doesn't thrash GPU memory bandwidth).
+        target_cap == 0 -- fall back to proc._DISPLAY_CHAIN_MAX (legacy).
+        """
         if mpv_display is None:
             return
-        cap = getattr(proc, '_DISPLAY_CHAIN_MAX', 1024)
+        if target_cap <= 0:
+            target_cap = int(getattr(proc, '_DISPLAY_CHAIN_MAX', 1024))
+        # Hard ceiling: GL_MAX_TEXTURE_SIZE on most modern GPUs is 16k,
+        # but going past 4096 buys nothing for playback and eats VRAM.
+        target_cap = max(256, min(target_cap, 4096))
         info = getattr(proc, 'video_info', None) or {}
         src_w = int(info.get('width', 0))
         src_h = int(info.get('height', 0))
         if src_w > 0 and src_h > 0:
             if src_w >= src_h:
-                fbo_w = min(src_w, cap)
+                fbo_w = min(src_w, target_cap)
                 fbo_h = max(64, int(round(fbo_w * src_h / src_w)))
             else:
-                fbo_h = min(src_h, cap)
+                fbo_h = min(src_h, target_cap)
                 fbo_w = max(64, int(round(fbo_h * src_w / src_h)))
         else:
-            fbo_w = min(int(getattr(proc, '_display_frame_w', 640) or 640), cap)
-            fbo_h = min(int(getattr(proc, '_display_frame_h', 640) or 640), cap)
+            fbo_w = min(int(getattr(proc, '_display_frame_w', 640) or 640), target_cap)
+            fbo_h = min(int(getattr(proc, '_display_frame_h', 640) or 640), target_cap)
         fbo_w = max(64, fbo_w)
         fbo_h = max(64, fbo_h)
 
