@@ -103,6 +103,18 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.last_perf_log_time = time.time()
         self.perf_frame_count = 0
         self.perf_accumulated_times = {}
+
+        # Profiler mode: when FUNGEN_PROFILE_FRAMES is set to a positive int,
+        # every _time_render() call appends its duration to _profile_samples[name]
+        # and after N rendered frames the session writes a JSON summary and
+        # exits. Off by default; zero per-frame cost when unset.
+        try:
+            _pf = int(os.environ.get("FUNGEN_PROFILE_FRAMES", "0") or "0")
+        except ValueError:
+            _pf = 0
+        self._profile_target_frames = _pf
+        self._profile_samples: Dict[str, list] = {} if _pf > 0 else {}
+        self._profile_enabled = _pf > 0
         
         # Frontend data queue - maintains continuous data flow
         self._frontend_perf_queue = deque(maxlen=2)  # Keep last 2 data points
@@ -252,6 +264,49 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             self._extra_timeline_editors[timeline_num] = editor
         return self._extra_timeline_editors[timeline_num]
 
+    def _dump_profile_snapshot(self):
+        """Write a JSON summary of _time_render samples to disk, then log it.
+
+        Output path: bench_results/gui_profile_<timestamp>.json. Each entry
+        has n / mean_ms / p50_ms / p95_ms / p99_ms / max_ms / total_ms so
+        subsequent diff-against-baseline runs are possible.
+        """
+        import json, statistics
+        from pathlib import Path
+
+        out_dir = Path("bench_results")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        path = out_dir / f"gui_profile_{stamp}.json"
+
+        payload = {
+            "frames": self.perf_frame_count,
+            "components": {},
+        }
+        for name, samples in self._profile_samples.items():
+            if not samples:
+                continue
+            s = sorted(samples)
+            n = len(s)
+            def _pct(p):
+                k = max(0, min(n - 1, int(round((n - 1) * p))))
+                return s[k]
+            payload["components"][name] = {
+                "n": n,
+                "mean_ms": statistics.fmean(samples),
+                "p50_ms": _pct(0.50),
+                "p95_ms": _pct(0.95),
+                "p99_ms": _pct(0.99),
+                "max_ms": s[-1],
+                "total_ms": sum(samples),
+            }
+
+        try:
+            path.write_text(json.dumps(payload, indent=2))
+            self.app.logger.info(f"GUI profile dumped to {path}")
+        except Exception as e:
+            self.app.logger.error(f"failed to write profile JSON: {e}")
+
     def _time_render(self, component_name: str, render_func, *args, **kwargs):
         """Helper to time a render function and store its duration."""
         start_time = time.perf_counter()
@@ -264,6 +319,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         if component_name not in self.perf_accumulated_times:
             self.perf_accumulated_times[component_name] = 0.0
         self.perf_accumulated_times[component_name] += duration_ms
+
+        # Profile-mode sample record (no-op unless FUNGEN_PROFILE_FRAMES set).
+        if self._profile_enabled:
+            lst = self._profile_samples.get(component_name)
+            if lst is None:
+                lst = []
+                self._profile_samples[component_name] = lst
+            lst.append(duration_ms)
 
     def get_performance_summary(self):
         """Get comprehensive performance analysis."""
@@ -2532,6 +2595,13 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                     self.app.updater.check_for_updates_async()
                 if sleep_duration > 0:
                     time.sleep(sleep_duration)
+
+                # Profile-mode: when the requested frame count is reached,
+                # dump timings and exit.
+                if (self._profile_enabled
+                        and self.perf_frame_count >= self._profile_target_frames):
+                    self._dump_profile_snapshot()
+                    glfw.set_window_should_close(self.window, True)
         finally:
             self.app.shutdown_app()
 
