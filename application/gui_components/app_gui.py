@@ -59,6 +59,13 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # because it reflects live user toggles.
         self._feat_supporter = _is_feature_available("patreon_features")
 
+        # Embedded GLFW fullscreen (shader-mode playback). When active,
+        # render_gui draws only the video display panel filling the window
+        # and the main GLFW window is set to the primary monitor. Entry
+        # via toggle_embedded_fullscreen(); exit via the same call or ESC.
+        self._embedded_fullscreen_active = False
+        self._embedded_fullscreen_saved = None  # (x, y, w, h, refresh_rate)
+
         self.frame_texture_id = 0
         self.heatmap_texture_id = 0
         self.funscript_preview_texture_id = 0
@@ -932,6 +939,50 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         self.mpv_display_w, self.mpv_display_h = int(w), int(h)
+
+    def toggle_embedded_fullscreen(self) -> bool:
+        """Toggle GLFW-window fullscreen so the embedded shader + GL pipeline
+        fills the primary monitor. Returns the new active state."""
+        try:
+            import glfw
+        except Exception:
+            return self._embedded_fullscreen_active
+        if self._embedded_fullscreen_active:
+            saved = self._embedded_fullscreen_saved or (100, 100, 1600, 900, 0)
+            x, y, w, h, rr = saved
+            try:
+                glfw.set_window_monitor(
+                    self.window, None, int(x), int(y), int(w), int(h),
+                    glfw.DONT_CARE)
+            except Exception:
+                pass
+            self._embedded_fullscreen_active = False
+            self._embedded_fullscreen_saved = None
+            self.app.logger.info(
+                "Embedded fullscreen: exited", extra={'status_message': True})
+            return False
+        try:
+            mon = glfw.get_primary_monitor()
+            vmode = glfw.get_video_mode(mon) if mon else None
+            mon_w = int(vmode.size.width) if vmode else 1920
+            mon_h = int(vmode.size.height) if vmode else 1080
+            rr = int(vmode.refresh_rate) if vmode else 60
+            wpos = glfw.get_window_pos(self.window)
+            wsize = glfw.get_window_size(self.window)
+            self._embedded_fullscreen_saved = (
+                int(wpos[0]), int(wpos[1]),
+                int(wsize[0]), int(wsize[1]), rr)
+            glfw.set_window_monitor(
+                self.window, mon, 0, 0, mon_w, mon_h, rr)
+        except Exception as e:
+            self.app.logger.warning(
+                f"Embedded fullscreen toggle failed: {e}")
+            return False
+        self._embedded_fullscreen_active = True
+        self.app.logger.info(
+            "Embedded fullscreen: enter (ESC to exit)",
+            extra={'status_message': True})
+        return True
 
     def resize_mpv_display_target(self, w: int, h: int) -> None:
         """Reallocate the mpv display FBO + texture (fresh IDs) if the size changed."""
@@ -2322,6 +2373,40 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             wizard_done = self._first_run_wizard.render()
             if wizard_done:
                 self._first_run_wizard = None
+            self.perf_frame_count += 1
+            self._time_render("ImGuiRender", imgui.render)
+            if self.impl:
+                draw_data = imgui.get_draw_data()
+                self.impl.render(draw_data)
+            return
+
+        # Embedded fullscreen: draw ONLY the video display, filling the
+        # whole window. Shader + adaptive quality pipeline intact. ESC
+        # exits and restores the windowed UI.
+        if self._embedded_fullscreen_active:
+            try:
+                import glfw as _glfw
+                if _glfw.get_key(self.window, _glfw.KEY_ESCAPE) == _glfw.PRESS:
+                    self.toggle_embedded_fullscreen()
+            except Exception:
+                pass
+            # Refresh window dims so video_display sizes itself correctly.
+            try:
+                import glfw as _glfw
+                ws = _glfw.get_window_size(self.window)
+                self.window_width, self.window_height = int(ws[0]), int(ws[1])
+            except Exception:
+                pass
+            imgui.set_next_window_pos(0, 0)
+            imgui.set_next_window_size(self.window_width, self.window_height)
+            imgui.begin(
+                "EmbeddedFullscreen##video",
+                flags=(imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE
+                       | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE
+                       | imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS
+                       | imgui.WINDOW_NO_BACKGROUND))
+            self._time_render("VideoDisplayUI", self.video_display_ui.render)
+            imgui.end()
             self.perf_frame_count += 1
             self._time_render("ImGuiRender", imgui.render)
             if self.impl:
