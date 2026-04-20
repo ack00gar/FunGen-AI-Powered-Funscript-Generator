@@ -22,6 +22,7 @@ import numpy as np
 import cv2
 from typing import Dict, Any, Optional, List, Tuple
 from collections import deque
+from itertools import islice
 
 try:
     from ..core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult, StageDefinition
@@ -606,8 +607,14 @@ class HybridFlowTracker(BaseTracker):
         # This avoids cumulative-position drift that can appear as a slow sinusoidal center wander.
         signed_flow = sign * flow_val
         raw_history.append(signed_flow)
-        recent_raw = np.array(list(raw_history)[-7:])
-        flow_med = float(np.median(recent_raw))
+        # 7-element median: Python sort beats np.median+np.array conversion
+        # for this size by ~3x. `islice` over a deque avoids the list(deque)
+        # allocation of the full history just to slice 7 items.
+        n_raw = len(raw_history)
+        k_raw = 7 if n_raw >= 7 else n_raw
+        recent_raw_list = list(islice(raw_history, n_raw - k_raw, n_raw))
+        recent_raw_list.sort()
+        flow_med = float(recent_raw_list[k_raw // 2])
 
         if axis == 'primary':
             self._pos_baseline = (1.0 - BASELINE_ALPHA) * self._pos_baseline + BASELINE_ALPHA * flow_med
@@ -620,10 +627,14 @@ class HybridFlowTracker(BaseTracker):
 
         # Adaptive normalization
         if len(history) > 20:
-            recent = np.array(list(history)[-NORMALIZATION_WINDOW:])
-            p10 = np.percentile(recent, 10)
-            p50 = np.percentile(recent, 50)
-            p90 = np.percentile(recent, 90)
+            # Single percentile call (returns 3 values) vs three calls;
+            # single np.fromiter avoids the list(deque) intermediate.
+            n_hist = len(history)
+            k_hist = NORMALIZATION_WINDOW if n_hist >= NORMALIZATION_WINDOW else n_hist
+            recent = np.fromiter(
+                islice(history, n_hist - k_hist, n_hist),
+                dtype=np.float32, count=k_hist)
+            p10, p50, p90 = np.percentile(recent, (10, 50, 90))
             current_range = max(p90 - p10, 0.1)
 
             alpha = 0.015
