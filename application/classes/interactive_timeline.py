@@ -91,6 +91,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         self.app = app_instance
         self.timeline_num = timeline_num
         self.logger = getattr(app_instance, 'logger', None)
+        # Cache per-instance attribute names so render() doesn't f-string them.
+        self._visibility_attr = (
+            "show_funscript_interactive_timeline"
+            if timeline_num == 1
+            else f"show_funscript_interactive_timeline{timeline_num}"
+        )
 
         # --- Selection & Interaction State ---
         self.selected_action_idx: int = -1
@@ -290,7 +296,7 @@ class InteractiveFunscriptTimeline(DrawingMixin):
     def render(self, y_pos: float = 0, height: float = 0, container_mode: bool = False,
                **kwargs):
         app_state = self.app.app_state_ui
-        visibility_attr = f"show_funscript_interactive_timeline{'' if self.timeline_num == 1 else str(self.timeline_num)}"
+        visibility_attr = self._visibility_attr
 
         if not getattr(app_state, visibility_attr, False):
             return
@@ -1457,8 +1463,7 @@ class InteractiveFunscriptTimeline(DrawingMixin):
     def _render_toolbar(self):
         # Hide this timeline
         if imgui.button(f"Hide##hide_{self.timeline_num}"):
-            attr = f"show_funscript_interactive_timeline{'2' if self.timeline_num == 2 else ''}"
-            setattr(self.app.app_state_ui, attr, False)
+            setattr(self.app.app_state_ui, self._visibility_attr, False)
         if imgui.is_item_hovered():
             imgui.set_tooltip(f"Hide timeline {self.timeline_num} (toggle from View menu)")
         imgui.same_line()

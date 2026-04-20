@@ -89,12 +89,24 @@ class ChapterBarMixin:
         action_on_segment_this_frame = False
 
         text_line_height = imgui.get_text_line_height()
-        icon_color_u32 = imgui.get_color_u32_rgba(*VideoNavigationColors.ICON)
-        scripting_border_u32 = imgui.get_color_u32_rgba(*VideoNavigationColors.SCRIPTING_BORDER)
-        sel_primary_u32 = imgui.get_color_u32_rgba(*VideoNavigationColors.SELECTION_PRIMARY)
-        sel_secondary_u32 = imgui.get_color_u32_rgba(*VideoNavigationColors.SELECTION_SECONDARY)
-        text_black_u32 = imgui.get_color_u32_rgba(*VideoNavigationColors.TEXT_BLACK)
-        text_white_u32 = imgui.get_color_u32_rgba(*VideoNavigationColors.TEXT_WHITE)
+        # Theme-static u32 colors cached once; previously 6 conversions/frame.
+        nav_u32 = getattr(self, "_nav_color_u32s", None)
+        if nav_u32 is None:
+            nav_u32 = {
+                "icon": imgui.get_color_u32_rgba(*VideoNavigationColors.ICON),
+                "scripting_border": imgui.get_color_u32_rgba(*VideoNavigationColors.SCRIPTING_BORDER),
+                "sel_primary": imgui.get_color_u32_rgba(*VideoNavigationColors.SELECTION_PRIMARY),
+                "sel_secondary": imgui.get_color_u32_rgba(*VideoNavigationColors.SELECTION_SECONDARY),
+                "text_black": imgui.get_color_u32_rgba(*VideoNavigationColors.TEXT_BLACK),
+                "text_white": imgui.get_color_u32_rgba(*VideoNavigationColors.TEXT_WHITE),
+            }
+            self._nav_color_u32s = nav_u32
+        icon_color_u32 = nav_u32["icon"]
+        scripting_border_u32 = nav_u32["scripting_border"]
+        sel_primary_u32 = nav_u32["sel_primary"]
+        sel_secondary_u32 = nav_u32["sel_secondary"]
+        text_black_u32 = nav_u32["text_black"]
+        text_white_u32 = nav_u32["text_white"]
         default_gray_color = (*CurrentTheme.GRAY_MEDIUM[:3], 0.7)
 
         sel_primary_id = self.context_selected_chapters[0].unique_id if len(self.context_selected_chapters) > 0 else None
@@ -125,7 +137,21 @@ class ChapterBarMixin:
                 self.app.logger.warning(
                     f"Segment {segment.unique_id} ('{segment.class_name if hasattr(segment, 'class_name') else 'N/A'}') has invalid color {segment_color_tuple}, using default gray.")
                 segment_color_tuple = default_gray_color
-            seg_color = imgui.get_color_u32_rgba(*segment_color_tuple)
+            # Per-segment u32 + text-color cache; invalidated via identity
+            # check on segment.color (edits replace the tuple).
+            if getattr(segment, "_chbar_color_key", None) is not segment_color_tuple:
+                seg_color_u32 = imgui.get_color_u32_rgba(*segment_color_tuple)
+                lum = (0.2100 * segment_color_tuple[0]
+                       + 0.587 * segment_color_tuple[1]
+                       + 0.114 * segment_color_tuple[2])
+                text_color_u32 = text_black_u32 if lum > 0.6 else text_white_u32
+                segment._chbar_color_key = segment_color_tuple
+                segment._chbar_seg_u32 = seg_color_u32
+                segment._chbar_text_u32 = text_color_u32
+            else:
+                seg_color_u32 = segment._chbar_seg_u32
+                text_color_u32 = segment._chbar_text_u32
+            seg_color = seg_color_u32
 
             seg_uid = segment.unique_id
             is_selected_for_scripting = (scripting_chapter_id is not None
@@ -152,11 +178,7 @@ class ChapterBarMixin:
             if text_width < seg_width - 8:
                 text_pos_x = seg_start_x + (seg_width - text_width) / 2
                 text_pos_y = bar_start_y + (bar_height - text_line_height) / 2
-                valid_color_for_lum = segment_color_tuple if isinstance(segment_color_tuple, tuple) and len(
-                    segment_color_tuple) >= 3 else CurrentTheme.GRAY_MEDIUM[:3]
-                lum = 0.2100 * valid_color_for_lum[0] + 0.587 * valid_color_for_lum[1] + 0.114 * valid_color_for_lum[2]
-                text_color = text_black_u32 if lum > 0.6 else text_white_u32
-                draw_list.add_text(text_pos_x, text_pos_y, text_color, text_to_draw)
+                draw_list.add_text(text_pos_x, text_pos_y, text_color_u32, text_to_draw)
 
             border_expansion = 3
             expanded_start_x = seg_start_x - border_expansion
@@ -165,7 +187,10 @@ class ChapterBarMixin:
             expanded_height = bar_height + (border_expansion * 2)
 
             imgui.set_cursor_screen_pos((expanded_start_x, expanded_start_y))
-            button_id = f"chapter_bar_segment_btn_{segment.unique_id}"
+            button_id = getattr(segment, "_chbar_btn_id", None)
+            if button_id is None:
+                button_id = f"chapter_bar_segment_btn_{segment.unique_id}"
+                segment._chbar_btn_id = button_id
 
             imgui.invisible_button(button_id, expanded_width, expanded_height)
 
@@ -185,12 +210,7 @@ class ChapterBarMixin:
                     io = imgui.get_io()
                     mouse_pos = io.mouse_pos
                     edge_tolerance = 8
-
-                    start_x_norm = segment.start_frame_id / total_video_frames
-                    end_x_norm = segment.end_frame_id / total_video_frames
-                    seg_start_x = bar_start_x + start_x_norm * bar_width
-                    seg_end_x = bar_start_x + end_x_norm * bar_width
-
+                    # seg_start_x / seg_end_x already computed above.
                     is_anchor_click = False
                     if segment in self.context_selected_chapters:
                         near_left_edge = abs(mouse_pos[0] - seg_start_x) <= edge_tolerance
