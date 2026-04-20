@@ -808,7 +808,8 @@ class MultiAxisFunscript:
         """Replace all actions on a given axis with the provided list.
 
         Handles primary, secondary, and additional axes.
-        Also invalidates the cached timestamp list for that axis.
+        Invalidates timestamp/numpy/parallel-array caches so readers
+        (timeline lines, get_value, gauge, 3D simulator) see the new data.
         """
         if axis_name == 'primary':
             self.primary_actions.clear()
@@ -819,10 +820,7 @@ class MultiAxisFunscript:
         else:
             self.ensure_axis(axis_name)
             self.additional_axes[axis_name] = list(actions)
-        # Invalidate cached timestamps
-        cache_key = f"_cached_timestamps_{axis_name}"
-        if hasattr(self, cache_key):
-            setattr(self, cache_key, None)
+        self._invalidate_cache(axis_name)
 
     def add_action_to_axis(self, axis_name: str, timestamp_ms: int, pos: int) -> None:
         """Add an action to any axis (primary, secondary, or additional)."""
