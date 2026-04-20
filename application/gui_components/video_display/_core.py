@@ -303,35 +303,34 @@ class VideoDisplayCoreMixin:
                             cursor_x_offset, cursor_y_offset = off_x, off_y
 
                         if route.source in ('mpv_shader', 'mpv_direct'):
-                            mon = getattr(self.gui_instance, '_vr_quality_monitor', None)
+                            # One settings+monitor read per frame. Used by
+                            # both the mpv FBO sizing and the shader pass.
                             ss = 1.0
-                            if route.source == 'mpv_shader' and mon is not None:
-                                try:
-                                    mode = self.app.app_settings.config.vr_display.quality_mode
-                                except Exception:
-                                    mode = 'auto'
-                                try:
-                                    sup_on = self.app.app_settings.config.vr_display.shader_supersample
-                                except Exception:
-                                    sup_on = True
-                                ss = float(mon.current_spec(mode=mode).supersample_factor) if sup_on else 1.0
+                            if route.source == 'mpv_shader':
+                                mon = getattr(self.gui_instance, '_vr_quality_monitor', None)
+                                if mon is not None:
+                                    try:
+                                        mode = self.app.app_settings.config.vr_display.quality_mode
+                                    except Exception:
+                                        mode = 'auto'
+                                    try:
+                                        sup_on = self.app.app_settings.config.vr_display.shader_supersample
+                                    except Exception:
+                                        sup_on = True
+                                    ss = float(mon.current_spec(mode=mode).supersample_factor) if sup_on else 1.0
+                                    self.gui_instance._vr_active_ss = ss
+                                    self.gui_instance._vr_active_mode = mode
                             mpv_cap = max(256, int(round(max(display_w, display_h) * ss)))
-                            # Gate: only re-render mpv to FBO when mpv says
-                            # there's a new frame (pause -> no updates, no
-                            # redraw). Saves ~40% GPU on a paused shader view.
                             mpv_has_new = bool(
                                 getattr(mpv_display, '_new_frame_pending', True))
-                            fbo_size_changed = (
-                                int(self.gui_instance.mpv_display_w) != mpv_cap
-                                and max(display_w, display_h) > 0)
-                            if mpv_has_new or fbo_size_changed:
+                            last_applied_cap = getattr(self.gui_instance,
+                                                       '_last_mpv_cap', -1)
+                            cap_changed = last_applied_cap != mpv_cap
+                            if mpv_has_new or cap_changed:
                                 self._render_mpv_to_fbo(proc, mpv_display, target_cap=mpv_cap)
+                                self.gui_instance._last_mpv_cap = mpv_cap
                                 self.gui_instance._shader_needs_repass = True
                         if route.source == 'mpv_shader':
-                            # Gate shader re-pass: only when input texture,
-                            # view params, quality, or size changed. Keeps
-                            # output FBO intact across idle frames -- imgui
-                            # just re-blits the existing texture.
                             shader_key = self._shader_params_key(
                                 proc, app_state, display_w, display_h,
                                 route.shader_locked, ss)
@@ -816,16 +815,12 @@ class VideoDisplayCoreMixin:
         if mon is None:
             mon = VRRenderQualityMonitor()
             self.gui_instance._vr_quality_monitor = mon
-        try:
-            mode = self.app.app_settings.config.vr_display.quality_mode
-        except Exception:
-            mode = 'auto'
-        try:
-            want_supersample = self.app.app_settings.config.vr_display.shader_supersample
-        except Exception:
-            want_supersample = True
+        # Reuse the mode + ss picked at the top of the render block so
+        # app_settings lookups + current_spec() run once per frame rather
+        # than twice.
+        mode = getattr(self.gui_instance, '_vr_active_mode', 'auto')
         spec = mon.current_spec(mode=mode)
-        ss_factor = float(spec.supersample_factor) if want_supersample else 1.0
+        ss_factor = float(getattr(self.gui_instance, '_vr_active_ss', spec.supersample_factor))
         # Log level changes so users can see adaptive quality working.
         _last_level = getattr(self.gui_instance, '_vr_quality_last_level', None)
         if _last_level != spec.name:
