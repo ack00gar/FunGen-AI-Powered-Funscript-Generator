@@ -320,7 +320,10 @@ class VideoDisplayCoreMixin:
                                     ss = float(mon.current_spec(mode=mode).supersample_factor) if sup_on else 1.0
                                     self.gui_instance._vr_active_ss = ss
                                     self.gui_instance._vr_active_mode = mode
-                            mpv_cap = max(256, int(round(max(display_w, display_h) * ss)))
+                            # Floor at 1024 so small panels do not regress
+                            # vs the historical default; scale up beyond that
+                            # with display_size * supersample factor.
+                            mpv_cap = max(1024, int(round(max(display_w, display_h) * ss)))
                             mpv_has_new = bool(
                                 getattr(mpv_display, '_new_frame_pending', True))
                             last_applied_cap = getattr(self.gui_instance,
