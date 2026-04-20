@@ -265,18 +265,23 @@ class OscillationExperimental2Tracker(BaseTracker):
         vr_central_third_start = eff_cols // 3
         vr_central_third_end = 2 * eff_cols // 3
 
-        newly_active_cells = set()
-        for r in range(num_rows):
-            for c in range(num_cols):
-                if is_vr and (not use_oscillation_area) and (c < vr_central_third_start or c > vr_central_third_end):
-                    continue
-
-                y_start, x_start = r * local_block_size, c * local_block_size
-                mask_roi = motion_mask[y_start:y_start + local_block_size, x_start:x_start + local_block_size]
-                if mask_roi.size == 0:
-                    continue
-                if cv2.countNonZero(mask_roi) > min_cell_activation_pixels:
-                    newly_active_cells.add((r, c))
+        # Vectorized cell activation: reshape to (num_rows, block, num_cols,
+        # block) and sum over the two block dims. Replaces num_rows*num_cols
+        # cv2.countNonZero calls with a single numpy reduction.
+        usable_h = num_rows * local_block_size
+        usable_w = num_cols * local_block_size
+        mm_crop = motion_mask[:usable_h, :usable_w]
+        # motion_mask is 0 or 255; divide by 255 to count pixels.
+        block_counts = (mm_crop.reshape(num_rows, local_block_size,
+                                        num_cols, local_block_size)
+                              .sum(axis=(1, 3)) // 255)
+        active_mask = block_counts > min_cell_activation_pixels
+        if is_vr and not use_oscillation_area:
+            col_mask = np.zeros(num_cols, dtype=bool)
+            col_mask[vr_central_third_start:vr_central_third_end + 1] = True
+            active_mask &= col_mask[None, :]
+        rs, cs = np.where(active_mask)
+        newly_active_cells = set(zip(rs.tolist(), cs.tolist()))
 
         # Update persistence counters
         for cell_pos in newly_active_cells:
