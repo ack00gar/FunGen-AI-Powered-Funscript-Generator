@@ -1217,7 +1217,7 @@ class FunscriptConfig(_Section):
 
     @property
     def enable_enhanced_preview(self) -> bool:
-        return bool(self._store.get("enable_enhanced_funscript_preview", False))
+        return bool(self._store.get("enable_enhanced_funscript_preview", True))
 
     @enable_enhanced_preview.setter
     def enable_enhanced_preview(self, value: bool) -> None:
