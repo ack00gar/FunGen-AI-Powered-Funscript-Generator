@@ -53,6 +53,12 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.constants = constants
         self.colors = element_group_colors.AppGUIColors
 
+        # Feature-detection is runtime-stable (per-session addon state);
+        # resolve once here so render_gui stops calling _is_feature_available
+        # every frame. _visible_extra_timelines is still recomputed per frame
+        # because it reflects live user toggles.
+        self._feat_supporter = _is_feature_available("patreon_features")
+
         self.frame_texture_id = 0
         self.heatmap_texture_id = 0
         self.funscript_preview_texture_id = 0
@@ -2215,9 +2221,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
     def render_gui(self):
         self.component_render_times.clear()
 
-        # Cache feature detection flags for this frame
-        self._feat_supporter = _is_feature_available("patreon_features")
-
+        # _feat_supporter resolved in __init__; session-stable.
         # Cache visible extra timeline numbers (avoids per-frame getattr + f-string)
         if self._feat_supporter:
             app_state = self.app.app_state_ui

@@ -58,6 +58,12 @@ class ControlPanelUI(
         self.AI_modelExtensionsFilter = self.constants.AI_MODEL_EXTENSIONS_FILTER
         self.AI_modelTooltipExtensions = self.constants.AI_MODEL_TOOLTIP_EXTENSIONS
 
+        # Feature-detection results don't change at runtime; resolve once.
+        self._feat_supporter = _is_feature_available("patreon_features")
+        self._feat_device = _is_feature_available("device_control")
+        self._feat_streamer = _is_feature_available("streamer")
+        self._feat_subtitle = _is_feature_available("subtitle_translation")
+
         # Initialize dynamic tracker UI helper
         self.tracker_ui = None
         self._try_reinitialize_tracker_ui()
@@ -588,11 +594,7 @@ class ControlPanelUI(
     def render(self, control_panel_w=None, available_height=None):
         app = self.app
         app_state = app.app_state_ui
-        # Cache feature detection flags for this frame
-        self._feat_supporter = _is_feature_available("patreon_features")
-        self._feat_device = _is_feature_available("device_control")
-        self._feat_streamer = _is_feature_available("streamer")
-        self._feat_subtitle = _is_feature_available("subtitle_translation")
+        # _feat_* attributes resolved once in __init__; runtime-stable.
 
         floating = (app_state.ui_layout_mode == "floating")
         if floating:
