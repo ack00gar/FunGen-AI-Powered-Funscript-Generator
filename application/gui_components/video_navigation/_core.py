@@ -138,11 +138,27 @@ class VideoNavigationCoreMixin:
             section_left_x, section_top_screen_y = imgui.get_cursor_screen_pos()
             playhead_top_y = None
 
+            gui = getattr(self.app, 'gui_instance', None)
+            _profile_on = bool(gui and getattr(gui, '_profile_enabled', False))
+            if _profile_on:
+                import time as _time
+                _samples = gui._profile_samples
+                def _sub(name, fn, *a, **kw):
+                    t0 = _time.perf_counter()
+                    fn(*a, **kw)
+                    _samples.setdefault(name, []).append(
+                        (_time.perf_counter() - t0) * 1000.0)
+            else:
+                def _sub(name, fn, *a, **kw):
+                    fn(*a, **kw)
+
             if app_state.show_funscript_timeline:
                 imgui.push_item_width(actual_content_width)
                 # Funscript preview internally offsets cursor by +20 before the image.
                 playhead_top_y = section_top_screen_y + 20
-                self._render_funscript_timeline_preview(eff_duration_s, app_state.funscript_preview_draw_height)
+                _sub("Nav.timeline_preview",
+                     self._render_funscript_timeline_preview,
+                     eff_duration_s, app_state.funscript_preview_draw_height)
                 imgui.pop_item_width()
 
             total_frames_for_bars = 0
@@ -156,11 +172,14 @@ class VideoNavigationCoreMixin:
             chapter_bar_h = fs_proc.chapter_bar_height if hasattr(fs_proc, 'chapter_bar_height') else 20
             if playhead_top_y is None:
                 playhead_top_y = imgui.get_cursor_screen_pos()[1]
-            self._render_chapter_bar(fs_proc, total_frames_for_bars, actual_content_width, chapter_bar_h)
+            _sub("Nav.chapter_bar", self._render_chapter_bar,
+                 fs_proc, total_frames_for_bars, actual_content_width, chapter_bar_h)
             imgui.spacing()
 
             if app_state.show_heatmap:
-                self._render_funscript_heatmap_preview(eff_duration_s, actual_content_width, app_state.timeline_heatmap_height)
+                _sub("Nav.heatmap",
+                     self._render_funscript_heatmap_preview,
+                     eff_duration_s, actual_content_width, app_state.timeline_heatmap_height)
                 imgui.spacing()
 
             # Unified playhead line across funscript preview + chapter bar + heatmap.
