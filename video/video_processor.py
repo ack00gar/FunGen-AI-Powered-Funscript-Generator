@@ -2004,10 +2004,9 @@ class VideoProcessor(
 
                 seek_target = self._pending_seek_target
                 if seek_target is not None and idx < seek_target:
-                    if self.is_hd_active:
-                        processing_frame = self._make_processing_frame(frame_np)
-                    else:
-                        processing_frame = frame_np
+                    # Fast-skip frames before the seek target -- no tracker,
+                    # no processing frame needed (result was never read here
+                    # anyway); just cache and bump the version.
                     if cache_this_frame:
                         self._buffer_append(idx, frame_np)
                     with self.frame_lock:
@@ -2017,7 +2016,16 @@ class VideoProcessor(
                 self._pending_seek_target = None
                 self.current_frame_index = idx
 
-                if self.is_hd_active:
+                # Only pay the HD -> imgsz resize cost when a tracker is
+                # actually going to consume the result. Otherwise (playback,
+                # post-stop-tracking, paused-with-HD) we ran the ~22 ms CPU
+                # resize every frame and discarded it -- this was the "lag
+                # after stop tracking" the user reported.
+                tracker_will_run = bool(
+                    self.tracker and self.tracker.tracking_active
+                    and self.enable_tracker_processing
+                )
+                if tracker_will_run and self.is_hd_active:
                     processing_frame = self._make_processing_frame(frame_np)
                 else:
                     processing_frame = frame_np
@@ -2026,7 +2034,7 @@ class VideoProcessor(
                     self._buffer_append(self.current_frame_index, frame_np)
 
                 # ---- tracker ----
-                if self.tracker and self.tracker.tracking_active and self.enable_tracker_processing:
+                if tracker_will_run:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else 0
                     # Skip 75MB memcpy when the active tracker has opted out
                     # via BaseTracker.mutates_input_frame = False.
