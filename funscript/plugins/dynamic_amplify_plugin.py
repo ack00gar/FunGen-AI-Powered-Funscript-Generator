@@ -120,44 +120,28 @@ class DynamicAmplifyPlugin(FunscriptTransformationPlugin):
         window_ms = params['window_ms']
         min_range_threshold = params['min_range_threshold']
 
-        # Create a list of timestamps for efficient searching
+        # Flat Python arrays; Python's built-in min/max on small lists beats
+        # numpy for window sizes in the typical ~50-500 point range because
+        # np.min/max have ~5 us of fixed overhead per call.
         action_timestamps = [a['at'] for a in actions_copy]
-
+        action_positions = [a['pos'] for a in actions_copy]
+        half = window_ms // 2
         modified_count = 0
 
         for i in indices_to_process:
-            current_action = actions_copy[i]
-            current_time = current_action['at']
-
-            # Define the local window for analysis
-            start_window = current_time - (window_ms // 2)
-            end_window = current_time + (window_ms // 2)
-
-            # Find the indices of the actions within this window using binary search
-            start_idx = bisect_left(action_timestamps, start_window)
-            end_idx = bisect_right(action_timestamps, end_window)
-
-            local_actions = actions_copy[start_idx:end_idx]
-            if not local_actions:
+            current_time = action_timestamps[i]
+            start_idx = bisect_left(action_timestamps, current_time - half)
+            end_idx = bisect_right(action_timestamps, current_time + half)
+            if end_idx <= start_idx:
                 continue
-
-            # Find the min/max position within the local window
-            local_positions = [a['pos'] for a in local_actions]
+            local_positions = action_positions[start_idx:end_idx]
             local_min = min(local_positions)
             local_max = max(local_positions)
             local_range = local_max - local_min
-
-            # Don't amplify if local motion is negligible
             if local_range < min_range_threshold:
                 continue
-
-            # Normalize the current point's position within its local range
-            normalized_pos = (current_action['pos'] - local_min) / local_range
-
-            # Scale the normalized position to the full 0-100 range
-            new_pos = int(round(np.clip(normalized_pos * 100, 0, 100)))
-
-            # Only update if the value changed
+            normalized_pos = (action_positions[i] - local_min) / local_range
+            new_pos = max(0, min(100, int(round(normalized_pos * 100))))
             if actions_list[i]['pos'] != new_pos:
                 actions_list[i]['pos'] = new_pos
                 modified_count += 1

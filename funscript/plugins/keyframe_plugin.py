@@ -181,78 +181,83 @@ class KeyframePlugin(FunscriptTransformationPlugin):
         return self._find_keyframes_vectorized(segment, params)
     
     def _find_keyframes_vectorized(self, segment: List[Dict], params: Dict[str, Any]) -> List[Dict]:
-        """Vectorized keyframe detection for large datasets."""
+        """Vectorized extrema pick + heap-based iterative simplification.
+
+        Old inner loop did np.delete + list.pop per iteration, O(n**2) and
+        ~40 ms on 5000 points. New version uses a doubly-linked-list sketch
+        over indices + a lazy min-heap of significance scores; each removal
+        is O(log n) and only the two adjacent neighbours are rescored.
+        """
+        import heapq
         position_tolerance = params['position_tolerance']
-        time_tolerance_ms = params['time_tolerance_ms']
-        
-        # Extract positions and timestamps as numpy arrays
-        positions = np.array([action['pos'] for action in segment])
-        timestamps = np.array([action['at'] for action in segment])
-        
-        # VECTORIZED: Find local extrema using numpy operations
-        # Create shifted arrays for comparison
-        pos_prev = positions[:-2]  # positions[i-1]
-        pos_curr = positions[1:-1]  # positions[i]
-        pos_next = positions[2:]    # positions[i+1]
-        
-        # Detect peaks: curr > prev AND curr >= next
-        # Detect valleys: curr < prev AND curr <= next
+
+        positions = np.asarray([a['pos'] for a in segment], dtype=np.float64)
+        timestamps = np.asarray([a['at'] for a in segment], dtype=np.float64)
+
+        pos_prev = positions[:-2]
+        pos_curr = positions[1:-1]
+        pos_next = positions[2:]
         is_peak = (pos_curr > pos_prev) & (pos_curr >= pos_next)
         is_valley = (pos_curr < pos_prev) & (pos_curr <= pos_next)
         is_extremum = is_peak | is_valley
-        
-        # Build extrema list (always include first and last)
-        extrema_indices = [0]
-        extrema_indices.extend(np.where(is_extremum)[0] + 1)  # +1 because we compared shifted arrays
-        extrema_indices.append(len(segment) - 1)
-        
-        # Remove duplicates and sort
-        extrema_indices = sorted(set(extrema_indices))
-        extrema = [segment[i] for i in extrema_indices]
-        
-        # VECTORIZED significance calculation and filtering
-        if len(extrema) <= 2:
-            return extrema
-            
-        # Convert to numpy arrays for vectorized processing
-        ext_positions = np.array([ext['pos'] for ext in extrema])
-        ext_timestamps = np.array([ext['at'] for ext in extrema])
-        
-        # Calculate significance for all internal points at once
-        while len(extrema) > 2:
-            if len(ext_positions) <= 2:
-                break
-                
-            # Vectorized significance calculation for internal points
-            prev_pos = ext_positions[:-2]
-            curr_pos = ext_positions[1:-1] 
-            next_pos = ext_positions[2:]
-            prev_time = ext_timestamps[:-2]
-            curr_time = ext_timestamps[1:-1]
-            next_time = ext_timestamps[2:]
-            
-            # Calculate projection-based significance
-            durations = next_time.astype(np.float64) - prev_time.astype(np.float64)
-            time_deltas = curr_time.astype(np.float64) - prev_time.astype(np.float64)
-            progress = np.divide(time_deltas, durations, 
-                               out=np.zeros_like(time_deltas), where=durations!=0)
-            projected_pos = prev_pos + progress * (next_pos - prev_pos)
-            significance_scores = np.abs(curr_pos - projected_pos)
-            
-            # Find weakest point
-            min_idx = np.argmin(significance_scores)
-            min_significance = significance_scores[min_idx]
-            
-            if min_significance < position_tolerance:
-                # Remove the weakest point (add 1 because we're looking at internal points)
-                remove_idx = min_idx + 1
-                extrema.pop(remove_idx)
-                ext_positions = np.delete(ext_positions, remove_idx)
-                ext_timestamps = np.delete(ext_timestamps, remove_idx)
+
+        ext_idx_rel = np.flatnonzero(is_extremum) + 1
+        ext_indices = [0]
+        ext_indices.extend(int(i) for i in ext_idx_rel)
+        if ext_indices[-1] != len(segment) - 1:
+            ext_indices.append(len(segment) - 1)
+        ext_indices = sorted(set(ext_indices))
+        if len(ext_indices) <= 2:
+            return [segment[i] for i in ext_indices]
+
+        ext_pos = positions[ext_indices]
+        ext_ts = timestamps[ext_indices]
+        n = len(ext_indices)
+        prev_of = list(range(-1, n - 1))
+        next_of = list(range(1, n + 1))
+        next_of[-1] = -1
+        alive = [True] * n
+        version = [0] * n
+
+        def _significance(i):
+            pi, ni = prev_of[i], next_of[i]
+            if pi < 0 or ni < 0:
+                return float('inf')
+            dur = ext_ts[ni] - ext_ts[pi]
+            if dur == 0:
+                proj = ext_pos[pi]
             else:
+                prog = (ext_ts[i] - ext_ts[pi]) / dur
+                proj = ext_pos[pi] + prog * (ext_pos[ni] - ext_pos[pi])
+            return abs(ext_pos[i] - proj)
+
+        heap = []
+        for i in range(1, n - 1):
+            heapq.heappush(heap, (_significance(i), version[i], i))
+
+        remaining = n
+        while heap and remaining > 2:
+            sig, ver, i = heapq.heappop(heap)
+            if not alive[i] or ver != version[i]:
+                continue
+            if sig >= position_tolerance:
                 break
-                
-        return extrema
+            alive[i] = False
+            remaining -= 1
+            pi, ni = prev_of[i], next_of[i]
+            if pi >= 0:
+                next_of[pi] = ni
+            if ni >= 0:
+                prev_of[ni] = pi
+            for nb in (pi, ni):
+                if nb < 0 or not alive[nb]:
+                    continue
+                if next_of[nb] < 0 or prev_of[nb] < 0:
+                    continue
+                version[nb] += 1
+                heapq.heappush(heap, (_significance(nb), version[nb], nb))
+
+        return [segment[ext_indices[i]] for i in range(n) if alive[i]]
     
     def _find_keyframes_ultra_fast(self, segment: List[Dict], params: Dict[str, Any]) -> List[Dict]:
         """Ultra-fast approximate keyframe detection for massive datasets."""
