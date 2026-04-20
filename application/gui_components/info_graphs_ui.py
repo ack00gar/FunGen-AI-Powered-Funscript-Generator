@@ -171,10 +171,17 @@ class InfoGraphsUI(InfoGraphsMixin):
                     self._render_funscript_info_section(1)
                     if self.app.app_state_ui.show_funscript_interactive_timeline2:
                         self._render_funscript_info_section(2)
-                    for tl_num in EXTRA_TIMELINE_RANGE:
-                        vis_attr = f"show_funscript_interactive_timeline{tl_num}"
-                        if getattr(self.app.app_state_ui, vis_attr, False):
-                            self._render_funscript_info_section(tl_num)
+                    # Reuse the visibility list that app_gui already computed
+                    # for this frame instead of re-grepping via per-iteration
+                    # getattr + f-string.
+                    visible_extras = getattr(self.gui_instance, "_visible_extra_timelines", None)
+                    if visible_extras is None:
+                        visible_extras = [
+                            t for t in EXTRA_TIMELINE_RANGE
+                            if getattr(self.app.app_state_ui, f"show_funscript_interactive_timeline{t}", False)
+                        ]
+                    for tl_num in visible_extras:
+                        self._render_funscript_info_section(tl_num)
 
             # Funscript Comparison (only visible when a reference is loaded)
             if self._has_any_reference_loaded():
