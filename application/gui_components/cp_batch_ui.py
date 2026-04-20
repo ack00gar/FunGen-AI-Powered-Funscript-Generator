@@ -89,7 +89,8 @@ class BatchMixin:
 
                 if self._batch_worker is None:
                     from application.batch.batch_worker import BatchWorker
-                    self._batch_worker = BatchWorker(self.app, self._batch_queue)
+                    max_parallel = int(self.app.app_settings.get("batch_max_parallel_items", 1) or 1)
+                    self._batch_worker = BatchWorker(self.app, self._batch_queue, max_parallel=max_parallel)
 
                 return self._batch_watcher, self._batch_queue, self._batch_worker
             except ImportError:

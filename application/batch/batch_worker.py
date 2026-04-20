@@ -1,34 +1,51 @@
 """
 Batch Worker
 
-Background worker that polls the BatchQueue and processes items one at a time,
-reusing the same tracker and settings as the Run tab. Mirrors the processing
-logic in app_logic._run_batch_processing_thread() but operates on queued items
-from the watched folder instead of a pre-built batch list.
+Background worker that polls the BatchQueue and processes items.
+
+Two modes:
+- Sequential (max_parallel=1, default): one item at a time in-process, reusing
+  the app's tracker/processor/stage_processor. Live trackers require this mode.
+- Parallel (max_parallel>1): offline batch-compatible items are launched as
+  independent `main.py` subprocesses with a concurrency cap. Live / intervention
+  trackers still go through the sequential path.
 """
 
 import os
+import sys
+import subprocess
 import time
 import logging
 import threading
-from typing import Optional
+from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+def _repo_root() -> Path:
+    """Locate the FunGen repo root (where main.py lives)."""
+    return Path(__file__).resolve().parents[2]
 
 
 class BatchWorker:
     """Background queue processor for watched-folder batch items."""
 
-    def __init__(self, app, queue):
+    def __init__(self, app, queue, max_parallel: int = 1):
         """
         Args:
             app: The FunGen ApplicationLogic instance.
             queue: A BatchQueue instance to pull items from.
+            max_parallel: Concurrency cap. 1 = sequential (default, unchanged
+                behavior). >1 = spawn up to N `main.py` subprocesses in parallel
+                for offline batch-compatible items.
         """
         self.app = app
         self.queue = queue
+        self.max_parallel = max(1, int(max_parallel))
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._inflight: Dict[int, subprocess.Popen] = {}
 
     @property
     def is_running(self) -> bool:
@@ -53,30 +70,171 @@ class BatchWorker:
         logger.info("BatchWorker stop requested")
 
     def _run(self):
-        """Main worker loop: poll queue, process items."""
+        """Main worker loop. Dispatches to sequential or parallel path."""
+        if self.max_parallel > 1:
+            self._run_parallel()
+        else:
+            self._run_sequential()
+        logger.info("BatchWorker stopped")
+
+    def _run_sequential(self):
+        """Poll queue, process one item at a time in-process."""
         while not self._stop_event.is_set():
-            # Respect queue pause
             if not self.queue.wait_if_paused(timeout=1.0):
                 continue
             if self._stop_event.is_set():
                 break
 
-            # Find next QUEUED item
             next_idx = self._find_next_queued()
             if next_idx is None:
-                # Nothing to do — poll again after a short sleep
                 self._stop_event.wait(timeout=2.0)
                 continue
 
-            # Don't process if app is already busy with batch or analysis
             if self._app_is_busy():
                 self._stop_event.wait(timeout=3.0)
                 continue
 
-            # Process the item
             self._process_item(next_idx)
 
-        logger.info("BatchWorker stopped")
+    def _run_parallel(self):
+        """Launch up to max_parallel `main.py` subprocesses concurrently.
+
+        Each queued item is eligible if its tracker is offline and
+        batch-compatible. Live / intervention trackers are skipped here (they
+        require the live app state and cannot be driven from CLI unattended).
+        """
+        logger.info(f"BatchWorker: parallel mode, max_parallel={self.max_parallel}")
+        while not self._stop_event.is_set():
+            if not self.queue.wait_if_paused(timeout=1.0):
+                continue
+            if self._stop_event.is_set():
+                break
+
+            self._reap_finished_subprocesses()
+
+            # Fill up to max_parallel as long as the app isn't running its own
+            # in-process analysis (Run tab). If the app is busy we stay idle.
+            if not self._app_is_busy():
+                while len(self._inflight) < self.max_parallel:
+                    if self._stop_event.is_set():
+                        break
+                    idx = self._find_next_eligible_for_subprocess()
+                    if idx is None:
+                        break
+                    if not self._start_subprocess(idx):
+                        break
+
+            if not self._inflight:
+                self._stop_event.wait(timeout=1.5)
+            else:
+                self._stop_event.wait(timeout=0.5)
+
+        self._terminate_all_inflight()
+
+    def _find_next_eligible_for_subprocess(self) -> Optional[int]:
+        """Next QUEUED item whose tracker can run unattended via CLI."""
+        from application.batch.batch_queue import BatchItemStatus
+        from config.tracker_discovery import get_tracker_discovery
+        tracker_name = getattr(self.app.app_state_ui, 'selected_tracker_name', '')
+        if not tracker_name:
+            return None
+        info = get_tracker_discovery().get_tracker_info(tracker_name)
+        if not info or info.requires_intervention or not info.supports_batch or not info.cli_aliases:
+            return None
+        for i, item in enumerate(self.queue.items):
+            if item.status == BatchItemStatus.QUEUED and i not in self._inflight:
+                return i
+        return None
+
+    def _start_subprocess(self, idx: int) -> bool:
+        """Launch `main.py <video> --mode <cli_alias> --quiet` as a subprocess.
+
+        Returns True if the process was started, False otherwise. On success
+        the item is marked PROCESSING and the Popen is tracked in _inflight.
+        """
+        from application.batch.batch_queue import BatchItemStatus
+        from config.tracker_discovery import get_tracker_discovery
+
+        item = self.queue.items[idx]
+        if item.status != BatchItemStatus.QUEUED:
+            return False
+
+        tracker_name = getattr(self.app.app_state_ui, 'selected_tracker_name', '')
+        info = get_tracker_discovery().get_tracker_info(tracker_name)
+        if not info or not info.cli_aliases:
+            self.queue.mark_failed(idx, f"Unknown tracker: {tracker_name}")
+            return False
+        cli_alias = info.cli_aliases[0]
+
+        repo = _repo_root()
+        main_py = repo / "main.py"
+        if not main_py.exists():
+            self.queue.mark_failed(idx, f"main.py not found at {main_py}")
+            return False
+
+        # --overwrite: sequential batch always re-processes queued items;
+        # mirror that here so parallel mode does not silently skip videos that
+        # already have a sibling .funscript.
+        cmd = [sys.executable, str(main_py), item.video_path,
+               "--mode", cli_alias, "--quiet", "--overwrite"]
+        env = os.environ.copy()
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(repo),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as e:
+            self.queue.mark_failed(idx, f"subprocess launch failed: {e}")
+            return False
+
+        self._inflight[idx] = proc
+        self.queue.mark_processing(idx)
+        logger.info(f"BatchWorker: launched subprocess pid={proc.pid} for {os.path.basename(item.video_path)}")
+        return True
+
+    def _reap_finished_subprocesses(self):
+        """Poll inflight subprocesses; mark completed or failed based on exit code."""
+        done: list[Tuple[int, subprocess.Popen]] = []
+        for idx, proc in list(self._inflight.items()):
+            rc = proc.poll()
+            if rc is not None:
+                done.append((idx, proc))
+        for idx, proc in done:
+            del self._inflight[idx]
+            if proc.returncode == 0:
+                self.queue.mark_completed(idx)
+                logger.info(f"BatchWorker: subprocess pid={proc.pid} completed idx={idx}")
+            else:
+                self.queue.mark_failed(idx, f"subprocess exit code {proc.returncode}")
+                logger.warning(f"BatchWorker: subprocess pid={proc.pid} failed idx={idx} rc={proc.returncode}")
+
+    def _terminate_all_inflight(self):
+        """Terminate inflight subprocesses cleanly; mark their items as failed."""
+        if not self._inflight:
+            return
+        logger.info(f"BatchWorker: terminating {len(self._inflight)} inflight subprocess(es)")
+        for proc in self._inflight.values():
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        deadline = time.time() + 5.0
+        for idx, proc in list(self._inflight.items()):
+            timeout = max(0.0, deadline - time.time())
+            try:
+                proc.wait(timeout=timeout)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            self.queue.mark_failed(idx, "interrupted")
+        self._inflight.clear()
 
     def _find_next_queued(self) -> Optional[int]:
         """Find the index of the next QUEUED item."""
