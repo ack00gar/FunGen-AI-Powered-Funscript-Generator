@@ -9,7 +9,7 @@ class ComparisonMixin:
 
     def _visible_extra_timeline_nums(self):
         """Reuse app_gui's per-frame cached list; fall back to direct query."""
-        visible = getattr(self.gui_instance, "_visible_extra_timelines", None)
+        visible = getattr(self.app.gui_instance, "_visible_extra_timelines", None)
         if visible is not None:
             return visible
         return [t for t in EXTRA_TIMELINE_RANGE

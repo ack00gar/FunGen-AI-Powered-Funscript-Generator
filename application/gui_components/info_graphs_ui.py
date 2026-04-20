@@ -174,7 +174,7 @@ class InfoGraphsUI(InfoGraphsMixin):
                     # Reuse the visibility list that app_gui already computed
                     # for this frame instead of re-grepping via per-iteration
                     # getattr + f-string.
-                    visible_extras = getattr(self.gui_instance, "_visible_extra_timelines", None)
+                    visible_extras = getattr(self.app.gui_instance, "_visible_extra_timelines", None)
                     if visible_extras is None:
                         visible_extras = [
                             t for t in EXTRA_TIMELINE_RANGE
