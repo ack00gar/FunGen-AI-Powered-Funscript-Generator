@@ -2004,9 +2004,7 @@ class VideoProcessor(
 
                 seek_target = self._pending_seek_target
                 if seek_target is not None and idx < seek_target:
-                    # Fast-skip frames before the seek target -- no tracker,
-                    # no processing frame needed (result was never read here
-                    # anyway); just cache and bump the version.
+                    # Fast-skip: only cache and bump version.
                     if cache_this_frame:
                         self._buffer_append(idx, frame_np)
                     with self.frame_lock:
@@ -2016,11 +2014,7 @@ class VideoProcessor(
                 self._pending_seek_target = None
                 self.current_frame_index = idx
 
-                # Only pay the HD -> imgsz resize cost when a tracker is
-                # actually going to consume the result. Otherwise (playback,
-                # post-stop-tracking, paused-with-HD) we ran the ~22 ms CPU
-                # resize every frame and discarded it -- this was the "lag
-                # after stop tracking" the user reported.
+                # Only resize when a tracker will consume the frame.
                 tracker_will_run = bool(
                     self.tracker and self.tracker.tracking_active
                     and self.enable_tracker_processing
