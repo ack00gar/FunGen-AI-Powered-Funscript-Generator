@@ -21,7 +21,10 @@ class ChapterBarMixin:
         bar_start_x = cursor_screen_pos[0]
         bar_start_y = cursor_screen_pos[1]
 
-        bg_col = imgui.get_color_u32_rgba(*VideoNavigationColors.BACKGROUND)
+        bg_col = getattr(self, "_chbar_bg_u32", None)
+        if bg_col is None:
+            bg_col = imgui.get_color_u32_rgba(*VideoNavigationColors.BACKGROUND)
+            self._chbar_bg_u32 = bg_col
         draw_list.add_rect_filled(bar_start_x, bar_start_y, bar_start_x + bar_width, bar_start_y + bar_height, bg_col)
 
         if total_video_frames <= 0:
