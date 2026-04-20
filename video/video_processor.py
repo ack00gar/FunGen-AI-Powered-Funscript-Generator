@@ -777,11 +777,55 @@ class VideoProcessor(
 
         self.logger.info(f"HD display: {out_w}x{out_h} ({out_w * out_h * 3} bytes/frame)")
 
+    def _get_resize_device(self) -> str:
+        """Lazily resolve the device used by the HD-path resize.
+
+        Reads `hd_resize_device` from settings (default "cpu"). "auto" picks
+        CUDA > MPS > CPU. On any GPU-init failure the path falls back to CPU
+        and stays there for the life of the processor.
+        """
+        cached = getattr(self, "_resize_device", None)
+        if cached is not None:
+            return cached
+        try:
+            setting = str(self.app.app_settings.get("hd_resize_device", "cpu") or "cpu").lower()
+        except Exception:
+            setting = "cpu"
+        resolved = "cpu"
+        if setting in ("cuda", "mps", "auto"):
+            try:
+                import torch
+                if setting == "cuda" and torch.cuda.is_available():
+                    resolved = "cuda"
+                elif setting == "mps" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                    resolved = "mps"
+                elif setting == "auto":
+                    if torch.cuda.is_available():
+                        resolved = "cuda"
+                    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                        resolved = "mps"
+            except Exception:
+                resolved = "cpu"
+        self._resize_device = resolved
+        return resolved
+
+    def _resize_gpu(self, display_frame, new_w: int, new_h: int, device: str):
+        """Resize an HWC uint8 frame on a torch device. Returns HWC uint8 numpy."""
+        import torch
+        import torch.nn.functional as F
+        # Upload HWC uint8 -> NCHW float32 (interpolate requires float on most backends).
+        t = torch.from_numpy(display_frame).to(device).permute(2, 0, 1).unsqueeze(0).float()
+        out = F.interpolate(t, size=(new_h, new_w), mode="bilinear", antialias=True, align_corners=False)
+        out = out.clamp_(0, 255).to(torch.uint8).squeeze(0).permute(1, 2, 0).contiguous()
+        return out.cpu().numpy()
+
     def _make_processing_frame(self, display_frame):
         """Resize an HD display frame down to yolo_input_size square with padding for YOLO/tracker.
 
         Uses pre-allocated buffer and cached resize parameters to avoid
-        per-frame allocation overhead.
+        per-frame allocation overhead. The resize itself runs on CPU
+        (cv2.INTER_AREA) by default, or on the torch device selected by the
+        `hd_resize_device` setting ("cpu" | "auto" | "cuda" | "mps").
         """
         h, w = display_frame.shape[:2]
         size = self.yolo_input_size
@@ -792,7 +836,16 @@ class VideoProcessor(
         new_w, new_h = self._proc_resize_dims
         x_off, y_off = self._proc_pad_offset
 
-        resized = cv2.resize(display_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        device = self._get_resize_device()
+        if device != "cpu":
+            try:
+                resized = self._resize_gpu(display_frame, new_w, new_h, device)
+            except Exception as e:
+                self.logger.debug(f"GPU resize failed on {device}, pinning to CPU: {e}")
+                self._resize_device = "cpu"
+                resized = cv2.resize(display_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:
+            resized = cv2.resize(display_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
         # Reuse pre-allocated buffer (zero once, then overwrite content region)
         buf = self._processing_frame_buf
