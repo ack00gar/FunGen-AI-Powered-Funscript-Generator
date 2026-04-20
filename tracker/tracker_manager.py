@@ -3,6 +3,7 @@ Tracker manager that directly interfaces with modular trackers.
 Replaces ModularTrackerBridge with clean, scalable architecture.
 """
 import logging
+import time
 import numpy as np
 from typing import List, Dict, Tuple, Optional, Any
 
@@ -242,7 +243,8 @@ class TrackerManager:
                     self.logger.info(
                         f"Tracker '{mode_ref}' preloaded in {dt:.0f}ms (async)")
             except Exception as e:
-                self.logger.warning(f"Async tracker preload failed: {e}")
+                self.logger.warning(
+                    f"Async tracker preload failed: {e}", exc_info=True)
 
         self._preload_thread = _threading.Thread(
             target=_run, name=f"TrackerPreload[{mode_ref}]", daemon=True)

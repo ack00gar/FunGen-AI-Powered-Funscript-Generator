@@ -99,8 +99,8 @@ class ChapterMaker(BaseOfflineTracker):
         return TrackerMetadata(
             name="OFFLINE_CHAPTER_MAKER",
             display_name="Chapter Maker (VR + 2D POV)",
-            description="Fast chapter detection at 2fps — VR and 2D POV, no signal output",
-            category="tool",
+            description="Fast chapter detection at 2fps - VR and 2D POV, no signal output",
+            category="offline",
             version="1.0.0",
             author="FunGen",
             tags=["offline", "chapter-detection", "lightweight", "vr", "2d", "pov"],

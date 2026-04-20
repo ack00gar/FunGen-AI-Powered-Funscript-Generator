@@ -1,4 +1,5 @@
 import imgui
+import time as _time
 from application.utils.imgui_helpers import center_next_window_pivot
 import config
 from config.constants_colors import CurrentTheme
@@ -554,15 +555,21 @@ class ControlPanelUI(
                 if imgui.button("Stop Tracking##PinnedAction", width=btn_w, height=32):
                     events.handle_abort_process_click()
         elif is_playback_active:
-            # Simple video playback — show Pause/Resume button
+            # Mirror live tracking layout: Pause/Resume + Stop side-by-side.
             is_paused = hasattr(proc, 'pause_event') and proc.pause_event.is_set()
+            avail_w = imgui.get_content_region_available()[0]
+            btn_w = (avail_w - imgui.get_style().item_spacing[0]) / 2
             if is_paused:
                 with primary_button_style():
-                    if imgui.button("Resume Playback##PinnedAction", width=-1, height=32):
+                    if imgui.button("Resume##PinnedAction", width=btn_w, height=32):
                         events.handle_playback_control("play_pause")
             else:
-                if imgui.button("Pause Playback##PinnedAction", width=-1, height=32):
+                if imgui.button("Pause##PinnedAction", width=btn_w, height=32):
                     events.handle_playback_control("play_pause")
+            imgui.same_line()
+            with destructive_button_style():
+                if imgui.button("Stop##PinnedAction", width=btn_w, height=32):
+                    events.handle_playback_control("stop")
         else:
             # Has results or ready to start
             has_results = False
@@ -620,6 +627,21 @@ class ControlPanelUI(
         # _feat_* attributes resolved once in __init__; runtime-stable.
 
         floating = (app_state.ui_layout_mode == "floating")
+
+        # Cheap sub-section timer: records into gui._profile_samples only when
+        # FUNGEN_PROFILE_FRAMES is set, otherwise just calls the fn.
+        gui = getattr(self.app, "gui_instance", None)
+        if gui is not None and getattr(gui, "_profile_enabled", False):
+            _samples = gui._profile_samples
+            def _profile_sub(name, fn):
+                t0 = _time.perf_counter()
+                fn()
+                _samples.setdefault(name, []).append((_time.perf_counter() - t0) * 1000.0)
+        else:
+            def _profile_sub(name, fn):
+                fn()
+        self._profile_sub = _profile_sub
+
         if floating:
             if not getattr(app_state, "show_control_panel_window", True):
                 return
@@ -655,33 +677,34 @@ class ControlPanelUI(
 
         tab_selected = self._active_section
         imgui.begin_child("TabContentRegion", width=0, height=content_h, border=False)
+        _sub = self._profile_sub
         if tab_selected == "run":
-            self._render_run_control_tab()
+            _sub("CP.run", self._render_run_control_tab)
         elif tab_selected == "post":
-            self._render_post_processing_tab()
+            _sub("CP.post", self._render_post_processing_tab)
         elif tab_selected == "subtitle":
             if self._feat_subtitle:
-                self._render_subtitle_tab()
+                _sub("CP.subtitle", self._render_subtitle_tab)
             else:
-                self._render_subtitle_preview()
+                _sub("CP.subtitle_preview", self._render_subtitle_preview)
         elif tab_selected == "device_control":
             if self._feat_device:
-                self._render_device_control_tab()
+                _sub("CP.device_control", self._render_device_control_tab)
             else:
-                self._render_device_control_preview()
+                _sub("CP.device_control_preview", self._render_device_control_preview)
         elif tab_selected == "native_sync":
             if self._feat_streamer:
-                self._render_native_sync_tab()
+                _sub("CP.native_sync", self._render_native_sync_tab)
             else:
-                self._render_streamer_preview()
+                _sub("CP.streamer_preview", self._render_streamer_preview)
         elif tab_selected == "metadata":
-            self._render_metadata_tab()
+            _sub("CP.metadata", self._render_metadata_tab)
         elif tab_selected == "supporter_batch":
-            self._render_supporter_batch_tab()
+            _sub("CP.supporter_batch", self._render_supporter_batch_tab)
         imgui.end_child()
 
         # Pinned action bar at bottom
-        self._render_pinned_action_bar()
+        _sub("CP.pinned_action", self._render_pinned_action_bar)
 
         imgui.end_child()  # ##RightPanel
         imgui.end()
