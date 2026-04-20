@@ -217,13 +217,8 @@ class DrawingMixin:
 
 
     def _point_fade_opacity(self, tf: 'TimelineTransformer') -> float:
-        """Fade and eventually hide action points when zoomed far out.
-        Returns a 0-1 alpha multiplier; callers should skip drawing below 0.25
-        (where 10k points become visual noise and cost without value)."""
-        visible_s = max(1e-3, (tf.visible_end_ms - tf.visible_start_ms) / 1000.0)
-        o = 20.0 / visible_s
-        o = o * o if o < 1.0 else 1.0  # ease-out for visual smoothness
-        return max(0.0, min(1.0, o))
+        """No fade. Every visible point always renders at full opacity."""
+        return 1.0
 
 
     def _expand_catmull(self, ats: np.ndarray, poss: np.ndarray, k: int):
@@ -294,15 +289,11 @@ class DrawingMixin:
         safe_max_x = tf.x_offset + tf.width + 5000
         xs = np.clip(xs, safe_min_x, safe_max_x)
 
-        # 3. LOD Decision
+        # No point LOD: always draw every visible action point. Bench
+        # showed ~2-3ms worst-case on 30k-point / full-zoom frames, and
+        # zero saving at normal zoom levels.
         points_on_screen = len(xs)
         pixels_per_point = tf.width / points_on_screen if points_on_screen > 0 else 0
-
-        # -- Line drawing (dense zoom-out falls back to straight polyline via
-        # _spline_samples_for_view; point loop skips via the sparse gate
-        # below). Previously had a "LOD A density envelope" fast-path here
-        # but the bench showed zero CPU saving vs this path and its
-        # half-alpha recolor was just a visual regression on dense views.
         base_col = color_override or (TimelineColors.PREVIEW_LINES if is_preview else (0.8, 0.8, 0.8, 1.0))
         col_u32 = imgui.get_color_u32_rgba(base_col[0], base_col[1], base_col[2], base_col[3] * alpha)
         base_col = color_override or (TimelineColors.PREVIEW_LINES if is_preview else (0.8, 0.8, 0.8, 1.0))
@@ -326,22 +317,12 @@ class DrawingMixin:
             pts = np.column_stack((xs, ys)).tolist()
         dl.add_polyline(pts, col_u32, False, thick)
 
-        # -- Points (only when zoomed in enough to see them individually) --
-        # Fade points out when the visible window is too wide; below ~0.25
-        # opacity ImGui's blend contributes nothing but still costs a draw
-        # call per point, so skip entirely.
-        point_fade = self._point_fade_opacity(tf) if not is_preview else 1.0
-        should_draw_points = (pixels_per_point > 5) or (not force_lines_only)
-
-        if should_draw_points and not force_lines_only and point_fade >= 0.25:
+        # -- Points: always render every visible action point.
+        if not force_lines_only:
             radius = self.app.app_state_ui.timeline_point_radius
-            pt_alpha = alpha * point_fade
 
-            # Pre-compute color u32 values outside the per-point loop.
-            # Alpha-quantized cache collapses the ~continuous alpha into ~40
-            # buckets so viewport fade doesn't allocate a fresh u32/frame.
             _default_c = TimelineColors.POINT_DEFAULT if not is_preview else TimelineColors.PREVIEW_POINTS
-            col_default = _u32_alpha_blend(_default_c, pt_alpha)
+            col_default = _u32_alpha_blend(_default_c, alpha)
             col_drag = _u32_alpha_blend(TimelineColors.POINT_DRAGGING, alpha)
             col_sel = _u32_alpha_blend(TimelineColors.POINT_SELECTED, alpha)
             col_hover = _u32_alpha_blend(TimelineColors.POINT_HOVER, alpha)
@@ -349,25 +330,17 @@ class DrawingMixin:
             r_drag = radius + 2
             r_sel = radius + 1
             r_hover = radius + 1
+            r_sel_border = r_sel + 1
 
             _sel_set = self.multi_selected_action_indices
             _drag_idx = self.dragging_action_idx
             _hover_idx = self._hovered_point_idx
-            sparse = pixels_per_point < 5
             xs_l = xs.tolist()
             ys_l = ys.tolist()
             n_actions = len(visible_actions)
-            # Hoist ImGui drawlist methods to locals — bound-method lookup
-            # per call adds up for dense (10k+) scripts.
             _add_circle_filled = dl.add_circle_filled
             _add_circle = dl.add_circle
-            r_sel_border = r_sel + 1
-            # Fast path when no selection/hover/drag state applies to this
-            # axis: avoid tuple construction + set hashing per point.
             sel_empty = not _sel_set
-            # Extract action keys via two tight comprehensions (one dict lookup
-            # each) if we need to test membership; for the empty-set case we
-            # skip this work entirely.
             if sel_empty:
                 is_sel_list = [False] * n_actions
             else:
@@ -378,9 +351,6 @@ class DrawingMixin:
                 is_sel = is_sel_list[i]
                 is_drag = (real_idx == _drag_idx)
                 is_hover = (real_idx == _hover_idx)
-
-                if sparse and not (is_sel or is_drag or is_hover):
-                    continue
 
                 px, py = xs_l[i], ys_l[i]
 
@@ -503,45 +473,42 @@ class DrawingMixin:
         else:
             _draw_runs(xs_list, ys_list, colors_u32.tolist(), dl.add_polyline)
 
-        # Draw points (same logic as standard _draw_curve)
+        # Always draw every visible point in heatmap view.
         radius = self.app.app_state_ui.timeline_point_radius
-        pixels_per_point = tf.width / max(1, len(xs))
-        if pixels_per_point > 5:
-            col_default = _u32_from_const(TimelineColors.POINT_DEFAULT)
-            col_drag = _u32_from_const(TimelineColors.POINT_DRAGGING)
-            col_sel = _u32_from_const(TimelineColors.POINT_SELECTED)
-            col_hover = _u32_from_const(TimelineColors.POINT_HOVER)
-            col_sel_border = _u32_from_const(TimelineColors.SELECTED_POINT_BORDER)
-            r_drag, r_sel, r_hover = radius + 2, radius + 1, radius + 1
-            r_sel_border = r_sel + 1
-            _sel_set = self.multi_selected_action_indices
-            _drag_idx = self.dragging_action_idx
-            _hover_idx = self._hovered_point_idx
-            _add_circle_filled = dl.add_circle_filled
-            _add_circle = dl.add_circle
-            n_actions = len(visible_actions)
-            # Pre-materialize selection-hit flags once; empty set skips all work.
-            if _sel_set:
-                is_sel_list = [(a['at'], a['pos']) in _sel_set for a in visible_actions]
+        col_default = _u32_from_const(TimelineColors.POINT_DEFAULT)
+        col_drag = _u32_from_const(TimelineColors.POINT_DRAGGING)
+        col_sel = _u32_from_const(TimelineColors.POINT_SELECTED)
+        col_hover = _u32_from_const(TimelineColors.POINT_HOVER)
+        col_sel_border = _u32_from_const(TimelineColors.SELECTED_POINT_BORDER)
+        r_drag, r_sel, r_hover = radius + 2, radius + 1, radius + 1
+        r_sel_border = r_sel + 1
+        _sel_set = self.multi_selected_action_indices
+        _drag_idx = self.dragging_action_idx
+        _hover_idx = self._hovered_point_idx
+        _add_circle_filled = dl.add_circle_filled
+        _add_circle = dl.add_circle
+        n_actions = len(visible_actions)
+        if _sel_set:
+            is_sel_list = [(a['at'], a['pos']) in _sel_set for a in visible_actions]
+        else:
+            is_sel_list = [False] * n_actions
+
+        for i in range(n_actions):
+            real_idx = s_idx + i
+            is_sel = is_sel_list[i]
+            is_drag = (real_idx == _drag_idx)
+            is_hover = (real_idx == _hover_idx)
+
+            px, py = xs_list[i], ys_list[i]
+            if is_drag:
+                _add_circle_filled(px, py, r_drag, col_drag)
+            elif is_sel:
+                _add_circle_filled(px, py, r_sel, col_sel)
+                _add_circle(px, py, r_sel_border, col_sel_border)
+            elif is_hover:
+                _add_circle_filled(px, py, r_hover, col_hover)
             else:
-                is_sel_list = [False] * n_actions
-
-            for i in range(n_actions):
-                real_idx = s_idx + i
-                is_sel = is_sel_list[i]
-                is_drag = (real_idx == _drag_idx)
-                is_hover = (real_idx == _hover_idx)
-
-                px, py = xs_list[i], ys_list[i]
-                if is_drag:
-                    _add_circle_filled(px, py, r_drag, col_drag)
-                elif is_sel:
-                    _add_circle_filled(px, py, r_sel, col_sel)
-                    _add_circle(px, py, r_sel_border, col_sel_border)
-                elif is_hover:
-                    _add_circle_filled(px, py, r_hover, col_hover)
-                else:
-                    _add_circle_filled(px, py, radius, col_default)
+                _add_circle_filled(px, py, radius, col_default)
 
 
     def _draw_speed_limit_overlay(self, dl, tf: 'TimelineTransformer', actions: List[Dict]):
