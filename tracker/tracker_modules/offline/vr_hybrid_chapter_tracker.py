@@ -323,7 +323,11 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
             self.logger.error(f"YOLO model not found: {yolo_model_path}")
             return None
 
-        model = _yolo_load_model(yolo_model_path)
+        model = _yolo_load_model(
+            yolo_model_path,
+            warmup_device=config_constants.DEVICE,
+            warmup_imgsz=self.yolo_input_size,
+        )
 
         vp = VideoProcessor(
             app_instance=self.app,

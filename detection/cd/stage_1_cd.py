@@ -554,11 +554,17 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
             load_model, run_detection, run_pose, detection_to_dict, pose_to_dict,
         )
         consumer_logger.info(f"[S1 Consumer-{consumer_idx}] Loading models...")
-        det_model = load_model(yolo_det_model_path, task='detect')
+        det_model = load_model(
+            yolo_det_model_path, task='detect',
+            warmup_device=constants.DEVICE, warmup_imgsz=yolo_input_size_consumer,
+        )
 
         # Force CPU for pose model on Apple MPS to avoid known bugs ?
         pose_device = constants.DEVICE
-        pose_model = load_model(yolo_pose_model_path, task='pose')
+        pose_model = load_model(
+            yolo_pose_model_path, task='pose',
+            warmup_device=pose_device, warmup_imgsz=yolo_input_size_consumer,
+        )
         consumer_logger.info(
             f"[S1 Consumer-{consumer_idx}] Models loaded. Detection on '{constants.DEVICE}', Pose on '{pose_device}'.")
 

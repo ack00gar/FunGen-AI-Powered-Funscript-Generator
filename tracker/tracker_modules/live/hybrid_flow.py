@@ -176,7 +176,11 @@ class HybridFlowTracker(BaseTracker):
                 load_model as _yolo_load_model, run_detection as _yolo_run_detection,
             )
             self._yolo_run_detection = _yolo_run_detection
-            self._yolo_model = _yolo_load_model(yolo_model_path)
+            self._yolo_model = _yolo_load_model(
+                yolo_model_path,
+                warmup_device=config_constants.DEVICE,
+                warmup_imgsz=getattr(self.app, 'yolo_input_size', 640),
+            )
             self.logger.info(f"YOLO model loaded: {yolo_model_path}")
 
             # Initialize DIS optical flow

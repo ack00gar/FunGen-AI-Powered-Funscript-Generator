@@ -46,18 +46,33 @@ class PoseResult:
 #  Stateless functions (safe for multiprocessing workers)
 # ---------------------------------------------------------------------------
 
-def load_model(path: str, task: str = 'detect'):
+def load_model(path: str, task: str = 'detect', *,
+               warmup_device: Optional[str] = None,
+               warmup_imgsz: int = 640):
     """Load a YOLO model. Each process/thread should call this independently.
 
     Args:
         path: Path to YOLO model file (.pt, .engine, etc.)
         task: 'detect' or 'pose'
+        warmup_device: If given, run one dummy forward on this device to pay
+            the graph-compile / allocator / JIT cost here instead of on the
+            first real frame. Measured ~540 ms penalty on MPS.
+        warmup_imgsz: Input size for the warmup forward (should match the
+            size the caller will actually use).
 
     Returns:
         ultralytics.YOLO model instance
     """
     from ultralytics import YOLO
-    return YOLO(path, task=task)
+    model = YOLO(path, task=task)
+    if warmup_device:
+        try:
+            dummy = np.zeros((warmup_imgsz, warmup_imgsz, 3), dtype=np.uint8)
+            model(dummy, device=warmup_device, imgsz=warmup_imgsz,
+                  verbose=False, conf=0.01)
+        except Exception as exc:
+            logger.debug(f"YOLO warmup skipped ({warmup_device}): {exc}")
+    return model
 
 
 def run_detection(
@@ -223,12 +238,18 @@ class YoloDetectionHelper:
         self.imgsz = imgsz
 
         self.logger.info(f"Loading YOLO detection model: {det_model_path}")
-        self._det_model = load_model(det_model_path, task='detect')
+        self._det_model = load_model(
+            det_model_path, task='detect',
+            warmup_device=device, warmup_imgsz=imgsz,
+        )
 
         self._pose_model = None
         if pose_model_path:
             self.logger.info(f"Loading YOLO pose model: {pose_model_path}")
-            self._pose_model = load_model(pose_model_path, task='pose')
+            self._pose_model = load_model(
+                pose_model_path, task='pose',
+                warmup_device=device, warmup_imgsz=imgsz,
+            )
 
     # -- Detection API --
 
