@@ -364,9 +364,12 @@ class ApplicationLogic:
         # The wizard calls trigger_first_run_setup() when the user reaches that step.
 
         # --- Initialize tracker mode from persisted setting; default handled by AppStateUI ---
+        # GUI startup uses lazy=True so the YOLO model load + warmup forward
+        # (~1-2 s on MPS) is deferred until the user actually hits Start. CLI
+        # mode still runs analysis immediately after init so keeps eager init.
         if not self.is_cli_mode and self.tracker:
             tracker_name = self.app_state_ui.selected_tracker_name
-            if not self.tracker.set_tracking_mode(tracker_name):
+            if not self.tracker.set_tracking_mode(tracker_name, lazy=True):
                 from config.tracker_discovery import get_tracker_discovery, TrackerCategory
                 discovery = get_tracker_discovery()
                 live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
@@ -374,7 +377,7 @@ class ApplicationLogic:
                     fallback = live_trackers[0].internal_name
                     self.logger.info(f"Tracker '{tracker_name}' unavailable, falling back to '{fallback}'")
                     self.app_state_ui.selected_tracker_name = fallback
-                    self.tracker.set_tracking_mode(fallback)
+                    self.tracker.set_tracking_mode(fallback, lazy=True)
 
     def get_timeline(self, timeline_num: int) -> Optional['InteractiveFunscriptTimeline']:
         """

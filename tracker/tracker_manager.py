@@ -136,8 +136,15 @@ class TrackerManager:
 
         self.logger.debug("TrackerManager initialized - Direct modular tracker interface")
 
-    def set_tracking_mode(self, mode_name: str) -> bool:
-        """Set tracking mode with direct tracker instantiation."""
+    def set_tracking_mode(self, mode_name: str, lazy: bool = False) -> bool:
+        """Set tracking mode with direct tracker instantiation.
+
+        When ``lazy`` is True, the tracker object is instantiated and axes are
+        assigned, but the potentially-heavy ``initialize()`` call (YOLO model
+        load, warmup forward, etc.) is deferred until ``start_tracking()`` or
+        an explicit ``ensure_initialized()``. Useful at startup so users who
+        never hit Play don't pay the load cost (saves 1-2 s of cold-start).
+        """
         try:
             if mode_name == self._current_mode and self._current_tracker:
                 self.logger.debug(f"Already using tracker mode: {mode_name}")
@@ -186,14 +193,19 @@ class TrackerManager:
 
             # Set up tracker with app and model path
             self._setup_tracker_environment()
-            
-            # Initialize tracker
-            if not self._initialize_tracker():
-                return False
-                
+
+            # Initialize tracker now or defer to first use.
+            if lazy:
+                self._pending_initialize = True
+                self.logger.debug(f"Tracker {mode_name} staged (lazy init); model load deferred.")
+            else:
+                self._pending_initialize = False
+                if not self._initialize_tracker():
+                    return False
+
             # Apply any pending configurations
             self._apply_pending_configurations()
-            
+
             self.logger.debug(f"Native tracker instantiated: {mode_name} ({tracker_info.display_name})")
             return True
             
@@ -203,6 +215,17 @@ class TrackerManager:
             traceback.print_exc()
             return False
 
+    def ensure_initialized(self) -> bool:
+        """Force initialize() on a lazily-staged tracker. Idempotent."""
+        if not self._current_tracker:
+            return False
+        if not getattr(self, "_pending_initialize", False):
+            return True
+        ok = self._initialize_tracker()
+        if ok:
+            self._pending_initialize = False
+        return ok
+
     def start_tracking(self) -> bool:
         """Start tracking with direct tracker call."""
         if not self._current_tracker:
@@ -210,6 +233,13 @@ class TrackerManager:
             return False
 
         try:
+            # Pay the deferred initialize cost here if set_tracking_mode was
+            # called lazily. Running it inside start_tracking keeps the user's
+            # "click Play, wait a moment, go" expectation intact.
+            if getattr(self, "_pending_initialize", False):
+                if not self.ensure_initialized():
+                    return False
+
             self.tracking_active = True
             self._suspend_mpv_display_for_tracking()
             self._suspend_hd_for_live_tracking()
