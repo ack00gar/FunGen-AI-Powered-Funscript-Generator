@@ -161,7 +161,7 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     # Note: send2trash is included because it's imported by application.utils.__init__.py -> generated_file_manager.py
     bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging', 'send2trash'], pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
 
-    logger.info("--- Dependency Check ---")
+    logger.debug("Starting dependency check")
 
     # 2. Detect GPU environment and select appropriate requirements
     requirements_file, env_description = detect_gpu_environment()
@@ -313,7 +313,7 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     # 9. Download UI control icons (optional, non-blocking)
     check_and_download_ui_icons(auto_download=auto_install)
 
-    logger.info("--- Dependency Check Complete ---")
+    logger.debug("Dependency check complete")
 
 
 def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = False):
@@ -388,7 +388,7 @@ def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = F
                 logger.error("Could not determine the installation command for your OS. Please install ffmpeg manually.")
             sys.exit(1)
     else:
-        logger.info("ffmpeg and ffprobe are available.")
+        logger.debug("ffmpeg and ffprobe are available")
 
 
 def check_and_download_emojis(*, auto_download: bool = True):

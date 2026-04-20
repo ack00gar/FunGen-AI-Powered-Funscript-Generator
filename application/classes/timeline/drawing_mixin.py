@@ -296,7 +296,10 @@ class DrawingMixin:
         base_thick = self._line_thickness_for_height()
         thick = max(1.0, base_thick - 0.5) if is_preview else base_thick
 
-        if self._show_smooth_curve and not is_preview and len(ats) >= 2:
+        # Drop spline sampling during active pan/drag; straight polyline is
+        # cheaper and the user won't notice in-motion.
+        interacting = bool(getattr(self.app.app_state_ui, 'timeline_interaction_active', False))
+        if self._show_smooth_curve and not is_preview and len(ats) >= 2 and not interacting:
             k = self._spline_samples_for_view(tf.width, len(ats) - 1)
             if k >= 3:
                 d_ats, d_poss, _ = self._expand_catmull(ats, poss, k)
@@ -304,9 +307,6 @@ class DrawingMixin:
                 d_ys = tf.vec_val_to_y(d_poss)
                 pts = np.column_stack((d_xs, d_ys)).tolist()
             else:
-                # Per-segment budget too low to render a smooth curve without
-                # visible kinks, fall back to straight segments, which at
-                # this density are indistinguishable from the spline anyway.
                 pts = np.column_stack((xs, ys)).tolist()
         else:
             pts = np.column_stack((xs, ys)).tolist()
@@ -333,10 +333,7 @@ class DrawingMixin:
             xs_l = xs.tolist()
             ys_l = ys.tolist()
             n_actions = len(visible_actions)
-            # Points rendered as filled squares (rect_filled); at radius <= 5 the
-            # visual difference vs a tessellated circle is imperceptible and rects
-            # are ~2x cheaper in the imgui boundary.
-            _rf = dl.add_rect_filled
+            _add_circle_filled = dl.add_circle_filled
             _add_circle = dl.add_circle
             sel_empty = not _sel_set
             if sel_empty:
@@ -353,14 +350,14 @@ class DrawingMixin:
                 px, py = xs_l[i], ys_l[i]
 
                 if is_drag:
-                    _rf(px - r_drag, py - r_drag, px + r_drag, py + r_drag, col_drag)
+                    _add_circle_filled(px, py, r_drag, col_drag)
                 elif is_sel:
-                    _rf(px - r_sel, py - r_sel, px + r_sel, py + r_sel, col_sel)
+                    _add_circle_filled(px, py, r_sel, col_sel)
                     _add_circle(px, py, r_sel_border, col_sel_border)
                 elif is_hover:
-                    _rf(px - r_hover, py - r_hover, px + r_hover, py + r_hover, col_hover)
+                    _add_circle_filled(px, py, r_hover, col_hover)
                 else:
-                    _rf(px - radius, py - radius, px + radius, py + radius, col_default)
+                    _add_circle_filled(px, py, radius, col_default)
 
     # ==================================================================================
     # VISUALIZATION DRAWING METHODS
@@ -452,7 +449,9 @@ class DrawingMixin:
                 i, j = starts[run_i], starts[run_i + 1]
                 add_polyline(pts_all[i:j + 1], int(arr[i]), False, hm_thick)
 
-        if self._show_smooth_curve and len(ats) >= 2 and n_segs > 0 and lod_k >= 3:
+        interacting_hm = bool(getattr(self.app.app_state_ui, 'timeline_interaction_active', False))
+        if (self._show_smooth_curve and len(ats) >= 2 and n_segs > 0
+                and lod_k >= 3 and not interacting_hm):
             d_ats, d_poss, seg_idx = self._expand_catmull(ats, poss, lod_k)
             d_xs = np.clip(tf.vec_time_to_x(d_ats), safe_min_x, safe_max_x).tolist()
             d_ys = tf.vec_val_to_y(d_poss).tolist()
@@ -483,7 +482,7 @@ class DrawingMixin:
         _sel_set = self.multi_selected_action_indices
         _drag_idx = self.dragging_action_idx
         _hover_idx = self._hovered_point_idx
-        _rf = dl.add_rect_filled
+        _add_circle_filled = dl.add_circle_filled
         _add_circle = dl.add_circle
         n_actions = len(visible_actions)
         if _sel_set:
@@ -499,14 +498,14 @@ class DrawingMixin:
 
             px, py = xs_list[i], ys_list[i]
             if is_drag:
-                _rf(px - r_drag, py - r_drag, px + r_drag, py + r_drag, col_drag)
+                _add_circle_filled(px, py, r_drag, col_drag)
             elif is_sel:
-                _rf(px - r_sel, py - r_sel, px + r_sel, py + r_sel, col_sel)
+                _add_circle_filled(px, py, r_sel, col_sel)
                 _add_circle(px, py, r_sel_border, col_sel_border)
             elif is_hover:
-                _rf(px - r_hover, py - r_hover, px + r_hover, py + r_hover, col_hover)
+                _add_circle_filled(px, py, r_hover, col_hover)
             else:
-                _rf(px - radius, py - radius, px + radius, py + radius, col_default)
+                _add_circle_filled(px, py, radius, col_default)
 
 
     def _draw_speed_limit_overlay(self, dl, tf: 'TimelineTransformer', actions: List[Dict]):

@@ -311,12 +311,16 @@ class AppFunscriptProcessor:
 
     def _get_current_fps(self) -> float:
         """Get current video FPS. Prefers video_info (ffprobe-based), warns once on fallback."""
-        if self.app.processor and hasattr(self.app.processor, 'video_info') and \
-                self.app.processor.video_info and self.app.processor.video_info.get('fps', 0) > 0:
-            return self.app.processor.video_info['fps']
-        if self.app.processor and hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:
-            return self.app.processor.fps
-        if not getattr(self, '_fps_fallback_warned', False):
+        proc = getattr(self.app, 'processor', None)
+        if proc and hasattr(proc, 'video_info') and \
+                proc.video_info and proc.video_info.get('fps', 0) > 0:
+            return proc.video_info['fps']
+        if proc and hasattr(proc, 'fps') and proc.fps > 0:
+            return proc.fps
+        # No video loaded yet -> silent fallback. Only warn when a video
+        # IS open but its FPS somehow came back zero (a real problem).
+        video_open = bool(proc and getattr(proc, 'is_video_open', lambda: False)())
+        if video_open and not getattr(self, '_fps_fallback_warned', False):
             self.logger.warning(
                 "Video FPS not available, using fallback 30.0 (60fps videos may have wrong chapter frame indices)")
             self._fps_fallback_warned = True

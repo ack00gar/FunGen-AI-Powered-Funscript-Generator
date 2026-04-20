@@ -73,7 +73,7 @@ class FunGenWSAPI:
 
     async def _serve(self, websockets):
         async with websockets.serve(self._handle_client, "127.0.0.1", self.port):
-            logger.info(f"WebSocket API: ws://127.0.0.1:{self.port}")
+            logger.info(f"WebSocket API listening: ws://127.0.0.1:{self.port}")
             while self._running:
                 await asyncio.sleep(0.5)
 

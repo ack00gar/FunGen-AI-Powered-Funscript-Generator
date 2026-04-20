@@ -102,6 +102,12 @@ def _setup_bootstrap_logger():
     console_handler.setFormatter(BootstrapColoredFormatter())
     logger.addHandler(console_handler)
 
+    # Silence third-party info chatter (PyOpenGL's "No OpenGL_accelerate
+    # module loaded", websockets server-listening notice, etc.).
+    for noisy in ("OpenGL", "OpenGL.acceleratesupport", "websockets",
+                  "websockets.server"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
 def run_gui(video_path=None):
     """Initializes and runs the graphical user interface."""
     from application.logic.app_logic import ApplicationLogic
