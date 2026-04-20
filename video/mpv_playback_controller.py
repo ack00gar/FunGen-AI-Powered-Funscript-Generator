@@ -140,13 +140,7 @@ class MpvPlaybackController:
                 self.seek(max(0, processor.current_frame_index + delta))
 
     def _vr_crop_args(self, processor) -> list:
-        """Build --vf chain for a standalone mpv subprocess: crop + v360 dewarp.
-
-        Mirrors the filter the embedded display uses so fullscreen mode
-        does not show raw fisheye. v360 in libavfilter is CPU-based and
-        slower than our embedded GL shader, but standalone mpv cannot
-        access our render context, so this is the honest path.
-        """
+        """Build --vf crop= args for a standalone mpv subprocess."""
         if not processor or processor.determined_video_type != 'VR':
             return []
         from video import vr_panel
@@ -155,32 +149,17 @@ class MpvPlaybackController:
         if eye == vr_panel.EYE_FULL:
             return []
         region = vr_panel.resolve_eye(processor.vr_input_format, eye)
-
+        if region.is_full():
+            return []
         def _frac(val: float, axis: str) -> str:
             if val == 0.0:
                 return "0"
             if val == 0.5:
                 return f"{axis}/2"
             return axis
-
-        chain = []
-        if not region.is_full():
-            chain.append(
-                f"crop={_frac(region.w, 'iw')}:{_frac(region.h, 'ih')}"
+        crop = (f"crop={_frac(region.w, 'iw')}:{_frac(region.h, 'ih')}"
                 f":{_frac(region.x, 'iw')}:{_frac(region.y, 'ih')}")
-
-        fmt = (getattr(processor, 'vr_input_format', '') or '').lower()
-        fov = float(getattr(processor, 'vr_fov', 0) or 190) or 190.0
-        pitch = float(getattr(processor, 'vr_pitch', 0) or 0.0)
-        base = fmt.replace('_sbs', '').replace('_tb', '').replace('_lr', '').replace('_rl', '')
-        v360 = (
-            f"v360={base}:in_stereo=0:output=sg:"
-            f"iv_fov={fov}:ih_fov={fov}:d_fov={fov}:"
-            f"v_fov=90:h_fov=90:pitch={pitch}:yaw=0:roll=0:"
-            f"interp=linear"
-        )
-        chain.append(v360)
-        return [f"--vf={','.join(chain)}"]
+        return [f"--vf={crop}"]
 
     def _on_position(self, pos_ms: float, dur_ms: float):
         processor = getattr(self._app, 'processor', None)
