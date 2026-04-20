@@ -221,6 +221,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self._reading_fps_last_update = 0.0
         self._tracker_fps_display = 0.0
         self._tracker_fps_last_update = 0.0
+        # Rolling samples of raw tracker fps with timestamps for a 3s mean.
+        self._tracker_fps_samples = deque()
 
         self.batch_state = BatchState()
 
@@ -2052,8 +2054,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 video_fps_text = f"Video FPS {proc.fps:.0f}"
 
         # --- Tracker FPS (only while a live tracker is active) ---
-        # Update the displayed value at most once per second so it doesn't
-        # flicker frame-to-frame like the raw tracker.current_fps does.
+        # 3s rolling mean of raw tracker.current_fps to smooth the 1/dt
+        # instantaneous samples; displayed value refreshes every 500ms.
         tracker_fps_text = ""
         tracker_fps_color = dim_color
         tracking_now = False
@@ -2068,9 +2070,18 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         if not tracking_now:
             self._tracker_fps_display = 0.0
             self._tracker_fps_last_update = 0.0
-        elif now_t - self._tracker_fps_last_update >= 1.0:
-            self._tracker_fps_display = cur_tracker_fps
-            self._tracker_fps_last_update = now_t
+            self._tracker_fps_samples.clear()
+        else:
+            if cur_tracker_fps > 0.0:
+                self._tracker_fps_samples.append((now_t, cur_tracker_fps))
+            cutoff = now_t - 3.0
+            while self._tracker_fps_samples and self._tracker_fps_samples[0][0] < cutoff:
+                self._tracker_fps_samples.popleft()
+            if now_t - self._tracker_fps_last_update >= 0.5 and self._tracker_fps_samples:
+                self._tracker_fps_display = (
+                    sum(v for _, v in self._tracker_fps_samples)
+                    / len(self._tracker_fps_samples))
+                self._tracker_fps_last_update = now_t
         if tracking_now:
             tracker_fps_text = f"Tracker FPS {self._tracker_fps_display:.0f}"
             src_fps = float(getattr(proc, 'fps', 0.0) or 0.0)

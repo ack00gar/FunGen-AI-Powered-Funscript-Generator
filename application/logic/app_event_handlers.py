@@ -108,6 +108,8 @@ class AppEventHandlers:
             self.logger.info(f"No {direction} point found to jump to.", extra={'status_message': True})
 
     def handle_abort_process_click(self):
+        import time as _time
+        t0 = _time.perf_counter()
         stage_processor = self.app.stage_processor
         if stage_processor.full_analysis_active:
             stage_processor.abort_stage_processing()
@@ -115,8 +117,13 @@ class AppEventHandlers:
             self.app.notify("Analysis aborted", "warning", 3.0)
 
         elif self.app.processor and self.app.processor.is_processing:
+            t_proc = _time.perf_counter()
             self.app.processor.stop_processing()
+            dt_proc = (_time.perf_counter() - t_proc) * 1000.0
             self.app.notify("Processing stopped", "info", 2.0)
+            self.logger.info(
+                f"handle_abort_process_click: stop_processing={dt_proc:.0f}ms "
+                f"total={(_time.perf_counter() - t0) * 1000.0:.0f}ms")
         elif self.app.tracker and self.app.tracker.tracking_active:
             self.logger.info("Stopping active tracker...")
             self.app.tracker.stop_tracking()

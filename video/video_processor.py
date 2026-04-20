@@ -1670,6 +1670,8 @@ class VideoProcessor(
         self.stop_event.set()
 
         if join_thread:
+            import time as _time
+            t0 = _time.perf_counter()
             thread_to_join = self.processing_thread
             if thread_to_join and thread_to_join.is_alive():
                 if threading.current_thread() is not thread_to_join:
@@ -1678,15 +1680,24 @@ class VideoProcessor(
                     if thread_to_join.is_alive():
                         self.logger.warning("Processing thread did not join cleanly after stop signal.")
             self.processing_thread = None
+            dt_join = (_time.perf_counter() - t0) * 1000.0
 
+            t1 = _time.perf_counter()
             if self.tracker:
                 self.logger.debug("Signaling tracker to stop.")
                 self.tracker.stop_tracking()
+            dt_tracker = (_time.perf_counter() - t1) * 1000.0
 
             self.enable_tracker_processing = False
 
+            t2 = _time.perf_counter()
             if self.app and hasattr(self.app, 'on_processing_stopped'):
                 self.app.on_processing_stopped(was_scripting_session=was_scripting_session, scripted_frame_range=scripted_range)
+            dt_lifecycle = (_time.perf_counter() - t2) * 1000.0
+
+            self.logger.info(
+                f"stop_processing phases: join={dt_join:.0f}ms "
+                f"tracker_stop={dt_tracker:.0f}ms lifecycle={dt_lifecycle:.0f}ms")
         else:
             self.enable_tracker_processing = False
 

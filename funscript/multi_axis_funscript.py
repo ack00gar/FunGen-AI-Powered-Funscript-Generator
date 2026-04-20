@@ -382,8 +382,8 @@ class MultiAxisFunscript:
 
                 self.logger.info(
                     f"Point Simplification (Primary): {time_window_sec:.1f}s window, "
-                    f"{stats_p['total_considered']:,} frames → {stats_p['total_removed']:,} points removed ({reduction_pct:.1f}% reduction), "
-                    f"{would_have_been:,} → {current_points:,} points"
+                    f"{stats_p['total_considered']:,} frames -> {stats_p['total_removed']:,} points removed ({reduction_pct:.1f}% reduction), "
+                    f"{would_have_been:,} -> {current_points:,} points"
                 )
 
         # Log stats for secondary axis if active
@@ -400,8 +400,8 @@ class MultiAxisFunscript:
 
                 self.logger.info(
                     f"Point Simplification (Secondary): {time_window_sec:.1f}s window, "
-                    f"{stats_s['total_considered']:,} frames → {stats_s['total_removed']:,} points removed ({reduction_pct:.1f}% reduction), "
-                    f"{would_have_been:,} → {current_points:,} points"
+                    f"{stats_s['total_considered']:,} frames -> {stats_s['total_removed']:,} points removed ({reduction_pct:.1f}% reduction), "
+                    f"{would_have_been:,} -> {current_points:,} points"
                 )
 
     def log_final_simplification_summary(self):
