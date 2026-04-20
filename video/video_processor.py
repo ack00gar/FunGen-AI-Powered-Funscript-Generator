@@ -224,7 +224,7 @@ class VideoProcessor(
         except Exception as e:
             self.logger.debug(f"hwaccel probe failed, using CPU: {e}")
         src = FFmpegFrameSource(cfg, logger=self.logger, hwaccel_args=hwaccel)
-        self.logger.info(f"Frame source: ffmpeg subprocess (hwaccel={hwaccel or 'cpu'})")
+        self.logger.debug(f"Frame source: ffmpeg subprocess (hwaccel={hwaccel or 'cpu'})")
 
         if not src.open():
             return False
@@ -333,7 +333,7 @@ class VideoProcessor(
             )
             src.reapply_settings(new_cfg)
             self._hd_suspended_for_live = True
-            self.logger.info(
+            self.logger.debug(
                 f"HD suspended for live tracking: output {self._display_frame_w}x{self._display_frame_h}")
         except Exception as e:
             self.logger.warning(f"suspend_hd_for_live_tracking failed: {e}")
@@ -360,7 +360,7 @@ class VideoProcessor(
                 decoder_threads=src.cfg.decoder_threads,
             )
             src.reapply_settings(new_cfg)
-            self.logger.info(
+            self.logger.debug(
                 f"HD restored after live tracking: output {self._display_frame_w}x{self._display_frame_h}")
         except Exception as e:
             self.logger.warning(f"resume_hd_after_live_tracking failed: {e}")
@@ -470,14 +470,14 @@ class VideoProcessor(
         # one render pass before any frame is ready.
         disp = self._get_mpv_display()
         if disp is None:
-            self.logger.info("MpvDisplay load skipped: no disp instance")
+            self.logger.debug("MpvDisplay load skipped: no disp instance")
             return
         if not disp.is_alive:
-            self.logger.info("MpvDisplay load skipped: disp not alive")
+            self.logger.debug("MpvDisplay load skipped: disp not alive")
             return
         path = self._active_video_source_path or self.video_path
         if not path:
-            self.logger.info("MpvDisplay load skipped: no video path yet")
+            self.logger.debug("MpvDisplay load skipped: no video path yet")
             return
         try:
             vf = self._build_display_filter_chain() or None
@@ -486,7 +486,7 @@ class VideoProcessor(
                 base_hwdec = getattr(disp, 'hwdec', '') or ''
                 if base_hwdec and not base_hwdec.endswith('-copy') and base_hwdec != 'no':
                     hwdec_override = base_hwdec + '-copy'
-            self.logger.info(
+            self.logger.debug(
                 f"MpvDisplay.load() starting: path={path} "
                 f"mode={self._vr_display_mode()} vf={vf!r} "
                 f"hwdec_override={hwdec_override!r}")
@@ -503,7 +503,7 @@ class VideoProcessor(
                         disp.set_fps_fallback(self.fps)
                     except Exception:
                         pass
-                self.logger.info(
+                self.logger.debug(
                     f"MpvDisplay.load() ok in {dur:.0f}ms "
                     f"(is_loaded={disp.is_loaded}, fps={disp.fps:.2f}, "
                     f"frames={disp.total_frames})")
@@ -775,7 +775,7 @@ class VideoProcessor(
         self._proc_resize_dims = (new_w, new_h)
         self._proc_pad_offset = ((size - new_w) // 2, (size - new_h) // 2)
 
-        self.logger.info(f"HD display: {out_w}x{out_h} ({out_w * out_h * 3} bytes/frame)")
+        self.logger.debug(f"HD display: {out_w}x{out_h} ({out_w * out_h * 3} bytes/frame)")
 
     def _get_resize_device(self) -> str:
         """Lazily resolve the device used by the HD-path resize.
@@ -1217,10 +1217,11 @@ class VideoProcessor(
 
         active_source_name = os.path.basename(self._active_video_source_path)
         source_type = "preprocessed" if self._active_video_source_path != video_path else "original"
+        fmt = self.vr_input_format if self.determined_video_type == 'VR' else self.determined_video_type
+        w = self.video_info.get('width', 0)
+        h = self.video_info.get('height', 0)
         self.logger.info(
-            f"Opened: {active_source_name} ({source_type}, {self.determined_video_type}, "
-            f"format: {self.vr_input_format if self.determined_video_type == 'VR' else 'N/A'}), "
-            f"{self.total_frames}fr, {self.fps:.2f}fps, {self.video_info.get('bit_depth', 'N/A')}bit)")
+            f"Opened: {active_source_name} [{fmt}, {w}x{h}, {self.total_frames}f @ {self.fps:.2f}fps]")
 
         # Notify sync server (streamer) that video was loaded in desktop FunGen
         # This broadcasts to ALL connected browser clients (VR viewer, etc.)
@@ -1605,7 +1606,7 @@ class VideoProcessor(
                 self.logger.warning(f"Start frame {start_frame} out of bounds ({self.total_frames} total). Not starting.")
                 return
 
-        self.logger.info(f"Starting processing from frame {effective_start_frame}.")
+        self.logger.debug(f"Starting processing from frame {effective_start_frame}.")
 
         self.processing_start_frame_limit = effective_start_frame
         self.processing_end_frame_limit = -1
@@ -1680,34 +1681,21 @@ class VideoProcessor(
         self._mpv_pause()
 
         if join_thread:
-            import time as _time
-            t0 = _time.perf_counter()
             thread_to_join = self.processing_thread
             if thread_to_join and thread_to_join.is_alive():
                 if threading.current_thread() is not thread_to_join:
-                    self.logger.info(f"Joining processing thread: {thread_to_join.name} during stop.")
                     thread_to_join.join(timeout=2.0)
                     if thread_to_join.is_alive():
                         self.logger.warning("Processing thread did not join cleanly after stop signal.")
             self.processing_thread = None
-            dt_join = (_time.perf_counter() - t0) * 1000.0
 
-            t1 = _time.perf_counter()
             if self.tracker:
-                self.logger.debug("Signaling tracker to stop.")
                 self.tracker.stop_tracking()
-            dt_tracker = (_time.perf_counter() - t1) * 1000.0
 
             self.enable_tracker_processing = False
 
-            t2 = _time.perf_counter()
             if self.app and hasattr(self.app, 'on_processing_stopped'):
                 self.app.on_processing_stopped(was_scripting_session=was_scripting_session, scripted_frame_range=scripted_range)
-            dt_lifecycle = (_time.perf_counter() - t2) * 1000.0
-
-            self.logger.info(
-                f"stop_processing phases: join={dt_join:.0f}ms "
-                f"tracker_stop={dt_tracker:.0f}ms lifecycle={dt_lifecycle:.0f}ms")
         else:
             self.enable_tracker_processing = False
 
@@ -1896,7 +1884,7 @@ class VideoProcessor(
                     and not tracker_needs_frames
                 )
                 if _prev_source_idle != mpv_drives_display:
-                    self.logger.info(
+                    self.logger.debug(
                         f"Playback decode mode: source_idle={mpv_drives_display} "
                         f"(disp={disp is not None}, loaded={disp_loaded}, "
                         f"tracker_needs={tracker_needs_frames}, "

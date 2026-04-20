@@ -1138,10 +1138,10 @@ class TrackerManager:
                 self.tracking_active):
             # Log what's preventing device control (only warn once per session)
             if not self.device_bridge and not hasattr(self, '_no_bridge_warned'):
-                self.logger.info("Live tracking device control: No device bridge available")
+                self.logger.debug("Live tracking device control: No device bridge available")
                 self._no_bridge_warned = True
             if not self.live_device_control_enabled and not hasattr(self, '_not_enabled_warned'):
-                self.logger.info("Live tracking device control: Not enabled - check Control Panel -> Global Device Settings -> 'Enable Live Tracking Control'")
+                self.logger.debug("Live tracking device control: Not enabled - check Control Panel -> Global Device Settings -> 'Enable Live Tracking Control'")
                 self._not_enabled_warned = True
             return
             

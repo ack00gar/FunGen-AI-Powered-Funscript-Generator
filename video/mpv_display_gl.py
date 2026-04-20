@@ -124,8 +124,6 @@ class MpvDisplayGL:
                     self.logger.error(line)
                 elif level == "warn":
                     self.logger.warning(line)
-                elif level == "info":
-                    self.logger.info(line)
                 else:
                     self.logger.debug(line)
 
@@ -171,7 +169,7 @@ class MpvDisplayGL:
             self.logger.debug(f"update_cb install failed: {e}")
 
         self._install_observers()
-        self.logger.info("MpvDisplayGL ready (OpenGL render API)")
+        self.logger.debug("MpvDisplayGL ready (OpenGL render API)")
         return True
 
     def load(self, video_path: str, vf: Optional[str] = None,
@@ -237,7 +235,7 @@ class MpvDisplayGL:
                     self.logger.debug(f"post-load pause/seek failed: {e}")
                 self._loaded = True
                 self._new_frame_pending = True
-                self.logger.info(
+                self.logger.debug(
                     f"MpvDisplayGL loaded {video_path} "
                     f"(duration={self._duration_s:.2f}s fps={self._fps:.3f})")
                 return True

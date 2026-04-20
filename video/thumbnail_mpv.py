@@ -68,7 +68,7 @@ class ThumbnailMpv:
                 self._player, "opengl",
                 opengl_init_params={"get_proc_address": self._proc_address_cfunc},
             )
-            self.logger.info("ThumbnailMpv ready")
+            self.logger.debug("ThumbnailMpv ready")
             return True
         except Exception as e:
             self.logger.warning(f"ThumbnailMpv open failed: {e}")

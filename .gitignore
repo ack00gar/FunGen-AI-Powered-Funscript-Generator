@@ -31,6 +31,7 @@ device_control/
 streamer/
 subtitle_translation/
 patreon_features/
+addons_common/
 *.zip
 
 # Byte-compiled / optimized / DLL files
@@ -229,3 +230,4 @@ checkpoints/
 tracker/tracker_modules/offline/peak_model_tracker.py
 *.pt
 tracker/tracker_modules/offline/vr_hybrid_chapter_tracker_v1_archived.py
+

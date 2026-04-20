@@ -305,7 +305,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         try:
             path.write_text(json.dumps(payload, indent=2))
-            self.app.logger.info(f"GUI profile dumped to {path}")
+            self.app.logger.debug(f"GUI profile dumped to {path}")
         except Exception as e:
             self.app.logger.error(f"failed to write profile JSON: {e}")
 
@@ -792,7 +792,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                         display_fps=refresh_hz,
                         logger=self.app.logger,
                     )
-                    self.app.logger.info(
+                    self.app.logger.debug(
                         f"MpvDisplayGL backend selected (hwdec={hwdec_override}, "
                         f"display_fps={refresh_hz:.1f})")
                     if not disp.open(_get_proc_address):
@@ -838,7 +838,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 disp.register_position_callback(_mpv_pos_cb)
             except Exception as e:
                 self.app.logger.debug(f"mpv position callback register failed: {e}")
-            self.app.logger.info(
+            self.app.logger.debug(
                 f"{type(disp).__name__} ready (libmpv render API)")
             # Project-restore catch-up: if open_video already ran (project
             # loaded at app start before gui_instance existed), the prior
@@ -846,7 +846,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             # Now that disp exists, fire it so mpv actually loads the file.
             proc = getattr(self.app, 'processor', None)
             if proc is not None and getattr(proc, 'video_path', None):
-                self.app.logger.info(
+                self.app.logger.debug(
                     "Project-restore: loading current video into MpvDisplay")
                 try:
                     proc._load_into_mpv_display()
@@ -974,7 +974,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.mpv_display_texture_id = int(new_tex)
         self.mpv_display_fbo = int(new_fbo)
         self.mpv_display_w, self.mpv_display_h = w, h
-        self.app.logger.info(
+        self.app.logger.debug(
             f"mpv display FBO re-created fresh at {w}x{h} "
             f"(tex={self.mpv_display_texture_id}, fbo={self.mpv_display_fbo})")
 

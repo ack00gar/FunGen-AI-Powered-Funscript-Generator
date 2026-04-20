@@ -49,7 +49,7 @@ class FunGenWSAPI:
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True, name="WSAPIServer")
         self._thread.start()
-        logger.info(f"WebSocket API server starting on port {self.port}")
+        logger.debug(f"WebSocket API server starting on port {self.port}")
 
     def stop(self):
         self._running = False
@@ -73,7 +73,7 @@ class FunGenWSAPI:
 
     async def _serve(self, websockets):
         async with websockets.serve(self._handle_client, "127.0.0.1", self.port):
-            logger.info(f"WebSocket API listening on ws://127.0.0.1:{self.port}")
+            logger.info(f"WebSocket API: ws://127.0.0.1:{self.port}")
             while self._running:
                 await asyncio.sleep(0.5)
 

@@ -219,19 +219,13 @@ class FormatDetectionMixin:
             return
 
         if filename_result['type'] == 'VR':
-            self.logger.info(f"Filename indicates VR video: projection={filename_result['projection']}, layout={filename_result['layout']}, fov={filename_result['fov']}")
             self.determined_video_type = 'VR'
-
-            # Apply detected format
             if filename_result['projection'] and filename_result['layout']:
                 self.vr_input_format = f"{filename_result['projection']}{filename_result['layout']}"
-                self.logger.info(f"Set VR format to: {self.vr_input_format}")
-
-            # Apply detected FOV if available
             if filename_result['fov']:
                 self.vr_fov = filename_result['fov']
-                self.logger.info(f"Set VR FOV to: {self.vr_fov}")
-
+            self.logger.info(
+                f"VR video detected: format={self.vr_input_format}, fov={self.vr_fov}")
             self._compute_display_dimensions()
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
             self.frame_size_bytes = self._display_frame_w * self._display_frame_h * 3

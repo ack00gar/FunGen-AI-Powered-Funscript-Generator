@@ -221,51 +221,23 @@ class TrackingLifecycleController:
             # Heavy work (file I/O + Ultimate Autotune) runs on a daemon
             # thread so the Stop Tracking click does not block the UI.
             import threading as _threading
-            import time as _time
             scripted_range = scripted_frame_range
 
             def _post_live_work() -> None:
                 try:
-                    t_all = _time.perf_counter()
-
-                    t0 = _time.perf_counter()
-                    app.logger.info("Live session ended. Saving raw funscript before post-processing.")
                     app.file_manager.save_raw_funscripts_after_generation(video_path)
-                    t_raw = (_time.perf_counter() - t0) * 1000.0
-
-                    t0 = _time.perf_counter()
                     self._invalidate_all_timeline_caches()
-                    t_inv1 = (_time.perf_counter() - t0) * 1000.0
-
-                    t0 = _time.perf_counter()
                     any_processing_applied = self.run_post_analysis_pipeline(frame_range=scripted_range)
-                    t_post = (_time.perf_counter() - t0) * 1000.0
-
-                    t0 = _time.perf_counter()
                     if any_processing_applied:
-                        app.logger.info("Saving final (post-processed) funscript.")
                         chapters_for_save = app.funscript_processor.video_chapters
                         app.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
                     else:
-                        app.logger.info(
-                            "No post-processing was applied to live session. Saving raw funscript "
-                            "with .raw.funscript extension to video location.")
                         app.file_manager.save_raw_funscripts_next_to_video(video_path)
-                    t_final = (_time.perf_counter() - t0) * 1000.0
-
-                    t0 = _time.perf_counter()
                     self._invalidate_all_timeline_caches()
-                    t_inv2 = (_time.perf_counter() - t0) * 1000.0
-
-                    total = (_time.perf_counter() - t_all) * 1000.0
-                    app.logger.info(
-                        f"Live post-processing done in {total:.0f}ms "
-                        f"(raw_save={t_raw:.0f}ms, inv1={t_inv1:.0f}ms, "
-                        f"post={t_post:.0f}ms, final_save={t_final:.0f}ms, "
-                        f"inv2={t_inv2:.0f}ms)")
                 except Exception as e:
                     app.logger.error(f"Live post-processing failed: {e}", exc_info=True)
 
+            app.logger.info("Live session ended, saving funscript and running post-processing...")
             _threading.Thread(
                 target=_post_live_work, name="LivePostProcess", daemon=True
             ).start()

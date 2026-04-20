@@ -426,7 +426,7 @@ class AppFileManager:
         primary_actions = self.app.funscript_processor.get_actions('primary')
         secondary_actions = self.app.funscript_processor.get_actions('secondary')
         chapters = self.app.funscript_processor.video_chapters
-        self.logger.info("Saving raw (pre-post-processing) funscript backup to output folder...")
+        self.logger.debug("Saving raw (pre-post-processing) funscript backup to output folder...")
 
         if primary_actions:
             primary_path = self.get_output_path_for_file(video_path, "_t1_raw.funscript")
@@ -638,7 +638,7 @@ class AppFileManager:
                     # Create a unique backup filename with a Unix timestamp
                     backup_path = f"{filepath}.{int(time.time())}.bak"
                     os.rename(filepath, backup_path)
-                    self.logger.info(f"Created backup of existing file: {os.path.basename(backup_path)}")
+                    self.logger.debug(f"Created backup of existing file: {os.path.basename(backup_path)}")
                 except Exception as e:
                     self.logger.error(f"Failed to create backup for {os.path.basename(filepath)}: {e}")
                     # We can decide whether to proceed with the overwrite or not.
@@ -1472,7 +1472,7 @@ class AppFileManager:
                 saved_paths.append(path_in_output)
 
                 if save_next_to_video:
-                    self.logger.info("Also saving a copy of the final funscript next to the video file.")
+                    self.logger.debug("Also saving a copy of the final funscript next to the video file.")
                     base, _ = os.path.splitext(video_path)
                     path_next_to_vid = f"{base}.funscript"
                     self._save_funscript_file(path_next_to_vid, primary_actions, chapters_to_save)

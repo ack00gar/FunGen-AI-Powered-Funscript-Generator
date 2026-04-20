@@ -352,19 +352,8 @@ class MultiAxisFunscript:
         self._pa_values[axis] = buf_v[:n - 1]
 
     def _maybe_log_simplification_stats(self):
-        """
-        Periodically log point simplification statistics (every 10 seconds).
-        Shows time window, frames considered, and reduction percentage.
-        """
-        import time
-        current_time = time.time()
-
-        # Only log every N seconds to avoid spam
-        if current_time - self._last_simplification_log_time < self._simplification_log_interval_sec:
-            return
-
-        self._last_simplification_log_time = current_time
-        self._log_simplification_stats_internal()
+        """No-op: per-tick simplification logs were noisy. Final summary only."""
+        return
 
     def _log_simplification_stats_internal(self):
         """Internal helper to log stats (called by periodic logger and final summary)."""

@@ -1,14 +1,24 @@
 {
   "addons": {
     "device_control": {
-      "version": "5.7.5",
+      "version": "5.7.6",
       "display_name": "Device Control",
-      "changelog": "Multi-device Buttplug support"
+      "changelog": "Parity helpers (TCode UDP/TCP backends, dirty dedupe, sync ramp, smart limit, auto-reconnect), multi-instance backend support, addons_common shared package"
     },
     "streamer": {
-      "version": "3.6.8",
+      "version": "3.7.0",
       "display_name": "Video Streamer",
-      "changelog": "Fix fisheye VR mode (shader double-crop), black-until-fullscreen, V key left<->right cycle for fisheye, anisotropic + denser sphere mesh, DynamicTrackerUI rename, filter tracker list, restore missing viewer/browser assets"
+      "changelog": "RFC 7233 range parser in handlers (returns 416 on bad ranges), ETag with mtime, video_path snapshot in all handlers, image proxy SSRF allowlist + streaming, codec cache (path/mtime), mDNS keepalive, transcode cache cleanup, transcode cache key includes mtime"
+    },
+    "subtitle_translation": {
+      "version": "1.0.2",
+      "display_name": "Subtitle Translation",
+      "changelog": "Batched LLM translation (8 cues/call, ~5x throughput) with per-line parse-failure fallback, VAD model singleton, streaming audio energy, cleanup helper, BackgroundJob threaded wrapper"
+    },
+    "addons_common": {
+      "version": "0.1.1",
+      "display_name": "Addons Common",
+      "changelog": "Shared package: ServiceState, BackgroundJob, cleanup_old_files, RateLimiter, SpeedLimiter, AddonStatus registry"
     },
     "patreon_features": {
       "version": "1.1.4",

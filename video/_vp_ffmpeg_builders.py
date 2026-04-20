@@ -202,7 +202,7 @@ class FFmpegBuildersMixin:
         # Unwarp method: 'none' (crop only) or default libavfilter v360.
         if self.vr_unwarp_method_override == 'none':
             vr_filters.append(f"scale={out_w}:{out_h}")
-            self.logger.info("Unwarp: None (crop only) - no dewarping applied, just crop+scale")
+            self.logger.debug("Unwarp: None (crop only) - no dewarping applied, just crop+scale")
         else:
             base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '').replace('_lr', '').replace('_rl', '')
             v360_filter_core = (
@@ -302,7 +302,7 @@ class FFmpegBuildersMixin:
                     self.logger.debug("Auto-selected 'dxva2' for Windows.")
 
             if not hwaccel_args:
-                self.logger.info("Auto hardware acceleration: No compatible method found, using CPU decoding.")
+                self.logger.debug("Auto hardware acceleration: No compatible method found, using CPU decoding.")
         elif selected_hwaccel != "none" and selected_hwaccel:
             if selected_hwaccel in available_on_app:
                 hwaccel_args = ['-hwaccel', selected_hwaccel]

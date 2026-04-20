@@ -310,16 +310,16 @@ class AppFunscriptProcessor:
         return None, None
 
     def _get_current_fps(self) -> float:
-        """Get current video FPS. Prefers video_info (ffprobe-based), warns on 30fps fallback."""
+        """Get current video FPS. Prefers video_info (ffprobe-based), warns once on fallback."""
         if self.app.processor and hasattr(self.app.processor, 'video_info') and \
                 self.app.processor.video_info and self.app.processor.video_info.get('fps', 0) > 0:
             return self.app.processor.video_info['fps']
         if self.app.processor and hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:
             return self.app.processor.fps
-        self.logger.warning(
-            "Video FPS not available, using fallback 30.0, "
-            "chapter frame indices may be wrong for 60fps videos!"
-        )
+        if not getattr(self, '_fps_fallback_warned', False):
+            self.logger.warning(
+                "Video FPS not available, using fallback 30.0 (60fps videos may have wrong chapter frame indices)")
+            self._fps_fallback_warned = True
         return 30.0
 
     @staticmethod

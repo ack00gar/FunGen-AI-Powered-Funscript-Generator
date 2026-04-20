@@ -234,7 +234,7 @@ class VRDewarpShader:
         gl.glBindVertexArray(0)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
 
-        self.logger.info("VR dewarp shader compiled and ready.")
+        self.logger.debug("VR dewarp shader compiled and ready.")
         return True
 
     def render_pass(self, *, input_texture_id: int, output_fbo: int,

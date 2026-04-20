@@ -148,18 +148,19 @@ class FeatureDetector:
         self.logger.debug(f"Detected {len(self.available_features)} available features")
         self.logger.debug(f"Enabled {len(self.enabled_features)} features")
         
-        # Log enabled features
-        for feature_name in self.enabled_features:
-            feature = self.features[feature_name]
-            # Try to get version from the module if available
-            version_str = ""
-            try:
-                module = __import__(feature.folder_path)
-                if hasattr(module, '__version__'):
-                    version_str = f" (v{module.__version__})"
-            except (ImportError, AttributeError):
-                pass
-            self.logger.info(f"  {feature.display_name}{version_str}")
+        if self.enabled_features:
+            parts = []
+            for feature_name in self.enabled_features:
+                feature = self.features[feature_name]
+                version_str = ""
+                try:
+                    module = __import__(feature.folder_path)
+                    if hasattr(module, '__version__'):
+                        version_str = f" v{module.__version__}"
+                except (ImportError, AttributeError):
+                    pass
+                parts.append(f"{feature.display_name}{version_str}")
+            self.logger.info(f"Addons loaded: {', '.join(parts)}")
     
     def _detect_feature(self, feature_info: FeatureInfo) -> bool:
         """Detect if a specific feature is available."""

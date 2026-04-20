@@ -119,7 +119,7 @@ class FFmpegFrameSource:
         self._fps = p.fps
         self._total_frames = p.total_frames
         self._duration_seconds = p.duration_sec
-        self.logger.info(
+        self.logger.debug(
             f"FFmpeg source opened {self.cfg.video_path}: "
             f"{p.width}x{p.height} fps={self._fps:.3f} frames={self._total_frames}"
         )
