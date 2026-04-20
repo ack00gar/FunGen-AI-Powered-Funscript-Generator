@@ -297,19 +297,14 @@ class DrawingMixin:
         # 3. LOD Decision
         points_on_screen = len(xs)
         pixels_per_point = tf.width / points_on_screen if points_on_screen > 0 else 0
-        
-        # -- LOD A: Density Envelope (Massive Zoom Out) --
-        if pixels_per_point < 2 and not is_preview and len(visible_actions) > 2000:
-            # Optimization: Draw simple vertical bars representing min/max in horizontal chunks
-            col = color_override or TimelineColors.AUDIO_WAVEFORM # Reuse waveform color for density
-            col_u32 = imgui.get_color_u32_rgba(col[0], col[1], col[2], 0.5 * alpha)
-            
-            # Draw simplified polyline for shape
-            pts = np.column_stack((xs, ys)).tolist()
-            dl.add_polyline(pts, col_u32, False, 1.0)
-            return
 
-        # -- LOD B: Lines Only --
+        # -- Line drawing (dense zoom-out falls back to straight polyline via
+        # _spline_samples_for_view; point loop skips via the sparse gate
+        # below). Previously had a "LOD A density envelope" fast-path here
+        # but the bench showed zero CPU saving vs this path and its
+        # half-alpha recolor was just a visual regression on dense views.
+        base_col = color_override or (TimelineColors.PREVIEW_LINES if is_preview else (0.8, 0.8, 0.8, 1.0))
+        col_u32 = imgui.get_color_u32_rgba(base_col[0], base_col[1], base_col[2], base_col[3] * alpha)
         base_col = color_override or (TimelineColors.PREVIEW_LINES if is_preview else (0.8, 0.8, 0.8, 1.0))
         col_u32 = imgui.get_color_u32_rgba(base_col[0], base_col[1], base_col[2], base_col[3] * alpha)
         base_thick = self._line_thickness_for_height()
@@ -331,7 +326,7 @@ class DrawingMixin:
             pts = np.column_stack((xs, ys)).tolist()
         dl.add_polyline(pts, col_u32, False, thick)
 
-        # -- LOD C: Points (Zoomed In) --
+        # -- Points (only when zoomed in enough to see them individually) --
         # Fade points out when the visible window is too wide; below ~0.25
         # opacity ImGui's blend contributes nothing but still costs a draw
         # call per point, so skip entirely.

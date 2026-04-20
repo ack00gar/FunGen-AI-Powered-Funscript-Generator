@@ -6,4 +6,5 @@ from . import b_async_yolo_batch    # noqa: F401
 from . import b_batch_parallel      # noqa: F401
 from . import b_scrub_cache         # noqa: F401
 from . import b_vr_shader           # noqa: F401
+from . import b_timeline_draw       # noqa: F401
 from . import b_flow_reduce         # noqa: F401
