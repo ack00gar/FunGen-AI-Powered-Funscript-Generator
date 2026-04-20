@@ -145,20 +145,15 @@ class HybridFlowTracker(BaseTracker):
         self._phase_yolo_calls = 0
         self._phase_last_log = 0.0
 
-        # Async YOLO worker: YOLO inference runs on its own thread so
-        # the ~17ms CoreML call does not block the per-frame flow pipeline.
-        # Main thread queues the latest frame each interval and consumes
-        # whatever ROI result is currently published; ROI is at most one
-        # YOLO-round stale which is identical to the sync-path latency
-        # because the sync path still only runs YOLO every N frames.
+        # Async YOLO worker state.
         self._yolo_thread = None
-        self._yolo_shutdown = None   # threading.Event, created in start
-        self._yolo_wake = None       # threading.Event
+        self._yolo_shutdown = None
+        self._yolo_wake = None
         self._yolo_pending_lock = None
-        self._yolo_pending_frame = None  # latest BGR frame to infer on
+        self._yolo_pending_frame = None
         self._yolo_result_lock = None
-        self._yolo_result = None     # (roi, penis_box, contact_box) or None
-        self._yolo_inflight = False  # worker is mid-inference
+        self._yolo_result = None
+        self._yolo_inflight = False
         self._yolo_calls = 0
         self._yolo_last_ms = 0.0
 
@@ -369,19 +364,12 @@ class HybridFlowTracker(BaseTracker):
 
         h, w = frame.shape[:2]
 
-        # --- Step 1: YOLO detection (every N frames, worker-thread) ---
-        # Main thread only dispatches the latest frame and consumes any
-        # ROI result the worker has published since the last tick.
+        # --- Step 1: YOLO dispatch + consume latest result (async) ---
         _t = time.perf_counter()
         yolo_dispatched = False
         self._roi_refreshed_this_frame = False
 
         if self._frames_since_yolo >= self._yolo_interval:
-            # Non-blocking dispatch: overwrite the pending slot with the
-            # latest frame so if the worker is still busy we just drop
-            # the older queued frame. The copy is cheap (~<0.5 ms at
-            # 640x640 BGR) and ensures the worker never races a decoder
-            # that might reuse the buffer.
             if self._yolo_thread is not None and self._yolo_thread.is_alive():
                 with self._yolo_pending_lock:
                     self._yolo_pending_frame = frame.copy()
@@ -389,8 +377,6 @@ class HybridFlowTracker(BaseTracker):
                 self._frames_since_yolo = 0
                 yolo_dispatched = True
 
-        # Consume any freshly published YOLO result regardless of dispatch;
-        # lets us pick up late results that arrive mid-interval.
         result = None
         if self._yolo_result_lock is not None:
             with self._yolo_result_lock:
@@ -438,13 +424,7 @@ class HybridFlowTracker(BaseTracker):
             roi_h = ry2 - ry1
 
             if roi_w > MIN_ROI_SIZE and roi_h > MIN_ROI_SIZE:
-                # gray[ry1:ry2, rx1:rx2] is typically a non-contiguous slice.
-                # DIS requires contiguous arrays, and we also need a copy for
-                # next frame's prev-patch. Single contiguous copy serves both
-                # roles -- drops one ~0.2 ms memcpy per frame vs the old
-                # ascontiguousarray+.copy() pair, and ascontiguousarray on
-                # the already-contig previous patch is a no-op so we can drop
-                # that call too.
+                # DIS needs contiguous; this slice is also reused as prev next frame.
                 curr_contig = np.ascontiguousarray(gray[ry1:ry2, rx1:rx2])
 
                 if self._roi_refreshed_this_frame:
@@ -643,15 +623,7 @@ class HybridFlowTracker(BaseTracker):
     # -------------------------------------------------------------------------
 
     def _magnitude_weighted_flow(self, flow: np.ndarray) -> Tuple[float, float]:
-        """Extract magnitude-weighted dy/dx from flow field.
-
-        Optimizations over the straight formulation:
-          - Gaussian spatial weight is cached by ROI shape (ROI rarely
-            changes size, so np.exp + np.outer run once per ROI resize).
-          - The weighting scheme uses squared magnitudes, not sqrt'd ones.
-            sqrt is monotonic so the weighted-mean ratio is unchanged; we
-            save one np.sqrt pass over the full flow field per frame.
-        """
+        """Magnitude-weighted dy/dx. Gaussian weights cached per ROI shape."""
         fh, fw = flow.shape[:2]
         key = (fh, fw)
         if getattr(self, "_mwf_spatial_key", None) != key:
@@ -692,13 +664,9 @@ class HybridFlowTracker(BaseTracker):
             history = self._dx_history
             sign = 1.0
 
-        # Use direct flow (velocity-like) with median denoising + slow baseline removal.
-        # This avoids cumulative-position drift that can appear as a slow sinusoidal center wander.
+        # Velocity-like flow with median denoise + slow baseline to avoid drift.
         signed_flow = sign * flow_val
         raw_history.append(signed_flow)
-        # 7-element median: Python sort beats np.median+np.array conversion
-        # for this size by ~3x. `islice` over a deque avoids the list(deque)
-        # allocation of the full history just to slice 7 items.
         n_raw = len(raw_history)
         k_raw = 7 if n_raw >= 7 else n_raw
         recent_raw_list = list(islice(raw_history, n_raw - k_raw, n_raw))
@@ -716,8 +684,6 @@ class HybridFlowTracker(BaseTracker):
 
         # Adaptive normalization
         if len(history) > 20:
-            # Single percentile call (returns 3 values) vs three calls;
-            # single np.fromiter avoids the list(deque) intermediate.
             n_hist = len(history)
             k_hist = NORMALIZATION_WINDOW if n_hist >= NORMALIZATION_WINDOW else n_hist
             recent = np.fromiter(
