@@ -97,7 +97,7 @@ class ThumbnailMpv:
                     except Exception:
                         pass
                     self.logger.info(
-                        f"ThumbnailMpv loaded {video_path} "
+                        f"Thumbnail hover ready: {video_path} "
                         f"(duration={self._duration_s:.2f}s)")
                     return True
                 time.sleep(0.02)

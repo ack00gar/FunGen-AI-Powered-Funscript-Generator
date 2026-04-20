@@ -236,9 +236,9 @@ class MpvDisplayGL:
                     self.logger.debug(f"post-load pause/seek failed: {e}")
                 self._loaded = True
                 self._new_frame_pending = True
-                self.logger.debug(
-                    f"MpvDisplayGL loaded {video_path} "
-                    f"(duration={self._duration_s:.2f}s fps={self._fps:.3f})")
+                self.logger.info(
+                    f"Video display ready: {video_path} "
+                    f"(duration={self._duration_s:.2f}s, fps={self._fps:.3f})")
                 return True
             time.sleep(0.02)
 
