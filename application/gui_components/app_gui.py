@@ -2516,6 +2516,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         if target_energy_fps > target_normal_fps: target_energy_fps = target_normal_fps
         target_frame_duration_normal = 1.0 / target_normal_fps
         target_frame_duration_energy_saver = 1.0 / target_energy_fps
+        # Passive throttle between active and energy-saver states: when
+        # nothing animates (paused, no user input for ~1.5s, no tracker)
+        # drop to this rate. Still responsive (any event wakes us via
+        # glfw.wait_events_timeout), and cuts idle CPU dramatically vs
+        # running the imgui loop at 60 Hz.
+        target_passive_fps = 15
+        target_frame_duration_passive = 1.0 / target_passive_fps
+        passive_idle_seconds = 1.5
         glfw.swap_interval(0)
 
         try:
@@ -2524,7 +2532,23 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 
                 # Track frame setup operations
                 event_start = time.perf_counter()
-                glfw.poll_events()
+                # Active = playing / tracking / recent user activity. Anything
+                # else blocks on wait_events_timeout so we don't burn CPU
+                # redrawing a static imgui UI at 60 Hz.
+                _idle_for = time.time() - self.app.energy_saver.last_activity_time
+                _is_active = (
+                    _idle_for < passive_idle_seconds
+                    or (self.app.processor and getattr(self.app.processor,
+                                                        'is_processing', False))
+                    or self.app.stage_processor.full_analysis_active
+                )
+                if _is_active:
+                    glfw.poll_events()
+                else:
+                    # Timeout equals the passive frame budget, so we still
+                    # tick ~15 Hz for time-based updates (autosave check,
+                    # toast expiry, etc.) even with zero input events.
+                    glfw.wait_events_timeout(target_frame_duration_passive)
                 if self.impl: self.impl.process_inputs()
                 gl.glClearColor(*colors.BACKGROUND_CLEAR)
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT)
@@ -2576,7 +2600,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                     # Only track if it's actually expensive (>1ms)
                     if gpu_time > 1.0:
                         self.component_render_times["GPU_Monitor"] = gpu_time
-                current_target_duration = target_frame_duration_energy_saver if self.app.energy_saver.energy_saver_active else target_frame_duration_normal
+                if self.app.energy_saver.energy_saver_active:
+                    current_target_duration = target_frame_duration_energy_saver
+                elif not _is_active:
+                    # Passive idle: wait_events_timeout already slept the
+                    # budget, so don't double-sleep afterwards.
+                    current_target_duration = 0.0
+                else:
+                    current_target_duration = target_frame_duration_normal
                 elapsed_time_for_frame = time.time() - frame_start_time
                 sleep_duration = current_target_duration - elapsed_time_for_frame
                 

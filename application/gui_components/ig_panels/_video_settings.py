@@ -187,13 +187,14 @@ class VideoSettingsMixin:
                 _vr_cfg.shader_lock_to_tracker = new_lock
             row_end()
 
-            row_label("Supersample (2x)",
-                      "Render the shader output at 2x the display FBO "
-                      "resolution then downsample. Sharper edges on "
-                      "rectilinear output, costs a little more GPU.")
+            row_label("Adaptive Quality",
+                      "Auto-tunes shader resolution + filters based on "
+                      "GPU headroom. Lets the monitor scale up to 2x "
+                      "supersample on fast hardware, and down to 0.5x "
+                      "render scale on slow hardware to hold frame rate.")
             cur_ss = _vr_cfg.shader_supersample
             changed_ss, new_ss = imgui.checkbox(
-                "Enabled##vrSupersample", cur_ss)
+                "Enabled##vrAdaptive", cur_ss)
             if changed_ss:
                 _vr_cfg.shader_supersample = new_ss
             row_end()

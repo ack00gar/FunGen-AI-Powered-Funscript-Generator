@@ -1024,7 +1024,7 @@ class MainMenu:
 
         cur_ss = bool(settings.get('vr_shader_supersample', True))
         clicked, new_ss = imgui.menu_item(
-            "Supersample shader (2x)",
+            "Adaptive Quality (auto-tune)",
             selected=cur_ss, enabled=lock_enabled or cur_mode == 'shader_dewarp')
         if clicked and new_ss != cur_ss:
             settings.set('vr_shader_supersample', bool(new_ss))
