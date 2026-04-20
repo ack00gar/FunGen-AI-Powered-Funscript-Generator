@@ -24,6 +24,7 @@ import queue
 import subprocess
 import threading
 import time
+from collections import OrderedDict
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -96,6 +97,18 @@ class FFmpegFrameSource:
 
         self._eos_reached: bool = False
 
+        # Scrub cache: frame_index -> decoded np.ndarray, LRU-bounded.
+        # The hover / arrow-nav scrub path repeatedly seeks to nearby frames;
+        # each seek costs an ffmpeg respawn (~50-200 ms). Keeping the last N
+        # decoded frames around lets get_frame() short-circuit without killing
+        # the subprocess. Cleared on reapply_settings (filter chain change
+        # invalidates cached pixel data).
+        self._scrub_cache: "OrderedDict[int, np.ndarray]" = OrderedDict()
+        self._scrub_cache_max: int = 16
+        self._scrub_cache_lock = threading.Lock()
+        self._scrub_cache_hits: int = 0
+        self._scrub_cache_misses: int = 0
+
     # --------------------------------------------------------------- lifecycle
 
     def open(self) -> bool:
@@ -124,11 +137,60 @@ class FFmpegFrameSource:
         if new_config is not None:
             self.cfg = new_config
             self._frame_bytes = new_config.output_w * new_config.output_h * 3
+        # Filter chain or output dims changed -> cached frames are stale.
+        self._cache_clear()
         if was_running:
             self.start(cur)
             if was_paused:
                 self._pause_event.set()
         return True
+
+    # ------------------------------------------------------------ scrub cache
+
+    def _cache_put(self, idx: int, frame: np.ndarray) -> None:
+        if frame is None or idx < 0:
+            return
+        with self._scrub_cache_lock:
+            if idx in self._scrub_cache:
+                self._scrub_cache.move_to_end(idx)
+                return
+            self._scrub_cache[idx] = frame
+            while len(self._scrub_cache) > self._scrub_cache_max:
+                self._scrub_cache.popitem(last=False)
+
+    def _cache_get(self, idx: int) -> Optional[np.ndarray]:
+        with self._scrub_cache_lock:
+            f = self._scrub_cache.get(idx)
+            if f is not None:
+                self._scrub_cache.move_to_end(idx)
+                self._scrub_cache_hits += 1
+            else:
+                self._scrub_cache_misses += 1
+            return f
+
+    def _cache_clear(self) -> None:
+        with self._scrub_cache_lock:
+            self._scrub_cache.clear()
+
+    def set_scrub_cache_size(self, size: int) -> None:
+        """Resize the scrub cache. 0 disables it."""
+        with self._scrub_cache_lock:
+            self._scrub_cache_max = max(0, int(size))
+            while len(self._scrub_cache) > self._scrub_cache_max:
+                self._scrub_cache.popitem(last=False)
+
+    @property
+    def scrub_cache_stats(self) -> dict:
+        with self._scrub_cache_lock:
+            total = self._scrub_cache_hits + self._scrub_cache_misses
+            hit_rate = (self._scrub_cache_hits / total) if total else 0.0
+            return {
+                "size": len(self._scrub_cache),
+                "max": self._scrub_cache_max,
+                "hits": self._scrub_cache_hits,
+                "misses": self._scrub_cache_misses,
+                "hit_rate": hit_rate,
+            }
 
     # -------------------------------------------------------------- transport
 
@@ -216,9 +278,21 @@ class FFmpegFrameSource:
 
         ``timeout`` is the overall budget: wait_seek plus queue.get share it
         so a slow keyframe decode can't double-charge the caller.
+
+        Scrub cache: on a hit we short-circuit and never kill the ffmpeg
+        subprocess; that is the main performance win for hover-over-timeline
+        preview, which would otherwise respawn ffmpeg on every pixel.
         """
+        cached = self._cache_get(frame_index)
+        if cached is not None:
+            self._publish(frame_index, cached)
+            return cached
+
         if not self.is_running:
-            return self._oneshot_decode_at(frame_index)
+            frame = self._oneshot_decode_at(frame_index)
+            if frame is not None:
+                self._cache_put(frame_index, frame)
+            return frame
         deadline = time.monotonic() + max(0.05, timeout)
         self.seek(frame_index, accurate=accurate)
         remaining = max(0.01, deadline - time.monotonic())
@@ -238,6 +312,7 @@ class FFmpegFrameSource:
             return None
         idx, frame = item
         self._publish(idx, frame)
+        self._cache_put(idx, frame)
         return frame
 
     # ---------------------------------------------------------------- consume
@@ -254,6 +329,7 @@ class FFmpegFrameSource:
             return self.next_frame(timeout=timeout)
         idx, frame = item
         self._publish(idx, frame)
+        self._cache_put(idx, frame)
         return idx, frame
 
     @property
