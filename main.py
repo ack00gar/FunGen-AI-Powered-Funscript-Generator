@@ -108,6 +108,16 @@ def _setup_bootstrap_logger():
                   "websockets.server"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
+    # Route ultralytics' logger through our root formatter. It installs
+    # its own StreamHandler by default which prints raw (no timestamp or
+    # git-info prefix), producing lines like:
+    #   "Loading models/... for CoreML inference..."
+    # Stripping handlers + enabling propagation fixes the formatting.
+    _ul = logging.getLogger("ultralytics")
+    for h in list(_ul.handlers):
+        _ul.removeHandler(h)
+    _ul.propagate = True
+
 def run_gui(video_path=None):
     """Initializes and runs the graphical user interface."""
     from application.logic.app_logic import ApplicationLogic
