@@ -7,6 +7,15 @@ from config.constants_colors import CurrentTheme
 
 class ComparisonMixin:
 
+    def _visible_extra_timeline_nums(self):
+        """Reuse app_gui's per-frame cached list; fall back to direct query."""
+        visible = getattr(self.gui_instance, "_visible_extra_timelines", None)
+        if visible is not None:
+            return visible
+        return [t for t in EXTRA_TIMELINE_RANGE
+                if getattr(self.app.app_state_ui,
+                           f"show_funscript_interactive_timeline{t}", False)]
+
     def _has_any_reference_loaded(self):
         """Check if any visible timeline has a reference overlay loaded."""
         if self._get_timeline_editor(1) and getattr(self._get_timeline_editor(1), 'reference_overlay_actions', None):
@@ -15,11 +24,10 @@ class ComparisonMixin:
             tl2 = self._get_timeline_editor(2)
             if tl2 and getattr(tl2, 'reference_overlay_actions', None):
                 return True
-        for tl_num in EXTRA_TIMELINE_RANGE:
-            if getattr(self.app.app_state_ui, f"show_funscript_interactive_timeline{tl_num}", False):
-                tl = self._get_timeline_editor(tl_num)
-                if tl and getattr(tl, 'reference_overlay_actions', None):
-                    return True
+        for tl_num in self._visible_extra_timeline_nums():
+            tl = self._get_timeline_editor(tl_num)
+            if tl and getattr(tl, 'reference_overlay_actions', None):
+                return True
         return False
 
     def _render_reference_comparison_standalone(self):
@@ -33,11 +41,10 @@ class ComparisonMixin:
             tl2 = self._get_timeline_editor(2)
             if tl2 and getattr(tl2, 'reference_overlay_actions', None):
                 timelines.append((2, tl2))
-        for tl_num in EXTRA_TIMELINE_RANGE:
-            if getattr(self.app.app_state_ui, f"show_funscript_interactive_timeline{tl_num}", False):
-                tl = self._get_timeline_editor(tl_num)
-                if tl and getattr(tl, 'reference_overlay_actions', None):
-                    timelines.append((tl_num, tl))
+        for tl_num in self._visible_extra_timeline_nums():
+            tl = self._get_timeline_editor(tl_num)
+            if tl and getattr(tl, 'reference_overlay_actions', None):
+                timelines.append((tl_num, tl))
 
         for timeline_num, tl in timelines:
             metrics = tl._reference_metrics
