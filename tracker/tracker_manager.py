@@ -256,26 +256,41 @@ class TrackerManager:
             return False
 
     def stop_tracking(self):
-        """Stop tracking with direct tracker call."""
+        """Stop tracking with direct tracker call.
+
+        Heavy teardown (ffmpeg filter-chain rebuild + respawn) runs on a
+        background thread so the UI click returns instantly instead of
+        freezing for seconds while the source restarts.
+        """
         if not self._current_tracker:
             return
 
         try:
             self.tracking_active = False
-            self._resume_hd_after_live_tracking()
-            self._resume_mpv_display_after_tracking()
             if hasattr(self._current_tracker, 'stop_tracking'):
                 self._current_tracker.stop_tracking()
             elif hasattr(self._current_tracker, 'cleanup'):
                 self._current_tracker.cleanup()
 
-            # Log final point simplification summary
             if self.funscript and hasattr(self.funscript, 'log_final_simplification_summary'):
                 self.funscript.log_final_simplification_summary()
 
-            # Force timeline to resync to current frame position on stop
             if self.app and hasattr(self.app, 'app_state_ui'):
                 self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+
+            import threading as _threading
+            def _teardown():
+                try:
+                    self._resume_hd_after_live_tracking()
+                except Exception as e:
+                    self.logger.warning(f"async HD resume failed: {e}")
+                try:
+                    self._resume_mpv_display_after_tracking()
+                except Exception as e:
+                    self.logger.warning(f"async mpv resume failed: {e}")
+            _threading.Thread(
+                target=_teardown, name="TrackerStopTeardown", daemon=True
+            ).start()
         except Exception as e:
             self.logger.error(f"Failed to stop tracking: {e}")
 

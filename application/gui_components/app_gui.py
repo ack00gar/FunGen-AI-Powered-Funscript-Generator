@@ -763,13 +763,11 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                     return 0
                 return _ctypes.cast(addr, _ctypes.c_void_p).value or 0
 
-            # Use auto-safe so mpv probes codec/profile/device and falls back
-            # cleanly when a given backend can't negotiate. videotoolbox hard-
-            # pinned previously failed on 8K h264 ("Failed setup for format
-            # videotoolbox_vld") and silently dropped us to SW, flooding the
-            # demuxer queue and producing choppy playback.
+            # 'auto' probes all hwdec options and falls back to SW only if
+            # none work. 'auto-safe' was too conservative and left some 8K
+            # h264 files on SW.
             backend = self.app.app_settings.config.mpv.render_backend
-            _default_hwdec = "auto-safe"
+            _default_hwdec = "auto"
             _sys = __import__("platform").system()
             hwdec_override = self.app.app_settings.config.mpv.hwdec_override or _default_hwdec
             disp = None

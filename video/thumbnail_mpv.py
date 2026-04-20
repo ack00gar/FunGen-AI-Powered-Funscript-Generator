@@ -28,9 +28,8 @@ log = logging.getLogger(__name__)
 
 
 def _default_hwdec() -> str:
-    # auto-safe lets mpv probe + fall back when a specific backend can't
-    # negotiate (8K h264 + videotoolbox failed at init and dropped to SW).
-    return "auto-safe"
+    # 'auto' probes everything and falls back to SW only if nothing works.
+    return "auto"
 
 
 class ThumbnailMpv:
