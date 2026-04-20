@@ -347,6 +347,9 @@ class TrackerManager:
                     disp.seek(target_s, exact=True)
             if disp._player is not None:
                 disp._player.mute = bool(getattr(self, '_mpv_pre_tracking_mute', False))
+            # Matches the unconditional pause in _suspend_...; without it
+            # mpv stays paused and nothing advances post-tracking.
+            disp.play()
         except Exception as e:
             if self.logger:
                 self.logger.debug(f"mpv resume-after-tracking failed: {e}")
