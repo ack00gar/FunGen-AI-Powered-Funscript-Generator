@@ -3,6 +3,7 @@ import imgui
 import os
 import time
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
+from application.utils.imgui_helpers import u32_const
 from funscript.quality_validator import FunscriptQualityValidator, IssueSeverity
 from config.constants_colors import CurrentTheme
 
@@ -89,13 +90,13 @@ class FunscriptInfoMixin:
 
         score = report.score
         if score >= 80:
-            bar_color = imgui.get_color_u32_rgba(*CurrentTheme.GREEN)
+            bar_color = u32_const(CurrentTheme.GREEN)
         elif score >= 50:
-            bar_color = imgui.get_color_u32_rgba(0.9, 0.7, 0.1, 1.0)
+            bar_color = u32_const((0.9, 0.7, 0.1, 1.0))
         else:
-            bar_color = imgui.get_color_u32_rgba(*CurrentTheme.RED)
+            bar_color = u32_const(CurrentTheme.RED)
 
-        bg_color = imgui.get_color_u32_rgba(0.15, 0.15, 0.15, 1.0)
+        bg_color = u32_const((0.15, 0.15, 0.15, 1.0))
         draw_list = imgui.get_window_draw_list()
         cursor = imgui.get_cursor_screen_position()
         avail_w = imgui.get_content_region_available()[0]
@@ -120,7 +121,7 @@ class FunscriptInfoMixin:
         text_size = imgui.calc_text_size(score_text)
         text_x = cursor[0] + avail_w - text_size[0] - 4
         text_y = cursor[1] + (bar_h - text_size[1]) * 0.5
-        draw_list.add_text(text_x, text_y, imgui.get_color_u32_rgba(1, 1, 1, 0.9), score_text)
+        draw_list.add_text(text_x, text_y, u32_const((1.0, 1.0, 1.0, 0.9)), score_text)
 
         # Advance cursor past the gauge
         imgui.dummy(avail_w, bar_h + 2)

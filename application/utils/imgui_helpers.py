@@ -3,6 +3,24 @@
 import imgui
 
 
+_U32_CONST_CACHE = {}
+
+
+def u32_const(color):
+    """Return imgui.get_color_u32_rgba(*color) cached by tuple key.
+
+    Use for theme-static RGBA tuples called per-frame. NOT for colors with
+    a runtime-varying alpha multiplier -- those need per-frame computation
+    or a quantized cache; see drawing_mixin._u32_alpha_blend for that shape.
+    """
+    key = tuple(color)
+    u = _U32_CONST_CACHE.get(key)
+    if u is None:
+        u = imgui.get_color_u32_rgba(*key)
+        _U32_CONST_CACHE[key] = u
+    return u
+
+
 def tooltip_if_hovered(text):
     """Show a tooltip when the last imgui item is hovered."""
     if imgui.is_item_hovered():

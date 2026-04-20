@@ -2,6 +2,7 @@
 import imgui
 import numpy as np
 import time
+from application.utils.imgui_helpers import u32_const
 from config.constants_colors import CurrentTheme
 
 
@@ -49,13 +50,13 @@ class PerformanceMixin:
 
             total_width = (bar_width + spacing) * len(per_core_usage) - spacing
 
-            # Pre-compute outside loop
+            # Pre-compute outside loop (cached across frames via u32_const).
             dl = imgui.get_window_draw_list()
-            bg_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.8)
-            text_color = imgui.get_color_u32_rgba(*CurrentTheme.GRAY_LIGHT)
-            color_green = imgui.get_color_u32_rgba(*CurrentTheme.GREEN)
-            color_yellow = imgui.get_color_u32_rgba(1.0, 0.8, 0.2, 1.0)
-            color_red = imgui.get_color_u32_rgba(*CurrentTheme.RED)
+            bg_color = u32_const((0.2, 0.2, 0.2, 0.8))
+            text_color = u32_const(CurrentTheme.GRAY_LIGHT)
+            color_green = u32_const(CurrentTheme.GREEN)
+            color_yellow = u32_const((1.0, 0.8, 0.2, 1.0))
+            color_red = u32_const(CurrentTheme.RED)
 
             for i, core_load in enumerate(per_core_usage):
                 bar_x = imgui.get_cursor_screen_pos()[0] + i * (bar_width + spacing)
