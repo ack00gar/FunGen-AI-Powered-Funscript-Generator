@@ -65,6 +65,7 @@ class GamepadInput:
         self.secondary_mapping: str = "right_x"
         self.invert_primary: bool = False
         self.invert_secondary: bool = False
+        self.center_mode: bool = True
         self.active_joystick_id: int = 0
         self._detected_name: str = ""
 
@@ -125,9 +126,14 @@ class GamepadInput:
         if self.invert_secondary:
             sec = -sec
 
-        # Map -1..+1 → 0..100  (stick up / left = 100)
-        primary_100 = (1.0 - pri) * 50.0
-        secondary_100 = (1.0 - sec) * 50.0
+        if self.center_mode:
+            # rest=50, full stick travel maps to 0..100 (sign-preserving)
+            primary_100 = (1.0 - pri) * 50.0
+            secondary_100 = (1.0 - sec) * 50.0
+        else:
+            # rest=0, deflection magnitude maps to 0..100 (direction-agnostic)
+            primary_100 = 100.0 * abs(pri)
+            secondary_100 = 100.0 * abs(sec)
 
         return GamepadState(
             primary=max(0.0, min(100.0, primary_100)),

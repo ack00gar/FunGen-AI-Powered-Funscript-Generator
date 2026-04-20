@@ -278,6 +278,9 @@ class AppSettings:
             "device_control_selected_devices": [],  # List of selected device IDs
             "device_control_log_commands": False,
 
+            # Recording / live scripting
+            "recording_gamepad_center_mode": True,  # True: full travel -> 0..100. False: deflection magnitude -> 0..100
+
             # Audio Playback
             "audio_enabled": True,
             "audio_volume": 0.8,

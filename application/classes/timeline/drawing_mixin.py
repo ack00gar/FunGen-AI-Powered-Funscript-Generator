@@ -786,6 +786,17 @@ class DrawingMixin:
         if changed:
             gp.invert_primary = inv
 
+        imgui.same_line()
+        changed, cm = imgui.checkbox(f"Center##{self.timeline_num}_cm", gp.center_mode)
+        if changed:
+            gp.center_mode = cm
+            self.app.app_settings.config.recording.gamepad_center_mode = cm
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "On: full stick travel maps to 0..100 (rest = 50).\n"
+                "Off: stick deflection magnitude maps to 0..100 (rest = 0)."
+            )
+
         # Deadzone
         imgui.same_line()
         imgui.push_item_width(60)

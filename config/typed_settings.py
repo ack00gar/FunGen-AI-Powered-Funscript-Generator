@@ -1741,6 +1741,18 @@ class DeviceControlConfig(_Section):
         self._store.set("device_control_log_commands", bool(value))
 
 
+class RecordingConfig(_Section):
+    @property
+    def gamepad_center_mode(self) -> bool:
+        """Stick mapping mode. True: rest=50, full travel -> 0..100 (sign-preserving).
+        False: rest=0, deflection magnitude -> 0..100 (direction-agnostic)."""
+        return bool(self._store.get("recording_gamepad_center_mode", True))
+
+    @gamepad_center_mode.setter
+    def gamepad_center_mode(self, value: bool) -> None:
+        self._store.set("recording_gamepad_center_mode", bool(value))
+
+
 class XBVRConfig(_Section):
     @property
     def host(self) -> str:
@@ -1783,6 +1795,7 @@ class AppConfig:
         self.chapter = ChapterConfig(store)
         self.funscript = FunscriptConfig(store)
         self.device_control = DeviceControlConfig(store)
+        self.recording = RecordingConfig(store)
         self.xbvr = XBVRConfig(store)
         self.project = ProjectConfig(store)
         self.batch = BatchConfig(store)

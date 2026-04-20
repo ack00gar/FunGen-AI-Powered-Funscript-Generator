@@ -1329,6 +1329,7 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         """Lazy-init gamepad input and detect controllers."""
         from application.live_scripting.gamepad_input import GamepadInput
         self._gamepad_input = GamepadInput()
+        self._gamepad_input.center_mode = self.app.app_settings.config.recording.gamepad_center_mode
         gamepads = self._gamepad_input.detect_gamepads()
         if gamepads:
             self._gamepad_input.active_joystick_id = gamepads[0].joystick_id
