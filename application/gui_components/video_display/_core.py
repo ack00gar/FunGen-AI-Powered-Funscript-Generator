@@ -330,6 +330,25 @@ class VideoDisplayCoreMixin:
                                                        '_last_mpv_cap', -1)
                             cap_changed = last_applied_cap != mpv_cap
                             if mpv_has_new or cap_changed:
+                                # In direct (non-shader) mode the mpv scaler
+                                # is the final quality step before imgui's
+                                # LINEAR blit. Pin it to ewa_lanczos if we
+                                # don't already set it (shader path picks
+                                # per-quality-level below).
+                                if route.source == 'mpv_direct' and mpv_display is not None:
+                                    try:
+                                        cur = getattr(mpv_display, '_current_scale', None)
+                                        if cur != 'ewa_lanczos':
+                                            player = getattr(mpv_display, '_player', None) \
+                                                     or getattr(mpv_display, 'player', None)
+                                            if player is not None:
+                                                try:
+                                                    player.scale = 'ewa_lanczos'
+                                                    mpv_display._current_scale = 'ewa_lanczos'
+                                                except Exception:
+                                                    pass
+                                    except Exception:
+                                        pass
                                 self._render_mpv_to_fbo(proc, mpv_display, target_cap=mpv_cap)
                                 self.gui_instance._last_mpv_cap = mpv_cap
                                 self.gui_instance._shader_needs_repass = True
@@ -754,16 +773,21 @@ class VideoDisplayCoreMixin:
         info = getattr(proc, 'video_info', None) or {}
         src_w = int(info.get('width', 0))
         src_h = int(info.get('height', 0))
+        # Render at the full target_cap (don't cap at source size). mpv's
+        # scaler (ewa_lanczos / spline36 / bilinear) is the right place to
+        # up- or down-sample; coming out of mpv at display size means the
+        # imgui blit is 1:1 with LINEAR -- no extra blur. Aspect always
+        # preserved from source.
         if src_w > 0 and src_h > 0:
             if src_w >= src_h:
-                fbo_w = min(src_w, target_cap)
+                fbo_w = target_cap
                 fbo_h = max(64, int(round(fbo_w * src_h / src_w)))
             else:
-                fbo_h = min(src_h, target_cap)
+                fbo_h = target_cap
                 fbo_w = max(64, int(round(fbo_h * src_w / src_h)))
         else:
-            fbo_w = min(int(getattr(proc, '_display_frame_w', 640) or 640), target_cap)
-            fbo_h = min(int(getattr(proc, '_display_frame_h', 640) or 640), target_cap)
+            fbo_w = target_cap
+            fbo_h = target_cap
         fbo_w = max(64, fbo_w)
         fbo_h = max(64, fbo_h)
 

@@ -28,9 +28,18 @@ class AppEnergySaver:
                 self.logger.info("Energy saver mode globally disabled by setting, deactivating.", extra={'status_message': True})
             return
 
-        # Access stage_processor via self.app
+        # Access stage_processor via self.app. Only treat the processor
+        # as activity when it's actually PLAYING (not just paused) --
+        # otherwise is_processing stays True after pause and the energy
+        # saver + idle-render throttle never kick in.
+        _proc = self.app.processor
+        _proc_playing = bool(
+            _proc
+            and getattr(_proc, 'is_processing', False)
+            and not (getattr(_proc, 'pause_event', None)
+                     and _proc.pause_event.is_set()))
         if self.app.stage_processor.full_analysis_active or \
-           (self.app.processor and self.app.processor.is_processing) or \
+           _proc_playing or \
            (self.app.stage_processor.stage_thread and self.app.stage_processor.stage_thread.is_alive()):
             self.reset_activity_timer()
             return

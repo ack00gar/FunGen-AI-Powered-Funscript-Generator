@@ -2532,14 +2532,20 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 
                 # Track frame setup operations
                 event_start = time.perf_counter()
-                # Active = playing / tracking / recent user activity. Anything
-                # else blocks on wait_events_timeout so we don't burn CPU
-                # redrawing a static imgui UI at 60 Hz.
+                # Active = actually playing (not just "session open") or
+                # tracker-running or very recent user input. A PAUSED
+                # processor counts as idle even though is_processing=True,
+                # because nothing animates.
                 _idle_for = time.time() - self.app.energy_saver.last_activity_time
+                _proc = self.app.processor
+                _proc_playing = bool(
+                    _proc
+                    and getattr(_proc, 'is_processing', False)
+                    and not (getattr(_proc, 'pause_event', None)
+                             and _proc.pause_event.is_set()))
                 _is_active = (
                     _idle_for < passive_idle_seconds
-                    or (self.app.processor and getattr(self.app.processor,
-                                                        'is_processing', False))
+                    or _proc_playing
                     or self.app.stage_processor.full_analysis_active
                 )
                 if _is_active:
