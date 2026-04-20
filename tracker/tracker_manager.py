@@ -50,7 +50,12 @@ class TrackerManager:
         # Tracking state
         self.tracking_active = False
         self.current_fps = 0.0
-        
+
+        # Background preload: when set_tracking_mode(lazy=True) stages a
+        # tracker, we spawn a thread that runs initialize() in the
+        # background so start_tracking() doesn't have to block the UI.
+        self._preload_thread = None
+
         # Pending configurations (applied when tracker is instantiated)
         self._pending_axis_A = None
         self._pending_axis_B = None
@@ -198,6 +203,7 @@ class TrackerManager:
             if lazy:
                 self._pending_initialize = True
                 self.logger.debug(f"Tracker {mode_name} staged (lazy init); model load deferred.")
+                self._start_preload_async()
             else:
                 self._pending_initialize = False
                 if not self._initialize_tracker():
@@ -215,10 +221,43 @@ class TrackerManager:
             traceback.print_exc()
             return False
 
+    def _start_preload_async(self) -> None:
+        """Run initialize() on a background thread so Start is instant."""
+        import threading as _threading
+        prev = self._preload_thread
+        if prev is not None and prev.is_alive():
+            return
+        tracker_ref = self._current_tracker
+        mode_ref = self._current_mode
+
+        def _run():
+            try:
+                if tracker_ref is not self._current_tracker:
+                    return
+                t0 = time.monotonic()
+                ok = self._initialize_tracker()
+                dt = (time.monotonic() - t0) * 1000.0
+                if ok and tracker_ref is self._current_tracker:
+                    self._pending_initialize = False
+                    self.logger.info(
+                        f"Tracker '{mode_ref}' preloaded in {dt:.0f}ms (async)")
+            except Exception as e:
+                self.logger.warning(f"Async tracker preload failed: {e}")
+
+        self._preload_thread = _threading.Thread(
+            target=_run, name=f"TrackerPreload[{mode_ref}]", daemon=True)
+        self._preload_thread.start()
+
     def ensure_initialized(self) -> bool:
-        """Force initialize() on a lazily-staged tracker. Idempotent."""
+        """Force initialize() on a lazily-staged tracker. Idempotent.
+
+        Joins an in-flight async preload first so Start doesn't race it.
+        """
         if not self._current_tracker:
             return False
+        pre = self._preload_thread
+        if pre is not None and pre.is_alive():
+            pre.join()
         if not getattr(self, "_pending_initialize", False):
             return True
         ok = self._initialize_tracker()
