@@ -37,6 +37,22 @@ def _u32_from_const(color):
     return u
 
 
+def _u32_alpha_blend(color, alpha_mult):
+    """u32 for ``color`` with its alpha channel multiplied by ``alpha_mult``.
+
+    ``alpha_mult`` is quantized to 0.025 so viewport fades only ever sample
+    ~40 distinct values per RGB tuple -- far less than one new u32 per frame.
+    """
+    cache = _u32_alpha_blend.__dict__.setdefault("_cache", {})
+    qa = round(alpha_mult * 40) / 40.0
+    key = (tuple(color), qa)
+    u = cache.get(key)
+    if u is None:
+        u = imgui.get_color_u32_rgba(color[0], color[1], color[2], color[3] * qa)
+        cache[key] = u
+    return u
+
+
 class DrawingMixin:
     def _draw_background_grid(self, dl, tf: 'TimelineTransformer'):
         # Theme-static u32 colors + label text extents cached once per instance.
@@ -326,12 +342,14 @@ class DrawingMixin:
             radius = self.app.app_state_ui.timeline_point_radius
             pt_alpha = alpha * point_fade
 
-            # Pre-compute color u32 values outside the per-point loop
+            # Pre-compute color u32 values outside the per-point loop.
+            # Alpha-quantized cache collapses the ~continuous alpha into ~40
+            # buckets so viewport fade doesn't allocate a fresh u32/frame.
             _default_c = TimelineColors.POINT_DEFAULT if not is_preview else TimelineColors.PREVIEW_POINTS
-            col_default = imgui.get_color_u32_rgba(_default_c[0], _default_c[1], _default_c[2], _default_c[3] * pt_alpha)
-            col_drag = imgui.get_color_u32_rgba(*TimelineColors.POINT_DRAGGING[:3], TimelineColors.POINT_DRAGGING[3] * alpha)
-            col_sel = imgui.get_color_u32_rgba(*TimelineColors.POINT_SELECTED[:3], TimelineColors.POINT_SELECTED[3] * alpha)
-            col_hover = imgui.get_color_u32_rgba(*TimelineColors.POINT_HOVER[:3], TimelineColors.POINT_HOVER[3] * alpha)
+            col_default = _u32_alpha_blend(_default_c, pt_alpha)
+            col_drag = _u32_alpha_blend(TimelineColors.POINT_DRAGGING, alpha)
+            col_sel = _u32_alpha_blend(TimelineColors.POINT_SELECTED, alpha)
+            col_hover = _u32_alpha_blend(TimelineColors.POINT_HOVER, alpha)
             col_sel_border = _u32_from_const(TimelineColors.SELECTED_POINT_BORDER)
             r_drag = radius + 2
             r_sel = radius + 1

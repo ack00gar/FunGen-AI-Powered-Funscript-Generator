@@ -177,7 +177,15 @@ class ChapterBarMixin:
                 draw_list.add_rect(seg_start_x - 2, bar_start_y - 2, seg_start_x + seg_width + 2, bar_start_y + bar_height + 2, sel_secondary_u32, thickness=1.5, rounding=1.0)
 
             text_to_draw = segment.position_short_name
-            text_width = imgui.calc_text_size(text_to_draw)[0]
+            # Cache calc_text_size keyed by (text, line-height) so font-scale
+            # changes re-measure automatically.
+            cw_key = (text_to_draw, text_line_height)
+            if getattr(segment, "_chbar_text_key", None) != cw_key:
+                text_width = imgui.calc_text_size(text_to_draw)[0]
+                segment._chbar_text_key = cw_key
+                segment._chbar_text_width = text_width
+            else:
+                text_width = segment._chbar_text_width
             if text_width < seg_width - 8:
                 text_pos_x = seg_start_x + (seg_width - text_width) / 2
                 text_pos_y = bar_start_y + (bar_height - text_line_height) / 2
