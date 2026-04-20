@@ -35,6 +35,11 @@ class MainMenu:
         self._support_width = 0
         self._support_height = 0
         self._is_macos = platform.system() == "Darwin"
+        # Session-stable feature flags; resolved once here instead of every
+        # render() frame.
+        self._feat_supporter = _is_feature_available("patreon_features")
+        self._feat_device = _is_feature_available("device_control")
+        self._feat_streamer = _is_feature_available("streamer")
 
     # ------------------------- HELPER METHODS -------------------------
 
@@ -382,11 +387,7 @@ class MainMenu:
         file_mgr = app.file_manager
         stage_proc = app.stage_processor
 
-        # Cache feature detection flags for this frame
-        self._feat_supporter = _is_feature_available("patreon_features")
-        self._feat_device = _is_feature_available("device_control")
-        self._feat_streamer = _is_feature_available("streamer")
-
+        # _feat_* flags resolved in __init__; session-stable.
         if imgui.begin_main_menu_bar():
             self._render_menu_bar_logo()
 
