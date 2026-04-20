@@ -1669,6 +1669,16 @@ class VideoProcessor(
         self.pause_event.clear()
         self.stop_event.set()
 
+        # Stop must also halt the decoder and mpv display -- otherwise
+        # mpv-driven playback keeps rendering frames even though the
+        # processing thread has exited.
+        if self.frame_source is not None:
+            try:
+                self.frame_source.pause()
+            except Exception:
+                pass
+        self._mpv_pause()
+
         if join_thread:
             import time as _time
             t0 = _time.perf_counter()
