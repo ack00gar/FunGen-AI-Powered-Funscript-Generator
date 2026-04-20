@@ -761,18 +761,11 @@ class TrackerManager:
             return False
 
         try:
-            # Yield before potentially heavy initialization (YOLO model loading)
-            import time
-            time.sleep(0.001)  # 1ms yield - forces GIL release
-
             if hasattr(self._current_tracker, 'initialize'):
                 init_result = self._current_tracker.initialize(self.app, tracker_model_path=self.tracker_model_path)
                 if isinstance(init_result, bool) and not init_result:
                     self.logger.error(f"Tracker {self._current_mode} initialization failed")
                     return False
-
-            # Yield after initialization completes
-            time.sleep(0.001)  # 1ms yield - forces GIL release
             return True
         except Exception as e:
             self.logger.error(f"Error initializing tracker {self._current_mode}: {e}")
