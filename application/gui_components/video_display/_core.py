@@ -764,18 +764,28 @@ class VideoDisplayCoreMixin:
         dw_h = max(64, min(int(target_h) * ss_factor, cap))
         self.gui_instance.resize_vr_dewarp_target(dw_w, dw_h)
         # Apply anisotropic filtering to the input (mpv display) texture.
-        # Free to change each frame since it's a texture parameter.
+        # Cache the GL_MAX_TEXTURE_MAX_ANISOTROPY cap on first use (glGetFloatv
+        # can force a pipeline sync every frame otherwise) and skip the
+        # texture parameter update if the effective level has not changed --
+        # glTexParameterf is cheap but redundant calls still traverse the GL
+        # driver.
         try:
             import OpenGL.GL.EXT.texture_filter_anisotropic as _aniso_ext
-            aniso_cap = gl.glGetFloatv(
-                _aniso_ext.GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT)
-            aniso = min(spec.aniso_level, float(aniso_cap))
-            gl.glBindTexture(gl.GL_TEXTURE_2D,
-                              self.gui_instance.mpv_display_texture_id)
-            gl.glTexParameterf(gl.GL_TEXTURE_2D,
-                                _aniso_ext.GL_TEXTURE_MAX_ANISOTROPY_EXT,
-                                aniso)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+            aniso_cap = getattr(self.gui_instance, "_aniso_cap", None)
+            if aniso_cap is None:
+                aniso_cap = float(gl.glGetFloatv(
+                    _aniso_ext.GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT))
+                self.gui_instance._aniso_cap = aniso_cap
+            aniso = min(float(spec.aniso_level), aniso_cap)
+            last_aniso = getattr(self.gui_instance, "_last_applied_aniso", None)
+            if last_aniso != aniso:
+                gl.glBindTexture(gl.GL_TEXTURE_2D,
+                                  self.gui_instance.mpv_display_texture_id)
+                gl.glTexParameterf(gl.GL_TEXTURE_2D,
+                                    _aniso_ext.GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                                    aniso)
+                gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+                self.gui_instance._last_applied_aniso = aniso
         except Exception:
             pass
         # Apply mpv scaler choice (runtime property change is cheap).

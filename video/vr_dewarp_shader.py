@@ -150,6 +150,13 @@ void main() {
     } else {
         fragColor = texture(inputTexture, src);
     }
+
+    // Interleaved gradient noise dither, ~0.5/255 amplitude. Breaks up
+    // 8-bit banding on smooth gradients (skin, sky, walls) without any
+    // texture fetch or branch cost. Applied after sampling so the dither
+    // is in output space, not source space.
+    float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    fragColor.rgb += (ign - 0.5) / 255.0;
 }
 """
 
