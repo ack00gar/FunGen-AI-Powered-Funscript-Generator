@@ -780,6 +780,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
 
         # 3. Delete (Delete/Backspace)
         if check_shortcut("delete_selected_point", "DELETE") or check_shortcut("delete_selected_point_alt", "BACKSPACE"):
+            if not self.multi_selected_action_indices:
+                nearest = self._find_nearest_point_index()
+                if nearest is not None and nearest >= 0:
+                    actions = self._get_actions()
+                    if 0 <= nearest < len(actions):
+                        self.multi_selected_action_indices = {self._action_key(actions[nearest])}
             delete_selected(self)
 
         # 4. Copy/Paste
