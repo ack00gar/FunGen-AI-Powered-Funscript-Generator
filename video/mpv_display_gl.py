@@ -131,6 +131,7 @@ class MpvDisplayGL:
                 "vo": "libmpv",
                 "audio": "auto" if self.with_audio else "no",
                 "keep_open": "yes",
+                "pause": "yes",
                 "hwdec": self.hwdec,
                 "profile": "fast",
                 "scale": "bilinear",

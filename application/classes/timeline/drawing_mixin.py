@@ -216,6 +216,50 @@ class DrawingMixin:
         return 1.0
 
 
+    def _cached_catmull_with_seg(self, ats: np.ndarray, poss: np.ndarray, k: int):
+        """Return (d_ats, d_poss, seg_idx) reusing a cached full-funscript
+        spline when only the visible slice changes (pan/zoom without edits).
+        ats/poss are slices of the full per-axis cached arrays; we key the
+        cache on the base buffer identity + k, then slice by segment range.
+        """
+        base_a = ats.base if ats.base is not None else ats
+        base_p = poss.base if poss.base is not None else poss
+        full_len = base_a.shape[0]
+        # Recover slice bounds against the base.
+        if ats.base is not None:
+            s_idx = (ats.ctypes.data - base_a.ctypes.data) // ats.itemsize
+        else:
+            s_idx = 0
+        e_idx = s_idx + ats.shape[0]
+
+        cache = getattr(self, '_catmull_cache', None)
+        key = (id(base_a), id(base_p), k, full_len)
+        if cache is not None and cache[0] == key:
+            d_full_a, d_full_p, seg_full = cache[1], cache[2], cache[3]
+        else:
+            d_full_a, d_full_p, seg_full = self._expand_catmull(base_a, base_p, k)
+            self._catmull_cache = (key, d_full_a, d_full_p, seg_full)
+
+        # Slice by segment range. Segments are [0, full_len-1); each has k
+        # dense samples. The expanded array also has a trailing final point.
+        n_dense_full = (full_len - 1) * k
+        lo = min(s_idx * k, n_dense_full)
+        hi = min(e_idx * k, n_dense_full)
+        if e_idx >= full_len:
+            d_ats = np.concatenate([d_full_a[lo:hi], d_full_a[-1:]])
+            d_poss = np.concatenate([d_full_p[lo:hi], d_full_p[-1:]])
+            seg_idx = np.concatenate([seg_full[lo:hi] - s_idx,
+                                      np.array([full_len - 1 - s_idx], dtype=np.int32)])
+        else:
+            d_ats = d_full_a[lo:hi]
+            d_poss = d_full_p[lo:hi]
+            seg_idx = seg_full[lo:hi] - s_idx
+        return d_ats, d_poss, seg_idx
+
+    def _cached_catmull(self, ats: np.ndarray, poss: np.ndarray, k: int):
+        d_ats, d_poss, _ = self._cached_catmull_with_seg(ats, poss, k)
+        return d_ats, d_poss
+
     def _expand_catmull(self, ats: np.ndarray, poss: np.ndarray, k: int):
         """Subsample each segment with catmull-rom spline. Returns (xs_a, ys_p, seg_idx).
         seg_idx maps each dense sample (excluding the appended final point) to its
@@ -296,13 +340,10 @@ class DrawingMixin:
         base_thick = self._line_thickness_for_height()
         thick = max(1.0, base_thick - 0.5) if is_preview else base_thick
 
-        # Drop spline sampling during active pan/drag; straight polyline is
-        # cheaper and the user won't notice in-motion.
-        interacting = bool(getattr(self.app.app_state_ui, 'timeline_interaction_active', False))
-        if self._show_smooth_curve and not is_preview and len(ats) >= 2 and not interacting:
+        if self._show_smooth_curve and not is_preview and len(ats) >= 2:
             k = self._spline_samples_for_view(tf.width, len(ats) - 1)
             if k >= 3:
-                d_ats, d_poss, _ = self._expand_catmull(ats, poss, k)
+                d_ats, d_poss = self._cached_catmull(ats, poss, k)
                 d_xs = np.clip(tf.vec_time_to_x(d_ats), safe_min_x, safe_max_x)
                 d_ys = tf.vec_val_to_y(d_poss)
                 pts = np.column_stack((d_xs, d_ys)).tolist()
@@ -449,10 +490,8 @@ class DrawingMixin:
                 i, j = starts[run_i], starts[run_i + 1]
                 add_polyline(pts_all[i:j + 1], int(arr[i]), False, hm_thick)
 
-        interacting_hm = bool(getattr(self.app.app_state_ui, 'timeline_interaction_active', False))
-        if (self._show_smooth_curve and len(ats) >= 2 and n_segs > 0
-                and lod_k >= 3 and not interacting_hm):
-            d_ats, d_poss, seg_idx = self._expand_catmull(ats, poss, lod_k)
+        if self._show_smooth_curve and len(ats) >= 2 and n_segs > 0 and lod_k >= 3:
+            d_ats, d_poss, seg_idx = self._cached_catmull_with_seg(ats, poss, lod_k)
             d_xs = np.clip(tf.vec_time_to_x(d_ats), safe_min_x, safe_max_x).tolist()
             d_ys = tf.vec_val_to_y(d_poss).tolist()
             # Map each dense sample to its segment's color via numpy fancy
