@@ -350,11 +350,19 @@ class ControlPanelUI(
         _SIDEBAR_TOP_PAD = 6
         imgui.dummy(0, _SIDEBAR_TOP_PAD)
 
+        # Theme-static sidebar colors cached once on first render.
+        sidebar_u32 = getattr(self, "_sidebar_color_u32s", None)
+        if sidebar_u32 is None:
+            sidebar_u32 = {
+                "bg": imgui.get_color_u32_rgba(*SidebarColors.BG),
+                "sep": imgui.get_color_u32_rgba(*CurrentTheme.DISABLED_OVERLAY),
+            }
+            self._sidebar_color_u32s = sidebar_u32
+
         # Draw sidebar background
         pos = imgui.get_window_position()
         size = (sidebar_w, total_h)
-        bg_u32 = imgui.get_color_u32_rgba(*SidebarColors.BG)
-        draw_list.add_rect_filled(pos[0], pos[1], pos[0] + size[0], pos[1] + size[1], bg_u32)
+        draw_list.add_rect_filled(pos[0], pos[1], pos[0] + size[0], pos[1] + size[1], sidebar_u32["bg"])
 
         btn_size = 36
         active_section = self._active_section
@@ -368,9 +376,8 @@ class ControlPanelUI(
         # Separator
         imgui.spacing()
         sep_pos = imgui.get_cursor_screen_pos()
-        sep_color = imgui.get_color_u32_rgba(*CurrentTheme.DISABLED_OVERLAY)
         draw_list.add_line(sep_pos[0] + 6, sep_pos[1],
-                           sep_pos[0] + sidebar_w - 6, sep_pos[1], sep_color)
+                           sep_pos[0] + sidebar_w - 6, sep_pos[1], sidebar_u32["sep"])
         imgui.spacing()
 
         # Add-on sections
@@ -396,25 +403,42 @@ class ControlPanelUI(
         """Render a single sidebar navigation entry."""
         SidebarColors = _SidebarColors
 
+        # Reuse the mixin-level cache populated by _render_sidebar; also lazily
+        # add the active/accent/hover u32s and a per-key button-ID dict here.
+        sidebar_u32 = getattr(self, "_sidebar_color_u32s", None)
+        if sidebar_u32 is None or "active_bg" not in sidebar_u32:
+            if sidebar_u32 is None:
+                sidebar_u32 = {}
+                self._sidebar_color_u32s = sidebar_u32
+            sidebar_u32["active_bg"] = imgui.get_color_u32_rgba(
+                SidebarColors.ACTIVE_ACCENT[0],
+                SidebarColors.ACTIVE_ACCENT[1],
+                SidebarColors.ACTIVE_ACCENT[2], 0.2)
+            sidebar_u32["accent"] = imgui.get_color_u32_rgba(*SidebarColors.ACTIVE_ACCENT)
+            sidebar_u32["hover_bg"] = imgui.get_color_u32_rgba(*SidebarColors.HOVER_BG)
+        btn_ids = getattr(self, "_sidebar_btn_ids", None)
+        if btn_ids is None:
+            btn_ids = {}
+            self._sidebar_btn_ids = btn_ids
+        button_id = btn_ids.get(key)
+        if button_id is None:
+            button_id = f"##SB_{key}"
+            btn_ids[key] = button_id
+
         cursor = imgui.get_cursor_screen_pos()
         pad_x = (sidebar_w - btn_size) * 0.5
 
         # Background highlight for active entry
         if is_active:
-            active_bg = imgui.get_color_u32_rgba(
-                SidebarColors.ACTIVE_ACCENT[0],
-                SidebarColors.ACTIVE_ACCENT[1],
-                SidebarColors.ACTIVE_ACCENT[2], 0.2)
             draw_list.add_rect_filled(
                 cursor[0], cursor[1],
                 cursor[0] + sidebar_w, cursor[1] + btn_size,
-                active_bg, 4.0)
+                sidebar_u32["active_bg"], 4.0)
             # Left accent bar
-            accent_u32 = imgui.get_color_u32_rgba(*SidebarColors.ACTIVE_ACCENT)
             draw_list.add_rect_filled(
                 cursor[0], cursor[1] + 4,
                 cursor[0] + 3, cursor[1] + btn_size - 4,
-                accent_u32, 2.0)
+                sidebar_u32["accent"], 2.0)
 
         # Hover highlight
         hover_region = (cursor[0], cursor[1], cursor[0] + sidebar_w, cursor[1] + btn_size)
@@ -426,7 +450,7 @@ class ControlPanelUI(
 
         # Invisible button for click detection
         imgui.set_cursor_screen_pos((cursor[0] + pad_x, cursor[1]))
-        if imgui.invisible_button(f"##SB_{key}", btn_size, btn_size) and available:
+        if imgui.invisible_button(button_id, btn_size, btn_size) and available:
             self._active_section = key
 
         # Check hover state BEFORE drawing so bg goes behind text
@@ -445,11 +469,10 @@ class ControlPanelUI(
                         desc = f"\n{info.description}"
                 imgui.set_tooltip(f"{tooltip}{desc}\n(Available as a FunGen add-on: paypal.me/k00gar)")
             # Hover bg (drawn before text so text stays on top)
-            hover_bg = imgui.get_color_u32_rgba(*SidebarColors.HOVER_BG)
             draw_list.add_rect_filled(
                 hover_region[0], hover_region[1],
                 hover_region[2], hover_region[3],
-                hover_bg, 4.0)
+                sidebar_u32["hover_bg"], 4.0)
 
         # Draw icon (on top of hover bg)
         icon_tex = None
