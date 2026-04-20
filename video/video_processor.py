@@ -503,6 +503,19 @@ class VideoProcessor(
                         disp.set_fps_fallback(self.fps)
                     except Exception:
                         pass
+                # Sync mpv pause state with the processor's intent. load()
+                # internally calls play() which unpauses mpv; without this,
+                # switching display modes (passthrough <-> shader) silently
+                # unpauses while the UI still reads 'paused'.
+                try:
+                    should_play = (self.is_processing
+                                   and not self.pause_event.is_set())
+                    if should_play:
+                        disp.play()
+                    else:
+                        disp.pause()
+                except Exception as _e:
+                    self.logger.debug(f"mpv pause sync failed: {_e}")
                 self.logger.debug(
                     f"MpvDisplay.load() ok in {dur:.0f}ms "
                     f"(is_loaded={disp.is_loaded}, fps={disp.fps:.2f}, "
