@@ -178,6 +178,9 @@ class BatchWorker:
         cmd = [sys.executable, str(main_py), item.video_path,
                "--mode", cli_alias, "--quiet", "--overwrite"]
         env = os.environ.copy()
+        # Signal to the subprocess how many siblings are running concurrently
+        # so its Stage 1 pool can down-scale (see app_stage_executor.py).
+        env["FUNGEN_BATCH_PARALLEL"] = str(self.max_parallel)
 
         try:
             proc = subprocess.Popen(

@@ -78,6 +78,28 @@ class StageExecutorMixin:
             num_producers = num_producers_override if num_producers_override is not None else self.num_producers_stage1
             num_consumers = num_consumers_override if num_consumers_override is not None else self.num_consumers_stage1
 
+            # When launched as one of N parallel-batch CLI subprocesses (see
+            # BatchWorker), the FUNGEN_BATCH_PARALLEL env var carries N. Scale
+            # our internal producer/consumer pool down by that factor so the
+            # aggregate worker count across all subprocesses stays close to
+            # the single-process default (prevents CPU oversubscription that
+            # was the main reason max_parallel=4 underperformed sequential).
+            try:
+                parallel_rank = max(1, int(os.environ.get("FUNGEN_BATCH_PARALLEL", "1") or "1"))
+            except ValueError:
+                parallel_rank = 1
+            if parallel_rank > 1:
+                adjusted_producers = max(1, num_producers // parallel_rank)
+                adjusted_consumers = max(1, num_consumers // parallel_rank)
+                if adjusted_producers != num_producers or adjusted_consumers != num_consumers:
+                    self.logger.info(
+                        f"Stage 1: FUNGEN_BATCH_PARALLEL={parallel_rank}, "
+                        f"scaling pool {num_producers}p/{num_consumers}c -> "
+                        f"{adjusted_producers}p/{adjusted_consumers}c"
+                    )
+                    num_producers = adjusted_producers
+                    num_consumers = adjusted_consumers
+
             result_path, max_fps = stage1_module.perform_yolo_analysis(
                 video_path_arg=fm.video_path,
                 yolo_model_path_arg=self.app.yolo_det_model_path,

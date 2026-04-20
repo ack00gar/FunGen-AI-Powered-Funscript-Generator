@@ -80,6 +80,7 @@ class _FakePopen:
                  start_new_session=False, **kw):
         self.cmd = cmd
         self.cwd = cwd
+        self.env = dict(env) if env else {}
         self.pid = len(_FakePopen._registry) + 1000
         self._started = time.time()
         self._rc: Optional[int] = None
@@ -236,6 +237,28 @@ def test_parallel_cli_cmd_uses_overwrite_flag():
     assert "--overwrite" in cmd
     assert "--quiet" in cmd
     assert "--mode" in cmd
+
+
+def test_parallel_subprocess_env_carries_fungen_batch_parallel():
+    """Subprocesses should see FUNGEN_BATCH_PARALLEL=<max_parallel> in env.
+
+    Stage 1 in the child reads this to scale down its internal producer/
+    consumer pool and avoid CPU oversubscription across the parallel pool.
+    """
+    app = _mock_app_offline()
+    q = BatchQueue()
+    q.add("/fake/only.mp4")
+    with patch("subprocess.Popen", _FakePopen):
+        with patch.object(BatchWorker, "_app_is_busy", return_value=False):
+            w = BatchWorker(app, q, max_parallel=3)
+            w.start()
+            _wait_until(lambda: len(_FakePopen._registry) >= 1, timeout_s=5.0)
+            w.stop()
+            if w._thread:
+                w._thread.join(timeout=5.0)
+    assert _FakePopen._registry, "no subprocess launched"
+    env = _FakePopen._registry[0].env
+    assert env.get("FUNGEN_BATCH_PARALLEL") == "3"
 
 
 def test_parallel_honors_concurrency_cap():
