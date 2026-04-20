@@ -135,6 +135,15 @@ class HybridFlowTracker(BaseTracker):
         self.current_fps = 30.0
         self._fps_last_time = 0.0
 
+        # Per-phase timing for process_frame; summarised once per second
+        # so we can see where live-tracking CPU actually goes.
+        self._phase_sum = {'yolo': 0.0, 'gray': 0.0, 'dis': 0.0,
+                           'mwf': 0.0, 'pos': 0.0, 'write': 0.0,
+                           'overlay': 0.0, 'total': 0.0}
+        self._phase_samples = 0
+        self._phase_yolo_calls = 0
+        self._phase_last_log = 0.0
+
         # Funscript reference
         self.funscript = None
 
@@ -282,6 +291,7 @@ class HybridFlowTracker(BaseTracker):
         if not self.tracking_active:
             return TrackerResult(frame, None, {})
 
+        t_total0 = time.perf_counter()
         self._update_fps()
         self._frame_count += 1
         self._frames_since_yolo += 1
@@ -289,7 +299,10 @@ class HybridFlowTracker(BaseTracker):
         h, w = frame.shape[:2]
 
         # --- Step 1: YOLO detection (every N frames) ---
+        _t = time.perf_counter()
+        yolo_ran = False
         if self._frames_since_yolo >= self._yolo_interval:
+            yolo_ran = True
             roi, penis_box, contact_box = self._run_yolo(frame, h, w)
             self._frames_since_yolo = 0
             self._roi_refreshed_this_frame = False
@@ -311,10 +324,15 @@ class HybridFlowTracker(BaseTracker):
                     self._roi_refreshed_this_frame = True
         else:
             self._roi_refreshed_this_frame = False
+        t_yolo = (time.perf_counter() - _t) * 1000.0
 
         # --- Step 2: Optical flow in ROI ---
+        _t = time.perf_counter()
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        t_gray = (time.perf_counter() - _t) * 1000.0
         dy, dx = 0.0, 0.0
+        t_dis = 0.0
+        t_mwf = 0.0
 
         if self._current_roi is not None:
             rx1, ry1, rx2, ry2 = self._current_roi
@@ -343,13 +361,17 @@ class HybridFlowTracker(BaseTracker):
                     self._prev_gray_roi = None
                 if self._prev_gray_roi is not None and self._prev_gray_roi.shape == curr_contig.shape:
                     try:
+                        _t = time.perf_counter()
                         flow = self._dis.calc(
                             self._prev_gray_roi,
                             curr_contig,
                             None
                         )
+                        t_dis = (time.perf_counter() - _t) * 1000.0
                         if flow is not None:
+                            _t = time.perf_counter()
                             dy, dx = self._magnitude_weighted_flow(flow)
+                            t_mwf = (time.perf_counter() - _t) * 1000.0
                     except cv2.error:
                         pass
 
@@ -363,6 +385,7 @@ class HybridFlowTracker(BaseTracker):
             self._prev_roi_for_flow = None
 
         # --- Step 3: Convert flow to positions ---
+        _t = time.perf_counter()
         primary_pos = self._flow_to_position(dy, 'primary')
         secondary_pos = self._flow_to_position(dx, 'secondary')
 
@@ -389,19 +412,57 @@ class HybridFlowTracker(BaseTracker):
                 primary_to_write = final_secondary
             else:
                 secondary_to_write = final_secondary
+        t_pos = (time.perf_counter() - _t) * 1000.0
 
         # Write to funscript
+        _t = time.perf_counter()
         if self.funscript:
             self.funscript.add_action(
                 timestamp_ms=frame_time_ms,
                 primary_pos=primary_to_write,
                 secondary_pos=secondary_to_write)
+        t_write = (time.perf_counter() - _t) * 1000.0
 
         action_log = [{'at': frame_time_ms, 'pos': primary_to_write, 'secondary_pos': secondary_to_write}]
 
         # --- Debug overlay ---
+        _t = time.perf_counter()
         display_frame = frame
         self._draw_overlay()
+        t_overlay = (time.perf_counter() - _t) * 1000.0
+
+        t_all = (time.perf_counter() - t_total0) * 1000.0
+        ps = self._phase_sum
+        ps['yolo'] += t_yolo
+        ps['gray'] += t_gray
+        ps['dis'] += t_dis
+        ps['mwf'] += t_mwf
+        ps['pos'] += t_pos
+        ps['write'] += t_write
+        ps['overlay'] += t_overlay
+        ps['total'] += t_all
+        self._phase_samples += 1
+        if yolo_ran:
+            self._phase_yolo_calls += 1
+
+        now = time.monotonic()
+        if self._phase_last_log == 0.0:
+            self._phase_last_log = now
+        elif now - self._phase_last_log >= 1.0 and self._phase_samples > 0:
+            n = self._phase_samples
+            yn = max(1, self._phase_yolo_calls)
+            self.logger.info(
+                f"[hybrid_flow] {n} frames in {now - self._phase_last_log:.2f}s: "
+                f"total={ps['total']/n:.2f}ms "
+                f"yolo_avg_per_call={ps['yolo']/yn:.2f}ms ({self._phase_yolo_calls}x) "
+                f"gray={ps['gray']/n:.2f}ms dis={ps['dis']/n:.2f}ms "
+                f"mwf={ps['mwf']/n:.2f}ms pos={ps['pos']/n:.2f}ms "
+                f"write={ps['write']/n:.2f}ms overlay={ps['overlay']/n:.2f}ms")
+            for k in ps:
+                ps[k] = 0.0
+            self._phase_samples = 0
+            self._phase_yolo_calls = 0
+            self._phase_last_log = now
 
         debug_info = {
             'position': final_primary,
