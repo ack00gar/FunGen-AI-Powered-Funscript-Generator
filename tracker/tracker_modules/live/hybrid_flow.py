@@ -330,15 +330,22 @@ class HybridFlowTracker(BaseTracker):
             roi_h = ry2 - ry1
 
             if roi_w > MIN_ROI_SIZE and roi_h > MIN_ROI_SIZE:
-                curr_patch = gray[ry1:ry2, rx1:rx2]
+                # gray[ry1:ry2, rx1:rx2] is typically a non-contiguous slice.
+                # DIS requires contiguous arrays, and we also need a copy for
+                # next frame's prev-patch. Single contiguous copy serves both
+                # roles -- drops one ~0.2 ms memcpy per frame vs the old
+                # ascontiguousarray+.copy() pair, and ascontiguousarray on
+                # the already-contig previous patch is a no-op so we can drop
+                # that call too.
+                curr_contig = np.ascontiguousarray(gray[ry1:ry2, rx1:rx2])
 
                 if self._roi_refreshed_this_frame:
                     self._prev_gray_roi = None
-                if self._prev_gray_roi is not None and self._prev_gray_roi.shape == curr_patch.shape:
+                if self._prev_gray_roi is not None and self._prev_gray_roi.shape == curr_contig.shape:
                     try:
                         flow = self._dis.calc(
-                            np.ascontiguousarray(self._prev_gray_roi),
-                            np.ascontiguousarray(curr_patch),
+                            self._prev_gray_roi,
+                            curr_contig,
                             None
                         )
                         if flow is not None:
@@ -346,7 +353,7 @@ class HybridFlowTracker(BaseTracker):
                     except cv2.error:
                         pass
 
-                self._prev_gray_roi = curr_patch.copy()
+                self._prev_gray_roi = curr_contig
                 self._prev_roi_for_flow = current_roi
             else:
                 self._prev_gray_roi = None

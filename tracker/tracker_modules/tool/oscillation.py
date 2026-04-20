@@ -241,10 +241,11 @@ class OscillationExperimental2Tracker(BaseTracker):
             return processed_frame, None
 
         # --- Step 1: Calculate Global Optical Flow & Global Motion Vector (FROM EXPERIMENTAL) ---
-        # Critical performance optimization: ensure contiguous arrays for OpenCV
-        prev_gray_cont = np.ascontiguousarray(self.prev_gray_oscillation)
-        current_gray_cont = np.ascontiguousarray(current_gray)
-        flow = self.flow_dense_osc.calc(prev_gray_cont, current_gray_cont, None)
+        # self.prev_gray_oscillation is always contiguous (we populate it via
+        # np.copyto into a pre-allocated buffer, see end of this method) and
+        # current_gray is a fresh cvtColor output which is also contiguous by
+        # construction, so ascontiguousarray was a no-op on both. Dropped.
+        flow = self.flow_dense_osc.calc(self.prev_gray_oscillation, current_gray, None)
         if flow is None:
             self.prev_gray_oscillation = current_gray.copy()
             return processed_frame, None
