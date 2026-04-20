@@ -310,169 +310,37 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
         return result_actions
     
     def _limit_speed(self, actions: List[Dict], speed_threshold: float, axis: str) -> List[Dict]:
-        """ULTRA-OPTIMIZED: Vectorized speed limiting with batch processing."""
+        """Clamp each point's position so no edge exceeds speed_threshold
+        (positions per SECOND). Prior implementation tried to insert
+        intermediate anchors which did not actually slow edge speed.
+        """
         if len(actions) <= 1:
             return actions
-        
-        # OPTIMIZATION: Use vectorized approach for large datasets
-        if len(actions) > 3000:
-            return self._limit_speed_vectorized(actions, speed_threshold, axis)
-        else:
-            return self._limit_speed_original(actions, speed_threshold, axis)
-    
-    def _limit_speed_vectorized(self, actions: List[Dict], speed_threshold: float, axis: str) -> List[Dict]:
-        """REVOLUTIONARY: Bulk geometric interpolation for massive speedup."""
-        # Extract arrays for vectorized operations
-        timestamps = np.array([action['at'] for action in actions])
-        positions = np.array([action['pos'] for action in actions])
-        
-        # BREAKTHROUGH 1: Pre-compute ALL violations using vectorized operations
-        time_deltas = np.diff(timestamps)
-        pos_deltas = np.diff(positions)
-        speeds = np.abs(pos_deltas) / np.maximum(time_deltas, 1)
-        violation_mask = speeds > speed_threshold
-        
-        if not np.any(violation_mask):
-            return actions
-        
-        # BREAKTHROUGH 2: Build interpolation segments in bulk using geometric math
-        violation_indices = np.where(violation_mask)[0]
-        
-        # Pre-allocate result arrays for maximum efficiency
-        estimated_size = len(actions) + len(violation_indices) * 5  # Estimate 5 points per violation
-        result_times = np.zeros(estimated_size)
-        result_positions = np.zeros(estimated_size)
-        
-        write_idx = 0
-        last_processed = 0
-        
-        # BREAKTHROUGH 3: Vectorized segment processing
-        for violation_idx in violation_indices:
-            # Copy non-violating points before this violation
-            segment_start = last_processed
-            segment_end = violation_idx + 1
-            
-            if segment_start < segment_end:
-                segment_len = segment_end - segment_start
-                result_times[write_idx:write_idx + segment_len] = timestamps[segment_start:segment_end]
-                result_positions[write_idx:write_idx + segment_len] = positions[segment_start:segment_end]
-                write_idx += segment_len
-            
-            # BREAKTHROUGH 4: Geometric interpolation math
-            start_time = timestamps[violation_idx]
-            end_time = timestamps[violation_idx + 1]
-            start_pos = positions[violation_idx]
-            end_pos = positions[violation_idx + 1]
-            
-            # Calculate required intermediate points using mathematics
-            total_distance = abs(end_pos - start_pos)
-            total_time = end_time - start_time
-            max_distance_per_segment = speed_threshold * total_time / 1000
-            
-            if max_distance_per_segment > 0:
-                num_segments = max(1, int(np.ceil(total_distance / max_distance_per_segment)))
-                
-                # VECTORIZED interpolation point generation
-                if num_segments > 1:
-                    # Generate intermediate time points
-                    time_points = np.linspace(start_time, end_time, num_segments + 1)
-                    # Generate intermediate position points
-                    pos_points = np.linspace(start_pos, end_pos, num_segments + 1)
-                    
-                    # Add all interpolated points at once
-                    interp_len = len(time_points) - 1  # Skip the start point (already added)
-                    if write_idx + interp_len < len(result_times):
-                        result_times[write_idx:write_idx + interp_len] = time_points[1:]
-                        result_positions[write_idx:write_idx + interp_len] = pos_points[1:]
-                        write_idx += interp_len
-            
-            last_processed = violation_idx + 1
-        
-        # Add remaining points
-        if last_processed < len(timestamps):
-            remaining_len = len(timestamps) - last_processed
-            result_times[write_idx:write_idx + remaining_len] = timestamps[last_processed:]
-            result_positions[write_idx:write_idx + remaining_len] = positions[last_processed:]
-            write_idx += remaining_len
-        
-        # BREAKTHROUGH 5: Bulk reconstruction of action dicts
-        result_actions = [
-            {'at': int(result_times[i]), 'pos': int(np.clip(result_positions[i], 0, 100))}
-            for i in range(write_idx)
-        ]
-        
-        speed_corrections = len(result_actions) - len(actions)
-        if speed_corrections > 0:
-            self.logger.debug(f"{axis} axis: Added {speed_corrections} points (geometric interpolation)")
-        
-        return result_actions
-    
-    def _limit_speed_original(self, actions: List[Dict], speed_threshold: float, axis: str) -> List[Dict]:
-        """Original speed limiting for smaller datasets."""
-        speed_limited_actions = [actions[0]]  # Always keep first action
-        
+        threshold_per_ms = speed_threshold / 1000.0
+        result = [dict(actions[0])]
+        clamped = 0
         for i in range(1, len(actions)):
-            current = actions[i]
-            previous = speed_limited_actions[-1]
-            
-            time_delta = current['at'] - previous['at']
-            if time_delta <= 0:
+            curr_t = actions[i]['at']
+            curr_p = actions[i]['pos']
+            prev_t = result[-1]['at']
+            prev_p = result[-1]['pos']
+            dt = curr_t - prev_t
+            if dt <= 0:
+                result.append(dict(actions[i]))
                 continue
-            
-            pos_delta = abs(current['pos'] - previous['pos'])
-            current_speed = pos_delta / time_delta  # positions per millisecond
-            
-            if current_speed > speed_threshold:
-                # Need to limit speed - insert intermediate points
-                intermediate_actions = self._create_intermediate_actions(
-                    previous, current, speed_threshold
-                )
-                speed_limited_actions.extend(intermediate_actions)
+            max_dp = threshold_per_ms * dt
+            dp = curr_p - prev_p
+            if abs(dp) > max_dp:
+                direction = 1 if dp > 0 else -1
+                new_p = int(max(0, min(100, round(prev_p + direction * max_dp))))
+                result.append({'at': int(curr_t), 'pos': new_p})
+                clamped += 1
             else:
-                speed_limited_actions.append(current)
-        
-        speed_corrections = len(speed_limited_actions) - len(actions)
-        if speed_corrections > 0:
-            self.logger.debug(f"{axis} axis: Added {speed_corrections} intermediate points for speed limiting")
-        
-        return speed_limited_actions
-    
-    def _create_intermediate_actions(self, start_action: Dict, end_action: Dict, 
-                                   max_speed: float) -> List[Dict]:
-        """Create intermediate actions to limit speed between two points."""
-        time_delta = end_action['at'] - start_action['at']
-        pos_delta = end_action['pos'] - start_action['pos']
-        
-        if time_delta <= 0:
-            return [end_action]
-        
-        # Calculate how many intermediate points we need
-        required_time = abs(pos_delta) / max_speed
-        if required_time <= time_delta:
-            return [end_action]
-        
-        num_segments = int(np.ceil(required_time / time_delta))
-        
-        intermediate_actions = []
-        for i in range(1, num_segments + 1):
-            progress = i / num_segments
-            
-            intermediate_time = int(start_action['at'] + (time_delta * progress))
-            intermediate_pos = int(start_action['pos'] + (pos_delta * progress))
-            intermediate_pos = int(np.clip(intermediate_pos, 0, 100))
-            
-            intermediate_actions.append({
-                'at': intermediate_time,
-                'pos': intermediate_pos
-            })
-        
-        # Make sure the last intermediate action matches the target
-        if intermediate_actions:
-            intermediate_actions[-1] = end_action
-        else:
-            intermediate_actions = [end_action]
-        
-        return intermediate_actions
+                result.append(dict(actions[i]))
+        if clamped > 0:
+            self.logger.debug(
+                f"{axis} axis: clamped {clamped} points (speed limiter)")
+        return result
     
     def get_preview(self, funscript, axis: str = 'both', **parameters) -> Dict[str, Any]:
         """Generate a preview of the speed limiter effect."""
