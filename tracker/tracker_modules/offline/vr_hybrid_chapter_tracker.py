@@ -656,23 +656,33 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                 min(w, int(px2 + pad_x)), min(h, int(py2 + pad_y)))
 
     def _magnitude_weighted_flow(self, flow):
-        magnitudes = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
+        # Cache Gaussian spatial weights by ROI shape (offline Stage 3 calls
+        # this for every frame; the flow ROI rarely changes size so the
+        # np.exp+np.outer pair runs once per resize, not once per frame).
+        # Squared-magnitude weighting is equivalent to sqrt'd magnitudes in
+        # the weighted-mean ratio and saves one np.sqrt over the flow field.
         region_h, region_w = flow.shape[:2]
-        center_x, sigma_x = region_w / 2, region_w / 4.0
-        center_y, sigma_y = region_h / 2, region_h / 4.0
-        x_coords = np.arange(region_w)
-        y_coords = np.arange(region_h)
-        weights_x = np.exp(-((x_coords - center_x) ** 2) / (2 * sigma_x ** 2))
-        weights_y = np.exp(-((y_coords - center_y) ** 2) / (2 * sigma_y ** 2))
-        spatial_weights = np.outer(weights_y, weights_x)
-        combined_weights = magnitudes * spatial_weights
-        total_weight = np.sum(combined_weights)
+        key = (region_h, region_w)
+        if getattr(self, "_mwf_spatial_key", None) != key:
+            cx, sx = region_w * 0.5, region_w * 0.25
+            cy, sy = region_h * 0.5, region_h * 0.25
+            wx = np.exp(-((np.arange(region_w, dtype=np.float32) - cx) ** 2) / (2 * sx * sx))
+            wy = np.exp(-((np.arange(region_h, dtype=np.float32) - cy) ** 2) / (2 * sy * sy))
+            self._mwf_spatial = np.outer(wy, wx)
+            self._mwf_spatial_key = key
+        spatial_weights = self._mwf_spatial
+
+        fx = flow[..., 0]
+        fy = flow[..., 1]
+        mag2 = fx * fx + fy * fy
+        combined_weights = mag2 * spatial_weights
+        total_weight = combined_weights.sum()
         if total_weight > 0:
-            dy = np.sum(flow[..., 1] * combined_weights) / total_weight
-            dx = np.sum(flow[..., 0] * combined_weights) / total_weight
+            dy = (fy * combined_weights).sum() / total_weight
+            dx = (fx * combined_weights).sum() / total_weight
         else:
-            dy = np.median(flow[..., 1])
-            dx = np.median(flow[..., 0])
+            dy = float(np.median(fy))
+            dx = float(np.median(fx))
         return dy, dx
 
     # --- Post-processing (same as V1) ----------------------------------------

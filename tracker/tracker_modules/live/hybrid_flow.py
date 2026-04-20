@@ -198,6 +198,13 @@ class HybridFlowTracker(BaseTracker):
             # Load settings
             self._load_settings()
 
+            # Spatial-weight cache for _magnitude_weighted_flow. Key is the
+            # (fh, fw) ROI shape; value is the pre-computed Gaussian weight
+            # plane so np.exp / np.outer run once per ROI resize, not once
+            # per frame.
+            self._mwf_spatial_key: Optional[Tuple[int, int]] = None
+            self._mwf_spatial: Optional[np.ndarray] = None
+
             self._initialized = True
             self.logger.info("Hybrid Flow Tracker initialized")
             return True
@@ -478,26 +485,38 @@ class HybridFlowTracker(BaseTracker):
     # -------------------------------------------------------------------------
 
     def _magnitude_weighted_flow(self, flow: np.ndarray) -> Tuple[float, float]:
-        """Extract magnitude-weighted dy/dx from flow field."""
-        magnitudes = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
+        """Extract magnitude-weighted dy/dx from flow field.
 
+        Optimizations over the straight formulation:
+          - Gaussian spatial weight is cached by ROI shape (ROI rarely
+            changes size, so np.exp + np.outer run once per ROI resize).
+          - The weighting scheme uses squared magnitudes, not sqrt'd ones.
+            sqrt is monotonic so the weighted-mean ratio is unchanged; we
+            save one np.sqrt pass over the full flow field per frame.
+        """
         fh, fw = flow.shape[:2]
-        cx, sx = fw / 2, fw / 4.0
-        cy, sy = fh / 2, fh / 4.0
+        key = (fh, fw)
+        if getattr(self, "_mwf_spatial_key", None) != key:
+            cx, sx = fw * 0.5, fw * 0.25
+            cy, sy = fh * 0.5, fh * 0.25
+            wx = np.exp(-((np.arange(fw, dtype=np.float32) - cx) ** 2) / (2 * sx * sx))
+            wy = np.exp(-((np.arange(fh, dtype=np.float32) - cy) ** 2) / (2 * sy * sy))
+            self._mwf_spatial = np.outer(wy, wx)
+            self._mwf_spatial_key = key
+        spatial = self._mwf_spatial
 
-        wx = np.exp(-((np.arange(fw) - cx) ** 2) / (2 * sx ** 2))
-        wy = np.exp(-((np.arange(fh) - cy) ** 2) / (2 * sy ** 2))
-        spatial = np.outer(wy, wx)
-
-        combined = magnitudes * spatial
-        total = np.sum(combined)
+        fx = flow[..., 0]
+        fy = flow[..., 1]
+        mag2 = fx * fx + fy * fy
+        combined = mag2 * spatial
+        total = combined.sum()
 
         if total > 0:
-            dy = np.sum(flow[..., 1] * combined) / total
-            dx = np.sum(flow[..., 0] * combined) / total
+            dy = (fy * combined).sum() / total
+            dx = (fx * combined).sum() / total
         else:
-            dy = np.median(flow[..., 1])
-            dx = np.median(flow[..., 0])
+            dy = float(np.median(fy))
+            dx = float(np.median(fx))
 
         return float(dy), float(dx)
 
