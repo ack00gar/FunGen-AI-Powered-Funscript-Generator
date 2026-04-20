@@ -94,20 +94,22 @@ class GamepadInput:
         if not glfw.joystick_present(jid):
             return None
 
-        # Prefer gamepad API (standard mapping) over raw joystick
+        # Prefer gamepad API (standard mapping) over raw joystick.
         if glfw.joystick_is_gamepad(jid):
-            success, state = glfw.get_gamepad_state(jid)
-            if not success:
+            state = glfw.get_gamepad_state(jid)
+            if state is None:
                 return None
-            axes = list(state.axes)
-            buttons = list(state.buttons)
+            axes = [float(x) for x in state.axes]
+            buttons = [int(b) for b in state.buttons]
         else:
-            axes_raw = glfw.get_joystick_axes(jid)
-            buttons_raw = glfw.get_joystick_buttons(jid)
-            if axes_raw is None:
+            axes_ptr, a_count = glfw.get_joystick_axes(jid)
+            btn_ptr, b_count = glfw.get_joystick_buttons(jid)
+            if not axes_ptr or a_count <= 0:
                 return None
-            axes = list(axes_raw) + [0.0] * max(0, 4 - len(axes_raw))
-            buttons = list(buttons_raw or []) + [0] * max(0, 7 - len(buttons_raw or []))
+            axes = [float(axes_ptr[i]) for i in range(a_count)]
+            axes += [0.0] * max(0, 4 - len(axes))
+            buttons = [int(btn_ptr[i]) for i in range(b_count)] if btn_ptr else []
+            buttons += [0] * max(0, 7 - len(buttons))
 
         pri_idx = _AXIS_NAME_TO_INDEX.get(self.axis_mapping, _AXIS_LEFT_Y)
         sec_idx = _AXIS_NAME_TO_INDEX.get(self.secondary_mapping, _AXIS_RIGHT_X)
