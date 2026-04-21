@@ -109,9 +109,10 @@ def detect_gpu_environment():
     """
     system = platform.system()
     
-    # macOS: Use core requirements (MPS/CPU PyTorch)
+    # macOS: torch comes from mps.txt at install time; the inline pyobjc check
+    # below covers the Metal-specific bits at runtime.
     if system == "Darwin":
-        return "requirements/core.requirements.txt", "macOS (Metal/CPU)"
+        return "requirements/base.txt", "macOS (Metal/CPU)"
     
     # Windows/Linux: Detect GPU type
     cuda_available = False
@@ -144,13 +145,13 @@ def detect_gpu_environment():
     
     # Return appropriate requirements file
     if rtx_50_series:
-        return "requirements/cuda.50series.requirements.txt", "NVIDIA RTX 50-series (CUDA)"
+        return "requirements/cuda_blackwell.txt", "NVIDIA RTX 50-series (CUDA)"
     elif cuda_available:
-        return "requirements/cuda.requirements.txt", "NVIDIA CUDA"
+        return "requirements/cuda_stable.txt", "NVIDIA CUDA"
     elif rocm_available:
-        return "requirements/rocm.requirements.txt", "AMD ROCm"
+        return "requirements/rocm.txt", "AMD ROCm"
     else:
-        return "requirements/core.requirements.txt", "CPU-only"
+        return "requirements/base.txt", "CPU-only"
 
 def check_and_install_dependencies(*, non_interactive: bool = True, auto_install: bool = True):
     """
@@ -168,12 +169,12 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     logger.debug(f"Detected environment: {env_description}")
     logger.debug(f"Using requirements file: {requirements_file}")
 
-    # 3. Load and install core requirements first
+    # 3. Load and install base requirements first
     try:
-        with open('requirements/core.requirements.txt', 'r') as f:
+        with open('requirements/base.txt', 'r') as f:
             core_packages = [line.strip() for line in f if line.strip() and not line.startswith('#')]
     except FileNotFoundError:
-        logger.error("requirements/core.requirements.txt not found.")
+        logger.error("requirements/base.txt not found.")
         sys.exit(1)
 
     core_changed = False
@@ -192,7 +193,7 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
 
     # 4. Load and install GPU-specific requirements if needed
     gpu_changed = False
-    if requirements_file != "requirements/core.requirements.txt":
+    if requirements_file != "requirements/base.txt":
         try:
             with open(requirements_file, 'r') as f:
                 lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
@@ -202,7 +203,7 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
                 gpu_packages = []
                 
                 for line in lines:
-                    if line.startswith('-i ') or line.startswith('--index-url '):
+                    if line.startswith(('-i ', '--index-url ', '--extra-index-url ')):
                         pip_extra_args.extend(line.split())
                     else:
                         gpu_packages.append(line)
@@ -213,7 +214,7 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
             tensorrt_packages = []
             
             for line in lines:
-                if line.startswith('-i ') or line.startswith('--index-url '):
+                if line.startswith(('-i ', '--index-url ', '--extra-index-url ')):
                     pip_extra_args.extend(line.split())
                 elif line.startswith('torch==') or line.startswith('torchvision==') or line.startswith('torchaudio=='):
                     pytorch_packages.append(line)
@@ -222,7 +223,7 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
                 else:
                     # Add other GPU-specific packages to pytorch_packages to be installed with custom index
                     # This assumes other GPU packages also need the custom PyTorch index
-                    # If not, they should be handled separately or moved to requirements/core.requirements.txt
+                    # If not, they should be handled separately or moved to requirements/base.txt
                     pytorch_packages.append(line)
 
             if pytorch_packages:
@@ -246,11 +247,11 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
             logger.warning(f"{requirements_file} not found. Continuing with core packages only.")
 
     # Install torch-tensorrt and tensorrt separately using the nightly index
-    if requirements_file == "requirements/cuda.requirements.txt" or requirements_file == "requirements/cuda.50series.requirements.txt":
+    if requirements_file in ("requirements/cuda_stable.txt", "requirements/cuda_blackwell.txt"):
         cuda_version = None
-        if requirements_file == "requirements/cuda.requirements.txt":
+        if requirements_file == "requirements/cuda_stable.txt":
             cuda_version = "cu128"
-        elif requirements_file == "requirements/cuda.50series.requirements.txt":
+        elif requirements_file == "requirements/cuda_blackwell.txt":
             cuda_version = "cu129"
         
         if cuda_version:
