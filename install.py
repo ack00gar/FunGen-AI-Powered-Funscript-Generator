@@ -341,6 +341,56 @@ def ensure_ffmpeg() -> None:
         print("  FunGen will still launch but video features will not work until ffmpeg is on PATH.")
 
 
+# ─── mpv via system package manager (non-fatal) ─────────────────────────────
+
+def ensure_mpv() -> None:
+    """Try to install mpv via the OS package manager. Non-fatal: prints a
+    manual-install hint and returns if no automated path works.
+    FunGen spawns `mpv` as a subprocess for fullscreen review playback."""
+    if shutil.which("mpv"):
+        return
+
+    _print_section("mpv not found, attempting install")
+    sys_os = platform.system()
+    try:
+        if sys_os == "Windows":
+            if shutil.which("winget"):
+                # shinchiro.mpv is the canonical winget package that installs
+                # mpv.exe to PATH (other packages like mpv.net ship as mpvnet.exe
+                # which FunGen's IPC bridge cannot find).
+                _run("winget", "install", "-e", "--id", "shinchiro.mpv",
+                     "--silent", "--accept-source-agreements",
+                     "--accept-package-agreements")
+            else:
+                print("  winget not found. Install mpv manually:  https://mpv.io/installation/")
+                return
+        elif sys_os == "Darwin":
+            if shutil.which("brew"):
+                _run("brew", "install", "mpv")
+            else:
+                print("  Homebrew not found. Install mpv manually:  brew install mpv")
+                print("  (install Homebrew from https://brew.sh first if you don't have it).")
+                return
+        elif sys_os == "Linux":
+            for mgr_check, args in (
+                ("apt", ["sudo", "apt", "install", "-y", "mpv"]),
+                ("dnf", ["sudo", "dnf", "install", "-y", "mpv"]),
+                ("pacman", ["sudo", "pacman", "-S", "--noconfirm", "mpv"]),
+            ):
+                if shutil.which(mgr_check):
+                    _run(*args)
+                    break
+            else:
+                print("  no supported package manager found; install mpv via your distro's tools.")
+                return
+        else:
+            print(f"  unsupported OS ({sys_os}); install mpv manually.")
+            return
+    except subprocess.CalledProcessError as e:
+        print(f"  mpv install failed: {e}")
+        print("  FunGen will still launch but fullscreen video playback will not work.")
+
+
 # ─── per-OS launch hint ─────────────────────────────────────────────────────
 
 def print_launch_hint() -> None:
@@ -373,6 +423,7 @@ def main() -> None:
 
     build_env(uv, channel)
     ensure_ffmpeg()
+    ensure_mpv()
     offer_conda_cleanup()
     print_launch_hint()
 
