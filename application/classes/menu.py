@@ -678,10 +678,12 @@ class MainMenu:
             )
             if clicked and new_val != smooth_curve:
                 settings.set("timeline_smooth_curve", new_val)
-                for tl_attr in ("interactive_timeline1", "interactive_timeline2"):
-                    tl = getattr(self.app, tl_attr, None)
-                    if tl is not None:
-                        tl._show_smooth_curve = new_val
+                gui = getattr(self.app, 'gui_instance', None)
+                if gui is not None:
+                    for tl_attr in ("timeline_editor1", "timeline_editor2"):
+                        tl = getattr(gui, tl_attr, None)
+                        if tl is not None:
+                            tl._show_smooth_curve = new_val
 
             if imgui.menu_item("Reset Timeline View", self._get_shortcut_display("reset_timeline_view"))[0]:
                 app_state.timeline_zoom_factor_ms_per_px = settings.get_default_settings().get(

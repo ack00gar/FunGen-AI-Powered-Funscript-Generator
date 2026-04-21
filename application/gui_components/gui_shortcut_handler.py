@@ -1060,10 +1060,12 @@ class ShortcutHandlerMixin:
         settings = self.app.app_settings
         new_val = not bool(settings.get("timeline_smooth_curve", True))
         settings.set("timeline_smooth_curve", new_val)
-        for tl_attr in ("interactive_timeline1", "interactive_timeline2"):
-            tl = getattr(self.app, tl_attr, None)
-            if tl is not None:
-                tl._show_smooth_curve = new_val
+        gui = getattr(self.app, 'gui_instance', None)
+        if gui is not None:
+            for tl_attr in ("timeline_editor1", "timeline_editor2"):
+                tl = getattr(gui, tl_attr, None)
+                if tl is not None:
+                    tl._show_smooth_curve = new_val
         status = "smoothed" if new_val else "straight"
         self.app.logger.info(f"Timeline curve: {status}", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
