@@ -277,6 +277,7 @@ def main():
     parser.add_argument('--recursive', '-r', action='store_true', help='If input_path is a folder, process it recursively.')
     parser.add_argument('--hwaccel', metavar='METHOD', default=None, help='Override hardware acceleration method for this run (e.g. cuda, qsv, auto, none).')
     parser.add_argument('--watch', metavar='FOLDER', help='Watch folder for new videos (requires patreon_features add-on).')
+    parser.add_argument('--max-parallel', type=int, default=1, metavar='N', help='With --watch: max number of videos to process concurrently (default 1).')
     parser.add_argument('--pipeline', metavar='PRESET', default=None, help='Apply a plugin pipeline preset after generation (e.g. "Ultimate Autotune", "Light Polish").')
 
     args = parser.parse_args()
@@ -304,26 +305,96 @@ def main():
 
     # Step 5: Validate arguments and start the appropriate interface
     if args.watch:
-        # Headless watched-folder mode (supporter feature)
+        # Headless watched-folder mode (supporter feature). Earlier versions of
+        # this block created the queue and the watcher but never consumed the
+        # queue, so detected videos piled up without ever being processed.
+        # Fix: spawn `main.py --mode <alias>` subprocesses (up to --max-parallel)
+        # for each queued item, tracking them via the BatchQueue state machine.
         try:
             from application.utils.feature_detection import is_feature_available
             if not is_feature_available("patreon_features"):
                 parser.error("--watch requires the patreon_features add-on")
             from application.batch.watched_folder import WatchedFolderProcessor
-            from application.batch.batch_queue import BatchQueue
+            from application.batch.batch_queue import BatchQueue, BatchItemStatus
         except ImportError as e:
             parser.error(f"--watch requires patreon_features: {e}")
 
+        # Resolve the tracker's CLI alias from args.mode (argparse already
+        # validated it against the discovery system earlier in this file).
+        try:
+            from config.tracker_discovery import get_tracker_discovery
+            info = get_tracker_discovery().get_tracker_info(args.mode)
+            cli_alias = info.cli_aliases[0] if info and info.cli_aliases else args.mode
+        except Exception:
+            cli_alias = args.mode
+
+        max_parallel = max(1, int(getattr(args, 'max_parallel', 1) or 1))
         queue = BatchQueue()
         watcher = WatchedFolderProcessor(on_new_video=lambda p: queue.add(p))
         watcher.start_watching(args.watch, recursive=True)
-        logger.info(f"Watching folder: {args.watch} (Ctrl-C to stop)")
+        logger.info(f"Watching folder: {args.watch}")
+        logger.info(f"Mode: {cli_alias}, max_parallel: {max_parallel}, Ctrl-C to stop")
+
+        import os as _os
+        import time as _time
+        from pathlib import Path as _Path
+        main_py = _Path(__file__).resolve()
+        inflight: dict[int, subprocess.Popen] = {}
+
+        def _spawn(idx: int) -> bool:
+            item = queue.items[idx]
+            cmd = [sys.executable, str(main_py), item.video_path,
+                   "--mode", cli_alias, "--quiet", "--overwrite"]
+            if args.hwaccel:
+                cmd += ["--hwaccel", args.hwaccel]
+            try:
+                proc = subprocess.Popen(cmd, cwd=str(main_py.parent),
+                                        start_new_session=True)
+            except Exception as exc:
+                queue.mark_failed(idx, f"spawn failed: {exc}")
+                return False
+            inflight[idx] = proc
+            queue.mark_processing(idx)
+            logger.info(f"Processing: {_os.path.basename(item.video_path)} (pid {proc.pid})")
+            return True
+
         try:
-            import time
             while True:
-                time.sleep(1)
+                # reap finished subprocesses
+                for idx, proc in list(inflight.items()):
+                    rc = proc.poll()
+                    if rc is None:
+                        continue
+                    name = _os.path.basename(queue.items[idx].video_path)
+                    if rc == 0:
+                        queue.mark_completed(idx)
+                        logger.info(f"Completed: {name}")
+                    else:
+                        queue.mark_failed(idx, f"rc={rc}")
+                        logger.warning(f"Failed (rc={rc}): {name}")
+                    del inflight[idx]
+
+                # fill up to max_parallel
+                while len(inflight) < max_parallel:
+                    next_idx = next(
+                        (i for i, it in enumerate(queue.items)
+                         if it.status == BatchItemStatus.QUEUED and i not in inflight),
+                        None,
+                    )
+                    if next_idx is None:
+                        break
+                    if not _spawn(next_idx):
+                        break
+
+                _time.sleep(1)
         except KeyboardInterrupt:
             watcher.stop_watching()
+            logger.info(f"Stop requested; terminating {len(inflight)} inflight job(s)...")
+            for proc in inflight.values():
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
             logger.info("Stopped watching")
     elif args.input_path:
         # Validate funscript mode arguments
