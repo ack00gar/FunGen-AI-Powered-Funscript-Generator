@@ -153,11 +153,33 @@ def detect_gpu_environment():
     else:
         return "requirements/base.txt", "CPU-only"
 
+def _ensure_pip_in_venv():
+    """uv venvs created without --seed don't ship pip. Bootstrap it via ensurepip
+    so the rest of this checker (which shells out to `python -m pip ...`) works."""
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "--version"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return  # pip already available
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    logger.warning("pip is missing from this venv (older uv install), bootstrapping via ensurepip...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "ensurepip", "--upgrade"])
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Could not bootstrap pip: {e}. Re-run install.bat / install.sh.")
+        sys.exit(1)
+
+
 def check_and_install_dependencies(*, non_interactive: bool = True, auto_install: bool = True):
     """
     Checks for and installs missing dependencies.
     This function is designed to be run before the main application starts.
     """
+    # 0. Make sure pip is reachable inside this venv (required by every step below).
+    _ensure_pip_in_venv()
+
     # 1. Self-bootstrap: Ensure the checker has its own dependencies
     # Note: send2trash is included because it's imported by application.utils.__init__.py -> generated_file_manager.py
     bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging', 'send2trash'], pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
@@ -275,9 +297,14 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
                     else:
                         logger.warning("Auto-install is disabled: skipping installation of torch-tensorrt. Application may not function correctly.")
                 except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                    logger.error(f"Failed to install torch-tensorrt and tensorrt: {e}")
-                    logger.error("Please install them manually and restart.")
-                    sys.exit(1)
+                    # TensorRT is an optional accelerator. If the install fails
+                    # (nightly wheel missing for this platform/python combo,
+                    # ABI mismatch, network error, etc.) FunGen falls back to
+                    # standard PyTorch inference. Don't kill the app over it.
+                    logger.warning(f"torch-tensorrt install failed: {e}")
+                    logger.warning("Continuing without TensorRT acceleration.")
+                    logger.warning("To retry later: pip install torch-tensorrt tensorrt "
+                                   f"--extra-index-url {nightly_index_url}")
 
     # Check if we need to restart due to major package changes
     major_changes = bootstrap_changed or core_changed or macos_changed or gpu_changed

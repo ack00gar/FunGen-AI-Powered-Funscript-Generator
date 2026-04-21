@@ -208,7 +208,11 @@ def build_env(uv: Path, channel: str) -> None:
     _print_section(f"Creating Python 3.11 environment at {VENV}")
     if VENV.exists():
         shutil.rmtree(VENV)
-    _run(str(uv), "venv", "--python", "3.11", str(VENV))
+    # --seed installs pip into the venv. Required because the runtime
+    # dependency checker shells out to `python -m pip install ...` to
+    # auto-install missing packages after a `git pull`; without --seed,
+    # the venv has no pip and that call fails with "No module named pip".
+    _run(str(uv), "venv", "--python", "3.11", "--seed", str(VENV))
 
     _print_section(f"Installing dependencies (channel: {channel})")
     # unsafe-best-match: uv default (first-index) refuses to look at PyPI when
