@@ -55,10 +55,12 @@ def _find_or_clone_project() -> Path:
     print()
     print(f"== Fetching FunGen source into {sub} ==")
     sub.parent.mkdir(parents=True, exist_ok=True)
+    if not shutil.which("git"):
+        _try_install_git()
     if shutil.which("git"):
         subprocess.run(["git", "clone", "--depth", "1", REPO_HTTPS, str(sub)], check=True)
     else:
-        print("  git not found, downloading source archive instead...")
+        print("  git install failed, falling back to source archive...")
         with tempfile.TemporaryDirectory() as tmp:
             zip_path = Path(tmp) / "fungen.zip"
             urllib.request.urlretrieve(REPO_ZIP, zip_path)
@@ -73,6 +75,40 @@ def _find_or_clone_project() -> Path:
     if not (sub / "requirements" / "base.txt").exists():
         sys.exit(f"FunGen source did not arrive at {sub}; aborting.")
     return sub
+
+
+def _try_install_git() -> None:
+    """Install git via OS package manager. Non-fatal."""
+    sys_os = platform.system()
+    print("  git not found, attempting install...")
+    try:
+        if sys_os == "Windows":
+            if shutil.which("winget"):
+                subprocess.run(
+                    ["winget", "install", "-e", "--id", "Git.Git", "--silent",
+                     "--accept-source-agreements", "--accept-package-agreements"],
+                    check=True,
+                )
+                # winget puts git at C:\Program Files\Git\cmd\git.exe but
+                # doesn't refresh the current cmd session's PATH.
+                for p in (r"C:\Program Files\Git\cmd", r"C:\Program Files (x86)\Git\cmd"):
+                    if Path(p).exists():
+                        os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
+                        break
+        elif sys_os == "Darwin":
+            if shutil.which("brew"):
+                subprocess.run(["brew", "install", "git"], check=True)
+        elif sys_os == "Linux":
+            for mgr, args in (
+                ("apt", ["sudo", "apt", "install", "-y", "git"]),
+                ("dnf", ["sudo", "dnf", "install", "-y", "git"]),
+                ("pacman", ["sudo", "pacman", "-S", "--noconfirm", "git"]),
+            ):
+                if shutil.which(mgr):
+                    subprocess.run(args, check=True)
+                    break
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
 
 
 ROOT = _find_or_clone_project()
