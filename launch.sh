@@ -1,28 +1,42 @@
 #!/bin/bash
+# FunGen launcher (Linux + macOS Terminal). Self-heals: if .venv is missing
+# or broken, runs install.py before launching.
+set -e
 cd "$(dirname "$0")"
+
+# Homebrew on Apple Silicon ships things (mpv, ffmpeg) we want on PATH
 export PATH="/opt/homebrew/bin:$PATH"
 
-# Prevent pip/python from using user-site packages
+# Don't pull in user-site packages from a stray ~/.local install
 export PYTHONNOUSERSITE=1
 
-# Disable Ultralytics telemetry for privacy
-export YOLO_TELEMETRY=False
-
-# Prevent OMP duplicate libomp crash (conda + torch both ship libomp)
+# pip torch wheels also bundle libomp on macOS; this prevents the duplicate-libomp crash
+# regardless of whether we're under conda, venv, or a plain system Python.
 export KMP_DUPLICATE_LIB_OK=TRUE
 
-# Isolate Ultralytics config to project directory (prevents cross-project corruption)
-export YOLO_CONFIG_DIR="$(dirname "$0")/config/ultralytics"
-
-# Prevent Ultralytics from phoning home during normal usage
+# Ultralytics: telemetry + offline + isolated config dir per project
+export YOLO_TELEMETRY=False
 export YOLO_OFFLINE=True
+export YOLO_CONFIG_DIR="$(pwd)/config/ultralytics"
 
-# Activate environment (skip if already active to avoid double-activation)
-if [ "$CONDA_DEFAULT_ENV" != "FunGen" ]; then
-    echo "Activating FunGen environment..."
-    source "$HOME/miniconda3/bin/activate" FunGen
-else
-    echo "FunGen environment already active."
+# Drop any active conda env vars so nothing leaks into our venv interpreter
+unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_PROMPT_MODIFIER CONDA_SHLVL
+
+VENV_PY=".venv/bin/python"
+
+if [ ! -x "$VENV_PY" ]; then
+    echo "FunGen environment missing — running installer (one-time, ~2 min)..."
+    for py in python3 python; do
+        if command -v "$py" >/dev/null 2>&1; then
+            "$py" install.py
+            break
+        fi
+    done
 fi
-echo "Starting FunGen..."
-python main.py "$@"
+
+if [ ! -x "$VENV_PY" ]; then
+    echo "Install failed. See output above. Re-run ./install.sh and report the issue." >&2
+    exit 1
+fi
+
+exec "$VENV_PY" main.py "$@"

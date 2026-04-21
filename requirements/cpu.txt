@@ -1,0 +1,6 @@
+# CPU-only torch wheels (Linux + Windows). Avoids pulling in the ~2GB CUDA bloat
+# that comes with the default PyPI wheels.
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+torch~=2.8.0
+torchvision~=0.23.0

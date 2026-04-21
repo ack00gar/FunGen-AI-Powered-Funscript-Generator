@@ -182,13 +182,14 @@ class FunGenUninstaller:
                 size = self.get_directory_size(fungen_env)
                 print(f"  Found conda env: {fungen_env} ({self.format_size(size)})")
         
-        # Venv environments (look for venv folders in project directories)
+        # Venv environments — both legacy `venv/` and current `.venv/`
         for project_path in self.project_paths:
-            venv_path = project_path / "venv"
-            if venv_path.exists():
-                self.env_paths.append(venv_path)
-                size = self.get_directory_size(venv_path)
-                print(f"  Found venv: {venv_path} ({self.format_size(size)})")
+            for venv_name in ("venv", ".venv"):
+                venv_path = project_path / venv_name
+                if venv_path.exists():
+                    self.env_paths.append(venv_path)
+                    size = self.get_directory_size(venv_path)
+                    print(f"  Found venv: {venv_path} ({self.format_size(size)})")
     
     def _find_tools(self):
         """Find tools installed by FunGen installer"""

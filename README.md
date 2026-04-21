@@ -49,108 +49,81 @@ This project is still at the early stages of development. It is not intended for
 
 ## Quick Installation (Recommended)
 
-**Automatic installer that handles everything for you:**
+**One installer for every platform. No miniconda, no admin rights, ~500 MB on disk.**
 
 ### Windows
 1. Download: [install.bat](https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.bat)
-2. Double-click to run (or run from command prompt)
-3. Wait for automatic installation of Python, Git, FFmpeg, and FunGen
+2. Double-click to run.
 
-### Linux/macOS
+### Linux / macOS
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.sh | bash
 ```
 
-The installer automatically:
-- Installs Python 3.11 (Miniconda)
-- Installs Git, FFmpeg/FFprobe, and libmpv
-- Downloads and sets up FunGen
-- Installs all required dependencies
-- Creates launcher scripts for easy startup
-- Detects your GPU and optimizes PyTorch installation
+The installer:
+- Installs [uv](https://docs.astral.sh/uv/) once (~15 MB) if you don't already have it
+- Creates a self-contained `.venv` next to FunGen with Python 3.11
+- Detects your GPU (NVIDIA Blackwell / NVIDIA stable / AMD ROCm / Apple MPS / CPU) and installs the matching PyTorch wheels
+- Creates launcher scripts: `launch.bat` (Windows), `launch.command` (macOS, Finder), `launch.sh` (Linux / macOS Terminal)
+- Note: `ffmpeg` and `libmpv` are system packages, install them via your OS package manager (the Windows launcher bundles them)
 
-**That's it!** The installer creates launch scripts - just run them to start FunGen.
+If a previous FunGen install used miniconda, the installer detects it at the end and asks (once) whether to clean it up. It never touches conda silently and never removes other conda envs.
+
+**That's it.** Double-click the launcher for your OS to start FunGen.
+
+### Migrating from a previous miniconda install
+
+Just `git pull` (or use the in-app updater) and click the launcher again. The launcher self-heals: it sees there's no `.venv`, runs `install.py` once (~2 min), then starts the app. The old `~/miniconda3/envs/FunGen` is left in place until you confirm the new env works. You will get a one-time prompt at the end of the installer asking what to do with it.
+
+### Fallback (if the new installer fails)
+
+The previous conda-based installer is still in the repo as `legacy_install_with_conda.py` (with `legacy_install.sh` / `legacy_install.bat` shims). Run it the same way as the old installer if you hit a problem with the uv-based one, then please [open an issue](https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/issues).
 
 ---
 
 ## Manual Installation
 
-If you prefer manual installation or need custom configuration:
+If the automatic installer doesn't fit your setup, you can do it by hand.
 
 ### Prerequisites
 
-Before using this project, ensure you have the following installed:
+- Any Python 3.x on PATH (uv will install Python 3.11 itself if you don't have it)
+- `git` (https://git-scm.com/downloads/, or `winget install --id Git.Git -e --source winget` on Windows)
+- `ffmpeg` + `ffprobe` on PATH (https://www.ffmpeg.org/download.html, `brew install ffmpeg`, `apt install ffmpeg`)
+- `libmpv` for in-GUI video playback (Homebrew: `brew install mpv`, Debian/Ubuntu: `sudo apt install libmpv-dev`, Windows: bundled with the launcher)
 
-- **Git** — https://git-scm.com/downloads/ (Windows users can also run `winget install --id Git.Git -e --source winget`)
-- **FFmpeg + ffprobe** on PATH, or set the path in the settings menu — https://www.ffmpeg.org/download.html
-- **libmpv** — required for smooth in-GUI video playback. Homebrew: `brew install mpv`. Debian/Ubuntu: `sudo apt install libmpv-dev`. Windows: bundled with the installer.
-- **Miniconda** — https://www.anaconda.com/docs/getting-started/miniconda/install
-
-Easy install of Miniconda for Windows users:
-Open Command Prompt and run: `winget install -e --id Anaconda.Miniconda3`
-
-### Start a miniconda command prompt
-After installing Miniconda look for a program called "Anaconda prompt (miniconda3)" in the start menu (on Windows) and open it
-
-### Create the necessary miniconda environment and activate it
+### Install
 ```bash
-conda create -n VRFunAIGen python=3.11
-conda activate VRFunAIGen
-```
-- Please note that any pip or python commands related to this project must be run from within the VRFunAIGen virtual environment.
-
-### Clone the repository
-Open a command prompt and navigate to the folder where you'd like FunGen to be located. For example, if you want it in C:\FunGen, navigate to C:\ ('cd C:\'). Then run
-```bash
-git clone --branch main https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGen
+git clone --branch release/v0.9.0 https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGen
 cd FunGen
+python install.py
 ```
 
-### Install the core python requirements
+`install.py` is stdlib-only and ~250 lines. It picks the right requirements file from `requirements/` based on your GPU, then installs them into `.venv/` via uv.
+
+### Requirements files (one per channel)
+
+| File | When |
+|---|---|
+| `requirements/base.txt` | Always installed: torch-independent deps (opencv, ultralytics, moderngl, etc.) |
+| `requirements/cuda_stable.txt` | NVIDIA RTX 20/30/40-series, A/H/L-series datacenter cards (cu128) |
+| `requirements/cuda_blackwell.txt` | NVIDIA RTX 50-series (RTX 5070/5080/5090), Blackwell, cu129 |
+| `requirements/cpu.txt` | Linux + Windows CPU-only |
+| `requirements/mps.txt` | macOS Apple Silicon (MPS / Metal) |
+| `requirements/rocm.txt` | AMD ROCm on Linux |
+
+If the GPU detection picks the wrong file, you can override it by running:
 ```bash
-pip install -r requirements/core.requirements.txt
+.venv/bin/python -m pip install -r requirements/base.txt -r requirements/<channel>.txt
 ```
+(replace `bin/python` with `Scripts/python.exe` on Windows).
 
-### NVIDIA GPU Setup (CUDA Required)
+**NVIDIA 10xx-series GPUs are not supported.** ROCm is Linux-only.
 
-**Quick Setup:**
-1. **Install NVIDIA Drivers**: [Download here](https://www.nvidia.com/Download/index.aspx)
-2. **Install CUDA 12.8**: [Download here](https://developer.nvidia.com/cuda-downloads)
-3. **Install cuDNN for CUDA 12.8**: [Download here](https://developer.nvidia.com/cudnn) (requires free NVIDIA account)
-
-**Install Python Packages:**
-
-**For 20xx, 30xx and 40xx-series NVIDIA GPUs:**
+### Verify the install (NVIDIA only)
 ```bash
-pip install -r requirements/cuda.requirements.txt
-pip install tensorrt
-```
-
-**For 50xx series NVIDIA GPUs (RTX 5070, 5080, 5090):**
-```bash
-pip install -r requirements/cuda.50series.requirements.txt
-pip install tensorrt
-```
-
-**Note:** NVIDIA 10xx series GPUs are not supported.
-
-**Verify Installation:**
-```bash
-nvidia-smi                    # Check GPU and driver
-nvcc --version               # Check CUDA version
-python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
-python -c "import torch; print(torch.backends.cudnn.is_available())"  # Check cuDNN
-```
-
-### If your GPU doesn't support cuda
-```bash
-pip install -r requirements/cpu.requirements.txt
-```
-
-### AMD GPU acceleration (ROCm for Linux Only)
-ROCm is supported for AMD GPUs on Linux. To install the required packages, run:
-```bash
-pip install -r requirements/rocm.requirements.txt
+nvidia-smi
+.venv/bin/python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
 ## Download the YOLO models
@@ -181,17 +154,16 @@ In most cases, the app will automatically detect the best model from your models
 ### Troubleshooting CUDA Installation
 
 **Common Issues:**
-- **Driver version mismatch**: Ensure NVIDIA drivers are compatible with your CUDA version
-- **PATH issues**: Make sure CUDA bin directory is in your system PATH
-- **Version conflicts**: Ensure all components (driver, CUDA, cuDNN, PyTorch) are compatible versions
+- **Driver too old for installed CUDA wheels**: NVIDIA Studio Driver 555+ is recommended for cu128 (RTX 20/30/40-series); 560+ for cu129 (RTX 50-series Blackwell).
+- **PATH issues**: The system CUDA toolkit is not required (the torch wheels ship their own CUDA libs). Just having `nvidia-smi` work is enough.
+- **Right channel?** The installer auto-detects, but you can verify by checking `.venv/bin/python -c "import torch; print(torch.version.cuda)"` matches expectations (12.8 for stable, 12.9 for Blackwell).
 
 **Verification Commands:**
 ```bash
-nvidia-smi                    # Check GPU and driver
-nvcc --version               # Check CUDA version
-python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
-python -c "import torch; print(torch.backends.cudnn.is_available())"  # Check cuDNN
+nvidia-smi
+.venv/bin/python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
 ```
+On Windows replace `.venv/bin/python` with `.venv\Scripts\python.exe`.
 
 ## GUI
 
@@ -385,15 +357,14 @@ git config --add safe.directory .
 **Solution 2 - Reinstall as normal user:**
 1. Redownload `install.bat`
 2. Run it as a **normal user** (NOT as administrator)
-3. Use the launcher script created by the installer instead of `python main.py`
+3. Use the launcher script (`launch.bat` on Windows, `launch.command` on macOS, `launch.sh` on Linux) instead of `python main.py`
 
 ### FFmpeg/FFprobe Not Found
 
 If you get "ffmpeg/ffprobe not found" errors:
 
-1. **Use the launcher script** (`launch.bat` or `launch.sh`) instead of running `python main.py` directly
-2. **Rerun the installer** to get updated launcher scripts with FFmpeg PATH fixes
-3. The launcher automatically adds FFmpeg to PATH
+1. **Use the launcher script** (`launch.bat` on Windows, `launch.command` on macOS, `launch.sh` on Linux) instead of running `python main.py` directly
+2. **Rerun the installer** if FFmpeg is not on your system PATH (the launcher relies on system PATH to find it; install via `brew install ffmpeg` on macOS, `apt install ffmpeg` on Debian/Ubuntu, or [ffmpeg.org](https://www.ffmpeg.org/download.html) on Windows)
 
 ### libmpv not found
 

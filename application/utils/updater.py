@@ -132,7 +132,12 @@ class AutoUpdater:
         
         self.local_commit_date = None
         self.remote_commit_date = None
-        
+
+        # Set to True when the pending update touches install.py / launch.* /
+        # requirements/. Surfaces a heads-up in the update dialog so users know
+        # the next launch will take ~2 min for the env rebuild.
+        self.installer_change_detected = False
+
         self.available_updates = []
         self.selected_update = None
         self.update_picker_loading = False
@@ -425,6 +430,11 @@ class AutoUpdater:
             author_info = commit_info.get('author', {})
             local_commit_date = author_info.get('date', 'Unknown date')
 
+        # Detect installer-affecting file changes. The next launch will rebuild
+        # .venv from scratch, which takes a couple of minutes — flag it so the
+        # update dialog can warn the user and they don't think the app is hung.
+        self.installer_change_detected = self._compare_touches_installer(compare_data)
+
         changelog = []
         commits = compare_data.get('commits', [])
         
@@ -461,6 +471,19 @@ class AutoUpdater:
                     changelog.append(f"  {cleaned_line}")
             changelog.append("")
         return changelog, local_commit_date
+
+    @staticmethod
+    def _compare_touches_installer(compare_data: dict) -> bool:
+        """True if the GitHub compare result includes any installer-related files."""
+        installer_paths = {
+            "install.py", "install.sh", "install.bat",
+            "launch.sh", "launch.command", "launch.bat",
+        }
+        for entry in compare_data.get("files", []) or []:
+            path = entry.get("filename", "") if isinstance(entry, dict) else ""
+            if path in installer_paths or path.startswith("requirements/"):
+                return True
+        return False
 
     def _get_commit_date(self, commit_hash: str) -> str:
         """Gets the commit date for a given commit hash."""
@@ -1029,6 +1052,15 @@ class AutoUpdater:
                 
                 imgui.text_wrapped(
                     f"Latest Update: {self.remote_commit_hash[:7] if self.remote_commit_hash else 'N/A'} ({remote_date}) {remote_branch_info}")
+
+                if self.installer_change_detected:
+                    imgui.separator()
+                    imgui.text_wrapped(
+                        "Note: this update changes the installer or dependencies. "
+                        "The next launch will take ~2 min to set up the Python "
+                        "environment. This is automatic — no action needed."
+                    )
+
                 imgui.separator()
                 if imgui.button("Update and Restart", width=200):
                     self.apply_update_and_restart()

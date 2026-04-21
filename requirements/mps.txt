@@ -1,0 +1,9 @@
+# macOS Apple Silicon (MPS / Metal backend) requirements.
+# Default PyPI torch wheel on macOS arm64 ships with MPS support built in.
+torch~=2.8.0
+torchvision~=0.23.0
+
+# Metal framework bindings for the GPU unwarp worker.
+# Falls back to OpenGL or v360 if Metal is unavailable.
+pyobjc-framework-Metal>=10.0
+pyobjc-framework-MetalKit>=10.0
