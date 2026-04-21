@@ -1120,23 +1120,18 @@ class ShortcutHandlerMixin:
         self.app.logger.info("Video zoom/pan reset", extra={'status_message': True})
 
     def _handle_toggle_fullscreen_shortcut(self):
-        """Toggle fullscreen. If the shader dewarp is currently driving the
-        display, go embedded (keeps our GL shader + adaptive quality).
-        Otherwise fall back to the standalone mpv subprocess (Patreon)."""
-        gui = getattr(self.app, 'gui_instance', None)
-        # If we are already in embedded fullscreen, toggle always exits.
-        if gui is not None and getattr(gui, '_embedded_fullscreen_active', False):
-            gui.toggle_embedded_fullscreen()
-            return
-        # Authoritative check against the same routing the draw loop uses.
-        shader_active = False
+        """Toggle fullscreen. In shader_dewarp mode we go embedded (keeps
+        our GL shader + adaptive quality). In passthrough mode we fall
+        back to the standalone mpv subprocess (Patreon feature gated)."""
         try:
-            from application.gui_components.video_display.display_route import (
-                compute_display_route)
-            shader_active = compute_display_route(self.app).source == 'mpv_shader'
+            vr_mode = self.app.app_settings.config.vr_display.mode
         except Exception:
-            shader_active = False
-        if shader_active and gui is not None:
+            vr_mode = 'passthrough'
+        # Embedded fullscreen works for both shader and direct, but is
+        # only a clear win for shader. For direct mode, prefer the
+        # standalone mpv subprocess (native scaler, OS fullscreen).
+        gui = getattr(self.app, 'gui_instance', None)
+        if vr_mode == 'shader_dewarp' and gui is not None:
             gui.toggle_embedded_fullscreen()
             return
         from application.utils.feature_detection import is_feature_available as _is_feature_available
