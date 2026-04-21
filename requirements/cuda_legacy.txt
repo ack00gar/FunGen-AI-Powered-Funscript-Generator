@@ -1,8 +1,8 @@
-# Older NVIDIA drivers (525 <= major < 560). cu121 wheels, torch 2.5.1.
---index-url https://download.pytorch.org/whl/cu121
+# NVIDIA driver 550-559 (Debian Trixie, Bookworm-backports). cu124 wheels.
+--index-url https://download.pytorch.org/whl/cu124
 --extra-index-url https://pypi.org/simple
-torch==2.5.1+cu121
-torchvision==0.20.1+cu121
-torchaudio==2.5.1+cu121
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+torchaudio==2.6.0+cu124
 sympy>=1.13.3
 mpmath>=1.2

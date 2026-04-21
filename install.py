@@ -190,8 +190,8 @@ def detect_channel() -> str:
     if nvidia_driver is not None and nvidia_driver >= 560:
         return "cuda_stable"
 
-    # NVIDIA with an older driver (525..559, e.g. Debian stable): cu121.
-    if nvidia_driver is not None and nvidia_driver >= 525:
+    # NVIDIA driver 550..559 (Debian Trixie, bookworm-backports): cu124.
+    if nvidia_driver is not None and nvidia_driver >= 550:
         return "cuda_legacy"
 
     # nvidia-smi ran but driver_version unreadable: fall back to GPU-name regex

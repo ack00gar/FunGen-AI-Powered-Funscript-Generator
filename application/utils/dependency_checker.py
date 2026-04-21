@@ -159,8 +159,8 @@ def detect_gpu_environment():
     if rtx_50_series:
         return "requirements/cuda_blackwell.txt", "NVIDIA RTX 50-series (CUDA)"
     if cuda_available:
-        if driver_major is not None and driver_major < 560:
-            return "requirements/cuda_legacy.txt", "NVIDIA CUDA (legacy cu121)"
+        if driver_major is not None and 550 <= driver_major < 560:
+            return "requirements/cuda_legacy.txt", "NVIDIA CUDA (cu124, driver 550-559)"
         return "requirements/cuda_stable.txt", "NVIDIA CUDA"
     if rocm_available:
         return "requirements/rocm.txt", "AMD ROCm"
