@@ -2,12 +2,21 @@
 """
 FunGen installer. Stdlib-only.
 
-Builds a self-contained .venv next to this file using uv, picks the right
-torch wheel channel for the GPU it finds, then asks (once) whether to clean up
-any leftover miniconda FunGen env from older installs.
+Designed to be invoked three ways, all interchangeable:
+  1. From a clone:  python install.py
+  2. From a shim:   install.bat / install.sh   (bootstraps uv, then runs us)
+  3. From a URL:    uv run --no-project --python 3.11 https://.../install.py
 
-Re-runnable: blowing away .venv and re-running this script always lands on a
-known-good environment for the current machine.
+In modes 2 and 3, the script may be running from a temp cache (uv downloads
+remote scripts there). It locates or clones the FunGen repo into the user's
+current working directory before doing anything else.
+
+Builds a self-contained .venv inside the project, picks the right torch wheel
+channel for the GPU it finds, then asks (once) whether to clean up any leftover
+miniconda FunGen env from older installs.
+
+Re-runnable: blowing away .venv and re-running always lands on a known-good
+environment for the current machine.
 """
 import os
 import platform
@@ -15,11 +24,59 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).parent.resolve()
-VENV = ROOT / ".venv"
 WIN = platform.system() == "Windows"
+REPO_HTTPS = "https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git"
+REPO_ZIP = "https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/archive/refs/heads/main.zip"
+
+
+def _find_or_clone_project() -> Path:
+    """Return the FunGen project root, cloning the repo into cwd/FunGen if missing."""
+    # 1. Are we inside a FunGen checkout? (locally-invoked python install.py)
+    here = Path(__file__).parent.resolve()
+    if (here / "requirements" / "base.txt").exists():
+        return here
+
+    # 2. Did the user cd into a FunGen checkout? (uv-from-URL invocation)
+    cwd = Path.cwd().resolve()
+    if (cwd / "requirements" / "base.txt").exists():
+        return cwd
+
+    # 3. Has a previous run already cloned ./FunGen/?
+    sub = cwd / "FunGen"
+    if (sub / "requirements" / "base.txt").exists():
+        return sub
+
+    # 4. Nothing here. Clone the repo into ./FunGen/.
+    print()
+    print(f"== Fetching FunGen source into {sub} ==")
+    sub.parent.mkdir(parents=True, exist_ok=True)
+    if shutil.which("git"):
+        subprocess.run(["git", "clone", "--depth", "1", REPO_HTTPS, str(sub)], check=True)
+    else:
+        print("  git not found, downloading source archive instead...")
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "fungen.zip"
+            urllib.request.urlretrieve(REPO_ZIP, zip_path)
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(tmp)
+            extracted = next(p for p in Path(tmp).iterdir()
+                             if p.is_dir() and p.name.startswith("FunGen"))
+            shutil.move(str(extracted), str(sub))
+        print("  NOTE: installed without git, so the in-app updater will not work.")
+        print("        To enable updates later: install git, remove the FunGen folder,")
+        print("        and re-run install.")
+    if not (sub / "requirements" / "base.txt").exists():
+        sys.exit(f"FunGen source did not arrive at {sub}; aborting.")
+    return sub
+
+
+ROOT = _find_or_clone_project()
+VENV = ROOT / ".venv"
 PY_BIN = VENV / ("Scripts/python.exe" if WIN else "bin/python")
 CONDA_PROMPTED_MARKER = ROOT / ".fungen_conda_prompted"
 

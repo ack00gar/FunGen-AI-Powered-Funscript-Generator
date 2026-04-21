@@ -1,25 +1,15 @@
 #!/bin/bash
-# FunGen installer (Linux + macOS). Bootstraps uv, then uses uv to provide
-# Python 3.11 and run install.py. Avoids depending on a system Python at all
-# (parity with the Windows shim, where the Microsoft Store python alias
-# makes system-Python detection unreliable).
+# FunGen installer (Linux + macOS). Bootstraps uv, then runs the latest
+# install.py directly from GitHub. install.py handles cloning the repo +
+# building .venv.
 set -e
 cd "$(dirname "$0")"
 
 if ! command -v uv >/dev/null 2>&1; then
-    echo "Installing uv (one-time, ~15 MB download from astral.sh)..."
+    echo "Installing uv (one-time, ~15 MB)..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    # uv installer modifies shell rc files; export the common install
-    # locations for THIS session so the line below finds uv without restart.
-    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-if ! command -v uv >/dev/null 2>&1; then
-    echo "uv install failed. astral.sh may be blocked. Install uv manually" >&2
-    echo "(see https://astral.sh/uv) then re-run ./install.sh." >&2
-    exit 1
-fi
-
-# The "-- python install.py" form is required: on Windows uv treats a bare
-# "install.py" arg as a program name. Same form here for cross-platform parity.
-exec uv run --no-project --isolated --python 3.11 -- python install.py "$@"
+exec uv run --no-project --python 3.11 \
+    https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.py "$@"
