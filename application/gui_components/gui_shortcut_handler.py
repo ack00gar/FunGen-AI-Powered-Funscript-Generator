@@ -1120,20 +1120,7 @@ class ShortcutHandlerMixin:
         self.app.logger.info("Video zoom/pan reset", extra={'status_message': True})
 
     def _handle_toggle_fullscreen_shortcut(self):
-        """Toggle fullscreen. In shader_dewarp mode we go embedded (keeps
-        our GL shader + adaptive quality). In passthrough mode we fall
-        back to the standalone mpv subprocess (Patreon feature gated)."""
-        try:
-            vr_mode = self.app.app_settings.config.vr_display.mode
-        except Exception:
-            vr_mode = 'passthrough'
-        # Embedded fullscreen works for both shader and direct, but is
-        # only a clear win for shader. For direct mode, prefer the
-        # standalone mpv subprocess (native scaler, OS fullscreen).
-        gui = getattr(self.app, 'gui_instance', None)
-        if vr_mode == 'shader_dewarp' and gui is not None:
-            gui.toggle_embedded_fullscreen()
-            return
+        """Handle keyboard shortcut for toggling fullscreen (F11) - mpv supporter feature."""
         from application.utils.feature_detection import is_feature_available as _is_feature_available
         if not _is_feature_available("patreon_features"):
             return
