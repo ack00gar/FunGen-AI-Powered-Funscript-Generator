@@ -118,8 +118,9 @@ def detect_gpu_environment():
     cuda_available = False
     rocm_available = False
     rtx_50_series = False
-    
-    # Check for NVIDIA CUDA
+    driver_major = None
+
+    # NVIDIA: GPU name + driver version (driver gates which cu wheels work).
     try:
         import subprocess
         result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'], capture_output=True, text=True, timeout=5)
@@ -127,13 +128,24 @@ def detect_gpu_environment():
             cuda_available = True
             gpu_names = result.stdout.strip().split('\n')
             for gpu_name in gpu_names:
-                # Check for RTX 50-series (5070, 5080, 5090)
                 if any(model in gpu_name.upper() for model in ['RTX 507', 'RTX 508', 'RTX 509']):
                     rtx_50_series = True
                     break
+        drv = subprocess.run(['nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader'],
+                             capture_output=True, text=True, timeout=5)
+        if drv.returncode == 0:
+            for line in drv.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    driver_major = int(line.split(".", 1)[0])
+                    break
+                except ValueError:
+                    continue
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
         pass
-    
+
     # Check for AMD ROCm (Linux and Windows)
     if not cuda_available:
         try:
@@ -142,16 +154,17 @@ def detect_gpu_environment():
                 rocm_available = True
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
             pass
-    
-    # Return appropriate requirements file
+
+    # Return appropriate requirements file.
     if rtx_50_series:
         return "requirements/cuda_blackwell.txt", "NVIDIA RTX 50-series (CUDA)"
-    elif cuda_available:
+    if cuda_available:
+        if driver_major is not None and driver_major < 560:
+            return "requirements/cuda_legacy.txt", "NVIDIA CUDA (legacy cu121)"
         return "requirements/cuda_stable.txt", "NVIDIA CUDA"
-    elif rocm_available:
+    if rocm_available:
         return "requirements/rocm.txt", "AMD ROCm"
-    else:
-        return "requirements/base.txt", "CPU-only"
+    return "requirements/base.txt", "CPU-only"
 
 def _ensure_pip_in_venv():
     """uv venvs created without --seed don't ship pip. Bootstrap it via ensurepip

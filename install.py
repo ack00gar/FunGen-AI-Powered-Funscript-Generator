@@ -180,9 +180,22 @@ def _pip_install_uv_fallback() -> None:
 def detect_channel() -> str:
     """Return the requirements/<channel>.txt name suffix to install."""
     nvidia_cap = _nvidia_compute_cap()
-    if nvidia_cap is not None:
-        return "cuda_blackwell" if nvidia_cap >= 12.0 else "cuda_stable"
+    nvidia_driver = _nvidia_driver_major()
 
+    # Blackwell GPU: needs cu129 wheels + driver 570+.
+    if nvidia_cap is not None and nvidia_cap >= 12.0:
+        return "cuda_blackwell"
+
+    # NVIDIA with a modern driver: cu128.
+    if nvidia_driver is not None and nvidia_driver >= 560:
+        return "cuda_stable"
+
+    # NVIDIA with an older driver (525..559, e.g. Debian stable): cu121.
+    if nvidia_driver is not None and nvidia_driver >= 525:
+        return "cuda_legacy"
+
+    # nvidia-smi ran but driver_version unreadable: fall back to GPU-name regex
+    # (matches the old detection path) and assume the driver is modern enough.
     nvidia_name = _nvidia_gpu_name()
     if nvidia_name:
         if re.search(r"RTX\s*50\d{2}|Blackwell", nvidia_name, re.IGNORECASE):
@@ -216,6 +229,27 @@ def _nvidia_compute_cap() -> float | None:
         except ValueError:
             continue  # "N/A" on very old drivers
     return max(caps) if caps else None
+
+
+def _nvidia_driver_major() -> int | None:
+    """Major integer of the installed NVIDIA driver, or None."""
+    try:
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            text=True, stderr=subprocess.DEVNULL, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    majors: list[int] = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            majors.append(int(line.split(".", 1)[0]))
+        except ValueError:
+            continue
+    return max(majors) if majors else None
 
 
 def _nvidia_gpu_name() -> str | None:
