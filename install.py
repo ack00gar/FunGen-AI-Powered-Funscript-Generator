@@ -211,7 +211,12 @@ def build_env(uv: Path, channel: str) -> None:
     _run(str(uv), "venv", "--python", "3.11", str(VENV))
 
     _print_section(f"Installing dependencies (channel: {channel})")
+    # unsafe-best-match: uv default (first-index) refuses to look at PyPI when
+    # a GPU lock file declares --index-url to the pytorch index, so packages
+    # like imgui (PyPI-only) fail to resolve. Pip behaves like best-match by
+    # default; this restores that for uv.
     _run(str(uv), "pip", "install", "--python", str(PY_BIN),
+         "--index-strategy", "unsafe-best-match",
          "-r", str(base_lock), "-r", str(channel_lock))
 
 

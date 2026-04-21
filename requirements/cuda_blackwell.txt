@@ -1,8 +1,9 @@
--i https://download.pytorch.org/whl/cu129
+# NVIDIA RTX 50-series (Blackwell, sm_120). Requires the cu129 wheels from
+# the pytorch index, plus PyPI for everything else.
+--index-url https://download.pytorch.org/whl/cu129
+--extra-index-url https://pypi.org/simple
 torch==2.8.0+cu129
 torchvision==0.23.0+cu129
 torchaudio==2.8.0+cu129
-# Ensure sympy version is compatible with other packages
 sympy>=1.13.3
 mpmath>=1.2
-

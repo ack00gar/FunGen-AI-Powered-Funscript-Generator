@@ -1,7 +1,9 @@
--i https://download.pytorch.org/whl/cu128
+# NVIDIA RTX 20/30/40-series + datacenter A/H/L. Requires the cu128 wheels
+# from the pytorch index, plus PyPI for everything else.
+--index-url https://download.pytorch.org/whl/cu128
+--extra-index-url https://pypi.org/simple
 torch==2.8.0+cu128
 torchvision==0.23.0+cu128
 torchaudio==2.8.0+cu128
-# Ensure sympy version is compatible with other packages
 sympy>=1.13.3
 mpmath>=1.2
