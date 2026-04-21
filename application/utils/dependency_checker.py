@@ -363,58 +363,20 @@ def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = F
         if 'ffplay' in missing_tools:
             logger.warning("ffplay is required for fullscreen video functionality with audio support.")
         
+        # ffmpeg is auto-installed by install.py via the OS package manager
+        # (winget on Windows, brew on macOS, apt/dnf/pacman on Linux). If it's
+        # still missing here, surface a one-line manual-install hint and let
+        # the app continue. Video features will fail loudly later if used,
+        # but unrelated features (chapter editing, plugins, etc.) still work.
         system = platform.system()
-        install_cmd = ""
-        if system == "Darwin":
-            install_cmd = "brew install ffmpeg"
-        elif system == "Linux":
-            install_cmd = "sudo apt-get update && sudo apt-get install ffmpeg"
-        elif system == "Windows":
-            # Safer: only suggest Chocolatey if available; otherwise guide manual install
-            if shutil.which('choco'):
-                install_cmd = "choco install ffmpeg"
-            else:
-                install_cmd = ""
-
-        if install_cmd:
-            try:
-                if non_interactive:
-                    if auto_install:
-                        logger.info(f"Attempting non-interactive install: {install_cmd}")
-                        subprocess.check_call(install_cmd, shell=True)
-                        if not is_tool('ffmpeg') or not is_tool('ffprobe') or not is_tool('ffplay'):
-                            logger.error("Installation may have failed. Please install ffmpeg suite manually.")
-                            sys.exit(1)
-                        else:
-                            logger.info("ffmpeg suite installed successfully.")
-                    else:
-                        logger.warning("Non-interactive mode: skipping ffmpeg auto-install. Please install manually.")
-                        sys.exit(1)
-                else:
-                    response = input(f"Would you like to attempt to install it now using '{install_cmd}'? (y/n): ").lower()
-                    if response == 'y':
-                        logger.info(f"Running installation command: {install_cmd}")
-                        subprocess.check_call(install_cmd, shell=True)
-                        # Re-check after installation
-                        if not is_tool('ffmpeg') or not is_tool('ffprobe') or not is_tool('ffplay'):
-                            logger.error("Installation may have failed. Please install ffmpeg suite manually.")
-                            sys.exit(1)
-                        else:
-                            logger.info("ffmpeg suite installed successfully.")
-                    else:
-                        logger.warning("Installation skipped. Please install ffmpeg manually to proceed.")
-                        sys.exit(1)
-            except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                logger.error(f"Error during installation: {e}")
-                logger.error("Please install ffmpeg manually.")
-                sys.exit(1)
-        else:
-            # Provide safer guidance for manual installation on Windows without Chocolatey
-            if system == "Windows":
-                logger.error("ffmpeg/ffprobe not found. Install manually or install Chocolatey (https://chocolatey.org/install) and run 'choco install ffmpeg'.")
-            else:
-                logger.error("Could not determine the installation command for your OS. Please install ffmpeg manually.")
-            sys.exit(1)
+        hint_per_os = {
+            "Windows": "winget install -e --id Gyan.FFmpeg   (or download from https://www.gyan.dev/ffmpeg/builds/)",
+            "Darwin":  "brew install ffmpeg",
+            "Linux":   "sudo apt install ffmpeg   (or your distro's equivalent)",
+        }
+        hint = hint_per_os.get(system, "install ffmpeg via your OS package manager")
+        logger.warning(f"Continuing without ffmpeg. To enable video features: {hint}")
+        logger.warning("Then re-launch FunGen.")
     else:
         logger.debug("ffmpeg and ffprobe are available")
 

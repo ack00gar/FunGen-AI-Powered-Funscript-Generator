@@ -293,6 +293,54 @@ def _dir_size_gb(path: Path) -> float:
     return total / (1024 ** 3)
 
 
+# ─── ffmpeg via system package manager (non-fatal) ──────────────────────────
+
+def ensure_ffmpeg() -> None:
+    """Try to install ffmpeg via the OS package manager. Non-fatal: prints a
+    manual-install hint and returns if no automated path works."""
+    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+        return
+
+    _print_section("ffmpeg not found, attempting install")
+    sys_os = platform.system()
+    try:
+        if sys_os == "Windows":
+            if shutil.which("winget"):
+                _run("winget", "install", "-e", "--id", "Gyan.FFmpeg",
+                     "--silent", "--accept-source-agreements",
+                     "--accept-package-agreements")
+            else:
+                print("  winget not found. Install ffmpeg manually:")
+                print("    https://www.gyan.dev/ffmpeg/builds/  (download the 'release essentials' zip,")
+                print("    extract, and add the bin/ folder to your system PATH).")
+                return
+        elif sys_os == "Darwin":
+            if shutil.which("brew"):
+                _run("brew", "install", "ffmpeg")
+            else:
+                print("  Homebrew not found. Install ffmpeg manually:  brew install ffmpeg")
+                print("  (install Homebrew from https://brew.sh first if you don't have it).")
+                return
+        elif sys_os == "Linux":
+            for mgr_check, args in (
+                ("apt", ["sudo", "apt", "install", "-y", "ffmpeg"]),
+                ("dnf", ["sudo", "dnf", "install", "-y", "ffmpeg"]),
+                ("pacman", ["sudo", "pacman", "-S", "--noconfirm", "ffmpeg"]),
+            ):
+                if shutil.which(mgr_check):
+                    _run(*args)
+                    break
+            else:
+                print("  no supported package manager found; install ffmpeg via your distro's tools.")
+                return
+        else:
+            print(f"  unsupported OS ({sys_os}); install ffmpeg manually.")
+            return
+    except subprocess.CalledProcessError as e:
+        print(f"  ffmpeg install failed: {e}")
+        print("  FunGen will still launch but video features will not work until ffmpeg is on PATH.")
+
+
 # ─── per-OS launch hint ─────────────────────────────────────────────────────
 
 def print_launch_hint() -> None:
@@ -324,6 +372,7 @@ def main() -> None:
     print(f"  channel:  {channel}")
 
     build_env(uv, channel)
+    ensure_ffmpeg()
     offer_conda_cleanup()
     print_launch_hint()
 
