@@ -16,6 +16,9 @@ set CONDA_DEFAULT_ENV=
 set CONDA_PROMPT_MODIFIER=
 set CONDA_SHLVL=
 
+REM Put venv's Scripts dir on PATH so subprocesses (ultralytics AutoUpdate,
+REM plugin installs) that call bare "pip" / "python" find the venv's copy.
+set PATH=%cd%\.venv\Scripts;%PATH%
 set VENV_PY=.venv\Scripts\python.exe
 
 if not exist "%VENV_PY%" (

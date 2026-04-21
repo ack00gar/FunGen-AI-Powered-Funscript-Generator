@@ -22,6 +22,8 @@ export YOLO_CONFIG_DIR="$(pwd)/config/ultralytics"
 # Drop any active conda env vars so nothing leaks into our venv interpreter
 unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_PROMPT_MODIFIER CONDA_SHLVL
 
+# Put venv's bin on PATH so subprocesses that call bare "pip"/"python" find it.
+export PATH="$(pwd)/.venv/bin:$PATH"
 VENV_PY=".venv/bin/python"
 
 if [ ! -x "$VENV_PY" ]; then
