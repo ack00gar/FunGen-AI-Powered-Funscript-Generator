@@ -121,11 +121,6 @@ class GamepadInput:
         pri = self._apply_deadzone(raw_pri)
         sec = self._apply_deadzone(raw_sec)
 
-        if self.invert_primary:
-            pri = -pri
-        if self.invert_secondary:
-            sec = -sec
-
         if self.center_mode:
             # rest=50, full stick travel maps to 0..100 (sign-preserving)
             primary_100 = (1.0 - pri) * 50.0
@@ -134,6 +129,12 @@ class GamepadInput:
             # rest=0, deflection magnitude maps to 0..100 (direction-agnostic)
             primary_100 = 100.0 * abs(pri)
             secondary_100 = 100.0 * abs(sec)
+
+        # Invert after mode transform; applied before, abs() erased it.
+        if self.invert_primary:
+            primary_100 = 100.0 - primary_100
+        if self.invert_secondary:
+            secondary_100 = 100.0 - secondary_100
 
         return GamepadState(
             primary=max(0.0, min(100.0, primary_100)),
