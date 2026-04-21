@@ -202,6 +202,8 @@ class ShortcutHandlerMixin:
         # View Controls
         elif check_and_run_shortcut("reset_timeline_view", self._handle_reset_timeline_view_shortcut):
             pass
+        elif check_and_run_shortcut("toggle_timeline_smooth_curve", self._handle_toggle_timeline_smooth_curve_shortcut):
+            pass
 
         # Video Zoom Controls
         elif check_and_run_shortcut("zoom_in_video", self._handle_zoom_in_video_shortcut):
@@ -1051,6 +1053,19 @@ class ShortcutHandlerMixin:
             self.app.project_manager.project_dirty = True
         status = "shown" if app_state.show_audio_waveform else "hidden"
         self.app.logger.info(f"Audio Waveform {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_timeline_smooth_curve_shortcut(self):
+        """Toggle timeline smooth-curve rendering (C)."""
+        settings = self.app.app_settings
+        new_val = not bool(settings.get("timeline_smooth_curve", True))
+        settings.set("timeline_smooth_curve", new_val)
+        for tl_attr in ("interactive_timeline1", "interactive_timeline2"):
+            tl = getattr(self.app, tl_attr, None)
+            if tl is not None:
+                tl._show_smooth_curve = new_val
+        status = "smoothed" if new_val else "straight"
+        self.app.logger.info(f"Timeline curve: {status}", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
 
     def _handle_reset_timeline_view_shortcut(self):

@@ -156,10 +156,11 @@ class InteractiveFunscriptTimeline(DrawingMixin):
 
         # Heatmap coloring - speed-based segment colors enabled by default
         self._show_heatmap_coloring = True
-        # Smooth curve rendering (catmull-rom spline between points), always on.
-        self._show_smooth_curve = True
-        self._smooth_samples_per_segment = 12
         _settings = getattr(self.app, 'app_settings', None)
+        # Catmull-rom spline between points. Toggle: View menu or C.
+        self._show_smooth_curve = bool(
+            _settings.get("timeline_smooth_curve", True)) if _settings else True
+        self._smooth_samples_per_segment = 12
         _max_speed = float(_settings.get("heatmap_max_speed", 400.0)) if _settings else 400.0
         _highlight = bool(_settings.get("heatmap_highlight_overspeed", True)) if _settings else True
         self._heatmap_mapper = HeatmapColorMapper(max_speed=_max_speed,

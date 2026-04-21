@@ -669,6 +669,20 @@ class MainMenu:
                 settings.set("use_simplified_funscript_preview", new_val)
                 app_state.funscript_preview_dirty = True
 
+            # Spline vs straight lines between points.
+            smooth_curve = settings.get("timeline_smooth_curve", True)
+            clicked, new_val = imgui.menu_item(
+                "Smooth Curve",
+                self._get_shortcut_display("toggle_timeline_smooth_curve"),
+                selected=smooth_curve,
+            )
+            if clicked and new_val != smooth_curve:
+                settings.set("timeline_smooth_curve", new_val)
+                for tl_attr in ("interactive_timeline1", "interactive_timeline2"):
+                    tl = getattr(self.app, tl_attr, None)
+                    if tl is not None:
+                        tl._show_smooth_curve = new_val
+
             if imgui.menu_item("Reset Timeline View", self._get_shortcut_display("reset_timeline_view"))[0]:
                 app_state.timeline_zoom_factor_ms_per_px = settings.get_default_settings().get(
                     "timeline_zoom_factor_ms_per_px", 1.0)

@@ -199,6 +199,7 @@ DEFAULT_SHORTCUTS = {
     "toggle_waveform": "W",
     "toggle_video_feed": "F",
     "toggle_script_gauge": "G",
+    "toggle_timeline_smooth_curve": "C",
     "reset_timeline_view": "R",
 
     # Editing (Layout-independent modifier+key combinations)
