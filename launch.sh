@@ -31,7 +31,7 @@ if [ ! -x "$VENV_PY" ]; then
         export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
     fi
     if command -v uv >/dev/null 2>&1; then
-        uv run --no-project --python 3.11 install.py || true
+        uv run --no-project --isolated --python 3.11 -- python install.py || true
     else
         echo "Could not install uv. Run ./install.sh manually." >&2
     fi

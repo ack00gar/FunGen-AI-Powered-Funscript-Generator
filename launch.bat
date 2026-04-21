@@ -37,7 +37,7 @@ if not exist "%VENV_PY%" (
         exit /b 1
     )
 
-    uv run --no-project --python 3.11 install.py
+    uv run --no-project --isolated --python 3.11 -- python install.py
 )
 
 if not exist "%VENV_PY%" (

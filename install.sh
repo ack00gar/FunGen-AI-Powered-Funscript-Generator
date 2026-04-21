@@ -20,4 +20,6 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-exec uv run --no-project --python 3.11 install.py "$@"
+# The "-- python install.py" form is required: on Windows uv treats a bare
+# "install.py" arg as a program name. Same form here for cross-platform parity.
+exec uv run --no-project --isolated --python 3.11 -- python install.py "$@"

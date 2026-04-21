@@ -34,7 +34,11 @@ if %errorlevel% neq 0 (
 
 :have_uv
 echo Setting up FunGen environment via uv...
-uv run --no-project --python 3.11 install.py %*
+REM The "-- python install.py" form is required: on Windows, uv treats a bare
+REM "install.py" arg as a program name and fails with "Failed to spawn:
+REM install.py: program not found". Routing through "python" inside the
+REM ephemeral env makes the script-vs-program ambiguity moot.
+uv run --no-project --isolated --python 3.11 -- python install.py %*
 set RC=%errorlevel%
 
 pause
