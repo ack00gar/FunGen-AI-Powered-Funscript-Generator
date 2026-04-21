@@ -369,18 +369,6 @@ class ApplicationLogic:
                     self.app_state_ui.selected_tracker_name = fallback
                     self.tracker.set_tracking_mode(fallback, lazy=True)
 
-    def get_timeline(self, timeline_num: int) -> Optional['InteractiveFunscriptTimeline']:
-        """
-        Retrieves the interactive timeline instance for the given timeline number.
-        """
-        if timeline_num == 1:
-            return getattr(self, 'interactive_timeline1', None)
-        elif timeline_num == 2:
-            return getattr(self, 'interactive_timeline2', None)
-        elif timeline_num >= 3 and hasattr(self, 'gui_instance') and self.gui_instance:
-            return self.gui_instance._extra_timeline_editors.get(timeline_num)
-        return None
-
     @staticmethod
     def _purge_old_log_entries(log_file_path: str):
         """Delegator — see log_config.purge_old_log_entries."""

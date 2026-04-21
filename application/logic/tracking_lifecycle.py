@@ -244,16 +244,18 @@ class TrackingLifecycleController:
 
     def _invalidate_all_timeline_caches(self) -> None:
         """Invalidate every timeline editor's cached action arrays so the
-        next render reflects live-tracking data committed during the run."""
-        app = self.app
-        for attr in ('interactive_timeline1', 'interactive_timeline2'):
-            tl = getattr(app, attr, None)
-            if tl and hasattr(tl, 'invalidate_cache'):
+        next render reflects live-tracking data committed during the run.
+        Earlier code read app.interactive_timeline1/2 which are never
+        assigned; timelines live on gui_instance.timeline_editor1/2."""
+        gui = getattr(self.app, 'gui_instance', None)
+        if gui is None:
+            return
+        for attr in ('timeline_editor1', 'timeline_editor2'):
+            tl = getattr(gui, attr, None)
+            if tl is not None and hasattr(tl, 'invalidate_cache'):
                 tl.invalidate_cache()
-                app.logger.debug(f"{attr} cache invalidated after live session completion")
-        gi = getattr(app, 'gui_instance', None)
-        if gi:
-            for t_num, editor in getattr(gi, '_extra_timeline_editors', {}).items():
-                if hasattr(editor, 'invalidate_cache'):
-                    editor.invalidate_cache()
-                    app.logger.debug(f"Timeline {t_num} cache invalidated after live session completion")
+                self.app.logger.debug(f"{attr} cache invalidated after live session completion")
+        for t_num, editor in getattr(gui, '_extra_timeline_editors', {}).items():
+            if hasattr(editor, 'invalidate_cache'):
+                editor.invalidate_cache()
+                self.app.logger.debug(f"Timeline {t_num} cache invalidated after live session completion")
