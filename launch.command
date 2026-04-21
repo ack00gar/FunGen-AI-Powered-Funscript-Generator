@@ -16,13 +16,16 @@ unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_PROMPT_MODIFIER CONDA_SHLVL
 VENV_PY=".venv/bin/python"
 
 if [ ! -x "$VENV_PY" ]; then
-    echo "FunGen environment missing — running installer (one-time, ~2 min)..."
-    for py in python3 python; do
-        if command -v "$py" >/dev/null 2>&1; then
-            "$py" install.py || true
-            break
-        fi
-    done
+    echo "FunGen environment missing, running installer (one-time, ~2 min)..."
+    if ! command -v uv >/dev/null 2>&1; then
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    fi
+    if command -v uv >/dev/null 2>&1; then
+        uv run --no-project --python 3.11 install.py || true
+    else
+        echo "Could not install uv. Open Terminal here and run ./install.sh."
+    fi
 fi
 
 if [ -x "$VENV_PY" ]; then

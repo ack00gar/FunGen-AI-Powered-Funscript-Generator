@@ -96,10 +96,11 @@ If the automatic installer doesn't fit your setup, you can do it by hand.
 ```bash
 git clone --branch release/v0.9.0 https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGen
 cd FunGen
-python install.py
+./install.sh        # macOS / Linux
+install.bat         # Windows
 ```
 
-`install.py` is stdlib-only and ~250 lines. It picks the right requirements file from `requirements/` based on your GPU, then installs them into `.venv/` via uv.
+The shim bootstraps `uv` if needed, then runs `install.py` with `uv run --no-project --python 3.11`. `install.py` is stdlib-only, picks the right requirements file from `requirements/` based on your GPU, and installs into `.venv/` via uv.
 
 ### Requirements files (one per channel)
 
