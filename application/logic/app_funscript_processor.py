@@ -444,18 +444,6 @@ class AppFunscriptProcessor:
         final_start = last_chapter.end_frame_id + 1
         return final_start, final_start + original_duration - 1
 
-    def _add_chapter_if_unique(self, chapter: 'VideoSegment') -> bool:
-        """Add a chapter only if it doesn't duplicate an existing one. Returns True if added."""
-        for existing_chapter in self.video_chapters:
-            if (existing_chapter.start_frame_id == chapter.start_frame_id and 
-                existing_chapter.end_frame_id == chapter.end_frame_id and
-                existing_chapter.position_short_name == chapter.position_short_name):
-                self.logger.debug(f"Skipping duplicate chapter at frames {chapter.start_frame_id}-{chapter.end_frame_id} ({chapter.position_short_name})")
-                return False
-        
-        self.video_chapters.append(chapter)
-        return True
-
     def create_new_chapter_from_data(self, data: Dict,
                                      return_chapter_object: bool = False,
                                      _skip_undo_record: bool = False):
