@@ -19,6 +19,9 @@ set CONDA_SHLVL=
 REM Put venv's Scripts dir on PATH so subprocesses (ultralytics AutoUpdate,
 REM plugin installs) that call bare "pip" / "python" find the venv's copy.
 set PATH=%cd%\.venv\Scripts;%PATH%
+REM winget installs git but new sessions don't always inherit the updated PATH.
+if exist "C:\Program Files\Git\cmd\git.exe" set "PATH=C:\Program Files\Git\cmd;%PATH%"
+if exist "C:\Program Files (x86)\Git\cmd\git.exe" set "PATH=C:\Program Files (x86)\Git\cmd;%PATH%"
 set VENV_PY=.venv\Scripts\python.exe
 
 if not exist "%VENV_PY%" (

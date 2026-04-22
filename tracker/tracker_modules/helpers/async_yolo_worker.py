@@ -80,9 +80,28 @@ class AsyncYoloWorker:
 
     # ----- lifecycle -----
 
+    def _probe_batch(self) -> None:
+        """Detect at init whether the model accepts batch>1. Avoids the
+        per-run WARNING when the engine is fixed-batch=1 (TRT default)."""
+        if self._batch_size <= 1:
+            return
+        try:
+            import numpy as _np
+            dummy = [_np.zeros((self._imgsz, self._imgsz, 3), dtype=_np.uint8)
+                     for _ in range(self._batch_size)]
+            self._model(dummy, device=self._device, verbose=False,
+                        conf=self._conf, imgsz=self._imgsz)
+        except Exception as e:
+            self._logger.info(
+                f"YOLO model rejected batch={self._batch_size} "
+                f"({type(e).__name__}); using single-frame inference.")
+            self._batch_ok = False
+            self._batch_size = 1
+
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
+        self._probe_batch()
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._loop, name="AsyncYoloWorker", daemon=True)
