@@ -4,5 +4,3 @@
 torch==2.6.0+cu124
 torchvision==0.21.0+cu124
 torchaudio==2.6.0+cu124
-sympy>=1.13.3
-mpmath>=1.2
