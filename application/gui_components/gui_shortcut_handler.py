@@ -523,36 +523,17 @@ class ShortcutHandlerMixin:
         if target == cur:
             return
 
-        SEEK_CROSSOVER = 10
         t0 = time.perf_counter()
-        budget_end = t0 + _ARROW_TICK_BUDGET_S
-        last_frame = None
-        frames_read = 0
         forward = target > cur
-        jump_style = "single-jump" if abs(target - cur) > SEEK_CROSSOVER else "step"
+        jump_style = "single-jump"
 
-        if abs(target - cur) > SEEK_CROSSOVER:
-            if forward:
-                last_frame = proc.arrow_nav_forward(target)
-            else:
-                last_frame = proc.arrow_nav_backward(target)
-            frames_read = 1 if last_frame is not None else 0
+        # Async path: advances cursor, enqueues background fetch, returns None
+        # on cache miss. Cache hit returns the frame synchronously.
+        if forward:
+            last_frame = proc.arrow_nav_forward(target)
         else:
-            # Time-budgeted step-by-step so the GUI always renders this tick.
-            step = 1 if forward else -1
-            idx = cur
-            while (forward and idx < target) or (not forward and idx > target):
-                idx += step
-                if forward:
-                    frame = proc.arrow_nav_forward(idx)
-                else:
-                    frame = proc.arrow_nav_backward(idx)
-                if frame is None:
-                    break
-                last_frame = frame
-                frames_read += 1
-                if time.perf_counter() > budget_end:
-                    break
+            last_frame = proc.arrow_nav_backward(target)
+        frames_read = 1 if last_frame is not None else 0
 
         elapsed = time.perf_counter() - t0
 

@@ -172,6 +172,7 @@ class VideoProcessor(
         # LRU eviction. Created here; the prefetcher thread is started
         # after open_video succeeds and stopped on reset(close_video=True).
         self._init_nav_cache()
+        self._init_arrow_async()
 
         # ML format detector (lazy loaded)
         self.ml_detector = None
@@ -2141,6 +2142,7 @@ class VideoProcessor(
             # Stop the prefetcher BEFORE closing the frame source so it
             # doesn't race against a torn-down decoder.
             self._stop_nav_prefetcher()
+            self._stop_arrow_async()
             if self.thumbnail_extractor:
                 self.thumbnail_extractor.close()
                 self.thumbnail_extractor = None

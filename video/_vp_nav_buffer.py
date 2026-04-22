@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time as _time
 from typing import Optional
 
 import numpy as np
@@ -65,6 +67,70 @@ class NavBufferMixin:
             self._nav_prefetcher.stop()
         except Exception:
             pass
+
+    # async arrow-nav fetch: dedicated worker for cache-miss targets so the
+    # imgui main thread never blocks on get_frame.
+    def _init_arrow_async(self) -> None:
+        self._arrow_target: Optional[int] = None
+        self._arrow_target_lock = threading.Lock()
+        self._arrow_wake = threading.Event()
+        self._arrow_stop = threading.Event()
+        self._arrow_epoch = 0
+        self._arrow_thread = threading.Thread(
+            target=self._arrow_async_loop, daemon=True, name="ArrowNavFetch")
+        self._arrow_thread.start()
+
+    def _stop_arrow_async(self) -> None:
+        ev = getattr(self, "_arrow_stop", None)
+        if ev is None:
+            return
+        ev.set()
+        self._arrow_wake.set()
+        try:
+            self._arrow_thread.join(timeout=1.0)
+        except Exception:
+            pass
+
+    def _enqueue_arrow_fetch(self, target: int) -> int:
+        with self._arrow_target_lock:
+            self._arrow_epoch += 1
+            self._arrow_target = int(target)
+            my_epoch = self._arrow_epoch
+        self._arrow_wake.set()
+        return my_epoch
+
+    def _arrow_async_loop(self) -> None:
+        while not self._arrow_stop.is_set():
+            if not self._arrow_wake.wait(timeout=0.5):
+                continue
+            self._arrow_wake.clear()
+            with self._arrow_target_lock:
+                target = self._arrow_target
+                my_epoch = self._arrow_epoch
+            if target is None or self.frame_source is None:
+                continue
+            t0 = _time.perf_counter()
+            frame = self.frame_source.get_frame(int(target), timeout=2.0)
+            dur_ms = (_time.perf_counter() - t0) * 1000.0
+            if frame is None:
+                if self._nav_dbg_enabled():
+                    self.logger.info(
+                        f"NAV arrow_async    target={target} path=miss      dur={dur_ms:.1f}ms")
+                continue
+            self._nav_cache.put(int(target), frame)
+            with self._arrow_target_lock:
+                stale = (self._arrow_epoch != my_epoch)
+            if stale:
+                if self._nav_dbg_enabled():
+                    self.logger.info(
+                        f"NAV arrow_async    target={target} path=stale     dur={dur_ms:.1f}ms")
+                continue
+            with self.frame_lock:
+                self.current_frame = frame
+                self._frame_version += 1
+            if self._nav_dbg_enabled():
+                self.logger.info(
+                    f"NAV arrow_async    target={target} path=commit    dur={dur_ms:.1f}ms")
 
     def _nav_prefetcher_can_run(self) -> bool:
         # Only when paused and tracker idle. Playback pumps the cache itself;
@@ -139,30 +205,20 @@ class NavBufferMixin:
         if self.frame_source is None:
             self.logger.warning(f"Nav miss and no frame source for frame {target_frame}")
             return None
-        # Short budget: UI thread is blocked while this runs. Cache miss
-        # on a slow VR keyframe can still exceed this; better to drop the
-        # frame than freeze the UI for seconds.
-        frame = self.frame_source.get_frame(target_frame, timeout=0.8)
-        dur_ms = (_time.perf_counter() - t0) * 1000.0
-        if frame is None:
-            if self._nav_dbg_enabled():
-                self.logger.info(
-                    f"NAV nav_to         from={prev} to={target_frame} "
-                    f"delta={target_frame-prev:+d} path=source     "
-                    f"dur={dur_ms:.1f}ms hit=0 miss=1")
-            else:
-                self.logger.debug(f"frame_source.get_frame({target_frame}) missed within budget")
-            return None
-        self._nav_cache.put(target_frame, frame)
+        # Cache miss: advance cursor sync, enqueue async fetch, return None.
+        # Background worker commits the frame + bumps _frame_version under lock.
         self.current_frame_index = target_frame
+        if hasattr(self, "_enqueue_arrow_fetch"):
+            self._enqueue_arrow_fetch(target_frame)
         if hasattr(self, "_nav_prefetcher"):
             self._nav_prefetcher.notify()
         if self._nav_dbg_enabled():
+            dur_ms = (_time.perf_counter() - t0) * 1000.0
             self.logger.info(
                 f"NAV nav_to         from={prev} to={target_frame} "
-                f"delta={target_frame-prev:+d} path=source     "
-                f"dur={dur_ms:.1f}ms hit=0 fetched=1")
-        return frame
+                f"delta={target_frame-prev:+d} path=async_queue "
+                f"dur={dur_ms:.1f}ms hit=0")
+        return None
 
     def arrow_nav_forward(self, target_frame: int) -> Optional[np.ndarray]:
         if getattr(self, "arrow_nav_in_progress", False):
