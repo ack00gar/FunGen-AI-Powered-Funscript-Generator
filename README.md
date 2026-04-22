@@ -75,10 +75,6 @@ If a previous FunGen install used miniconda, the installer detects it at the end
 
 Just `git pull` (or use the in-app updater) and click the launcher again. The launcher self-heals: it sees there's no `.venv`, runs `install.py` once (~2 min), then starts the app. The old `~/miniconda3/envs/FunGen` is left in place until you confirm the new env works. You will get a one-time prompt at the end of the installer asking what to do with it.
 
-### Fallback (if the new installer fails)
-
-The previous conda-based installer is still in the repo as `legacy_install_with_conda.py` (with `legacy_install.sh` / `legacy_install.bat` shims). Run it the same way as the old installer if you hit a problem with the uv-based one, then please [open an issue](https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/issues).
-
 ---
 
 ## Manual Installation

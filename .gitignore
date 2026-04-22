@@ -15,8 +15,10 @@ assets/splash/*.png
 # Auto-downloaded UI control icons (downloaded from config/constants.py URLs)
 assets/ui/icons/*.png
 
-# Test and audit files that shouldn't be in the repo
+# Test, audit, and perf-bench files that shouldn't be in the repo
 tests/
+bench/
+bench_results/
 test_all_cli_modes.py
 pytest.ini
 test_timeline_fixes.py
