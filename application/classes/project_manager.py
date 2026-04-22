@@ -512,4 +512,5 @@ class ProjectManager:
                     except ValueError:
                         pass
                 if editor and hasattr(editor, '_bookmark_manager'):
-                    editor._bookmark_manager = BookmarkManager.from_dict(bm_list)
+                    editor._bookmark_manager = BookmarkManager.from_dict(
+                        bm_list, on_change=editor._mark_project_dirty)

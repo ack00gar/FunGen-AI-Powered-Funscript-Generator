@@ -184,8 +184,8 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         self._live_tool_value: float = 0.0
         self._live_drag_state: Optional[dict] = None
 
-        # Bookmarks
-        self._bookmark_manager = BookmarkManager()
+        # Bookmarks. Mutations dirty the project so autosave + exit-save persist them.
+        self._bookmark_manager = BookmarkManager(on_change=self._mark_project_dirty)
         self._bookmark_rename_id: Optional[str] = None
         self._bookmark_rename_buf: str = ""
 
@@ -228,6 +228,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
     # ==================================================================================
     # CORE DATA HELPERS
     # ==================================================================================
+
+    def _mark_project_dirty(self) -> None:
+        """Mark the project as having unsaved changes (autosave + exit-save gate on this)."""
+        pm = getattr(self.app, 'project_manager', None)
+        if pm is not None:
+            pm.project_dirty = True
 
     def _get_target_funscript_details(self) -> Tuple[Optional[object], Optional[str]]:
         """Get the target funscript object and axis for this timeline"""

@@ -5,7 +5,7 @@ allowing quick navigation to important points in the script.
 """
 import uuid
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable
 
 
 @dataclass
@@ -19,12 +19,22 @@ class Bookmark:
 class BookmarkManager:
     """Manages a list of timeline bookmarks with CRUD operations."""
 
-    def __init__(self):
+    def __init__(self, on_change: Optional[Callable[[], None]] = None):
         self._bookmarks: List[Bookmark] = []
+        # Fired after every mutation. The owning timeline wires this to set
+        # project_dirty so autosave + exit-save persist bookmark changes.
+        self._on_change = on_change
 
     @property
     def bookmarks(self) -> List[Bookmark]:
         return self._bookmarks
+
+    def _fire(self) -> None:
+        if self._on_change is not None:
+            try:
+                self._on_change()
+            except Exception:
+                pass
 
     def add(self, time_ms: float, name: str = "", color: tuple = None) -> Bookmark:
         """Add a new bookmark at the given time."""
@@ -35,6 +45,7 @@ class BookmarkManager:
         )
         self._bookmarks.append(bm)
         self._bookmarks.sort(key=lambda b: b.time_ms)
+        self._fire()
         return bm
 
     def remove(self, bookmark_id: str) -> bool:
@@ -42,6 +53,7 @@ class BookmarkManager:
         for i, bm in enumerate(self._bookmarks):
             if bm.id == bookmark_id:
                 self._bookmarks.pop(i)
+                self._fire()
                 return True
         return False
 
@@ -50,6 +62,7 @@ class BookmarkManager:
         for bm in self._bookmarks:
             if bm.id == bookmark_id:
                 bm.name = new_name
+                self._fire()
                 return True
         return False
 
@@ -79,7 +92,9 @@ class BookmarkManager:
 
     def clear(self):
         """Remove all bookmarks."""
-        self._bookmarks.clear()
+        if self._bookmarks:
+            self._bookmarks.clear()
+            self._fire()
 
     def to_dict(self) -> List[Dict]:
         """Serialize bookmarks to a list of dicts for project save."""
@@ -94,9 +109,10 @@ class BookmarkManager:
         ]
 
     @classmethod
-    def from_dict(cls, data: List[Dict]) -> 'BookmarkManager':
+    def from_dict(cls, data: List[Dict],
+                  on_change: Optional[Callable[[], None]] = None) -> 'BookmarkManager':
         """Deserialize bookmarks from project data."""
-        mgr = cls()
+        mgr = cls(on_change=on_change)
         if not data:
             return mgr
         for d in data:
