@@ -480,7 +480,8 @@ class InteractiveFunscriptTimeline(DrawingMixin):
 
                 app_state.timeline_zoom_factor_ms_per_px = new_zoom
                 app_state.timeline_pan_offset_ms = new_pan
-                app_state.timeline_interaction_active = True
+                # Wheel events have no release; if we set timeline_interaction_active
+                # here it never clears and blocks subsequent forced syncs.
 
             # Double middle-click clears selection (fast deselect gesture).
             if imgui.is_mouse_double_clicked(glfw.MOUSE_BUTTON_MIDDLE):
