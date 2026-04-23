@@ -84,6 +84,10 @@ class AudioPlayer:
 
         self._lock = threading.Lock()  # guards start/stop/seek
 
+        # Once the OS rejects our output stream, stop retrying for the run.
+        # Per-video retries spam logs and waste an ffmpeg+thread per attempt.
+        self._session_audio_broken = False
+
         logger.debug(f"AudioPlayer init: device sample_rate={self._sample_rate}")
 
     # ------------------------------------------------------------------ public API
@@ -98,6 +102,8 @@ class AudioPlayer:
     def start(self, position_ms: float, tempo: float = 1.0):
         """Start (or restart) audio playback from ``position_ms``."""
         if not SOUNDDEVICE_AVAILABLE or not self._has_audio or not self._video_path:
+            return
+        if self._session_audio_broken:
             return
         with self._lock:
             self._stop_internal()
@@ -120,6 +126,8 @@ class AudioPlayer:
     def scrub(self, position_ms: float, duration_ms: float = 100):
         """Play a short audio burst for frame-stepping scrub."""
         if not SOUNDDEVICE_AVAILABLE or not self._has_audio or not self._video_path:
+            return
+        if self._session_audio_broken:
             return
         with self._lock:
             self._cancel_scrub_timer()
@@ -221,7 +229,9 @@ class AudioPlayer:
             )
             self._stream.start()
         except Exception as e:
-            logger.error(f"Failed to open audio stream: {e}")
+            logger.warning(
+                f"Audio output unavailable, disabling audio for this session: {e}")
+            self._session_audio_broken = True
             self._kill_ffmpeg()
             self._stream = None
 
