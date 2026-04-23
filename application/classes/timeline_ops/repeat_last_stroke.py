@@ -1,6 +1,8 @@
 """Append a copy of the most recent stroke (last two actions before playhead)."""
 from bisect import bisect_left
 
+from .add_point import add_point
+
 
 def repeat_last_stroke(tl) -> None:
     actions = tl._get_actions()
@@ -42,8 +44,8 @@ def repeat_last_stroke(tl) -> None:
                            extra={'status_message': True})
         return
 
-    tl._add_point(new1_at, a1['pos'])
-    tl._add_point(new2_at, a2['pos'])
+    add_point(tl, new1_at, a1['pos'])
+    add_point(tl, new2_at, a2['pos'])
     tl.app.logger.info(
         f"Repeated stroke at {new1_at}ms / {new2_at}ms (Timeline {tl.timeline_num})",
         extra={'status_message': True})
