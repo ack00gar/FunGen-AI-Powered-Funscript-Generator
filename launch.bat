@@ -53,5 +53,9 @@ if not exist "%VENV_PY%" (
     exit /b 1
 )
 
+REM Re-check git path after install.py (may have just installed git via winget).
+if exist "C:\Program Files\Git\cmd\git.exe" set "PATH=C:\Program Files\Git\cmd;%PATH%"
+if exist "C:\Program Files (x86)\Git\cmd\git.exe" set "PATH=C:\Program Files (x86)\Git\cmd;%PATH%"
+
 "%VENV_PY%" main.py %*
 if errorlevel 1 pause
