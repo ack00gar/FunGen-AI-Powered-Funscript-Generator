@@ -1195,16 +1195,20 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                                             self._preview_frame_fetch_pending = True
                                             self._preview_cached_tooltip_data['frame_loading'] = True  # Set immediately so tooltip shows "Loading..."
                                             cached_hover_frame = self._preview_cached_tooltip_data.get('hover_frame', hover_frame)
+                                            # Capture dict reference -- main thread may
+                                            # reassign self._preview_cached_tooltip_data
+                                            # to None mid-fetch (hover ends / new pos).
+                                            target_dict = self._preview_cached_tooltip_data
 
                                             def fetch_frame_async():
                                                 try:
                                                     frame_data, actual_frame = self._get_frame_direct_cv2(cached_hover_frame)
                                                     if frame_data is not None and frame_data.size > 0:
-                                                        self._preview_cached_tooltip_data['frame_data'] = frame_data
-                                                        self._preview_cached_tooltip_data['actual_frame'] = actual_frame
-                                                        self._preview_cached_tooltip_data['frame_loading'] = False
+                                                        target_dict['frame_data'] = frame_data
+                                                        target_dict['actual_frame'] = actual_frame
+                                                        target_dict['frame_loading'] = False
                                                 except Exception:
-                                                    self._preview_cached_tooltip_data['frame_loading'] = False
+                                                    target_dict['frame_loading'] = False
                                                 finally:
                                                     self._preview_frame_fetch_pending = False
 
@@ -1228,16 +1232,17 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
                                             if not self._preview_frame_fetch_pending:
                                                 self._preview_frame_fetch_pending = True
+                                                target_dict = tooltip_data
 
                                                 def fetch_frame_async():
                                                     try:
                                                         frame_data, actual_frame = self._get_frame_direct_cv2(hover_frame)
                                                         if frame_data is not None and frame_data.size > 0:
-                                                            self._preview_cached_tooltip_data['frame_data'] = frame_data
-                                                            self._preview_cached_tooltip_data['actual_frame'] = actual_frame
-                                                            self._preview_cached_tooltip_data['frame_loading'] = False
+                                                            target_dict['frame_data'] = frame_data
+                                                            target_dict['actual_frame'] = actual_frame
+                                                            target_dict['frame_loading'] = False
                                                     except Exception:
-                                                        self._preview_cached_tooltip_data['frame_loading'] = False
+                                                        target_dict['frame_loading'] = False
                                                     finally:
                                                         self._preview_frame_fetch_pending = False
 
