@@ -74,6 +74,11 @@ def set_application_logging_level(app, level_name: str) -> None:
     if numeric_level is not None and hasattr(app, '_logger_instance'):
         app._logger_instance.set_level(numeric_level)
         app.logging_level_setting = level_name
+        # Persist so subsequent CLI/batch runs pick up the same level.
+        try:
+            app.app_settings.config.logging.level = level_name
+        except Exception as e:
+            app.logger.debug(f"Could not persist logging_level: {e}")
         app.logger.info(f"Logging level changed to: {level_name}",
                         extra={'status_message': True})
     else:
