@@ -729,6 +729,10 @@ class StandaloneSplashWindow:
     def _render_prerendered_frame(self, frame_count):
         """Render a pre-rendered splash frame (buttery smooth - no GIL contention!)."""
         window_width, window_height = glfw.get_window_size(self.window)
+        # Minimized window on Windows reports (0, 0); downstream layout math
+        # divides by these and crashes the render thread.
+        if window_width <= 0 or window_height <= 0:
+            return
 
         # Calculate which frame to display based on FPS
         fps = self.prerendered_metadata.get('fps', 60)
@@ -769,6 +773,10 @@ class StandaloneSplashWindow:
         """Render the splash screen content (minimalist: just logo)."""
         # Get window size
         window_width, window_height = glfw.get_window_size(self.window)
+        # Minimized window on Windows reports (0, 0); downstream layout math
+        # divides by these and crashes the render thread.
+        if window_width <= 0 or window_height <= 0:
+            return
 
         # Subtle ambient drift (smooth, not jarring)
         current_time = time.time()
