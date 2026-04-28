@@ -6,6 +6,14 @@ config.json
 # Local dev probes and one-off diagnostic harnesses
 scratch/
 
+# Local working dirs (machine-specific WIP, never push)
+passthrough_prev/
+streamer_prev/
+bkp temp/
+.fungen_conda_prompted
+.claude/
+.idea/
+
 # Ultralytics project-local config (contains machine-specific UUID, auto-created at runtime)
 config/ultralytics/
 
@@ -16,11 +24,10 @@ assets/splash/*.png
 assets/ui/icons/*.png
 
 # Test, audit, and perf-bench files that shouldn't be in the repo
-tests/
+tests/addons/
 bench/
 bench_results/
 test_all_cli_modes.py
-pytest.ini
 test_timeline_fixes.py
 test_complete_ua_fix.py
 audit_launch_logging.py
