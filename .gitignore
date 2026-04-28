@@ -24,7 +24,7 @@ assets/splash/*.png
 assets/ui/icons/*.png
 
 # Test, audit, and perf-bench files that shouldn't be in the repo
-tests/addons/
+tests/
 bench/
 bench_results/
 test_all_cli_modes.py
