@@ -11,7 +11,7 @@ from enum import Enum
 # META & VERSIONING
 ####################################################################################################
 APP_NAME = "FunGen"
-APP_VERSION = "0.9.0"
+APP_VERSION = "1.0.0"
 APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION}"
 FUNSCRIPT_AUTHOR = "FunGen"
 
