@@ -12,14 +12,27 @@ This project is still at the early stages of development. It is not intended for
 
 ---
 
+## v1.0.0 Highlights
+
+- **One-shim installer (uv + venv replaces miniconda)**. Download a single `install.bat` / `install.sh`, double-click, done. The shim bootstraps `uv`, builds a self-contained `.venv`, auto-detects your GPU, and writes launcher scripts. ~500 MB on disk, no admin rights, no PATH surgery. `ffmpeg` and `mpv` are auto-installed via the OS package manager (winget, brew, apt/dnf/pacman) when missing.
+- **Six PyTorch channels, auto-selected**: `cuda_blackwell` (RTX 50-series, cu129), `cuda_stable` (RTX 20/30/40, cu128), `cuda_legacy` (driver 525-559, cu124), `cpu`, `mps` (Apple Silicon), `rocm` (AMD on Linux). Detection runs in `install.py`; you can override by re-running with the channel name.
+- **VR dewarp shader with adaptive supersample**. Runtime-compiled GLSL replaces the CPU `v360` filter for in-GUI playback. Adaptive resolution scales the shader FBO to display * supersample, with anisotropic filter cap and free IGN dither. Embedded fullscreen keeps the shader and adaptive quality active. Plain non-shader playback stays clamped to a sensible CPU budget.
+- **GUI perf sweep**. Timeline draws via `rect_filled` instead of `circle_filled` (~2x cheaper); oscillation grid activation vectorized (1.4x); plugin runtimes fixed at the algorithm level (Resample 8.4x via `math.cos` in the scalar loop, Keyframes 5.2x and Dynamic Amplify 3.1x via `O(n log n)` flat arrays); cached u32 colors / chapter text widths / spline math throughout the draw loop; LOD-A density envelope dropped (zero CPU saving in bench).
+- **Async tracker lifecycle**. YOLO model preloads off the UI thread; `stop_tracking` tears down asynchronously; post-session funscript save + autotune is async; mpv pause/resume is balanced across stop / display-mode reload; mpv `hwdec` defaults to `auto-safe`.
+- **Animated splash with 17 themes**. Random per launch (or pin one with `FUNGEN_SPLASH_THEME=<name>`). Themes: matrix, terminator, tron, starwars, breaking, invaders, mars, clippy, tetris, pacman, blade, bsod, sonic, xfiles, tmnt, et, mario.
+- **Cock Hero Beat Tracker (offline)**. Audio-beat-driven funscript generator. Picks beats from the audio track and emits alternating peak/valley keyframes - useful for music-video edits where visual flow alone is unreliable.
+- **`--watch` actually processes videos**. The watch-folder CLI now spawns `main.py` workers per queued item, up to `--max-parallel N` (default 1), reaps on exit, terminates inflight on Ctrl-C. Previously the queue filled forever with nothing draining it.
+- **Async navigation**. Arrow-key seeks fetch via a dedicated worker; tooltip dict refs are captured before async hover-cancel; scrub cache keyed by requested frame index avoids respawning the FFmpeg source on hover-seek.
+- **Internal restructure (no behavior change)**. `app_logic` split into 8 lifecycle modules (`tracking_lifecycle`, `project_lifecycle`, `settings_lifecycle`, `video_session`, `first_run_setup`, `hardware_accel`, `log_config`, `shortcut_mapper`); video display split into `_core` / `controls` / `display_route` / `overlays`; gui components reorganized.
+
 ## v0.9.0 Highlights
 
-- **Video backend rewrite** — PyAV is gone. Frame decode runs through a dedicated FFmpeg subprocess frame source; the GUI display uses libmpv via its render API for smooth playback. Each video-touching subsystem (thumbnails, proxy encode, metadata probe, audio) is a purpose-built FFmpeg or ffprobe path, not a shared in-process filter graph.
-- **New nav buffer** — 1 GB byte-budgeted LRU frame cache replaces the old contiguous deque. Survives seeks, so bouncing between regions of the video reuses previously decoded frames for free until the byte budget forces LRU eviction. Hit-rate and fill percentage visible in the Expert → Developer Perf panel.
-- **Anticipatory prefetcher** — While paused and idle, a background thread watches the arrow-nav pattern and warms the cache around the likely next target (bidirectional fill on "landed", forward/backward fill on sustained trend). Gated off during playback (the loop pumps the cache itself) and during tracking (tracker owns the decoder).
-- **Progressive arrow-hold playback** — Tap right arrow = one frame forward. Hold ≥ 0.25 s = REALTIME playback. Hold ≥ 3 s = MAX_SPEED. Release stops playback. Left arrow = one frame back on tap, auto-repeat step-back on hold (engine has no reverse playback).
-- **Faster texture upload** — `GL_BGR` native upload eliminates the per-frame `cv2.cvtColor` allocation; PBO-backed streaming with `glBufferData` orphaning lets the driver overlap the DMA copy with the rest of the render pass. Automatic fallback to direct upload if PBO fails.
-- **Better diagnostics** — FFmpeg subprocess deaths now surface the return code and stderr tail so misconfigured hwaccel or filter chains are identifiable from the log. MpvDisplay load failures surface to the user via toast + expert panel instead of showing a silent black frame. Expert panel exposes a "Debug nav logging" toggle that emits a one-line NAV trace per arrow/scrub event.
+- **Video backend rewrite** - PyAV is gone. Frame decode runs through a dedicated FFmpeg subprocess frame source; the GUI display uses libmpv via its render API for smooth playback. Each video-touching subsystem (thumbnails, proxy encode, metadata probe, audio) is a purpose-built FFmpeg or ffprobe path, not a shared in-process filter graph.
+- **New nav buffer** - 1 GB byte-budgeted LRU frame cache replaces the old contiguous deque. Survives seeks, so bouncing between regions of the video reuses previously decoded frames for free until the byte budget forces LRU eviction. Hit-rate and fill percentage visible in the Expert -> Developer Perf panel.
+- **Anticipatory prefetcher** - While paused and idle, a background thread watches the arrow-nav pattern and warms the cache around the likely next target (bidirectional fill on "landed", forward/backward fill on sustained trend). Gated off during playback (the loop pumps the cache itself) and during tracking (tracker owns the decoder).
+- **Progressive arrow-hold playback** - Tap right arrow = one frame forward. Hold >= 0.25 s = REALTIME playback. Hold >= 3 s = MAX_SPEED. Release stops playback. Left arrow = one frame back on tap, auto-repeat step-back on hold (engine has no reverse playback).
+- **Faster texture upload** - `GL_BGR` native upload eliminates the per-frame `cv2.cvtColor` allocation; PBO-backed streaming with `glBufferData` orphaning lets the driver overlap the DMA copy with the rest of the render pass. Automatic fallback to direct upload if PBO fails.
+- **Better diagnostics** - FFmpeg subprocess deaths now surface the return code and stderr tail so misconfigured hwaccel or filter chains are identifiable from the log. MpvDisplay load failures surface to the user via toast + expert panel instead of showing a silent black frame. Expert panel exposes a "Debug nav logging" toggle that emits a one-line NAV trace per arrow/scrub event.
 
 ## v0.8.0 Highlights
 
@@ -90,7 +103,7 @@ If the automatic installer doesn't fit your setup, you can do it by hand.
 
 ### Install
 ```bash
-git clone --branch release/v0.9.0 https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGen
+git clone --branch main https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGen
 cd FunGen
 ./install.sh        # macOS / Linux
 install.bat         # Windows
@@ -103,8 +116,9 @@ The shim bootstraps `uv` if needed, then runs `install.py` with `uv run --no-pro
 | File | When |
 |---|---|
 | `requirements/base.txt` | Always installed: torch-independent deps (opencv, ultralytics, moderngl, etc.) |
-| `requirements/cuda_stable.txt` | NVIDIA RTX 20/30/40-series, A/H/L-series datacenter cards (cu128) |
-| `requirements/cuda_blackwell.txt` | NVIDIA RTX 50-series (RTX 5070/5080/5090), Blackwell, cu129 |
+| `requirements/cuda_stable.txt` | NVIDIA RTX 20/30/40-series, A/H/L-series datacenter cards (cu128, driver 555+) |
+| `requirements/cuda_blackwell.txt` | NVIDIA RTX 50-series (RTX 5070/5080/5090), Blackwell (cu129, driver 560+) |
+| `requirements/cuda_legacy.txt` | Older NVIDIA drivers in the 525-559 range (cu124, torch 2.6.0) |
 | `requirements/cpu.txt` | Linux + Windows CPU-only |
 | `requirements/mps.txt` | macOS Apple Silicon (MPS / Metal) |
 | `requirements/rocm.txt` | AMD ROCm on Linux |
@@ -246,6 +260,7 @@ The tracker system is responsible for analyzing the video and generating the raw
 - **VR Hybrid Chapter-Aware** - Single-pass chapter detection + per-chapter ROI optical flow. Best quality for VR videos.
 - **Contact Analysis (2-Stage)** - YOLO-based contact detection and analysis.
 - **Guided Flow (3-Stage)** - Chapter-aware dense optical flow with per-position ROI strategies.
+- **Cock Hero Beat Tracker** - Audio-beat-driven script generator. Detects beats in the audio track and emits alternating peak/valley keyframes; works well for music-video edits where visual flow alone is unreliable.
 
 ### Live Trackers
 
@@ -309,6 +324,7 @@ This project started as a dream to automate Funscript generation for VR videos. 
 - **Initial Approach (OpenCV Trackers)**: The first version relied on OpenCV trackers to detect and track objects in the video. While functional, the approach was slow (8–20 FPS) and struggled with occlusions and complex scenes.
 - **Transition to YOLO**: To improve accuracy and speed, the project shifted to using YOLO object detection. A custom YOLO model was trained on a dataset of 1000nds annotated VR video frames, significantly improving detection quality.
 - **v0.9.0 Video Backend Rewrite**: PyAV and its in-process libav filter graph were replaced by a purpose-built FFmpeg subprocess frame source for analysis and a libmpv render-API display for playback. Removed a major source of C-level crashes, cut cold-start latency, and unblocked the GPU texture-upload and nav-cache improvements shipped in the same release.
+- **v1.0.0 Installer + Render Pipeline**: miniconda was replaced by `uv + .venv` so a fresh install is one click instead of a multi-step toolchain bring-up. The VR display path moved from CPU `v360` to a runtime-compiled GLSL dewarp shader with adaptive supersampling, and the GUI perf path was swept (timeline draw, oscillation grid, plugin algorithms, async tracker lifecycle).
 - **Original Post**: For more details and discussions, check out the original post on EroScripts:
   [VR Funscript Generation Helper (Python + CV/AI)](https://discuss.eroscripts.com/t/vr-funscript-generation-helper-python-now-cv-ai/202554)
 
@@ -328,10 +344,11 @@ See the [LICENSE](LICENSE) file for full details.
 
 # Acknowledgments
 
-- **YOLO** — Ultralytics for the detection framework.
-- **FFmpeg / libavfilter** — decode, v360 dewarp, proxy encoding, audio, thumbnails.
-- **libmpv** — smooth in-GUI playback via the render API.
-- **Eroscripts Community** — inspiration and real-world use cases.
+- **YOLO** - Ultralytics for the detection framework.
+- **FFmpeg / libavfilter** - decode, v360 dewarp, proxy encoding, audio, thumbnails.
+- **libmpv** - smooth in-GUI playback via the render API.
+- **uv** - the Python installer / venv builder that replaced miniconda in v1.0.0.
+- **Eroscripts Community** - inspiration and real-world use cases.
 
 ---
 
