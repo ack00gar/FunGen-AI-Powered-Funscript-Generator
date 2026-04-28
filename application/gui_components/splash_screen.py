@@ -815,7 +815,7 @@ class StandaloneSplashWindow:
             logo_size = 250  # Logo fills most of the window
             logo_y = (window_height - logo_size) / 2  # Centered vertically
 
-            # Theme-specific animations (picked once per session) — resolved early
+            # Theme-specific animations (picked once per session) -- resolved early
             # so themes like "invaders" can drive the logo's horizontal position.
             theme_name = self._get_splash_theme()
             theme_data = self._SPLASH_THEMES[theme_name]
@@ -829,7 +829,7 @@ class StandaloneSplashWindow:
             if placement is not None:
                 logo_x, logo_y, logo_size, float_offset = placement
             elif theme_name == 'invaders':
-                # Logo IS the player ship — sweep it L-R so it reads as the
+                # Logo IS the player ship -- sweep it L-R so it reads as the
                 # shooter firing at the fleet above.
                 sweep_amp = max(80.0, window_width * 0.33)
                 logo_x = (window_width - logo_size) / 2 + math.sin(current_time * 0.55) * sweep_amp
@@ -865,7 +865,7 @@ class StandaloneSplashWindow:
             # Foreground animation (e.g. laser eyes). Prefer extracted theme
             # modules; fall back to the class-resident method for the handful
             # still living on the class (terminator laser eyes, starwars
-            # sabers — deferred until they get their own theme module).
+            # sabers -- deferred until they get their own theme module).
             if current_time > 0.3 and self.quality_level > 0.3:
                 if not splash_themes.render_fg(
                         theme_name, self, logo_x, logo_y + float_offset,
@@ -878,7 +878,7 @@ class StandaloneSplashWindow:
                                       logo_size, current_time - 0.3)
 
             # Content below logo (skipped for themes that bake version/paypal
-            # into their own scene, or drive logo placement themselves — for
+            # into their own scene, or drive logo placement themselves -- for
             # those, the logo moves every frame so "below the logo" is a
             # moving target).
             _no_centered_content = set(_corner_themes) | {'blade'}
@@ -1959,7 +1959,7 @@ class StandaloneSplashWindow:
                     clash_x, clash_y, rr,
                     imgui.get_color_u32_rgba(1.0, 1.0, 0.95, aa * flicker))
 
-            # Lightning arcs between the two blade tips — jagged polylines
+            # Lightning arcs between the two blade tips -- jagged polylines
             rng = random.Random(int(t_loop * 200))
             for arc_i in range(5):
                 pts = [(blue_tx, blue_ty)]
@@ -1992,7 +1992,7 @@ class StandaloneSplashWindow:
                         imgui.get_color_u32_rgba(1.0, 1.0, 1.0,
                                                  arc_a * 0.8), 1.0)
 
-            # Radial sparks (classic style) — 14 of them
+            # Radial sparks (classic style) -- 14 of them
             for si in range(14):
                 sa = t * 12 + si * (math.tau / 14)
                 spark_len = 40 + 40 * math.sin(t * 22 + si * 3)

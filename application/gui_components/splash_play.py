@@ -10,11 +10,12 @@ Usage:
     python3 application/gui_components/splash_play.py --theme starwars
     FUNGEN_SPLASH_THEME=breaking python3 application/gui_components/splash_play.py
 
-    # Cycle through all 7 themes, 12 seconds each (tune with --duration)
+    # Cycle through all 17 themes, 12 seconds each (tune with --duration)
     python3 application/gui_components/splash_play.py --all
     python3 application/gui_components/splash_play.py --all --duration 20
 
-Valid theme names: matrix, terminator, tron, starwars, breaking, invaders, mars.
+Valid theme names: matrix, terminator, tron, starwars, breaking, invaders, mars,
+clippy, tetris, pacman, blade, bsod, sonic, xfiles, tmnt, et, mario.
 Press Esc (or close the window) to skip to the next theme / quit.
 """
 import argparse
