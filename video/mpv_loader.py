@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import glob
 import os
 import platform
+import shutil
 import sys
 
 _CANDIDATES = {
@@ -45,6 +47,34 @@ _CANDIDATES = {
     ],
     "Windows": [],
 }
+
+
+def _windows_candidates() -> list[str]:
+    """Locate libmpv-2.dll on Windows by following mpv.exe and the typical
+    winget / installer drop-points. python-mpv's default find_library only
+    searches PATH for the bare DLL name, but winget's shinchiro.mpv puts
+    mpv.exe on PATH while the DLL lives in the package directory."""
+    paths: list[str] = []
+    mpv_exe = shutil.which("mpv") or shutil.which("mpv.exe")
+    if mpv_exe:
+        mpv_dir = os.path.dirname(mpv_exe)
+        for name in ("libmpv-2.dll", "mpv-2.dll", "mpv-1.dll"):
+            paths.append(os.path.join(mpv_dir, name))
+    local_app = os.environ.get("LOCALAPPDATA") or ""
+    if local_app:
+        for pattern in (
+            os.path.join(local_app, "Microsoft", "WinGet", "Packages",
+                         "shinchiro.mpv*", "mpv", "libmpv-2.dll"),
+            os.path.join(local_app, "Programs", "mpv", "libmpv-2.dll"),
+        ):
+            paths.extend(glob.glob(pattern))
+    program_files = os.environ.get("ProgramFiles") or r"C:\Program Files"
+    paths.append(os.path.join(program_files, "mpv", "libmpv-2.dll"))
+    return paths
+
+
+if platform.system() == "Windows":
+    _CANDIDATES["Windows"] = _windows_candidates()
 
 
 def _first_existing(paths):
