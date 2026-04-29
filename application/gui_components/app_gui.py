@@ -1005,6 +1005,9 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         size_changed = (last_size is None) or (last_size != (w, h, internal_fmt))
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, texture_id)
+        # Row stride for BGR/RGB at odd widths isn't multiple of 4; default
+        # GL_UNPACK_ALIGNMENT=4 then misreads. Hits 854x480 etc, not 4K.
+        gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
 
         # Streaming texture upload via PBO: glBufferData orphans the backing
         # store so the driver can start the DMA copy without waiting for the
