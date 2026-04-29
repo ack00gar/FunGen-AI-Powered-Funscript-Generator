@@ -223,6 +223,28 @@ class RightBottomBlock:
     def invalidate(self):
         self._plugin_cache = None
 
+    def _open_plugin_on_active_timeline(self, plugin_name: str) -> None:
+        """Open a plugin dialog on the active timeline so 'apply to selection'
+        respects the current point selection. Falls back to the Pipeline editor
+        if no timeline can be reached."""
+        try:
+            tl_num = getattr(self.app.app_state_ui, 'active_timeline_num', 1) or 1
+            tl = getattr(self.gui, f'timeline_editor{tl_num}', None)
+            if tl is None:
+                tl = getattr(self.gui, 'timeline_editor1', None)
+            if tl is not None and hasattr(tl, '_activate_plugin'):
+                has_sel = bool(getattr(tl, 'multi_selected_action_indices', None))
+                tl._activate_plugin(plugin_name, apply_to_selection=has_sel)
+                return
+        except Exception:
+            pass
+        # Fallback: open the Pipeline editor preselected (legacy behavior).
+        self.app.app_state_ui.show_plugin_pipeline = True
+        try:
+            self.gui.plugin_pipeline_ui.preselect_plugin = plugin_name
+        except Exception:
+            pass
+
     def _build_cache(self):
         try:
             from funscript.plugins.base_plugin import plugin_registry
@@ -278,11 +300,7 @@ class RightBottomBlock:
                     desc = p.get('description', '')
                     disp = name if len(name) <= 18 else name[:17] + "..."
                     if imgui.button(f"{disp}##rb_p_{name}", width=btn_w, height=24):
-                        app_state.show_plugin_pipeline = True
-                        try:
-                            self.gui.plugin_pipeline_ui.preselect_plugin = name
-                        except Exception:
-                            pass
+                        self._open_plugin_on_active_timeline(name)
                     if imgui.is_item_hovered():
                         tip = name if not desc else f"{name}\n\n{desc}"
                         imgui.set_tooltip(tip)
