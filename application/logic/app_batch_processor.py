@@ -453,6 +453,8 @@ class AppBatchProcessor:
                             result = current_tracker.set_axis(axis_A, axis_B)
                             self.app.logger.info(f"Auto-set axis for {selected_mode}: A={axis_A}, B={axis_B}, result={result}")
 
+                    self.app.save_and_reset_complete_event.clear()
+
                     self.app.tracker.start_tracking()
                     self.app.processor.set_tracker_processing_enabled(True)
 
@@ -471,8 +473,13 @@ class AppBatchProcessor:
                     self.app.app_state_ui.selected_processing_speed_mode = original_speed_mode
                     self.app.logger.info("Restored original processing speed mode")
 
-                    # This call now handles all post-processing AND saving/copying
+                    # No-op when EOS already fired the daemon; covers the
+                    # exception/early-stop path that bypasses EOS.
                     self.app.on_processing_stopped(was_scripting_session=True)
+
+                    if not self.app.save_and_reset_complete_event.wait(timeout=600):
+                        self.app.logger.warning(
+                            "Post-live save did not signal completion within 600s; continuing anyway.")
 
                 self.app.processor.video_type_setting = original_video_type_setting
                 self.app.processor.vr_input_format = original_vr_format_setting

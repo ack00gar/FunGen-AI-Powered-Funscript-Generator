@@ -372,6 +372,8 @@ class BatchWorker:
         app.app_state_ui.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
 
         try:
+            app.save_and_reset_complete_event.clear()
+
             app.tracker.set_tracking_mode(selected_mode)
             app.tracker.start_tracking()
             app.processor.set_tracker_processing_enabled(True)
@@ -387,8 +389,12 @@ class BatchWorker:
                     logger.info("BatchWorker: Stop requested during live processing")
                     return
 
-            # Post-processing and saving (same as batch thread)
+            # No-op when EOS already fired the daemon.
             app.on_processing_stopped(was_scripting_session=True)
+
+            if not app.save_and_reset_complete_event.wait(timeout=600):
+                logger.warning(
+                    "BatchWorker: post-live save did not signal completion within 600s.")
 
         finally:
             app.app_state_ui.selected_processing_speed_mode = original_speed

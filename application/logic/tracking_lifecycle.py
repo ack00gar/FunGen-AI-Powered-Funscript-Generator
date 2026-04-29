@@ -216,6 +216,15 @@ class TrackingLifecycleController:
             video_path = app.file_manager.video_path
             if not video_path:
                 app.logger.warning("Live session ended, but no video path is available to save the raw funscript.")
+                if app.is_batch_processing_active and hasattr(app, 'save_and_reset_complete_event'):
+                    app.save_and_reset_complete_event.set()
+                return
+
+            # Batch fires on_processing_stopped twice (EOS + post-join);
+            # skip the second spawn so daemons don't race the same file.
+            existing = getattr(app, '_post_live_thread', None)
+            if existing is not None and existing.is_alive():
+                app.logger.debug("Post-live save already running, skipping duplicate.")
                 return
 
             # Heavy work (file I/O + Ultimate Autotune) runs on a daemon
@@ -236,11 +245,16 @@ class TrackingLifecycleController:
                     self._invalidate_all_timeline_caches()
                 except Exception as e:
                     app.logger.error(f"Live post-processing failed: {e}", exc_info=True)
+                finally:
+                    # Unblock the batch loop's wait before the next open_video.
+                    if app.is_batch_processing_active and hasattr(app, 'save_and_reset_complete_event'):
+                        app.save_and_reset_complete_event.set()
 
             app.logger.info("Live session ended, saving funscript and running post-processing...")
-            _threading.Thread(
-                target=_post_live_work, name="LivePostProcess", daemon=True
-            ).start()
+            t = _threading.Thread(
+                target=_post_live_work, name="LivePostProcess", daemon=True)
+            app._post_live_thread = t
+            t.start()
 
     def _invalidate_all_timeline_caches(self) -> None:
         """Invalidate every timeline editor's cached action arrays so the
