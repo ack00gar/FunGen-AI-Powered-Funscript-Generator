@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import platform
 import threading
+import zipfile
 from typing import TYPE_CHECKING
 
 from config.constants import DEFAULT_MODELS_DIR, MODEL_DOWNLOAD_URLS
@@ -56,31 +57,20 @@ class FirstRunSetupController:
 
             # ---- Detection model ----
             if not user_has_det:
-                det_url = MODEL_DOWNLOAD_URLS["detection_pt"]
-                det_filename_pt = os.path.basename(det_url)
-                det_path_pt = os.path.join(models_dir, det_filename_pt)
-                app.first_run_status_message = f"Downloading Detection Model: {det_filename_pt}..."
-                success = app.utility.download_file_with_progress(
-                    det_url, det_path_pt, self._progress)
-                if not success:
-                    app.first_run_status_message = "Detection model download failed."
+                if is_mac_arm:
+                    final_det_path = self._download_mlpackage(
+                        models_dir,
+                        MODEL_DOWNLOAD_URLS["detection_mlpackage_zip"],
+                        "Detection")
+                else:
+                    final_det_path = self._download_pt(
+                        models_dir,
+                        MODEL_DOWNLOAD_URLS["detection_pt"],
+                        "Detection")
+
+                if final_det_path is None:
                     app.first_run_error = True
                     return
-
-                final_det_path = det_path_pt
-                if is_mac_arm:
-                    app.first_run_status_message = "Converting detection model to CoreML format..."
-                    app.logger.info(f"Running on macOS ARM. Converting {det_filename_pt} to .mlpackage")
-                    try:
-                        # Lazy import: ultralytics pulls torch (~2s cold), only
-                        # needed on macOS ARM first-run.
-                        from ultralytics import YOLO
-                        YOLO(det_path_pt).export(format="coreml")
-                        final_det_path = det_path_pt.replace('.pt', '.mlpackage')
-                        app.logger.info(f"Successfully converted detection model to {final_det_path}")
-                    except Exception as e:
-                        app.logger.error(f"Failed to convert detection model to CoreML: {e}", exc_info=True)
-                        app.first_run_status_message = "Detection model conversion to CoreML failed. Using .pt format."
 
                 app.app_settings.config.models.yolo_det_path = final_det_path
                 app.yolo_detection_model_path_setting = final_det_path
@@ -90,31 +80,18 @@ class FirstRunSetupController:
                 app.logger.info(f"User already has detection model selected: {app.yolo_detection_model_path_setting}")
 
             # ---- Pose model ----
+            # Pose .mlpackage isn't hosted (ultralytics ships only .pt). On
+            # Mac ARM the .pt works (slower than .mlpackage); CoreML conversion
+            # would need coremltools which isn't a default dep.
             if not user_has_pose:
                 app.first_run_progress = 0
-                pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
-                pose_filename_pt = os.path.basename(pose_url)
-                pose_path_pt = os.path.join(models_dir, pose_filename_pt)
-                app.first_run_status_message = f"Downloading Pose Model: {pose_filename_pt}..."
-                success = app.utility.download_file_with_progress(
-                    pose_url, pose_path_pt, self._progress)
-                if not success:
-                    app.first_run_status_message = "Pose model download failed."
+                final_pose_path = self._download_pt(
+                    models_dir,
+                    MODEL_DOWNLOAD_URLS["pose_pt"],
+                    "Pose")
+                if final_pose_path is None:
                     app.first_run_error = True
                     return
-
-                final_pose_path = pose_path_pt
-                if is_mac_arm:
-                    app.first_run_status_message = "Converting pose model to CoreML format..."
-                    app.logger.info(f"Running on macOS ARM. Converting {pose_filename_pt} to .mlpackage")
-                    try:
-                        from ultralytics import YOLO
-                        YOLO(pose_path_pt).export(format="coreml")
-                        final_pose_path = pose_path_pt.replace('.pt', '.mlpackage')
-                        app.logger.info(f"Successfully converted pose model to {final_pose_path}")
-                    except Exception as e:
-                        app.logger.error(f"Failed to convert pose model to CoreML: {e}", exc_info=True)
-                        app.first_run_status_message = "Pose model conversion to CoreML failed. Using .pt format."
 
                 app.app_settings.config.models.yolo_pose_path = final_pose_path
                 app.yolo_pose_model_path_setting = final_pose_path
@@ -134,3 +111,37 @@ class FirstRunSetupController:
     def _progress(self, percent, downloaded, total_size) -> None:
         """Download progress callback."""
         self.app.first_run_progress = percent
+
+    def _download_pt(self, models_dir: str, url: str, label: str):
+        app = self.app
+        fname = os.path.basename(url)
+        target = os.path.join(models_dir, fname)
+        app.first_run_status_message = f"Downloading {label} Model: {fname}..."
+        if not app.utility.download_file_with_progress(url, target, self._progress):
+            app.first_run_status_message = f"{label} model download failed."
+            return None
+        return target
+
+    def _download_mlpackage(self, models_dir: str, zip_url: str, label: str):
+        """Download a hosted .mlpackage.zip, unzip into models_dir, return the
+        .mlpackage path. Skips the .pt + coremltools conversion path."""
+        app = self.app
+        zip_name = os.path.basename(zip_url)
+        zip_path = os.path.join(models_dir, zip_name)
+        app.first_run_status_message = f"Downloading {label} Model: {zip_name}..."
+        if not app.utility.download_file_with_progress(zip_url, zip_path, self._progress):
+            app.first_run_status_message = f"{label} model download failed."
+            return None
+        app.first_run_status_message = f"Extracting {zip_name}..."
+        try:
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(models_dir)
+        except Exception as e:
+            app.logger.error(f"Failed to extract {zip_name}: {e}", exc_info=True)
+            return None
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+        mlp_name = zip_name[:-4] if zip_name.endswith('.zip') else zip_name
+        return os.path.join(models_dir, mlp_name)

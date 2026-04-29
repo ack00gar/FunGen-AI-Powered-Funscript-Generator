@@ -2,9 +2,10 @@
 
 import os
 import platform
+import zipfile
 
-# `ultralytics.YOLO` is lazy-imported inside methods that actually need it —
-# it pulls torch (~2s cold) and must stay off the startup path.
+# `ultralytics.YOLO` is lazy-imported inside methods that actually need it.
+# Pulls torch (~2s cold), must stay off the startup path.
 
 from config.constants import DEFAULT_MODELS_DIR, MODEL_DOWNLOAD_URLS
 
@@ -162,37 +163,27 @@ class AppModelManager:
 
             # Check if either .pt or .mlpackage version exists
             if not os.path.exists(det_model_path_pt) and not os.path.exists(det_model_path_mlpackage):
-                self.app.logger.info(f"Downloading detection model: {det_filename_pt}")
-                success = self.app.utility.download_file_with_progress(det_url, det_model_path_pt, None)
-                if success:
-                    downloaded_models.append(f"Detection model: {det_filename_pt}")
-
-                    # Convert to CoreML if on macOS ARM
-                    if is_mac_arm:
-                        self.app.logger.info(f"Attempting to convert detection model to CoreML (is_mac_arm={is_mac_arm})...")
-                        try:
-                            from ultralytics import YOLO  # lazy: pulls torch
-                            model = YOLO(det_model_path_pt)
-                            self.app.logger.info(f"YOLO model loaded, starting export to CoreML format...")
-                            model.export(format="coreml")
-                            self.app.logger.info(f"Converted detection model to CoreML: {det_model_path_mlpackage}")
-                            # Set the CoreML model path in settings
-                            self.app.app_settings.config.models.yolo_det_path = det_model_path_mlpackage
-                            self.app.yolo_detection_model_path_setting = det_model_path_mlpackage
-                            self.app.yolo_det_model_path = det_model_path_mlpackage
-                        except Exception as e:
-                            self.app.logger.error(f"Failed to convert detection model to CoreML: {e}")
-                            # Fall back to PT model if CoreML conversion fails
-                            self.app.app_settings.config.models.yolo_det_path = det_model_path_pt
-                            self.app.yolo_detection_model_path_setting = det_model_path_pt
-                            self.app.yolo_det_model_path = det_model_path_pt
+                if is_mac_arm:
+                    # Mac ARM: pull the prebuilt .mlpackage.zip, skip coremltools.
+                    final_path = self._download_and_unzip_mlpackage(
+                        models_dir, MODEL_DOWNLOAD_URLS["detection_mlpackage_zip"])
+                    if final_path:
+                        downloaded_models.append(f"Detection model: {os.path.basename(final_path)}")
+                        self.app.app_settings.config.models.yolo_det_path = final_path
+                        self.app.yolo_detection_model_path_setting = final_path
+                        self.app.yolo_det_model_path = final_path
                     else:
-                        # Set the PT model path in settings for non-macOS ARM
+                        self.app.logger.error("Failed to download detection mlpackage")
+                else:
+                    self.app.logger.info(f"Downloading detection model: {det_filename_pt}")
+                    success = self.app.utility.download_file_with_progress(det_url, det_model_path_pt, None)
+                    if success:
+                        downloaded_models.append(f"Detection model: {det_filename_pt}")
                         self.app.app_settings.config.models.yolo_det_path = det_model_path_pt
                         self.app.yolo_detection_model_path_setting = det_model_path_pt
                         self.app.yolo_det_model_path = det_model_path_pt
-                else:
-                    self.app.logger.error("Failed to download detection model")
+                    else:
+                        self.app.logger.error("Failed to download detection model")
             else:
                 self.app.logger.info("Detection model already exists")
                 # Check if path is not set in settings and auto-configure
@@ -210,55 +201,31 @@ class AppModelManager:
                         self.app.yolo_det_model_path = det_model_path_pt
                         self.app.logger.info(f"Auto-configured detection model path to: {det_model_path_pt}")
 
-            # Check and download pose model
+            # Check and download pose model.
+            # Pose .mlpackage isn't hosted (ultralytics ships only .pt), so we
+            # use .pt on every platform. Slight perf hit on Mac ARM vs CoreML.
             pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
             pose_filename_pt = os.path.basename(pose_url)
             pose_model_path_pt = os.path.join(models_dir, pose_filename_pt)
-            pose_model_path_mlpackage = pose_model_path_pt.replace('.pt', '.mlpackage')
 
-            # Check if either .pt or .mlpackage version exists
-            if not os.path.exists(pose_model_path_pt) and not os.path.exists(pose_model_path_mlpackage):
+            if not os.path.exists(pose_model_path_pt):
                 self.app.logger.info(f"Downloading pose model: {pose_filename_pt}")
                 success = self.app.utility.download_file_with_progress(pose_url, pose_model_path_pt, None)
                 if success:
                     downloaded_models.append(f"Pose model: {pose_filename_pt}")
-
-                    # Convert to CoreML if on macOS ARM
-                    if is_mac_arm:
-                        self.app.logger.info(f"Attempting to convert pose model to CoreML (is_mac_arm={is_mac_arm})...")
-                        try:
-                            from ultralytics import YOLO  # lazy: pulls torch
-                            model = YOLO(pose_model_path_pt)
-                            self.app.logger.info(f"YOLO pose model loaded, starting export to CoreML format...")
-                            model.export(format="coreml")
-                            self.app.logger.info(f"Converted pose model to CoreML: {pose_model_path_mlpackage}")
-                            # Set the CoreML model path in settings
-                            self.app.app_settings.config.models.yolo_pose_path = pose_model_path_mlpackage
-                            self.app.yolo_pose_model_path_setting = pose_model_path_mlpackage
-                            self.app.yolo_pose_model_path = pose_model_path_mlpackage
-                        except Exception as e:
-                            self.app.logger.error(f"Failed to convert pose model to CoreML: {e}")
-                            # Fall back to PT model if CoreML conversion fails
-                            self.app.app_settings.config.models.yolo_pose_path = pose_model_path_pt
-                            self.app.yolo_pose_model_path_setting = pose_model_path_pt
-                            self.app.yolo_pose_model_path = pose_model_path_pt
-                    else:
-                        # Set the PT model path in settings for non-macOS ARM
-                        self.app.app_settings.config.models.yolo_pose_path = pose_model_path_pt
-                        self.app.yolo_pose_model_path_setting = pose_model_path_pt
-                        self.app.yolo_pose_model_path = pose_model_path_pt
+                    self.app.app_settings.config.models.yolo_pose_path = pose_model_path_pt
+                    self.app.yolo_pose_model_path_setting = pose_model_path_pt
+                    self.app.yolo_pose_model_path = pose_model_path_pt
                 else:
                     self.app.logger.error("Failed to download pose model")
             else:
                 self.app.logger.info("Pose model already exists")
-                # Check if path is not set in settings and auto-configure existing model
                 current_setting = self.app.app_settings.config.models.yolo_pose_path
                 if not current_setting or not os.path.exists(current_setting):
-                    if os.path.exists(pose_model_path_pt):
-                        self.app.logger.info("Auto-configuring existing pose model path in settings")
-                        self.app.app_settings.config.models.yolo_pose_path = pose_model_path_pt
-                        self.app.yolo_pose_model_path_setting = pose_model_path_pt
-                        self.app.yolo_pose_model_path = pose_model_path_pt
+                    self.app.logger.info("Auto-configuring existing pose model path in settings")
+                    self.app.app_settings.config.models.yolo_pose_path = pose_model_path_pt
+                    self.app.yolo_pose_model_path_setting = pose_model_path_pt
+                    self.app.yolo_pose_model_path = pose_model_path_pt
 
             # Report results
             if downloaded_models:
@@ -274,3 +241,24 @@ class AppModelManager:
             error_msg = f"Error downloading models: {e}"
             self.app.set_status_message(error_msg, duration=5.0)
             self.app.logger.error(error_msg, exc_info=True)
+
+    def _download_and_unzip_mlpackage(self, models_dir: str, zip_url: str):
+        """Download a hosted .mlpackage.zip, unzip into models_dir, return the
+        .mlpackage path. Skips the .pt + coremltools conversion path."""
+        zip_name = os.path.basename(zip_url)
+        zip_path = os.path.join(models_dir, zip_name)
+        self.app.logger.info(f"Downloading {zip_name}")
+        if not self.app.utility.download_file_with_progress(zip_url, zip_path, None):
+            return None
+        try:
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(models_dir)
+        except Exception as e:
+            self.app.logger.error(f"Failed to extract {zip_name}: {e}", exc_info=True)
+            return None
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+        mlp_name = zip_name[:-4] if zip_name.endswith('.zip') else zip_name
+        return os.path.join(models_dir, mlp_name)
