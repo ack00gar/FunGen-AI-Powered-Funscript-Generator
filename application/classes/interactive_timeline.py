@@ -1063,6 +1063,20 @@ class InteractiveFunscriptTimeline(DrawingMixin):
                 frame = ms_to_frame(time_ms, fps)
                 self.app.processor.seek_video(frame)
 
+    def _seek_if_cached(self, time_ms: float):
+        """Seek only when the target frame is in the nav cache. Used during
+        middle-drag pan to keep the video in sync without decode stutter;
+        cache-miss seeks are deferred to mouse-release."""
+        proc = self.app.processor
+        if not proc or proc.fps <= 0:
+            return
+        nav = getattr(proc, '_nav_cache', None)
+        if nav is None:
+            return
+        frame = ms_to_frame(time_ms, proc.fps)
+        if nav.contains(frame):
+            proc.seek_video(frame)
+
     def _seek_pan_center_with_sync(self, app_state):
         """Same path as alt+arrow pan-release: single seek_video_with_sync."""
         proc = self.app.processor
