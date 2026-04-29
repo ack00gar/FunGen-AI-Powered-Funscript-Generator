@@ -207,10 +207,23 @@ def detect_channel() -> str:
     if platform.system() == "Linux" and (_have("rocm-smi") or Path("/opt/rocm").exists()):
         return "rocm"
 
-    if platform.system() == "Darwin" and platform.machine().lower() in ("arm64", "aarch64"):
+    if platform.system() == "Darwin" and _is_apple_silicon_host():
         return "mps"
 
     return "cpu"
+
+
+def _is_apple_silicon_host() -> bool:
+    # platform.machine() reflects the running Python's arch (x86_64 under
+    # Rosetta), not the host. sysctl reports the host CPU regardless.
+    if platform.machine().lower() in ("arm64", "aarch64"):
+        return True
+    try:
+        out = subprocess.check_output(
+            ["sysctl", "-n", "hw.optional.arm64"], stderr=subprocess.DEVNULL, text=True)
+        return out.strip() == "1"
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return False
 
 
 def _nvidia_compute_cap() -> float | None:
@@ -482,7 +495,10 @@ def print_launch_hint() -> None:
 
 def main() -> None:
     _print_section("FunGen installer")
-    print(f"  platform: {platform.system()} {platform.machine()}")
+    arch = platform.machine()
+    if platform.system() == "Darwin" and _is_apple_silicon_host() and arch.lower() not in ("arm64", "aarch64"):
+        arch = f"{arch} (Rosetta on arm64 host)"
+    print(f"  platform: {platform.system()} {arch}")
     print(f"  project:  {ROOT}")
 
     uv = ensure_uv()
