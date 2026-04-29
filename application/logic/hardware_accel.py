@@ -12,6 +12,13 @@ if TYPE_CHECKING:
     from application.logic.app_logic import ApplicationLogic
 
 
+# Hwaccels that ffmpeg may report but that don't work as a generic decode
+# path through our analysis filter chain (crop, v360, scale). They're either
+# encoder-side APIs or codec-specific (AV1-only etc) and break frame fetch
+# silently. Hide them from the user-facing selector.
+_DECODE_BLOCKLIST = {"amf"}
+
+
 class HardwareAccelController:
     """Owns the ffmpeg hwaccel probe + validation of the configured method."""
 
@@ -59,7 +66,9 @@ class HardwareAccelController:
                             if line.strip() and line.strip() != "none"]
 
             standard_options = ["auto", "none"]
-            unique_hwaccels = [h for h in hwaccels if h not in standard_options]
+            unique_hwaccels = [h for h in hwaccels
+                               if h not in standard_options
+                               and h not in _DECODE_BLOCKLIST]
             final_options = standard_options + unique_hwaccels
             if log:
                 log.debug(f"Available FFmpeg hardware accelerations: {final_options}")
