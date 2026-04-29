@@ -286,7 +286,8 @@ class FFmpegBuildersMixin:
             elif system in ['linux', 'windows']:
                 if 'nvdec' in available_on_app or 'cuda' in available_on_app:
                     chosen_nvidia_accel = 'nvdec' if 'nvdec' in available_on_app else 'cuda'
-                    hwaccel_args = ['-hwaccel', chosen_nvidia_accel, '-hwaccel_output_format', 'cuda']
+                    # No -hwaccel_output_format=cuda: CPU filters can't take CUDA frames.
+                    hwaccel_args = ['-hwaccel', chosen_nvidia_accel]
                     self.logger.debug(f"Auto-selected '{chosen_nvidia_accel}' (NVIDIA) for {system.capitalize()}.")
                 elif 'qsv' in available_on_app:
                     hwaccel_args = ['-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv']
@@ -309,7 +310,8 @@ class FFmpegBuildersMixin:
                 if selected_hwaccel == 'qsv':
                     hwaccel_args.extend(['-hwaccel_output_format', 'qsv'])
                 elif selected_hwaccel in ['cuda', 'nvdec']:
-                    hwaccel_args.extend(['-hwaccel_output_format', 'cuda'])
+                    # No cuda output format pin: CPU filters can't take CUDA frames.
+                    pass
                 elif selected_hwaccel == 'vaapi':
                     hwaccel_args.extend(['-hwaccel_output_format', 'vaapi'])
                 self.logger.info(f"User-selected hardware acceleration: '{selected_hwaccel}'. Args: {hwaccel_args}")
