@@ -226,6 +226,48 @@ def _is_apple_silicon_host() -> bool:
         return False
 
 
+def _is_running_rosetta() -> bool:
+    return (platform.system() == "Darwin"
+            and _is_apple_silicon_host()
+            and platform.machine().lower() not in ("arm64", "aarch64"))
+
+
+def _switch_to_native_arm64() -> None:
+    # uv resolves wheels for the platform tag matching its own arch. Under
+    # x86_64 Python on an arm64 host the existing uv is x86_64 too (curl|sh
+    # detects via uname -m, which Rosetta returns as x86_64), so it asks
+    # PyPI for macosx_*_x86_64 torch wheels that no longer exist for 2.x.
+    # Reinstall uv as arm64 and re-exec ourselves under arch -arm64.
+    if not _is_running_rosetta():
+        return
+    arch_bin = "/usr/bin/arch"
+    if not Path(arch_bin).exists():
+        sys.exit("Apple Silicon host with x86_64 Python but /usr/bin/arch is missing.")
+    _print_section("Switching to native arm64")
+    print("  x86_64 Python on Apple Silicon detected; reinstalling uv as arm64...")
+    try:
+        subprocess.run(
+            [arch_bin, "-arm64", "sh", "-c",
+             "curl -LsSf https://astral.sh/uv/install.sh | sh"],
+            check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        sys.exit(f"  Failed to install arm64 uv: {exc}")
+    arm64_uv = Path.home() / ".local" / "bin" / "uv"
+    if not arm64_uv.exists():
+        sys.exit(f"  arm64 uv not found at {arm64_uv} after install.")
+    # Make sure the re-execed install.py finds this uv first.
+    env = dict(os.environ)
+    env["PATH"] = f"{arm64_uv.parent}{os.pathsep}{env.get('PATH', '')}"
+    script = str(Path(__file__).resolve())
+    print(f"  re-execing under arch -arm64 via {arm64_uv}")
+    os.execvpe(
+        arch_bin,
+        [arch_bin, "-arm64", str(arm64_uv), "run",
+         "--no-project", "--python", "3.11", script,
+         *sys.argv[1:]],
+        env)
+
+
 def _nvidia_compute_cap() -> float | None:
     """Highest CUDA compute capability across attached NVIDIA GPUs, or None."""
     try:
@@ -494,11 +536,9 @@ def print_launch_hint() -> None:
 # ─── entry point ────────────────────────────────────────────────────────────
 
 def main() -> None:
+    _switch_to_native_arm64()  # never returns if a re-exec happens
     _print_section("FunGen installer")
-    arch = platform.machine()
-    if platform.system() == "Darwin" and _is_apple_silicon_host() and arch.lower() not in ("arm64", "aarch64"):
-        arch = f"{arch} (Rosetta on arm64 host)"
-    print(f"  platform: {platform.system()} {arch}")
+    print(f"  platform: {platform.system()} {platform.machine()}")
     print(f"  project:  {ROOT}")
 
     uv = ensure_uv()
