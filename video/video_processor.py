@@ -122,7 +122,7 @@ class VideoProcessor(
         self._hd_suspended_for_live = False
         self._hd_suspended_saved_flag = False
         self._hd_display_force_off = False
-        if self.app and hasattr(self.app, 'app_settings'):
+        if self.app and hasattr(getattr(self.app, 'app_settings', None), 'config'):
             self.hd_display_enabled = self.app.app_settings.config.ui.hd_video_display
 
         # VR Unwarp method. Only two options now:
@@ -131,7 +131,7 @@ class VideoProcessor(
         #   'none': crop-only, skip v360 (useful for debugging or preprocessed
         #            videos where dewarp was already baked in).
         self.vr_unwarp_method_override = 'v360'
-        if self.app and hasattr(self.app, 'app_settings'):
+        if self.app and hasattr(getattr(self.app, 'app_settings', None), 'config'):
             self.vr_unwarp_method_override = self.app.app_settings.config.performance.vr_unwarp_method
             if self.vr_unwarp_method_override not in ('v360', 'none'):
                 self.vr_unwarp_method_override = 'v360'
@@ -731,7 +731,7 @@ class VideoProcessor(
         self._proc_resize_dims = (size, size)
         self._proc_pad_offset = (0, 0)
 
-        if self.app and hasattr(self.app, 'app_settings'):
+        if self.app and hasattr(getattr(self.app, 'app_settings', None), 'config'):
             # Honor a caller-forced override (suspend_hd_for_live_tracking)
             # without clobbering it from persistent settings.
             if not getattr(self, '_hd_display_force_off', False):
@@ -1124,7 +1124,7 @@ class VideoProcessor(
         if hasattr(self, '_ml_detection_cached'):
             delattr(self, '_ml_detection_cached')
 
-        if self.app and hasattr(self.app, 'app_settings'):
+        if self.app and hasattr(getattr(self.app, 'app_settings', None), 'config'):
             self.vr_unwarp_method_override = self.app.app_settings.config.performance.vr_unwarp_method
             if self.vr_unwarp_method_override not in ('v360', 'none'):
                 self.vr_unwarp_method_override = 'v360'
