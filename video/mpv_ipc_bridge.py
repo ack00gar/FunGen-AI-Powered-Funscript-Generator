@@ -75,6 +75,12 @@ class MpvIPCBridge:
         self._stop_event = threading.Event()
         self._position_callbacks: list[Callable] = []
 
+        # Coalesce + rate-limit scrub seeks on a worker thread so the 4 KB
+        # mpv ipc pipe cannot fill and block the ui.
+        self._seek_pending_ms: Optional[float] = None
+        self._seek_cv = threading.Condition()
+        self._seek_thread: Optional[threading.Thread] = None
+
         self.last_poll_latency_ms: float = 0.0
         self.last_seek_latency_ms: float = 0.0
 
@@ -165,6 +171,10 @@ class MpvIPCBridge:
         self._poller_thread = threading.Thread(target=self._event_loop, name="mpv-ipc-poller", daemon=True)
         self._poller_thread.start()
 
+        # Start seek worker.
+        self._seek_thread = threading.Thread(target=self._seek_loop, name="mpv-ipc-seek", daemon=True)
+        self._seek_thread.start()
+
         # Get duration synchronously
         dur = self._get_property("duration")
         if dur is not None:
@@ -177,8 +187,12 @@ class MpvIPCBridge:
     def stop(self):
         """Stop mpv and close IPC."""
         self._stop_event.set()
+        with self._seek_cv:
+            self._seek_cv.notify_all()
         if self._poller_thread and self._poller_thread.is_alive():
             self._poller_thread.join(timeout=2.0)
+        if self._seek_thread and self._seek_thread.is_alive():
+            self._seek_thread.join(timeout=2.0)
 
         try:
             self._send_cmd(["quit"])
@@ -226,17 +240,12 @@ class MpvIPCBridge:
             self._is_playing = False
 
     def seek(self, position_ms: float):
-        t0 = time.monotonic()
-        self._send_cmd(["seek", position_ms / 1000.0, "absolute"])
-        target = position_ms
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            with self._state_lock:
-                if abs(self._position_ms - target) < 200:
-                    self.last_seek_latency_ms = (time.monotonic() - t0) * 1000.0
-                    return
-            time.sleep(0.005)
-        self.last_seek_latency_ms = (time.monotonic() - t0) * 1000.0
+        # Fire-and-forget: hand the latest target to the worker; rapid scrub
+        # collapses into a single in-flight send. Position observer updates
+        # state asynchronously so callers do not need a sync confirmation.
+        with self._seek_cv:
+            self._seek_pending_ms = float(position_ms)
+            self._seek_cv.notify()
 
     # -------------------------------
     # State
@@ -348,6 +357,27 @@ class MpvIPCBridge:
             except Exception:
                 return None
         return None
+
+    # Pacing between dispatched seeks. Caps writer rate at ~33 Hz so a
+    # paused mpv can't overflow its 4 KB ipc input buffer during fast scrub.
+    _SEEK_PACING_S = 0.030
+
+    def _seek_loop(self):
+        while not self._stop_event.is_set():
+            with self._seek_cv:
+                while self._seek_pending_ms is None and not self._stop_event.is_set():
+                    self._seek_cv.wait()
+                if self._stop_event.is_set():
+                    return
+                target = self._seek_pending_ms
+                self._seek_pending_ms = None
+            t0 = time.monotonic()
+            try:
+                self._send_cmd(["seek", target / 1000.0, "absolute"])
+            except Exception:
+                pass
+            self.last_seek_latency_ms = (time.monotonic() - t0) * 1000.0
+            self._stop_event.wait(self._SEEK_PACING_S)
 
     def _event_loop(self):
         buf = b""
