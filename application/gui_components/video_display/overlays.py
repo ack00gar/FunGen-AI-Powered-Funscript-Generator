@@ -2,6 +2,7 @@ import math
 import time
 import imgui
 import logging
+from bisect import bisect_right
 from typing import Optional, Tuple
 
 import config.constants as constants
@@ -322,8 +323,82 @@ class VideoOverlaysMixin:
 
 
     def _render_stage2_overlay(self, stage_proc, app_state):
-        frame_overlay_data = stage_proc.stage2_overlay_data_map.get(self.app.processor.current_frame_index)
-        if not frame_overlay_data: return
+        idx = self.app.processor.current_frame_index
+        data_map = stage_proc.stage2_overlay_data_map
+        frame_overlay_data = data_map.get(idx)
+        if not frame_overlay_data:
+            # Sparse hybrid output: synth between cached key pairs.
+            keys = getattr(stage_proc, '_stage2_overlay_keys_sorted', None) or []
+            if not keys:
+                return
+            if idx < keys[0]:
+                return
+            if idx > keys[-1]:
+                # Past last key: hold last known boxes.
+                ka = keys[-1]
+                a_data = data_map.get(ka, {})
+                synth_boxes = []
+                for box in (a_data.get("yolo_boxes", []) or []):
+                    nb = dict(box)
+                    nb["status"] = constants.STATUS_OVERLAY_INTERPOLATED
+                    synth_boxes.append(nb)
+                frame_overlay_data = {
+                    "yolo_boxes": synth_boxes,
+                    "poses": a_data.get("poses", []),
+                    "dominant_pose_id": a_data.get("dominant_pose_id"),
+                    "active_interaction_track_id": a_data.get("active_interaction_track_id"),
+                    "is_occluded": a_data.get("is_occluded", False),
+                    "atr_aligned_fallback_candidate_ids": a_data.get("atr_aligned_fallback_candidate_ids", []),
+                    "motion_mode": a_data.get("motion_mode"),
+                    "atr_assigned_position": a_data.get("atr_assigned_position"),
+                }
+            else:
+                i = bisect_right(keys, idx) - 1
+                ka = keys[i]
+                kb = keys[i + 1]
+                span = max(1, kb - ka)
+                t = (idx - ka) / span
+                a_data = data_map.get(ka, {})
+                b_data = data_map.get(kb, {})
+                a_boxes = a_data.get("yolo_boxes", []) or []
+                b_boxes = b_data.get("yolo_boxes", []) or []
+                matches = (getattr(stage_proc, '_stage2_overlay_pair_matches', {}) or {}).get((ka, kb), [])
+                matched_a = set()
+                synth_boxes = []
+                for ia, ib in matches:
+                    if ia >= len(a_boxes) or ib >= len(b_boxes):
+                        continue
+                    matched_a.add(ia)
+                    a_box = a_boxes[ia]
+                    b_box = b_boxes[ib]
+                    a_bb = a_box.get("bbox")
+                    b_bb = b_box.get("bbox")
+                    if a_bb is None or b_bb is None:
+                        continue
+                    lerp_bb = [a_bb[k] + (b_bb[k] - a_bb[k]) * t for k in range(4)]
+                    nb = dict(a_box)
+                    nb["bbox"] = lerp_bb
+                    nb["status"] = constants.STATUS_OVERLAY_INTERPOLATED
+                    synth_boxes.append(nb)
+                # Hold unmatched prev-key boxes in place to avoid mid-gap pops.
+                for ia, a_box in enumerate(a_boxes):
+                    if ia in matched_a:
+                        continue
+                    nb = dict(a_box)
+                    nb["status"] = constants.STATUS_OVERLAY_INTERPOLATED
+                    synth_boxes.append(nb)
+                frame_overlay_data = {
+                    "yolo_boxes": synth_boxes,
+                    "poses": a_data.get("poses", []),
+                    "dominant_pose_id": a_data.get("dominant_pose_id"),
+                    "active_interaction_track_id": a_data.get("active_interaction_track_id"),
+                    "is_occluded": a_data.get("is_occluded", False),
+                    "atr_aligned_fallback_candidate_ids": a_data.get("atr_aligned_fallback_candidate_ids", []),
+                    "motion_mode": a_data.get("motion_mode"),
+                    "atr_assigned_position": a_data.get("atr_assigned_position"),
+                }
+            if not frame_overlay_data.get("yolo_boxes"):
+                return
 
         current_chapter = self.app.funscript_processor.get_chapter_at_frame(self.app.processor.current_frame_index)
 
@@ -353,6 +428,7 @@ class VideoOverlaysMixin:
                 is_active_interactor = (track_id is not None and track_id == active_track_id)
                 is_locked_penis = (box.get("class_name") == "locked_penis")
                 is_inferred_status = (box.get("status") == constants.STATUS_INFERRED_RELATIVE or box.get("status") == constants.STATUS_POSE_INFERRED)
+                is_overlay_interpolated = (box.get("status") == constants.STATUS_OVERLAY_INTERPOLATED)
                 is_of_recovered = (box.get("status") == constants.STATUS_OF_RECOVERED or box.get("status") == constants.STATUS_OF_RECOVERED)
 
                 # Check if this box is an aligned fallback candidate
@@ -389,6 +465,11 @@ class VideoOverlaysMixin:
                 elif is_inferred_status:
                     color = VideoDisplayColors.INFERRED_BOX # A distinct purple for inferred boxes
                     thickness = 1.0
+                elif is_overlay_interpolated:
+                    # Class color at half alpha + thin stroke to read as "guessed".
+                    base_color, _, _ = self.app.utility.get_box_style(box)
+                    color = (base_color[0], base_color[1], base_color[2], base_color[3] * 0.5)
+                    thickness = 1.0
                 else:
                     color, thickness, _ = self.app.utility.get_box_style(box)
 
@@ -404,6 +485,8 @@ class VideoOverlaysMixin:
                     label += " (Aligned)"
                 elif is_inferred_status:
                     label += " (Inferred)"
+                elif is_overlay_interpolated:
+                    label += " (interp)"
 
                 if is_of_recovered:
                     label += " [OF]"

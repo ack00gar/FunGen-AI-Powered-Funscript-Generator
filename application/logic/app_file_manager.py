@@ -8,6 +8,46 @@ from typing import List, Optional, Dict, Tuple, Any
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 
 
+def _bbox_iou(a, b) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    iw = max(0.0, min(ax2, bx2) - max(ax1, bx1))
+    ih = max(0.0, min(ay2, by2) - max(ay1, by1))
+    inter = iw * ih
+    if inter <= 0.0:
+        return 0.0
+    union = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1) + max(0.0, bx2 - bx1) * max(0.0, by2 - by1) - inter
+    return inter / union if union > 0.0 else 0.0
+
+
+def _match_overlay_boxes(boxes_a, boxes_b, iou_thresh: float = 0.1):
+    # Greedy class+IoU match (no track_id in hybrid output). Returns [(idx_a, idx_b)].
+    candidates = []
+    for ia, a in enumerate(boxes_a):
+        a_bbox = a.get("bbox")
+        a_cls = a.get("class_name")
+        if a_bbox is None or a_cls is None:
+            continue
+        for ib, b in enumerate(boxes_b):
+            if b.get("class_name") != a_cls:
+                continue
+            b_bbox = b.get("bbox")
+            if b_bbox is None:
+                continue
+            score = _bbox_iou(a_bbox, b_bbox)
+            if score >= iou_thresh:
+                candidates.append((score, ia, ib))
+    candidates.sort(reverse=True)
+    used_a, used_b, pairs = set(), set(), []
+    for _, ia, ib in candidates:
+        if ia in used_a or ib in used_b:
+            continue
+        used_a.add(ia)
+        used_b.add(ib)
+        pairs.append((ia, ib))
+    return pairs
+
+
 def _safe_makedirs(path: str, logger=None) -> str:
     """Create directory, falling back to a sanitized name if the OS rejects it.
 
@@ -1231,6 +1271,17 @@ class AppFileManager:
                 frame_data.get("frame_id", -1): frame_data
                 for frame_data in overlay_frames if isinstance(frame_data, dict)
             }
+            # Cache sorted keys + per-pair box matches for bisect+lerp at render time.
+            keys_sorted = sorted(stage_processor.stage2_overlay_data_map.keys())
+            stage_processor._stage2_overlay_keys_sorted = keys_sorted
+            pair_matches = {}
+            for i in range(len(keys_sorted) - 1):
+                ka = keys_sorted[i]
+                kb = keys_sorted[i + 1]
+                a_boxes = stage_processor.stage2_overlay_data_map[ka].get("yolo_boxes", []) or []
+                b_boxes = stage_processor.stage2_overlay_data_map[kb].get("yolo_boxes", []) or []
+                pair_matches[(ka, kb)] = _match_overlay_boxes(a_boxes, b_boxes)
+            stage_processor._stage2_overlay_pair_matches = pair_matches
             self.stage2_output_msgpack_path = filepath
 
             # Load segments if present
@@ -1262,6 +1313,8 @@ class AppFileManager:
         stage_processor = self.app.stage_processor
         stage_processor.stage2_overlay_data = None
         stage_processor.stage2_overlay_data_map = None
+        stage_processor._stage2_overlay_keys_sorted = None
+        stage_processor._stage2_overlay_pair_matches = None
         self.stage2_output_msgpack_path = None  # Clear path if data is cleared
 
     def load_stage3_mixed_debug_data(self, filepath: str):

@@ -394,8 +394,9 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                 if self._roi_shifted(current_roi, new_roi):
                     prev_gray = None
                 current_roi = new_roi
+            frame_dets = [_yolo_det_to_dict(d) for d in det_objs]
+            position = None
             if is_chap:
-                frame_dets = [_yolo_det_to_dict(d) for d in det_objs]
                 sparse_detections[f_idx] = frame_dets
                 if other_boxes:
                     frame_contact_info[f_idx] = build_contact_info(
@@ -412,21 +413,23 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                 else:
                     position = 'Not Relevant'
                 frame_positions[f_idx] = position
-                if frame_dets:
-                    self._overlay_frames.append({
-                        'frame_id': f_idx,
-                        'yolo_boxes': [
-                            {'bbox': d['bbox'], 'class_name': d['class_name'],
-                             'confidence': d.get('confidence', 0.0),
-                             'track_id': None, 'status': None}
-                            for d in frame_dets
-                        ],
-                        'poses': [],
-                        'dominant_pose_id': None,
-                        'active_interaction_track_id': None,
-                        'is_occluded': False,
-                        'atr_assigned_position': position,
-                    })
+            # Write overlay for both chapter and ROI firings so the file
+            # reflects signal-feeding detections, not just chapter cadence.
+            if frame_dets:
+                self._overlay_frames.append({
+                    'frame_id': f_idx,
+                    'yolo_boxes': [
+                        {'bbox': d['bbox'], 'class_name': d['class_name'],
+                         'confidence': d.get('confidence', 0.0),
+                         'track_id': None, 'status': None}
+                        for d in frame_dets
+                    ],
+                    'poses': [],
+                    'dominant_pose_id': None,
+                    'active_interaction_track_id': None,
+                    'is_occluded': False,
+                    'atr_assigned_position': position,
+                })
 
         yolo_worker = AsyncYoloWorker(
             model=model,
