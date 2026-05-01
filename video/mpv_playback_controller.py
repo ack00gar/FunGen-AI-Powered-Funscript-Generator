@@ -166,6 +166,15 @@ class MpvPlaybackController:
         if not processor or processor.fps <= 0:
             return
 
+        # Skip while tracker drives current_frame_index, else playhead flickers.
+        tracker = getattr(self._app, 'tracker', None)
+        if tracker is not None and getattr(tracker, 'tracking_active', False):
+            try:
+                processor._notify_playback_state_callbacks(self.is_playing, pos_ms)
+            except Exception:
+                pass
+            return
+
         frame_index = round(pos_ms / 1000.0 * processor.fps)
         frame_index = max(0, min(frame_index, processor.total_frames - 1))
 

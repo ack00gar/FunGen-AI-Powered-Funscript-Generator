@@ -258,6 +258,10 @@ class ThumbnailMpvQueue:
         event = threading.Event()
         container: list = [None]
         with self._lock:
+            # Coalesce stale hover requests; only the latest position matters.
+            while self._queue:
+                _, _, _, stale_event, _ = self._queue.popleft()
+                stale_event.set()
             self._queue.append((float(time_sec), int(w), int(h), event, container))
         if not event.wait(timeout=timeout):
             return None
