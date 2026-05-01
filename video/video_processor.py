@@ -1746,17 +1746,12 @@ class VideoProcessor(
             self._nav_prefetcher.notify()
         self._notify_seek_callbacks(target_frame)
 
-        if self.is_processing and not self.pause_event.is_set():
-            self.frame_source.seek(target_frame, accurate=False)
-        else:
-            frame = self.frame_source.get_frame(target_frame, timeout=8.0)
-            if frame is not None:
-                with self.frame_lock:
-                    self.current_frame = frame
-                    self._frame_version += 1
+        # Async seek: kick the source but do not block the ui thread waiting
+        # for the decoder. mpv handles the visual; current_frame catches up
+        # on the next decoder publish (playback loop, arrow-nav fetch).
+        self.frame_source.seek(target_frame, accurate=False)
+        if not (self.is_processing and not self.pause_event.is_set()):
             self._pending_seek_target = None
-            # Clear seek-in-progress so the spinner clears even when mpv is
-            # not loaded (no on_mpv_position callback to clear it otherwise).
             self._seek_in_progress_since = 0.0
 
         # Forward to libmpv display so the on-screen picture matches the
