@@ -38,8 +38,13 @@ class AppEnergySaver:
             and getattr(_proc, 'is_processing', False)
             and not (getattr(_proc, 'pause_event', None)
                      and _proc.pause_event.is_set()))
+        # External mpv review counts as activity so the main loop keeps
+        # painting at 60 Hz while the user is on another monitor.
+        _mpv_ctrl = getattr(self.app, '_mpv_controller', None)
+        _mpv_active = bool(_mpv_ctrl is not None and _mpv_ctrl.is_active)
         if self.app.stage_processor.full_analysis_active or \
            _proc_playing or \
+           _mpv_active or \
            (self.app.stage_processor.stage_thread and self.app.stage_processor.stage_thread.is_alive()):
             self.reset_activity_timer()
             return
