@@ -1754,10 +1754,16 @@ class VideoProcessor(
             self._pending_seek_target = None
             self._seek_in_progress_since = 0.0
 
-        # Forward to libmpv display so the on-screen picture matches the
-        # tracker's view (the two backends decode the same content in
-        # parallel and would drift otherwise).
+        # Keep libmpv display in sync with tracker's source.
         self._mpv_seek_to_frame(target_frame)
+
+        # Mirror to external fullscreen mpv so scrub updates current_frame_index.
+        mpv_ctrl = getattr(self.app, '_mpv_controller', None) if self.app else None
+        if mpv_ctrl is not None and getattr(mpv_ctrl, 'is_active', False):
+            try:
+                mpv_ctrl.seek(target_frame)
+            except Exception as e:
+                self.logger.debug(f"external mpv seek failed: {e}")
 
     def is_vr_active_or_potential(self) -> bool:
         if self.video_type_setting == 'VR':
