@@ -55,6 +55,18 @@ def _ensure_packages(packages, pip_args=None, *, non_interactive: bool = True, a
     """
     missing = []
     for package_spec in packages:
+        # Skip entries whose PEP 508 marker doesn't match this platform.
+        # Without this, pip is invoked with the full spec, exits 0 because
+        # the marker filters it out, and we'd flag a "restart needed" loop.
+        marker_idx = package_spec.find(';')
+        if marker_idx >= 0:
+            marker_str = package_spec[marker_idx + 1:].strip()
+            try:
+                from packaging.markers import Marker
+                if not Marker(marker_str).evaluate():
+                    continue
+            except Exception:
+                pass
         package_name, _ = _parse_package_spec(package_spec)
         try:
             version(package_name)
