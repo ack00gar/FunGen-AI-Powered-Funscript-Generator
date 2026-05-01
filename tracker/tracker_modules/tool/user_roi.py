@@ -223,8 +223,7 @@ class UserRoiTracker(BaseTracker):
                     frame_time_ms, final_primary_pos, final_secondary_pos, frame_index
                 )
             
-            # Apply visualizations
-            self._draw_visualizations()
+            self._draw_tracking_indicator()
             
             # Prepare debug info
             debug_info = {
@@ -781,28 +780,6 @@ class UserRoiTracker(BaseTracker):
         
         return action_log_list
     
-    def _draw_visualizations(self):
-        """Populate live_overlay with visualization data."""
-        # Draw User ROI rectangle
-        if self.show_roi and self.user_roi_fixed:
-            urx, ury, urw, urh = self.user_roi_fixed
-            self.live_overlay.setdefault('rects', []).append({
-                'x1': urx, 'y1': ury, 'x2': urx + urw, 'y2': ury + urh,
-                'color': (0, 1.0, 1.0, 1.0), 'thickness': 2.0, 'label': None
-            })
-
-            # Draw the tracked point moving with optical flow
-            if self.user_roi_tracked_point_relative:
-                rel_x, rel_y = self.user_roi_tracked_point_relative
-                abs_x = urx + rel_x
-                abs_y = ury + rel_y
-                self.live_overlay.setdefault('circles', []).append({
-                    'x': abs_x, 'y': abs_y, 'radius': 6.0,
-                    'color': (1.0, 0, 0, 1.0), 'filled': True
-                })
-
-        # Add tracking indicator
-        self._draw_tracking_indicator()
     
     def get_current_penis_size_factor(self) -> float:
         """Calculate current penis size factor (EXACT original method adapted for User ROI)."""

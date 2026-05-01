@@ -76,8 +76,6 @@ def compute_display_route(app) -> DisplayRoute:
                             show_overlays=False)
 
     tracker_active = bool(tracker and getattr(tracker, 'tracking_active', False))
-    paused = bool(getattr(proc, 'pause_event', None) and proc.pause_event.is_set())
-    actively_playing = bool(getattr(proc, 'is_processing', False) and not paused)
 
     determined_type = getattr(proc, 'determined_video_type', '') or ''
     is_vr = (determined_type == 'VR'
@@ -110,7 +108,8 @@ def compute_display_route(app) -> DisplayRoute:
     mpv_ok = (mpv_display is not None
               and getattr(mpv_display, 'is_loaded', False))
 
-    use_mpv = mpv_ok and (actively_playing or is_vr) and not tracker_active
+    # Use mpv whenever loaded so 2D paused/stepping matches playback (no 640 flip).
+    use_mpv = mpv_ok and not tracker_active
 
     zoom_uv = _BLANK_UV
     try:
