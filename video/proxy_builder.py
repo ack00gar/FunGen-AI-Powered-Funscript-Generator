@@ -249,9 +249,32 @@ def proxy_path_from_sidecar(source_path: str) -> Optional[str]:
 _ENCODER_PROBE_CACHE: Optional[str] = None
 
 
+def _test_encode_works(encoder: str, ffmpeg: str, logger: Optional[logging.Logger] = None) -> bool:
+    """Run a 1-frame encode against /dev/null to confirm the encoder loads at
+    runtime. Catches "compiled in but driver missing" cases like hevc_nvenc
+    on AMD/Intel boxes (nvenc shows in -encoders but fails when nvcuda.dll
+    is absent)."""
+    try:
+        rc = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error",
+             "-f", "lavfi", "-i", "color=black:s=64x64:d=0.1:r=1",
+             "-c:v", encoder, "-frames:v", "1", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess_flags(),
+        ).returncode
+        if rc != 0 and logger:
+            logger.debug(f"Encoder {encoder} failed runtime probe (rc={rc})")
+        return rc == 0
+    except (OSError, subprocess.TimeoutExpired) as e:
+        if logger:
+            logger.debug(f"Encoder {encoder} probe error: {e}")
+        return False
+
+
 def detect_hevc_encoder(logger: Optional[logging.Logger] = None) -> str:
-    """Pick the best HEVC encoder available on this host. Probes once and
-    caches. Always succeeds: libx265 is the CPU fallback."""
+    """Pick the best HEVC encoder that actually works on this host. Probes
+    by test-encoding 1 frame; first candidate that succeeds wins. Cached
+    per session. libx265 is the CPU fallback and assumed to always work."""
     global _ENCODER_PROBE_CACHE
     if _ENCODER_PROBE_CACHE is not None:
         return _ENCODER_PROBE_CACHE
@@ -262,10 +285,12 @@ def detect_hevc_encoder(logger: Optional[logging.Logger] = None) -> str:
         "Linux": ["hevc_nvenc", "hevc_vaapi", "hevc_qsv", "libx265"],
     }
     preferred = candidates_by_platform.get(platform.system(), ["libx265"])
+    ffmpeg = find_ffmpeg()
 
+    # First narrow to encoders compiled in (cheap), then runtime-probe each.
     try:
         out = subprocess.run(
-            [find_ffmpeg(), "-hide_banner", "-encoders"],
+            [ffmpeg, "-hide_banner", "-encoders"],
             capture_output=True, text=True, timeout=5,
             creationflags=subprocess_flags(),
         ).stdout
@@ -278,11 +303,15 @@ def detect_hevc_encoder(logger: Optional[logging.Logger] = None) -> str:
     available = {line.strip().split()[1] for line in out.splitlines()
                  if line.strip().startswith("V") and len(line.strip().split()) > 1}
     for enc in preferred:
-        if enc in available:
+        if enc not in available:
+            continue
+        if enc == "libx265" or _test_encode_works(enc, ffmpeg, logger):
             _ENCODER_PROBE_CACHE = enc
             if logger:
                 logger.info(f"Proxy encoder selected: {enc}")
             return enc
+        if logger:
+            logger.info(f"Encoder {enc} compiled in but failed runtime probe; trying next")
     _ENCODER_PROBE_CACHE = "libx265"
     return _ENCODER_PROBE_CACHE
 
