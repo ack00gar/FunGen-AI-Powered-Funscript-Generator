@@ -180,7 +180,8 @@ class ThumbnailMpv:
                 self._player.command("frame-step")
             except Exception:
                 pass
-            deadline = time.monotonic() + 0.5
+            # 100 ms cap so a hitch can't stall the main GL thread for half a second.
+            deadline = time.monotonic() + 0.1
             while time.monotonic() < deadline:
                 try:
                     cur = self._player.time_pos
