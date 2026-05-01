@@ -345,8 +345,11 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
 
         fps = vp.fps or 30.0
         total_frames = vp.total_frames
-        chapter_skip = max(1, int(fps / self.sparse_fps))  # ~29 @ 60fps: for chapter classification
         roi_skip = ROI_YOLO_INTERVAL                         # 5: for ROI tracking
+        # Round chapter_skip to a multiple of roi_skip so chapter frames are
+        # a strict subset of roi frames -- one yolo cadence, no redundancy.
+        target_skip = max(1, int(fps / self.sparse_fps))
+        chapter_skip = roi_skip * max(1, round(target_skip / roi_skip))
         frame_ms = 1000.0 / fps
 
         vp.vr_unwarp_method_override = 'v360'
@@ -494,8 +497,10 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
                     _fps_window.popleft()
 
                 # -- YOLO: submit async (runs on worker thread) + drain results --
-                is_chapter_frame = (frame_idx % chapter_skip == 0)
-                run_yolo = (frame_idx % roi_skip == 0) or is_chapter_frame
+                # chapter_skip is a multiple of roi_skip, so chapter is a
+                # subset of roi -- the roi check alone covers both cadences.
+                run_yolo = (frame_idx % roi_skip == 0)
+                is_chapter_frame = run_yolo and (frame_idx % chapter_skip == 0)
                 if run_yolo:
                     if yolo_worker.submit(frame_idx, frame, payload=is_chapter_frame):
                         yolo_count += 1
