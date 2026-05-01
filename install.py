@@ -240,6 +240,9 @@ def _switch_to_native_arm64() -> None:
     # Reinstall uv as arm64 and re-exec ourselves under arch -arm64.
     if not _is_running_rosetta():
         return
+    home = os.environ.get("HOME", "")
+    if not home or not Path(home).is_dir():
+        sys.exit("HOME unset/invalid; re-run from a normal interactive shell.")
     arch_bin = "/usr/bin/arch"
     if not Path(arch_bin).exists():
         sys.exit("Apple Silicon host with x86_64 Python but /usr/bin/arch is missing.")
@@ -255,6 +258,14 @@ def _switch_to_native_arm64() -> None:
     arm64_uv = Path.home() / ".local" / "bin" / "uv"
     if not arm64_uv.exists():
         sys.exit(f"  arm64 uv not found at {arm64_uv} after install.")
+    # Force a managed arm64 Python; otherwise 'uv run --python 3.11' may pick
+    # an x86_64 system Python and re-Rosetta us into a re-exec loop.
+    try:
+        subprocess.run(
+            [arch_bin, "-arm64", str(arm64_uv), "python", "install", "3.11"],
+            check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        sys.exit(f"  Failed to install arm64 managed Python 3.11: {exc}")
     # Make sure the re-execed install.py finds this uv first.
     env = dict(os.environ)
     env["PATH"] = f"{arm64_uv.parent}{os.pathsep}{env.get('PATH', '')}"
@@ -263,8 +274,8 @@ def _switch_to_native_arm64() -> None:
     os.execvpe(
         arch_bin,
         [arch_bin, "-arm64", str(arm64_uv), "run",
-         "--no-project", "--python", "3.11", script,
-         *sys.argv[1:]],
+         "--no-project", "--python-preference", "only-managed",
+         "--python", "3.11", script, *sys.argv[1:]],
         env)
 
 
