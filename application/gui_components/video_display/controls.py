@@ -386,7 +386,7 @@ class VideoControlsMixin:
     
 
     def _render_fullscreen_button_inline(self, spacing: float, button_height: float, controls_disabled: bool):
-        """Render the fullscreen button inline with playback controls (mpv, supporter exclusive)."""
+        """Render the fullscreen button inline with playback controls."""
         button_width = button_height
         imgui.same_line(spacing=spacing)
 
@@ -395,9 +395,8 @@ class VideoControlsMixin:
         video_path = self.app.file_manager.video_path if self.app.file_manager else None
         video_loaded = bool(video_path)
         is_fs_active = mpv is not None and mpv.is_active
-        is_supporter = _is_feature_available("patreon_features")
 
-        button_disabled = not video_loaded or not is_supporter or (is_supporter and mpv is None)
+        button_disabled = not video_loaded or mpv is None
 
         icon_mgr = get_icon_texture_manager()
         button_icon_name = 'fullscreen-exit.png' if is_fs_active else 'fullscreen.png'
@@ -436,10 +435,7 @@ class VideoControlsMixin:
         # Use is_mouse_hovering_rect so tooltip fires even when button is disabled
         if imgui.is_mouse_hovering_rect(item_min[0], item_min[1], item_max[0], item_max[1]):
             imgui.begin_tooltip()
-            if not is_supporter:
-                imgui.text("Fullscreen playback (mpv)")
-                imgui.text_disabled("Patreon Exclusive - add-on supporters")
-            elif mpv is None and mpv_missing:
+            if mpv is None and mpv_missing:
                 imgui.text("mpv not installed")
                 if sys.platform == "darwin":
                     imgui.text_disabled("Install: brew install mpv")

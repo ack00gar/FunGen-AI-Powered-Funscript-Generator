@@ -536,8 +536,12 @@ class VideoProcessor(
             self.logger.warning(f"MpvDisplay.load() raised: {e}", exc_info=True)
 
     def _mpv_seek_to_frame(self, frame_index: int) -> None:
-        """Forward a frame-indexed seek to the libmpv display."""
-        self._mpv_seek_to_frame_ex(frame_index, exact=True)
+        """Forward a frame-indexed seek to the libmpv display.
+
+        Keyframe-fast by default to match external mpv reactivity; callers
+        that must land on the exact frame use _mpv_seek_to_frame_ex(exact=True).
+        """
+        self._mpv_seek_to_frame_ex(frame_index, exact=False)
 
     def _mpv_seek_to_frame_ex(self, frame_index: int, exact: bool = True) -> None:
         disp = self._get_mpv_display()

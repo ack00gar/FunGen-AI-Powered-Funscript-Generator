@@ -1118,10 +1118,7 @@ class ShortcutHandlerMixin:
         self.app.logger.info("Video zoom/pan reset", extra={'status_message': True})
 
     def _handle_toggle_fullscreen_shortcut(self):
-        """Handle keyboard shortcut for toggling fullscreen (F11) - mpv supporter feature."""
-        from application.utils.feature_detection import is_feature_available as _is_feature_available
-        if not _is_feature_available("patreon_features"):
-            return
+        """Toggle the mpv-backed fullscreen review window."""
         mpv = getattr(self.app, '_mpv_controller', None)
         if mpv is None:
             return
