@@ -17,13 +17,16 @@ def _parse_package_spec(package_spec):
     Parses a package specification and returns (name, version_spec).
     Examples: 'torch~=2.5.1' -> ('torch', '~=2.5.1')
               'numpy' -> ('numpy', None)
+              'pywin32; sys_platform == "win32"' -> ('pywin32', None)
     """
-    # Split on version operators
+    # Strip PEP 508 environment marker first; markers like
+    # `sys_platform == "win32"` contain `==` and would confuse the splitter.
+    spec = package_spec.split(';', 1)[0].strip()
     for op in ['~=', '>=', '<=', '==', '!=', '>', '<']:
-        if op in package_spec:
-            name, spec = package_spec.split(op, 1)
-            return name.strip(), f"{op}{spec.strip()}"
-    return package_spec.strip(), None
+        if op in spec:
+            name, ver = spec.split(op, 1)
+            return name.strip(), f"{op}{ver.strip()}"
+    return spec, None
 
 def _check_version_compatibility(installed_version, required_spec):
     """

@@ -130,7 +130,13 @@ class MpvIPCBridge:
                     )
                     connected = True
                     break
-                except Exception:
+                except ImportError as e:
+                    logger.error(f"pywin32 not installed; mpv IPC requires win32file: {e}")
+                    return False
+                except Exception as e:
+                    if not getattr(self, '_first_connect_err_logged', False):
+                        logger.debug(f"mpv IPC pipe not ready (will retry): {e}")
+                        self._first_connect_err_logged = True
                     time.sleep(0.05)
             else:
                 if not os.path.exists(self.sock_path):

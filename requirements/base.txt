@@ -21,3 +21,4 @@ typing_extensions>=4.0
 sounddevice>=0.4.6
 python-mpv>=1.0.8
 onnxscript
+pywin32; sys_platform == "win32"
