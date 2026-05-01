@@ -1755,6 +1755,9 @@ class VideoProcessor(
                     self.current_frame = frame
                     self._frame_version += 1
             self._pending_seek_target = None
+            # Clear seek-in-progress so the spinner clears even when mpv is
+            # not loaded (no on_mpv_position callback to clear it otherwise).
+            self._seek_in_progress_since = 0.0
 
         # Forward to libmpv display so the on-screen picture matches the
         # tracker's view (the two backends decode the same content in
@@ -2035,6 +2038,7 @@ class VideoProcessor(
                         self._frame_version += 1
                     continue
                 self._pending_seek_target = None
+                self._seek_in_progress_since = 0.0
                 self.current_frame_index = idx
 
                 # Only resize when a tracker will consume the frame.
