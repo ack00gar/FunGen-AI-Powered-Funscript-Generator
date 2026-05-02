@@ -159,9 +159,18 @@ class SignalAmplifier:
         if not self.live_amp_enabled or len(history) < self.history_size * 0.5:
             return position
         
-        # Calculate percentiles for normalization
-        p10 = np.percentile(history, 10)
-        p90 = np.percentile(history, 90)
+        # np.partition is O(N) vs O(N log N) for percentile sort.
+        h = np.asarray(history) if not isinstance(history, np.ndarray) else history
+        n = h.size
+        if n >= 10:
+            k10 = max(0, int(n * 0.1))
+            k90 = min(n - 1, int(n * 0.9))
+            part = np.partition(h, [k10, k90])
+            p10 = float(part[k10])
+            p90 = float(part[k90])
+        else:
+            p10 = float(h.min())
+            p90 = float(h.max())
         effective_range = p90 - p10
         
         # Apply anti-plateau normalization if range is sufficient

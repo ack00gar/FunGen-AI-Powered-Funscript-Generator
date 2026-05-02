@@ -881,22 +881,31 @@ class AppFunscriptProcessor:
 
         actions_before = list(target_funscript.get_axis_actions(axis_name) or [])
 
-        # Make a copy of current actions to work with for filtering and merging
-        original_actions_copy: List[Dict] = [a.copy() for a in target_funscript.get_axis_actions(axis_name)]
+        # Source actions; bisect splits in O(log n) since source is sorted by at.
+        source_actions = target_funscript.get_axis_actions(axis_name) or []
+        try:
+            from bisect import bisect_left as _bl, bisect_right as _br
+            ats_view = [a['at'] for a in source_actions]
+            lo = _bl(ats_view, range_start_ms)
+            hi = _br(ats_view, range_end_ms)
+            actions_before_range = source_actions[:lo]
+            actions_after_range = source_actions[hi:]
+        except Exception:
+            actions_before_range = [a for a in source_actions if a['at'] < range_start_ms]
+            actions_after_range = [a for a in source_actions if a['at'] > range_end_ms]
 
-        # 1. Preserve actions outside the specified range
-        actions_before_range = [action for action in original_actions_copy if action['at'] < range_start_ms]
-        actions_after_range = [action for action in original_actions_copy if action['at'] > range_end_ms]
+        # New actions: sort if not already monotonic by 'at'.
+        new_list = list(new_actions_for_range)
+        is_sorted = all(new_list[i]['at'] <= new_list[i + 1]['at']
+                        for i in range(len(new_list) - 1))
+        processed_new_actions = new_list if is_sorted else sorted(
+            new_list, key=lambda x: x['at'])
 
-        # 2. Prepare new actions (ensure they are sorted and shallow-copied)
-        # Stage 2 should provide actions with absolute timestamps already correct for the range.
-        processed_new_actions = sorted([a.copy() for a in new_actions_for_range], key=lambda x: x['at'])
-
-        # 3. Combine the three parts: before, new (for the range), after
-        merged_actions = actions_before_range + processed_new_actions + actions_after_range
-
-        # 4. Sort the final combined list by time and ensure unique timestamps
-        merged_actions.sort(key=lambda x: x['at'])
+        # Three already-sorted lists: heapq.merge instead of full sort.
+        from heapq import merge as _merge
+        merged_actions = list(_merge(
+            actions_before_range, processed_new_actions, actions_after_range,
+            key=lambda x: x['at']))
 
         unique_final_actions = []
         if merged_actions:

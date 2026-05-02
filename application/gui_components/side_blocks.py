@@ -78,7 +78,7 @@ class LeftBottomBlock:
 
     def _render_chapters(self, app_state):
         fs_proc = getattr(self.app, 'funscript_processor', None)
-        chapters = list(getattr(fs_proc, 'video_chapters', []) or []) if fs_proc else []
+        chapters = getattr(fs_proc, 'video_chapters', None) or () if fs_proc else ()
         with section_card(f"Chapters ({len(chapters)})##lb_ch", tier="primary") as open_:
             if not open_:
                 return
@@ -112,8 +112,27 @@ class LeftBottomBlock:
                     return f"{t // 3600:d}:{(t % 3600) // 60:02d}:{t % 60:02d}"
                 return f"{t // 60:02d}:{t % 60:02d}"
 
-            labels = [(ch.position_short_name or ch.position_long_name or "Chapter") for ch in chapters]
-            max_label_w = max((imgui.calc_text_size(lb)[0] for lb in labels), default=0.0)
+            # Cache labels + per-label widths by chapter id; calc_text_size
+            # is an IPC call and was firing N x per-frame.
+            label_cache = getattr(self, '_lb_ch_label_cache', None)
+            ckey = (id(chapters), len(chapters))
+            if label_cache is None or label_cache.get('__key') != ckey:
+                label_cache = {'__key': ckey}
+                self._lb_ch_label_cache = label_cache
+            labels = []
+            label_widths = []
+            for ch in chapters:
+                cid = ch.unique_id
+                lb = ch.position_short_name or ch.position_long_name or "Chapter"
+                cached = label_cache.get(cid)
+                if cached is None or cached[0] != lb:
+                    w = imgui.calc_text_size(lb)[0]
+                    label_cache[cid] = (lb, w)
+                else:
+                    w = cached[1]
+                labels.append(lb)
+                label_widths.append(w)
+            max_label_w = max(label_widths, default=0.0)
             time_col_x = max_label_w + 12.0
 
             for ch, label in zip(chapters, labels):

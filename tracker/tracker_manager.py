@@ -423,11 +423,11 @@ class TrackerManager:
             return frame, None
 
         try:
-            # Ensure frame is writable for OpenCV operations
-            if not frame.flags.writeable:
+            # Only copy when the tracker mutates its input frame.
+            if (not frame.flags.writeable
+                    and getattr(self._current_tracker, 'mutates_input_frame', True)):
                 frame = frame.copy()
 
-            # Direct call to modular tracker
             result = self._current_tracker.process_frame(frame, frame_time_ms, frame_index)
 
             # Handle TrackerResult object or tuple format
@@ -464,11 +464,10 @@ class TrackerManager:
             return frame, None
             
         try:
-            # Ensure frame is writable for OpenCV operations
-            if not frame.flags.writeable:
+            if (not frame.flags.writeable
+                    and getattr(self._current_tracker, 'mutates_input_frame', True)):
                 frame = frame.copy()
-            
-            # Try to use the tracker's process_frame method
+
             result = self._current_tracker.process_frame(frame, frame_time_ms, frame_index)
             
             # Handle TrackerResult object or tuple format

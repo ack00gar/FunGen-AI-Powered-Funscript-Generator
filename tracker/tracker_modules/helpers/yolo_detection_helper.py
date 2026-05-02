@@ -150,7 +150,8 @@ def _parse_detections(results, model_names: Dict[int, str]) -> List[Detection]:
                 class_name=model_names.get(cls_id, 'unknown'),
                 confidence=float(conf_list[i]),
             ))
-    detections.sort(key=lambda d: d.confidence, reverse=True)
+    if len(detections) > 1:
+        detections.sort(key=lambda d: d.confidence, reverse=True)
     return detections
 
 
@@ -306,8 +307,12 @@ class YoloDetectionHelper:
 
     @property
     def class_names(self) -> Dict[int, str]:
-        """Detection model's class name mapping."""
-        return dict(self._det_model.names)
+        """Detection model's class name mapping (cached)."""
+        cached = getattr(self, '_class_names_cached', None)
+        if cached is None:
+            cached = dict(self._det_model.names)
+            self._class_names_cached = cached
+        return cached
 
     @property
     def det_model(self):

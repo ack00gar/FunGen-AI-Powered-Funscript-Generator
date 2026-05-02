@@ -318,10 +318,10 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         duration_ms = (end_time - start_time) * 1000
         self.component_render_times[component_name] = duration_ms
 
-        # Accumulate for averaging
-        if component_name not in self.perf_accumulated_times:
-            self.perf_accumulated_times[component_name] = 0.0
-        self.perf_accumulated_times[component_name] += duration_ms
+        # Accumulate for averaging (one hash via dict.get default-0).
+        self.perf_accumulated_times[component_name] = (
+            self.perf_accumulated_times.get(component_name, 0.0) + duration_ms
+        )
 
         # Profile-mode sample record (no-op unless FUNGEN_PROFILE_FRAMES set).
         if self._profile_enabled:

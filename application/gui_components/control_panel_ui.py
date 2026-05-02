@@ -38,6 +38,9 @@ def _readonly_input(label_id, value, width=-1):
         imgui.pop_item_width()
 
 
+_SENTINEL = object()
+
+
 class ControlPanelUI(
     PostProcessingMixin,
     AIModelsMixin,
@@ -162,36 +165,36 @@ class ControlPanelUI(
                 self.app.logger.error(f"Failed to initialize dynamic tracker UI: {e}")
             self.tracker_ui = None
 
+    def _tracker_category(self, tracker_name: str):
+        """Cached lookup: tracker_name -> TrackerCategory."""
+        cache = getattr(self, '_tracker_cat_cache', None)
+        if cache is None:
+            cache = {}
+            self._tracker_cat_cache = cache
+        cat = cache.get(tracker_name, _SENTINEL)
+        if cat is _SENTINEL:
+            from config.tracker_discovery import get_tracker_discovery
+            info = get_tracker_discovery().get_tracker_info(tracker_name)
+            cat = info.category if info else None
+            cache[tracker_name] = cat
+        return cat
+
     def _is_tracker_category(self, tracker_name: str, category) -> bool:
-        """Check if tracker belongs to specific category using dynamic discovery."""
-        from config.tracker_discovery import get_tracker_discovery
-        discovery = get_tracker_discovery()
-        tracker_info = discovery.get_tracker_info(tracker_name)
-        return tracker_info and tracker_info.category == category
+        return self._tracker_category(tracker_name) == category
 
     def _is_live_tracker(self, tracker_name: str) -> bool:
-        """Check if tracker runs in the real-time frame loop.
-
-        TOOL-category entries (User ROI, Oscillation Detector, Beat Marker)
-        hook into the same frame dispatch path as live trackers, so the
-        execution-progress UI, which gates rendering of Start Tracking and
-        Select ROI, must treat them the same. Kept in sync with
-        DynamicTrackerUI.is_live_tracker (commit 116f829).
-        """
-        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
-        discovery = get_tracker_discovery()
-        tracker_info = discovery.get_tracker_info(tracker_name)
-        return tracker_info and tracker_info.category in [
+        """Live trackers and TOOL-category entries (User ROI, Oscillation Detector, Beat Marker)."""
+        from config.tracker_discovery import TrackerCategory
+        return self._tracker_category(tracker_name) in (
             TrackerCategory.LIVE,
             TrackerCategory.LIVE_INTERVENTION,
             TrackerCategory.COMMUNITY,
             TrackerCategory.TOOL,
-        ]
+        )
 
     def _is_offline_tracker(self, tracker_name: str) -> bool:
-        """Check if tracker is an offline tracker."""
         from config.tracker_discovery import TrackerCategory
-        return self._is_tracker_category(tracker_name, TrackerCategory.OFFLINE)
+        return self._tracker_category(tracker_name) == TrackerCategory.OFFLINE
     def _check_tracker_ui(self, method_name: str, tracker_name: str) -> bool:
         """Dispatch a tracker-query method on tracker_ui, with lazy init."""
         if not self.tracker_ui:

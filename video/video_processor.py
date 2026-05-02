@@ -84,6 +84,7 @@ class VideoProcessor(
         self.current_frame = None
         self._frame_version = 0  # Incremented each time current_frame is replaced
         self.fps = 0.0
+        self._ms_per_frame = 0.0
         self.playhead_override_ms = None  # Set by point-jump to display at exact action time
         self._seek_in_progress_since = 0.0  # monotonic; display_route shows "Seeking..." while fresh
         self._video_open_in_progress = False
@@ -1181,6 +1182,7 @@ class VideoProcessor(
         self._update_video_parameters()
 
         self.fps = self.video_info['fps']
+        self._ms_per_frame = (1000.0 / self.fps) if self.fps and self.fps > 0 else 0.0
         self.total_frames = self.video_info['total_frames']
 
         # Initialize thumbnail extractor for fast random frame access (FFmpeg-based)
@@ -2066,7 +2068,7 @@ class VideoProcessor(
 
                 # ---- tracker ----
                 if tracker_will_run:
-                    timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else 0
+                    timestamp_ms = int(self.current_frame_index * self._ms_per_frame)
                     # Skip 75MB memcpy when the active tracker has opted out
                     # via BaseTracker.mutates_input_frame = False.
                     cur = getattr(self.tracker, '_current_tracker', None)
