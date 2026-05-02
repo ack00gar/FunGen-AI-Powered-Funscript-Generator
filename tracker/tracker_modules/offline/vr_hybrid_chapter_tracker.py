@@ -699,9 +699,11 @@ class VRHybridChapterTrackerV2(BaseOfflineTracker):
         if len(raw_positions) < SAVGOL_WINDOW:
             return [], []
 
-        frame_indices = np.array([p[0] for p in raw_positions])
-        time_ms_arr = np.array([p[1] for p in raw_positions])
-        dy_values = np.array([p[2] for p in raw_positions])
+        # One iteration via np.asarray, three column slices.
+        arr = np.asarray(raw_positions, dtype=np.float64)
+        frame_indices = arr[:, 0]
+        time_ms_arr = arr[:, 1]
+        dy_values = arr[:, 2]
 
         # Median filter
         if len(dy_values) >= FLOW_MEDIAN_WINDOW:

@@ -101,25 +101,18 @@ class SignalAmplifier:
             Tuple of (enhanced_primary, enhanced_secondary) positions (0-100)
         """
         try:
-            # Calculate motion magnitude for amplitude-aware scaling
-            motion_magnitude = np.sqrt(dy_flow**2 + dx_flow**2)
-            
-            # Amplitude-aware scaling with natural response
-            # Scales between 0.7x and 1.5x based on motion intensity
-            amplitude_scaler = np.clip(motion_magnitude / self.amplitude_divisor, 0.7, 1.5)
-            
-            # Calculate max deviation with sensitivity and amplitude scaling
-            sensitivity_factor = sensitivity / 10.0  # Normalize to 1.0 at default
+            # Scalar math via the math module avoids numpy dispatch overhead
+            # for the per-frame call path; previously each np.sqrt/np.clip
+            # paid the array-allocation cost on a single float.
+            import math as _m
+            motion_magnitude = _m.sqrt(dy_flow * dy_flow + dx_flow * dx_flow)
+            amplitude_scaler = max(0.7, min(1.5, motion_magnitude / self.amplitude_divisor))
+            sensitivity_factor = sensitivity / 10.0
             max_deviation = self.max_deviation_multiplier * sensitivity_factor * amplitude_scaler
-            
-            # Apply enhanced scaling with larger base factors
-            # These larger factors provide much stronger signal amplitude
-            enhanced_dy = np.clip(dy_flow * self.base_scale_primary, -max_deviation, max_deviation)
-            enhanced_dx = np.clip(dx_flow * self.base_scale_secondary, -max_deviation, max_deviation)
-            
-            # Calculate enhanced positions from center point (50)
-            enhanced_primary_raw = np.clip(50 + enhanced_dy, 0, 100)
-            enhanced_secondary_raw = np.clip(50 + enhanced_dx, 0, 100)
+            enhanced_dy = max(-max_deviation, min(max_deviation, dy_flow * self.base_scale_primary))
+            enhanced_dx = max(-max_deviation, min(max_deviation, dx_flow * self.base_scale_secondary))
+            enhanced_primary_raw = max(0.0, min(100.0, 50 + enhanced_dy))
+            enhanced_secondary_raw = max(0.0, min(100.0, 50 + enhanced_dx))
             
             # Apply live dynamic amplification
             final_primary = self._apply_dynamic_amplification(

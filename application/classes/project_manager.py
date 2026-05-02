@@ -302,10 +302,11 @@ class ProjectManager:
         funscript_data_dict = None
         if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
             funscript_obj = self.app.processor.tracker.funscript
-            primary_actions = self.app.funscript_processor.get_actions('primary')  # Get copies
-            secondary_actions = self.app.funscript_processor.get_actions('secondary')
-            # New canonical format: serialize all axes including T3+ and axis assignments
             funscript_data_dict = funscript_obj.to_dict()
+            # Reuse the same lists for the legacy keys; orjson reads them once.
+            axes = funscript_data_dict.get("axes", {})
+            primary_actions = axes.get('primary', [])
+            secondary_actions = axes.get('secondary', [])
 
         project_data = {
             # File Manager Data

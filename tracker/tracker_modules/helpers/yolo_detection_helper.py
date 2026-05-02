@@ -138,15 +138,18 @@ def _parse_detections(results, model_names: Dict[int, str]) -> List[Detection]:
     for r in results:
         if r.boxes is None:
             continue
-        for box in r.boxes:
-            cls_id = int(box.cls[0])
+        # Pull all tensors -> CPU lists in one sync each, instead of per-box.
+        xyxy_list = r.boxes.xyxy.tolist()
+        cls_list = r.boxes.cls.tolist()
+        conf_list = r.boxes.conf.tolist()
+        for i in range(len(cls_list)):
+            cls_id = int(cls_list[i])
             detections.append(Detection(
-                bbox=tuple(box.xyxy[0].tolist()),
+                bbox=tuple(xyxy_list[i]),
                 class_id=cls_id,
                 class_name=model_names.get(cls_id, 'unknown'),
-                confidence=float(box.conf[0]),
+                confidence=float(conf_list[i]),
             ))
-    # Highest confidence first
     detections.sort(key=lambda d: d.confidence, reverse=True)
     return detections
 
@@ -157,10 +160,12 @@ def _parse_poses(results) -> List[PoseResult]:
     for r in results:
         if r.keypoints is None or r.boxes is None:
             continue
-        for i in range(len(r.boxes)):
+        xyxy_list = r.boxes.xyxy.tolist()
+        kp_list = r.keypoints.data.tolist()
+        for i in range(len(xyxy_list)):
             poses.append(PoseResult(
-                bbox=tuple(r.boxes.xyxy[i].tolist()),
-                keypoints=r.keypoints.data[i].tolist(),
+                bbox=tuple(xyxy_list[i]),
+                keypoints=kp_list[i],
             ))
     return poses
 

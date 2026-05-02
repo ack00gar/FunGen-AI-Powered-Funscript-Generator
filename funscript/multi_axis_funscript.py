@@ -874,13 +874,16 @@ class MultiAxisFunscript:
     # ==================================================================================
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize all axes to a dict for project storage."""
+        """Serialize all axes to a dict for project storage.
+
+        The action lists are passed by reference; orjson does not mutate.
+        """
         axes_data = {
-            "primary": [a.copy() for a in self.primary_actions],
-            "secondary": [a.copy() for a in self.secondary_actions],
+            "primary": self.primary_actions,
+            "secondary": self.secondary_actions,
         }
         for name, actions in self.additional_axes.items():
-            axes_data[name] = [a.copy() for a in actions]
+            axes_data[name] = actions
 
         result: Dict[str, Any] = {
             "axes": axes_data,
