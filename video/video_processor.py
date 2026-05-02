@@ -1870,21 +1870,22 @@ class VideoProcessor(
                     next_frame_target_time = time.perf_counter()
 
                 # ---- pacing ----
-                speed_mode = self.app.app_state_ui.selected_processing_speed_mode
+                _ui = self.app.app_state_ui
+                speed_mode = _ui.selected_processing_speed_mode
                 if speed_mode == constants.ProcessingSpeedMode.REALTIME:
                     target_delay = 1.0 / self.fps if self.fps > 0 else (1.0 / 30.0)
                 elif speed_mode == constants.ProcessingSpeedMode.SLOW_MOTION:
-                    slo_mo_fps = getattr(self.app.app_state_ui, 'slow_motion_fps', 10.0)
+                    slo_mo_fps = getattr(_ui, 'slow_motion_fps', 10.0)
                     target_delay = 1.0 / max(1.0, slo_mo_fps)
                 else:
                     target_delay = 0.0
                 if speed_mode != self._last_applied_speed_mode or (
                     speed_mode == constants.ProcessingSpeedMode.SLOW_MOTION
-                    and getattr(self.app.app_state_ui, 'slow_motion_fps', 10.0) != self._last_applied_slow_mo_fps
+                    and getattr(_ui, 'slow_motion_fps', 10.0) != self._last_applied_slow_mo_fps
                 ):
                     self._sync_mpv_speed_from_mode()
                     self._last_applied_speed_mode = speed_mode
-                    self._last_applied_slow_mo_fps = getattr(self.app.app_state_ui, 'slow_motion_fps', 10.0)
+                    self._last_applied_slow_mo_fps = getattr(_ui, 'slow_motion_fps', 10.0)
 
                 # ---- gate ffmpeg decode on whether anyone consumes its frames ----
                 # Pure playback (no tracker, mpv loaded) doesn't need numpy

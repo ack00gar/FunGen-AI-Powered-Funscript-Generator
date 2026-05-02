@@ -31,7 +31,14 @@ class TimelinePreviewMixin:
         fs_proc = self.app.funscript_processor
         chapter_number_str = "N/A"
         if fs_proc and fs_proc.video_chapters:
-            sorted_chapters = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
+            chapters = fs_proc.video_chapters
+            cache = getattr(self, '_tooltip_sorted_cache', None)
+            ckey = (id(chapters), len(chapters))
+            if cache is not None and cache[0] == ckey:
+                sorted_chapters = cache[1]
+            else:
+                sorted_chapters = sorted(chapters, key=lambda c: c.start_frame_id)
+                self._tooltip_sorted_cache = (ckey, sorted_chapters)
             try:
                 chapter_index = sorted_chapters.index(segment)
                 chapter_number_str = str(chapter_index + 1)

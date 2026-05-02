@@ -352,11 +352,27 @@ class AppSettings:
 
     def _write_settings_now(self):
         settings_file = self.settings_file
+        tmp_path = settings_file + ".tmp"
         try:
-            with open(settings_file, 'w') as f:
-                json.dump(self.data, f, indent=4)
+            try:
+                import orjson
+                payload = orjson.dumps(
+                    self.data,
+                    option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS,
+                )
+                with open(tmp_path, 'wb') as f:
+                    f.write(payload)
+            except ImportError:
+                with open(tmp_path, 'w') as f:
+                    json.dump(self.data, f, indent=4)
+            os.replace(tmp_path, settings_file)
             self.logger.debug(f"Settings saved to {settings_file}.")
         except Exception as e:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
             self.logger.error(f"Error saving settings to '{settings_file}': {e}", exc_info=True)
 
     def _schedule_save(self):

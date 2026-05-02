@@ -126,6 +126,12 @@ class DrawingMixin:
         start_ms = (tf.visible_start_ms // step_ms) * step_ms
         curr_ms = start_ms
         
+        # Per-major-line label cache; keyed on (ms, step) so labels are
+        # reused across frames as long as the grid step is unchanged.
+        label_cache = getattr(self, '_grid_label_cache', None)
+        if label_cache is None or label_cache.get('__step') != step_ms:
+            label_cache = {'__step': step_ms}
+            self._grid_label_cache = label_cache
         while curr_ms <= tf.visible_end_ms:
             x = tf.time_to_x(curr_ms)
             if x >= tf.x_offset:
@@ -133,7 +139,11 @@ class DrawingMixin:
                 dl.add_line(x, tf.y_offset, x, tf.y_offset + tf.height,
                             grid_major_u32 if is_major else grid_minor_u32)
                 if is_major and curr_ms >= 0:
-                     dl.add_text(x + 3, tf.y_offset + tf.height - 15, grid_labels_u32, f"{curr_ms/1000:.1f}s")
+                    txt = label_cache.get(curr_ms)
+                    if txt is None:
+                        txt = f"{curr_ms/1000:.1f}s"
+                        label_cache[curr_ms] = txt
+                    dl.add_text(x + 3, tf.y_offset + tf.height - 15, grid_labels_u32, txt)
             curr_ms += step_ms
 
 
