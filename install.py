@@ -498,7 +498,10 @@ def ensure_mpv() -> None:
                      "--silent", "--accept-source-agreements",
                      "--accept-package-agreements")
             else:
-                print("  winget not found. Install mpv manually:  https://mpv.io/installation/")
+                print("  winget not found.")
+                print("  Install mpv manually so BOTH mpv.exe AND libmpv-2.dll land in the same folder on PATH.")
+                print("  Pre-built bundle that ships both: https://github.com/zhongfly/mpv-winbuild/releases")
+                print("  (extract, then add the folder containing mpv.exe + libmpv-2.dll to your PATH).")
                 return
         elif sys_os == "Darwin":
             if shutil.which("brew"):

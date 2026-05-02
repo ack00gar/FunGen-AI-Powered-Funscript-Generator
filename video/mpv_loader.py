@@ -50,16 +50,23 @@ _CANDIDATES = {
 
 
 def _windows_candidates() -> list[str]:
-    """Locate libmpv-2.dll on Windows by following mpv.exe and the typical
-    winget / installer drop-points. python-mpv's default find_library only
-    searches PATH for the bare DLL name, but winget's shinchiro.mpv puts
-    mpv.exe on PATH while the DLL lives in the package directory."""
+    """Locate libmpv-2.dll on Windows by following mpv.exe, scanning PATH for
+    the dll itself, and checking typical winget / installer drop-points.
+    python-mpv's default find_library only searches PATH for the bare DLL
+    name, which fails when the dll is split from mpv.exe."""
     paths: list[str] = []
     mpv_exe = shutil.which("mpv") or shutil.which("mpv.exe")
     if mpv_exe:
         mpv_dir = os.path.dirname(mpv_exe)
         for name in ("libmpv-2.dll", "mpv-2.dll", "mpv-1.dll"):
             paths.append(os.path.join(mpv_dir, name))
+    # Scan every PATH entry for the dll directly; covers third-party mpv
+    # bundles where the user dropped libmpv-2.dll in a different folder.
+    for d in (os.environ.get("PATH") or "").split(os.pathsep):
+        if not d:
+            continue
+        for name in ("libmpv-2.dll", "mpv-2.dll", "mpv-1.dll"):
+            paths.append(os.path.join(d, name))
     local_app = os.environ.get("LOCALAPPDATA") or ""
     if local_app:
         for pattern in (
