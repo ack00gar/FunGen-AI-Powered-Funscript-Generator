@@ -757,25 +757,31 @@ class DrawingMixin:
         quarter_col = _u32_from_const(TimelineColors.BPM_QUARTER)
         sub_col = _u32_from_const(TimelineColors.BPM_SUB)
 
-        for beat_num in range(start_beat, end_beat + 1):
-            t_ms = cfg.offset_ms + beat_num * interval_ms
-            if t_ms < tf.visible_start_ms or t_ms > tf.visible_end_ms:
-                continue
-            x = tf.time_to_x(t_ms)
+        # Hoist tier classification: when beats land on integer multiples of
+        # the measure / quarter (the common case), modulo over beat_num is
+        # cheaper than modulo over float ms inside the loop.
+        beats_per_base = max(1, int(round(base_interval / interval_ms))) if interval_ms > 0 else 1
+        beats_per_quarter = max(1, int(round(quarter_interval / interval_ms))) if quarter_interval > 0 and interval_ms > 0 else 1
+        vis_start = tf.visible_start_ms
+        vis_end = tf.visible_end_ms
+        offset = cfg.offset_ms
+        y_top = tf.y_offset
+        y_bot = tf.y_offset + tf.height
+        _add_line = dl.add_line
+        _t2x = tf.time_to_x
 
-            # Classify line tier
-            rel = t_ms - cfg.offset_ms
-            if base_interval > 0 and abs(rel % base_interval) < 1.0:
-                # Downbeat (measure start)
+        for beat_num in range(start_beat, end_beat + 1):
+            t_ms = offset + beat_num * interval_ms
+            if t_ms < vis_start or t_ms > vis_end:
+                continue
+            x = _t2x(t_ms)
+            if beat_num % beats_per_base == 0:
                 col, thick = downbeat_col, 2.0
-            elif quarter_interval > 0 and abs(rel % quarter_interval) < 1.0:
-                # Quarter beat
+            elif beat_num % beats_per_quarter == 0:
                 col, thick = quarter_col, 1.2
             else:
-                # Subdivision
                 col, thick = sub_col, 0.7
-
-            dl.add_line(x, tf.y_offset, x, tf.y_offset + tf.height, col, thick)
+            _add_line(x, y_top, x, y_bot, col, thick)
 
 
     def _draw_bookmarks(self, dl, tf: 'TimelineTransformer'):
