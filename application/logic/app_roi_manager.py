@@ -7,12 +7,40 @@ class AppROIManager:
 
     def __init__(self, app_logic):
         self.app = app_logic
+        self._shader_lock_saved = None  # prior vr_shader_lock_to_tracker state
+
+    def _lock_shader_for_region_select(self):
+        """Force-lock the vr shader so the displayed pixels match the v360
+        frame the tracker consumes. Otherwise screen->video coords drift."""
+        settings = getattr(self.app, 'app_settings', None)
+        if settings is None:
+            return
+        try:
+            self._shader_lock_saved = bool(settings.get('vr_shader_lock_to_tracker', False))
+            if not self._shader_lock_saved:
+                settings.set('vr_shader_lock_to_tracker', True)
+        except Exception:
+            self._shader_lock_saved = None
+
+    def _restore_shader_lock(self):
+        if self._shader_lock_saved is None:
+            return
+        settings = getattr(self.app, 'app_settings', None)
+        if settings is None:
+            self._shader_lock_saved = None
+            return
+        try:
+            settings.set('vr_shader_lock_to_tracker', self._shader_lock_saved)
+        except Exception:
+            pass
+        self._shader_lock_saved = None
 
     def enter_set_user_roi_mode(self):
         if self.app.processor and self.app.processor.is_processing:
             self.app.processor.pause_processing()  # Pause if playing/tracking
             self.app.logger.info("Video paused to set User ROI.")
 
+        self._lock_shader_for_region_select()
         self.app.is_setting_user_roi_mode = True
         if self.app.gui_instance and hasattr(self.app.gui_instance, 'video_display_ui'):  # Reset drawing state in UI
             self.app.gui_instance.video_display_ui.is_drawing_user_roi = False
@@ -24,6 +52,7 @@ class AppROIManager:
 
     def exit_set_user_roi_mode(self):
         self.app.is_setting_user_roi_mode = False
+        self._restore_shader_lock()
         if self.app.gui_instance and hasattr(self.app.gui_instance, 'video_display_ui'):
             self.app.gui_instance.video_display_ui.is_drawing_user_roi = False
             self.app.gui_instance.video_display_ui.drawn_user_roi_video_coords = None
@@ -111,6 +140,7 @@ class AppROIManager:
             self.app.processor.pause_processing()  # Pause if playing/tracking
             self.app.logger.info("Video paused to set oscillation area.")
 
+        self._lock_shader_for_region_select()
         self.app.is_setting_oscillation_area_mode = True
         if self.app.gui_instance and hasattr(self.app.gui_instance, 'video_display_ui'):  # Reset drawing state in UI
             self.app.gui_instance.video_display_ui.is_drawing_oscillation_area = False
@@ -122,6 +152,7 @@ class AppROIManager:
 
     def exit_set_oscillation_area_mode(self):
         self.app.is_setting_oscillation_area_mode = False
+        self._restore_shader_lock()
         if self.app.gui_instance and hasattr(self.app.gui_instance, 'video_display_ui'):
             self.app.gui_instance.video_display_ui.is_drawing_oscillation_area = False
             self.app.gui_instance.video_display_ui.drawn_oscillation_area_video_coords = None
