@@ -120,7 +120,18 @@ class CheckpointManager:
         self._last_checkpoint_time = {}
         
         # Create checkpoint directory
-        self.checkpoint_dir.mkdir(exist_ok=True)
+        try:
+            self.checkpoint_dir.mkdir(exist_ok=True)
+        except PermissionError as e:
+            abs_path = self.checkpoint_dir.resolve()
+            install_dir = abs_path.parent
+            raise PermissionError(
+                f"Cannot create '{abs_path}'. The FunGen install directory "
+                f"is not writable by the current user. Fix with:\n"
+                f"  sudo chown -R $USER \"{install_dir}\"\n"
+                f"or\n"
+                f"  chmod -R u+w \"{install_dir}\""
+            ) from e
         
         # Active checkpoints tracking
         self._active_checkpoints: Dict[str, CheckpointData] = {}

@@ -147,7 +147,19 @@ class AppModelManager:
         try:
             # Create models directory
             models_dir = DEFAULT_MODELS_DIR
-            os.makedirs(models_dir, exist_ok=True)
+            try:
+                os.makedirs(models_dir, exist_ok=True)
+            except PermissionError:
+                abs_path = os.path.abspath(models_dir)
+                install_dir = os.path.dirname(abs_path) or os.getcwd()
+                self.app.logger.error(
+                    f"Cannot create '{abs_path}'. The FunGen install directory "
+                    f"is not writable by the current user. Fix with:\n"
+                    f"  sudo chown -R $USER \"{install_dir}\"\n"
+                    f"or\n"
+                    f"  chmod -R u+w \"{install_dir}\""
+                )
+                return False
             self.app.logger.info(f"Checking for default models in: {models_dir}")
 
             # Determine OS for model format
