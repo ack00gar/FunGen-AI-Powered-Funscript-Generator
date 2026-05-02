@@ -277,7 +277,7 @@ class AutoUpdater:
         """Load skipped commit hashes from file."""
         try:
             if os.path.exists(self.skip_updates_file):
-                with open(self.skip_updates_file, 'r') as f:
+                with open(self.skip_updates_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     if isinstance(data, list):
                         self.skipped_commits = set(data)
@@ -292,7 +292,7 @@ class AutoUpdater:
     def _save_skip_updates(self):
         """Save skipped commit hashes to file."""
         try:
-            with open(self.skip_updates_file, 'w') as f:
+            with open(self.skip_updates_file, 'w', encoding='utf-8') as f:
                 json.dump(list(self.skipped_commits), f)
         except (IOError, OSError) as e:
             self.logger.error(f"Failed to save skip settings: {e}")
@@ -301,7 +301,7 @@ class AutoUpdater:
         """Load migration warning state from file."""
         try:
             if os.path.exists(self.migration_warning_file):
-                with open(self.migration_warning_file, 'r') as f:
+                with open(self.migration_warning_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.migration_warning_dismissed = data.get('dismissed', False)
             else:
@@ -313,7 +313,7 @@ class AutoUpdater:
     def _save_migration_state(self):
         """Save migration warning state to file."""
         try:
-            with open(self.migration_warning_file, 'w') as f:
+            with open(self.migration_warning_file, 'w', encoding='utf-8') as f:
                 json.dump({'dismissed': self.migration_warning_dismissed}, f)
         except (IOError, OSError) as e:
             self.logger.error(f"Failed to save migration state: {e}")

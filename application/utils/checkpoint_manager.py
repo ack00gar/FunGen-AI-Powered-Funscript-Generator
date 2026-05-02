@@ -205,7 +205,7 @@ class CheckpointManager:
                 
                 # Write to file
                 checkpoint_path = self._get_checkpoint_path(checkpoint_id)
-                with open(checkpoint_path, 'w') as f:
+                with open(checkpoint_path, 'w', encoding='utf-8') as f:
                     json.dump(data_dict, f, indent=2)
                 
                 # Track active checkpoint
@@ -236,7 +236,7 @@ class CheckpointManager:
                     logger.warning(f"Checkpoint file not found: {checkpoint_id}")
                     return None
                 
-                with open(checkpoint_path, 'r') as f:
+                with open(checkpoint_path, 'r', encoding='utf-8') as f:
                     data_dict = json.load(f)
                 
                 # Validate checksum
@@ -507,7 +507,7 @@ class CheckpointManager:
                         checkpoint_id = checkpoint_file.stem
 
                         # Read checkpoint without full validation
-                        with open(checkpoint_file, 'r') as f:
+                        with open(checkpoint_file, 'r', encoding='utf-8') as f:
                             data_dict = json.load(f)
 
                         video_path = data_dict.get('video_path', '')

@@ -291,7 +291,7 @@ class HandyVideoMixin:
                 temp_path = os.path.join(temp_dir, temp_filename)
                 
                 if _handy_debug_logger.isEnabledFor(logging.DEBUG): _handy_debug_logger.debug(f" Saving funscript to: {temp_path}")
-                with open(temp_path, 'w') as f:
+                with open(temp_path, 'w', encoding='utf-8') as f:
                     json.dump(funscript_data, f, indent=2)
                 
                 self.handy_last_funscript_path = temp_path

@@ -553,7 +553,7 @@ class StandaloneSplashWindow:
             if not metadata_path.exists():
                 return
 
-            with open(metadata_path, 'r') as f:
+            with open(metadata_path, 'r', encoding='utf-8') as f:
                 self.prerendered_metadata = json.load(f)
 
             # Load frame paths (we'll load textures later in OpenGL context)

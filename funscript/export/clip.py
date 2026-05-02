@@ -124,7 +124,7 @@ def export_chapter_clip(src_video: str, dst_dir: str, chapter,
 
     sliced = slice_funscript_actions(funscript_actions, start_ms, end_ms)
     payload = {"version": "1.0", "actions": sliced}
-    with open(funscript_path, 'w') as f:
+    with open(funscript_path, 'w', encoding='utf-8') as f:
         json.dump(payload, f)
 
     return video_path, funscript_path

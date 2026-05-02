@@ -67,6 +67,7 @@ class MpvDisplayGL:
 
         self._player = None
         self._ctx = None
+        self._video_sync_downgraded = False
 
         self._last_time_pos: float = 0.0
         self._fps: float = 0.0
@@ -124,6 +125,18 @@ class MpvDisplayGL:
                     self.logger.error(line)
                 elif level == "warn":
                     self.logger.warning(line)
+                    # Auto-downgrade video-sync from display-resample to audio
+                    # when mpv reports desync; display-resample is more
+                    # resource-hungry and breaks first under load.
+                    if (not self._video_sync_downgraded and isinstance(msg, str)
+                            and ("desynchroni" in msg.lower())):
+                        try:
+                            self._player["video-sync"] = "audio"
+                            self._video_sync_downgraded = True
+                            self.logger.warning(
+                                "[mpv] desync detected; video-sync downgraded to audio")
+                        except Exception:
+                            pass
                 else:
                     self.logger.debug(line)
 

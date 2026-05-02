@@ -305,7 +305,8 @@ class AppSettings:
 
         try:
             if os.path.exists(settings_file):
-                with open(settings_file, 'r') as f:
+                # Explicit utf-8; default 'r' mode crashes on non-ASCII on Windows.
+                with open(settings_file, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
 
                 # Migration for old setting name
@@ -363,8 +364,8 @@ class AppSettings:
                 with open(tmp_path, 'wb') as f:
                     f.write(payload)
             except ImportError:
-                with open(tmp_path, 'w') as f:
-                    json.dump(self.data, f, indent=4)
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.data, f, indent=4, ensure_ascii=False)
             os.replace(tmp_path, settings_file)
             self.logger.debug(f"Settings saved to {settings_file}.")
         except Exception as e:
@@ -510,8 +511,8 @@ class AppSettings:
         safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in name)
         file_path = os.path.join(self.get_profiles_dir(), "%s.json" % safe_name)
         try:
-            with open(file_path, 'w') as f:
-                json.dump(profile_data, f, indent=4)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(profile_data, f, indent=4, ensure_ascii=False)
             self.logger.info("Profile saved: %s" % name)
             return True
         except Exception as e:
@@ -523,7 +524,7 @@ class AppSettings:
         safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in name)
         file_path = os.path.join(self.get_profiles_dir(), "%s.json" % safe_name)
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 profile_data = json.load(f)
             settings = profile_data.get("settings", {})
             for k, v in settings.items():
@@ -546,7 +547,7 @@ class AppSettings:
                     continue
                 file_path = os.path.join(profiles_dir, filename)
                 try:
-                    with open(file_path, 'r') as f:
+                    with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                     profiles.append({
                         "name": data.get("profile_name", filename[:-5]),

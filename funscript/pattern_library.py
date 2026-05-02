@@ -78,7 +78,7 @@ class PatternLibrary:
             'duration_ms': pattern.duration_ms,
             'tags': pattern.tags,
         }
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
 
         return pattern
@@ -90,7 +90,7 @@ class PatternLibrary:
             return None
 
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             return MotionPattern(
                 name=data.get('name', name),

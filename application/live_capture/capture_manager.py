@@ -275,7 +275,7 @@ class CaptureManager:
 
         try:
             os.makedirs(output_dir, exist_ok=True)
-            with open(output_path, 'w') as f:
+            with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(funscript_data, f, indent=2)
             self._last_save_path = output_path
             logger.info(f"Saved capture funscript ({len(primary_actions)} actions) to: {output_path}")
@@ -295,7 +295,7 @@ class CaptureManager:
                 }
             }
             try:
-                with open(secondary_path, 'w') as f:
+                with open(secondary_path, 'w', encoding='utf-8') as f:
                     json.dump(secondary_data, f, indent=2)
                 logger.info(f"Saved secondary axis ({len(secondary_actions)} actions) to: {secondary_path}")
             except Exception as e:
