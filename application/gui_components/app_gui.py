@@ -1841,7 +1841,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             self._time_render("AIModelsDialog", self._render_ai_models_dialog)
 
         self._render_go_to_frame_popup()
-        self.app.addon_checker.tick_status_ads()
+        # tick_status_ads is currently a no-op; skip the per-frame call.
         self._render_tracker_debug_frame()
 
     def _render_tracker_debug_frame(self):
