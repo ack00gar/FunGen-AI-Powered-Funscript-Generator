@@ -37,11 +37,13 @@ class HeatmapExporter:
             # Return black image
             return np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Compute per-segment speeds
-        speeds = HeatmapColorMapper.compute_segment_speeds(actions)
-
-        # Vectorized 1D speed profile via per-pixel segment lookup.
-        ats = np.array([a['at'] for a in actions], dtype=np.float64)
+        # Extract once and feed into compute_segment_speeds via the
+        # pre-built array param to skip the duplicate pass.
+        ats = np.fromiter((a['at'] for a in actions), dtype=np.float64,
+                          count=len(actions))
+        poss = np.fromiter((a['pos'] for a in actions), dtype=np.float64,
+                           count=len(actions))
+        speeds = HeatmapColorMapper.compute_segment_speeds(actions, ats_np=ats, poss_np=poss)
         px_centers_ms = (np.arange(width, dtype=np.float64) + 0.5) * (duration_ms / width)
         seg_idx = np.searchsorted(ats, px_centers_ms, side='right') - 1
         np.clip(seg_idx, 0, len(speeds) - 1, out=seg_idx)

@@ -122,9 +122,10 @@ class UltimateAutotunePlugin(FunscriptTransformationPlugin):
                     indices = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
                     if len(indices) < 3:
                         continue
-                    working_actions = [copy.deepcopy(actions_list_ref[i]) for i in indices]
+                    # Action dicts hold only int values; shallow copy suffices.
+                    working_actions = [dict(actions_list_ref[i]) for i in indices]
                 else:
-                    working_actions = copy.deepcopy(list(actions_list_ref))
+                    working_actions = [dict(a) for a in actions_list_ref]
                     indices = None
 
                 result = self._process_actions(working_actions, params)

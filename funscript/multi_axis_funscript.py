@@ -984,8 +984,11 @@ class MultiAxisFunscript:
                     "Invalid value for actions setter: Must be a list of action dicts {'at': ms, 'pos': val}.")
                 self.primary_actions = []
             else:
-                # Create a new sorted list to avoid keeping a reference to the caller's mutable list
-                self.primary_actions = sorted(value, key=lambda x: x["at"])
+                # Skip the sort when input is already monotonic by 'at'.
+                already = all(value[i]["at"] <= value[i + 1]["at"]
+                              for i in range(len(value) - 1))
+                self.primary_actions = list(value) if already else sorted(
+                    value, key=lambda x: x["at"])
 
             self.last_timestamp_primary = self.primary_actions[-1]["at"] if self.primary_actions else 0
             self._invalidate_cache('primary') # Invalidate cache

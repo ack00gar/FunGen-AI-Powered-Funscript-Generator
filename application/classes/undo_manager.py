@@ -145,19 +145,23 @@ class DeletePointsCmd(Command):
         desc = f"Delete {n} Point{'s' if n != 1 else ''} (T{tl})"
         super().__init__(desc)
         self.tl = tl
-        self.deleted = [(d['index'], d['action'].copy()) for d in deleted]
+        # Pre-sort once; execute walks descending, undo ascending.
+        items = [(d['index'], d['action'].copy()) for d in deleted]
+        items.sort(key=lambda x: x[0])
+        self._sorted_asc = items
+        self._sorted_desc = list(reversed(items))
 
     def execute(self, app):
         actions = _get_actions_list(app, self.tl)
         if actions is not None:
-            for idx, _ in sorted(self.deleted, key=lambda x: x[0], reverse=True):
+            for idx, _ in self._sorted_desc:
                 if idx < len(actions):
                     actions.pop(idx)
 
     def undo(self, app):
         actions = _get_actions_list(app, self.tl)
         if actions is not None:
-            for idx, action in sorted(self.deleted, key=lambda x: x[0]):
+            for idx, action in self._sorted_asc:
                 actions.insert(idx, action.copy())
 
     def finalize(self, app):
@@ -282,8 +286,11 @@ class PasteActionsCmd(Command):
     def execute(self, app):
         actions = _get_actions_list(app, self.tl)
         if actions is not None:
-            actions.extend(self.pasted_actions)
-            actions.sort(key=lambda a: a['at'])
+            # Both inputs sorted; merge in O(N+M) instead of full sort.
+            from heapq import merge as _merge
+            sorted_paste = sorted(self.pasted_actions, key=lambda a: a['at'])
+            merged = list(_merge(actions, sorted_paste, key=lambda a: a['at']))
+            actions[:] = merged
 
     def undo(self, app):
         actions = _get_actions_list(app, self.tl)

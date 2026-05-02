@@ -472,7 +472,9 @@ def video_processor_producer_proc(
                 break
 
             if encoder:
-                encoder.encode_frame(frame.tobytes())
+                # numpy ndarrays satisfy the buffer protocol; stdin.write
+                # handles them directly without an intermediate bytes copy.
+                encoder.encode_frame(frame)
 
             try:
                 # Source yields a fresh immutable-bytes-backed array; mp.Queue pickles it for transport.

@@ -152,7 +152,7 @@ class SignalProcessor:
                     best_candidate = p_cand
 
             if best_candidate:
-                points_to_add.append(copy.deepcopy(best_candidate))
+                points_to_add.append(dict(best_candidate))
 
         if points_to_add:
             fs.logger.info(f"Ultimate Autotune: Recovered {len(points_to_add)} missing strokes.")

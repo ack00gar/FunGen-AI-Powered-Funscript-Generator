@@ -665,8 +665,9 @@ class FFmpegFrameSource:
         if result.returncode != 0 or len(result.stdout) < self._frame_bytes:
             return None
         try:
-            frame = np.frombuffer(result.stdout[:self._frame_bytes],
-                                  dtype=np.uint8).reshape(
+            # count= avoids a slice copy of the (potentially large) bytes.
+            frame = np.frombuffer(result.stdout, dtype=np.uint8,
+                                  count=self._frame_bytes).reshape(
                 (self.cfg.output_h, self.cfg.output_w, 3))
         except ValueError:
             return None

@@ -6,10 +6,22 @@ from application.utils.imgui_helpers import u32_const
 from config.constants_colors import CurrentTheme
 
 
+_NP_BUFS: dict = {}
+
+
 def render_graph(label, data, overlay_text, available_width,
                  scale_min=0, scale_max=100, height=60, color=None):
     """Shared graph rendering helper used by performance and disk I/O sections."""
-    np_data = np.array(data, dtype=np.float32) if data else np.array([], dtype=np.float32)
+    if data:
+        n = len(data)
+        buf = _NP_BUFS.get(label)
+        if buf is None or buf.shape[0] != n:
+            buf = np.empty(n, dtype=np.float32)
+            _NP_BUFS[label] = buf
+        buf[:] = data
+        np_data = buf
+    else:
+        np_data = np.array([], dtype=np.float32)
     current_value = data[-1] if data else 0.0
     if color is None:
         if current_value < 50:
@@ -58,9 +70,10 @@ class PerformanceMixin:
             color_yellow = u32_const((1.0, 0.8, 0.2, 1.0))
             color_red = u32_const(CurrentTheme.RED)
 
+            base_x, base_y = imgui.get_cursor_screen_pos()
             for i, core_load in enumerate(per_core_usage):
-                bar_x = imgui.get_cursor_screen_pos()[0] + i * (bar_width + spacing)
-                bar_y = imgui.get_cursor_screen_pos()[1]
+                bar_x = base_x + i * (bar_width + spacing)
+                bar_y = base_y
 
                 color = color_green if core_load < 50 else (color_yellow if core_load < 80 else color_red)
 
