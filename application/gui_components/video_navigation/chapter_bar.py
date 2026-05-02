@@ -3,7 +3,7 @@ import os
 from typing import Optional
 
 from application.utils import _format_time, VideoSegment, get_icon_texture_manager, primary_button_style, destructive_button_style
-from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS
+from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS, MOD_KEY
 from config.element_group_colors import VideoNavigationColors
 from config.constants_colors import CurrentTheme
 
@@ -636,8 +636,8 @@ class ChapterBarMixin:
         if timeline_has_point_selection:
             return
 
-        del_sc_str = shortcuts.get("delete_selected_chapter", "DELETE")
-        del_alt_sc_str = shortcuts.get("delete_selected_chapter_alt", "BACKSPACE")
+        del_sc_str = shortcuts.get("delete_selected_chapter", f"{MOD_KEY}+DELETE")
+        del_alt_sc_str = shortcuts.get("delete_selected_chapter_alt", f"{MOD_KEY}+BACKSPACE")
         del_key_tuple = self.app._map_shortcut_to_glfw_key(del_sc_str)
         bck_key_tuple = self.app._map_shortcut_to_glfw_key(del_alt_sc_str)
         delete_pressed = False
@@ -902,9 +902,9 @@ class ChapterBarMixin:
             # --- Delete Chapter (destructive, last) ---
             can_delete = num_selected > 0
             if _platform.system() == "Darwin":
-                delete_shortcut = shortcuts.get("delete_selected_chapter_alt", "Backspace")
+                delete_shortcut = shortcuts.get("delete_selected_chapter_alt", f"{MOD_KEY}+Backspace")
             else:
-                delete_shortcut = shortcuts.get("delete_selected_chapter", "Delete")
+                delete_shortcut = shortcuts.get("delete_selected_chapter", f"{MOD_KEY}+Delete")
             delete_label = f"Delete Chapter{'s' if num_selected > 1 else ''} ({num_selected})" if num_selected > 1 else "Delete Chapter"
             if imgui.menu_item(delete_label, shortcut=delete_shortcut, enabled=can_delete)[0]:
                 if can_delete and self.context_selected_chapters:

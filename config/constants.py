@@ -205,8 +205,8 @@ DEFAULT_SHORTCUTS = {
     # Editing (Layout-independent modifier+key combinations)
     "delete_selected_point": "DELETE",
     "delete_selected_point_alt": "BACKSPACE",
-    "delete_selected_chapter": "DELETE",
-    "delete_selected_chapter_alt": "BACKSPACE",
+    "delete_selected_chapter": f"{MOD_KEY}+DELETE",
+    "delete_selected_chapter_alt": f"{MOD_KEY}+BACKSPACE",
     "delete_points_in_chapter": "SHIFT+DELETE",
     "delete_points_in_chapter_alt": "SHIFT+BACKSPACE",
     "select_all_points": f"{MOD_KEY}+A",
