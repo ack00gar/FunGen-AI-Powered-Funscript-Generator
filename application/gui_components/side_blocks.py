@@ -203,8 +203,17 @@ class LeftBottomBlock:
                     return f"{h:d}:{m:02d}:{s:05.2f}"
                 return f"{int(secs // 60):02d}:{secs % 60:05.2f}"
 
-            tl_labels = [f"F{tl_num}" for tl_num, _, _ in all_bm]
-            max_tl_w = max((imgui.calc_text_size(lb)[0] for lb in tl_labels), default=0.0)
+            # Cache tl_labels + max width keyed on (id, len). Bookmark adds /
+            # removes invalidate the id; rename doesn't change tl_num.
+            bm_cache = getattr(self, '_lb_bm_label_cache', None)
+            bkey = (id(all_bm), len(all_bm))
+            if bm_cache is None or bm_cache[0] != bkey:
+                tl_labels = [f"F{tl_num}" for tl_num, _, _ in all_bm]
+                max_tl_w = max((imgui.calc_text_size(lb)[0] for lb in tl_labels), default=0.0)
+                self._lb_bm_label_cache = (bkey, tl_labels, max_tl_w)
+            else:
+                tl_labels = bm_cache[1]
+                max_tl_w = bm_cache[2]
             # Probe a representative time string for column width.
             sample_time = _fmt_bm(max_secs if all_bm else 0)
             time_w = imgui.calc_text_size(sample_time)[0]
