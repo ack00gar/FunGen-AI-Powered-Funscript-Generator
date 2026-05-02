@@ -1143,8 +1143,8 @@ class YoloRoiTracker(BaseTracker):
 
         # Apply median smoothing only if we have POSITION_HISTORY_SMOOTH_SIZE samples
         if len(self.position_history_smooth) >= POSITION_HISTORY_SMOOTH_SIZE:
-            primary_values = [pos[0] for pos in list(self.position_history_smooth)]
-            secondary_values = [pos[1] for pos in list(self.position_history_smooth)]
+            primary_values = [pos[0] for pos in self.position_history_smooth]
+            secondary_values = [pos[1] for pos in self.position_history_smooth]
 
             final_primary = int(np.median(primary_values))
             final_secondary = int(np.median(secondary_values))

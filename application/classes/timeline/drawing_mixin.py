@@ -903,8 +903,9 @@ class DrawingMixin:
         # between video position and the timeline marker.
         if self.app.app_settings.config.ui.timeline_show_video_sync_line:
             proc = self.app.processor
-            if proc and proc.fps and proc.fps > 0:
-                video_ms = (proc.current_frame_index / proc.fps) * 1000.0
+            mspf = getattr(proc, '_ms_per_frame', 0.0) if proc else 0.0
+            if mspf > 0.0:
+                video_ms = proc.current_frame_index * mspf
                 video_x = tf.time_to_x(video_ms)
                 if tf.x_offset <= video_x <= tf.x_offset + tf.width:
                     dl.add_line(video_x, tri_top, video_x,

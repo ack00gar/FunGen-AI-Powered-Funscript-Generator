@@ -475,6 +475,7 @@ class MpvDisplayGL:
             except (TypeError, ValueError):
                 return
             fps = self._fps
+            # Hot path first: skip the property fetches once fps is known.
             if fps <= 0:
                 for prop in ('container-fps', 'estimated-vf-fps', 'fps'):
                     try:
@@ -488,13 +489,20 @@ class MpvDisplayGL:
                             break
                     except (TypeError, ValueError):
                         continue
-            if fps > 0:
-                idx = int(round(self._last_time_pos * fps))
-                for cb in list(self._position_callbacks):
-                    try:
-                        cb(idx)
-                    except Exception:
-                        pass
+                if fps <= 0:
+                    return
+            idx = int(round(self._last_time_pos * fps))
+            cbs = self._position_callbacks
+            if not cbs:
+                return
+            # Snapshot only when there are multiple callbacks (rare); single
+            # callback (common) path skips the tuple alloc entirely.
+            iter_cbs = cbs if len(cbs) == 1 else tuple(cbs)
+            for cb in iter_cbs:
+                try:
+                    cb(idx)
+                except Exception:
+                    pass
 
         @p.property_observer("pause")
         def _on_pause(_name, value):
