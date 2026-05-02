@@ -228,7 +228,23 @@ class UltimateAutotunePlugin(FunscriptTransformationPlugin):
         # Window size for prominence: ~500ms at 30fps = 15 frames
         W = min(15, max(3, n // 6))
 
-        candidates = []  # (index, type, position)
+        # Rolling min/max via scipy (or stride_tricks fallback) -> Python lists
+        # so the per-candidate inner loop stays in pure-Python (numpy scalar
+        # extraction in a tight loop is much slower than list indexing).
+        positions_np = np.asarray(positions, dtype=np.int32)
+        try:
+            from scipy.ndimage import minimum_filter1d as _min1d, maximum_filter1d as _max1d
+            ws = 2 * W + 1
+            roll_min = _min1d(positions_np, size=ws, mode='nearest').tolist()
+            roll_max = _max1d(positions_np, size=ws, mode='nearest').tolist()
+        except ImportError:
+            from numpy.lib.stride_tricks import sliding_window_view
+            pad = np.pad(positions_np, W, mode='edge')
+            view = sliding_window_view(pad, 2 * W + 1)
+            roll_min = view.min(axis=1).tolist()
+            roll_max = view.max(axis=1).tolist()
+
+        candidates = []
         for i in range(1, n - 1):
             prev_pos = positions[i - 1]
             curr_pos = positions[i]
@@ -240,13 +256,10 @@ class UltimateAutotunePlugin(FunscriptTransformationPlugin):
                          and (curr_pos < prev_pos or curr_pos < next_pos))
 
             if is_peak or is_valley:
-                # Prominence: how far this extremum stands out from its surroundings
-                win_lo = max(0, i - W)
-                win_hi = min(n, i + W + 1)
                 if is_peak:
-                    prominence = curr_pos - min(positions[win_lo:win_hi])
+                    prominence = curr_pos - roll_min[i]
                 else:
-                    prominence = max(positions[win_lo:win_hi]) - curr_pos
+                    prominence = roll_max[i] - curr_pos
                 if prominence >= min_amplitude:
                     candidates.append((i, 'peak' if is_peak else 'valley', curr_pos))
 
