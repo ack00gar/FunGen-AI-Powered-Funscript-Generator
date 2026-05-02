@@ -83,7 +83,7 @@ class RangeExtenderPlugin(FunscriptTransformationPlugin):
             if len(indices) < 2:
                 continue
 
-            positions = np.array([actions[i]['pos'] for i in indices], dtype=np.float64)
+            positions = self._positions_at(funscript, current_axis, indices)
             center = (positions.min() + positions.max()) / 2.0
 
             # Push each point away from center proportionally

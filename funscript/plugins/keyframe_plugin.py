@@ -264,9 +264,9 @@ class KeyframePlugin(FunscriptTransformationPlugin):
         position_tolerance = params['position_tolerance']
         time_tolerance_ms = params['time_tolerance_ms']
         
-        # STRATEGY: Use statistical sampling + local maxima detection
-        positions = np.array([action['pos'] for action in segment])
-        timestamps = np.array([action['at'] for action in segment])
+        n = len(segment)
+        positions = np.fromiter((a['pos'] for a in segment), dtype=np.float64, count=n)
+        timestamps = np.fromiter((a['at'] for a in segment), dtype=np.float64, count=n)
         
         # Step 1: Reduce problem size with uniform sampling
         sample_rate = max(1, len(segment) // 10000)  # Reduce to ~10k points max

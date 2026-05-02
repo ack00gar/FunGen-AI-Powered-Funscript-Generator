@@ -270,3 +270,8 @@ class AsyncYoloWorker:
 
             for (f_idx, frame, payload), dets in zip(jobs, dets_per_frame):
                 self._out.put((f_idx, frame.shape[0], frame.shape[1], dets, payload))
+            # Drop strong refs to large frame buffers (~5 MB on 8K VR) so GC
+            # can reclaim them before the next batch starts.
+            jobs = None
+            frames = None
+            dets_per_frame = None

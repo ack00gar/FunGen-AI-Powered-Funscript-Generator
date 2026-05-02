@@ -98,8 +98,9 @@ class FunscriptQualityValidator:
             duration_ms = actions[-1]['at']
 
         # --- Pre-compute shared arrays ONCE (saves 8+ redundant O(n) extractions) ---
-        ats = np.array([a['at'] for a in actions], dtype=np.float64)
-        poss = np.array([a['pos'] for a in actions], dtype=np.float64)
+        n = len(actions)
+        ats = np.fromiter((a['at'] for a in actions), dtype=np.float64, count=n)
+        poss = np.fromiter((a['pos'] for a in actions), dtype=np.float64, count=n)
         dt = np.diff(ats)
         dp = np.abs(np.diff(poss))
         dt_safe = np.where(dt > 0, dt, 1.0)

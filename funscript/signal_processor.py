@@ -54,7 +54,8 @@ class SignalProcessor:
             fs.logger.warning("Not enough points for SG auto-tune.")
             return None
 
-        positions = np.array([actions_list_ref[i]['pos'] for i in indices_to_filter])
+        positions = np.fromiter((actions_list_ref[i]['pos'] for i in indices_to_filter),
+                                dtype=np.float64, count=len(indices_to_filter))
         num_points_in_segment = len(positions)
 
         best_window_length = -1
@@ -197,7 +198,8 @@ class SignalProcessor:
             actions_list_ref[:] = prefix_actions + segment_to_process + suffix_actions
             return
 
-        positions = np.array([a['pos'] for a in segment_to_process])
+        positions = np.fromiter((a['pos'] for a in segment_to_process),
+                                dtype=np.int64, count=len(segment_to_process))
         inverted_positions = 100 - positions
 
         kwargs = {
@@ -252,9 +254,11 @@ class SignalProcessor:
             fs.logger.info(f"Not enough points in selection for range scaling on {axis} axis.")
             return
 
-        positions_in_segment = np.array([actions_list_ref[i]['pos'] for i in indices_to_process])
-        effective_min = np.percentile(positions_in_segment, 10)
-        effective_max = np.percentile(positions_in_segment, 90)
+        positions_in_segment = np.fromiter(
+            (actions_list_ref[i]['pos'] for i in indices_to_process),
+            dtype=np.float64, count=len(indices_to_process))
+        # Single sort serves both quantiles.
+        effective_min, effective_max = np.percentile(positions_in_segment, [10, 90])
 
         current_effective_range = effective_max - effective_min
         target_range = output_max - output_min
@@ -361,8 +365,9 @@ class SignalProcessor:
         if len(extrema) <= 2:
             return extrema
 
-        ext_positions = np.array([ext['pos'] for ext in extrema])
-        ext_timestamps = np.array([ext['at'] for ext in extrema])
+        n = len(extrema)
+        ext_positions = np.fromiter((e['pos'] for e in extrema), dtype=np.int64, count=n)
+        ext_timestamps = np.fromiter((e['at'] for e in extrema), dtype=np.int64, count=n)
 
         while len(extrema) > 2:
             if len(ext_positions) <= 2:

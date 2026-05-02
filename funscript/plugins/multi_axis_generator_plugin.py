@@ -133,8 +133,9 @@ class MultiAxisGeneratorPlugin(FunscriptTransformationPlugin):
         phase_offset_ms = params['phase_offset_ms']
         smoothing = params['smoothing']
 
-        ats = np.array([a['at'] for a in source_actions], dtype=np.float64)
-        poss = np.array([a['pos'] for a in source_actions], dtype=np.float64)
+        n = len(source_actions)
+        ats = np.fromiter((a['at'] for a in source_actions), dtype=np.float64, count=n)
+        poss = np.fromiter((a['pos'] for a in source_actions), dtype=np.float64, count=n)
 
         # Compute derivatives
         dt = np.diff(ats)

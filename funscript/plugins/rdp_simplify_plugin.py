@@ -364,19 +364,11 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
             self.logger.debug(f"Segment for RDP on {axis} axis has < 2 points")
             return False
         
-        # OPTIMIZED: Vectorized conversion to points array for RDP
         segment = segment_info['segment']
-        if len(segment) > 1000:
-            # Use vectorized extraction for large datasets
-            timestamps = np.array([action['at'] for action in segment], dtype=np.float64)
-            positions = np.array([action['pos'] for action in segment], dtype=np.float64)
-            points = np.column_stack((timestamps, positions))
-        else:
-            # Original method for smaller datasets
-            points = np.column_stack((
-                [action['at'] for action in segment],
-                [action['pos'] for action in segment]
-            )).astype(np.float64)
+        n = len(segment)
+        timestamps = np.fromiter((a['at'] for a in segment), dtype=np.float64, count=n)
+        positions = np.fromiter((a['pos'] for a in segment), dtype=np.float64, count=n)
+        points = np.column_stack((timestamps, positions))
         
         epsilon = params['epsilon']
         if params.get('auto_scale_epsilon', False) and len(points) > 1:
