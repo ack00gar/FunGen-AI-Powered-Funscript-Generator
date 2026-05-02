@@ -2206,15 +2206,14 @@ def _show_splash_threading(init_function, *args, **kwargs):
         except Exception as e:
             result_container["exception"] = e
         finally:
-            # Enforce minimum display time of 5 seconds for smooth experience
+            # Floor so the animation has time to play.
             elapsed_time = time.perf_counter() - start_time
-            remaining_time = 5.0 - elapsed_time
+            remaining_time = 2.0 - elapsed_time
             if remaining_time > 0:
-                # Use smaller sleep intervals to be more responsive
                 sleep_interval = 0.1
                 while remaining_time > 0:
                     time.sleep(min(sleep_interval, remaining_time))
-                    remaining_time = 5.0 - (time.perf_counter() - start_time)
+                    remaining_time = 2.0 - (time.perf_counter() - start_time)
             splash.stop()
 
     # Start initialization in a separate thread with lower priority
@@ -2289,9 +2288,9 @@ def _show_splash_multiprocessing(init_function, *args, **kwargs):
         while init_process.is_alive():
             time.sleep(0.1)
 
-        # Enforce minimum display time
+        # Minimum display time floor so the animation has time to play
         elapsed_time = time.perf_counter() - start_time
-        remaining_time = 5.0 - elapsed_time
+        remaining_time = 2.0 - elapsed_time
         if remaining_time > 0:
             time.sleep(remaining_time)
 

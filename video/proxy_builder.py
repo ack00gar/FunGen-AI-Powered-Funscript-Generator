@@ -441,9 +441,15 @@ class ProxyBuilder:
 
         vf = self._video_filter_str(job)
 
+        # v360 in libavfilter is single-threaded by default; bump filter pools
+        # so VR dewarp doesn't bottleneck on one core during proxy build.
+        import os as _os
+        _ft = max(1, min(8, (_os.cpu_count() or 4) // 2))
         cmd = [
             find_ffmpeg(),
             "-hide_banner", "-nostats", "-loglevel", "warning",
+            "-filter_threads", str(_ft),
+            "-filter_complex_threads", str(_ft),
             "-y",
             "-i", job.source_path,
             "-progress", "pipe:1",

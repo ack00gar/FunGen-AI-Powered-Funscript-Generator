@@ -13,7 +13,6 @@ class GeneratedFileManagerWindow:
         self.output_folder = self.app.app_settings.config.output.folder_path
         self.sort_by = 'name'
         self.file_manager = GeneratedFileManager(self.output_folder, logger=self.app.logger, delete_funscript_files=False)
-        self.file_manager._scan_files()
         self.expanded_folders = set()
         self.expand_all = False
         self.force_expand_collapse = False

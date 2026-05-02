@@ -1,4 +1,5 @@
 import os
+import threading
 from send2trash import send2trash
 import logging
 
@@ -9,12 +10,45 @@ class GeneratedFileManager:
         self._file_tree = {}
         self._total_size_mb = 0
         self.delete_funscript_files = delete_funscript_files
+        # _rescan_pending coalesces requests fired during an in-flight scan.
+        self._scan_lock = threading.Lock()
+        self._scanning = False
+        self._rescan_pending = False
         self._scan_files()
 
     def _scan_files(self):
-        self._file_tree = {}
+        """Spawn a background scan if one isn't running. Coalesces if it is."""
+        with self._scan_lock:
+            if self._scanning:
+                self._rescan_pending = True
+                return
+            self._scanning = True
+        threading.Thread(
+            target=self._scan_worker, daemon=True,
+            name="GeneratedFileManagerScan",
+        ).start()
+
+    def _scan_worker(self):
+        try:
+            while True:
+                self._do_scan()
+                with self._scan_lock:
+                    if not self._rescan_pending:
+                        self._scanning = False
+                        return
+                    self._rescan_pending = False
+        except Exception as e:
+            with self._scan_lock:
+                self._scanning = False
+                self._rescan_pending = False
+            self.logger.warning(f"scan failed: {e}")
+
+    def _do_scan(self):
+        new_tree = {}
         total_size_bytes = 0
         if not os.path.isdir(self.output_folder):
+            self._file_tree = new_tree
+            self._total_size_mb = 0
             return
 
         for video_dir_name in os.listdir(self.output_folder):
@@ -35,11 +69,18 @@ class GeneratedFileManager:
                             continue
 
                 if files_in_dir or not os.listdir(video_dir_path):
-                    self._file_tree[video_dir_name] = {
+                    new_tree[video_dir_name] = {
                         "path": video_dir_path,
                         "files": sorted(files_in_dir, key=lambda x: x['name']),
                         "total_size_mb": folder_total_size_bytes / (1024 * 1024)}
+        # Atomic swap: readers see prior or new tree, never half-built.
+        self._file_tree = new_tree
         self._total_size_mb = total_size_bytes / (1024 * 1024)
+
+    @property
+    def is_scanning(self) -> bool:
+        with self._scan_lock:
+            return self._scanning
 
     def delete_file(self, file_path):
         if file_path and os.path.exists(file_path):

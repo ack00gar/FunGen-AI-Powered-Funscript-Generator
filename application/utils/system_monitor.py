@@ -112,12 +112,15 @@ class SystemMonitor:
         )
         self.gpu_temp: Optional[float] = None
         self.gpu_info: Optional[Dict[str, Any]] = None
-        self.gpu_name: str = "Unknown GPU"
+        self.gpu_name: str = "Detecting..."
         self.gpu_available: bool = False
 
-        # GPU setup
+        # system_profiler/ioreg can take hundreds of ms; defer.
         self._nvsmi = None
-        self._setup_gpu_monitoring()
+        threading.Thread(
+            target=self._setup_gpu_monitoring, daemon=True,
+            name="SystemMonitorGpuProbe"
+        ).start()
 
         # Prime cpu_percent
         try:

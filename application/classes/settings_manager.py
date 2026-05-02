@@ -98,9 +98,12 @@ class AppSettings:
         from config.typed_settings import AppConfig
         self.config = AppConfig(self)
 
-        # Auto-detect and set hardware acceleration on first run
+        # Each subprocess can block up to 5s; defer off constructor.
         if self.is_first_run:
-            self.auto_detect_hardware_acceleration()
+            threading.Thread(
+                target=self.auto_detect_hardware_acceleration, daemon=True,
+                name="HwaccelAutoDetect"
+            ).start()
 
     def get_default_settings(self):
         constants = self.constants

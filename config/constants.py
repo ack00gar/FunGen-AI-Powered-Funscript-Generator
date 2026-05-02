@@ -467,6 +467,8 @@ MOTION_INVERSION_THRESHOLD = 1.5
 STAGE1_FRAME_QUEUE_MAXSIZE = 99
 DEFAULT_S1_NUM_PRODUCERS = 1
 DEFAULT_S1_NUM_CONSUMERS = max(os.cpu_count() // 2, 1) if os.cpu_count() else 2
+# MPS: share one YOLO across thread consumers; saves N x 540ms + ~3GB.
+STAGE1_USE_THREADED_CONSUMERS_ON_MPS = True
 # MPS heuristic (unified memory). YOLO det+pose + buffers peak ~2-4GB/consumer.
 MPS_MEMORY_PER_CONSUMER_GB = 4.0
 MPS_MEMORY_HEADROOM_GB = 6.0
@@ -475,7 +477,7 @@ MPS_MEMORY_HEADROOM_GB = 6.0
 ####################################################################################################
 # STAGE 2: ANALYSIS & REFINEMENT
 ####################################################################################################
-DEFAULT_S2_OF_WORKERS = min(4, max(1, os.cpu_count() // 4 if os.cpu_count() else 1))
+DEFAULT_S2_OF_WORKERS = min(8, max(1, os.cpu_count() // 2 if os.cpu_count() else 1))
 PENIS_CLASS_NAME = "penis"
 GLANS_CLASS_NAME = "glans"
 CLASS_PRIORITY_ANALYSIS = {"pussy": 8, "butt": 7, "face": 6, "hand": 5, "breast": 4, "foot": 3}

@@ -90,7 +90,8 @@ class AsyncYoloWorker:
             dummy = [_np.zeros((self._imgsz, self._imgsz, 3), dtype=_np.uint8)
                      for _ in range(self._batch_size)]
             self._model(dummy, device=self._device, verbose=False,
-                        conf=self._conf, imgsz=self._imgsz)
+                        conf=self._conf, imgsz=self._imgsz,
+                        half=(self._device == 'cuda'))
         except Exception as e:
             self._logger.info(
                 f"YOLO model rejected batch={self._batch_size} "
@@ -227,7 +228,8 @@ class AsyncYoloWorker:
                 try:
                     results = self._model(frames, device=self._device,
                                           verbose=False, conf=self._conf,
-                                          imgsz=self._imgsz)
+                                          imgsz=self._imgsz,
+                                          half=(self._device == 'cuda'))
                     names = self._model.names
                     dets_per_frame = [_parse_detections([r], names) for r in results]
                 except Exception as e:

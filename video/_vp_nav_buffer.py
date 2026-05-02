@@ -28,6 +28,14 @@ class NavBufferMixin:
             except Exception:
                 pass
         budget = max(128 * 1024 * 1024, int(budget))
+        # Cap at 25% of system RAM so a misconfigured setting can't OOM.
+        try:
+            import psutil
+            ram_cap = int(psutil.virtual_memory().total * 0.25)
+            if ram_cap > 0:
+                budget = min(budget, ram_cap)
+        except Exception:
+            pass
         try:
             self.logger.debug(f"Nav cache byte budget: {budget / (1024*1024):.0f} MB")
         except Exception:

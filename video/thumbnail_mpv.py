@@ -44,41 +44,30 @@ class ThumbnailMpv:
         self._fbo_h = 0
         self._video_path = ""
         self._duration_s = 0.0
+        # Lazy: defer mpv allocation until first hover request.
+        self._pending_get_proc_address: Optional[Callable] = None
+        self._pending_video_path: str = ""
+        self._lazy_failed: bool = False
 
     @property
     def is_loaded(self) -> bool:
-        return self._player is not None and bool(self._video_path)
+        if self._player is not None and bool(self._video_path):
+            return True
+        return (self._pending_get_proc_address is not None
+                and bool(self._pending_video_path)
+                and not self._lazy_failed)
 
     def open(self, get_proc_address: Callable[[object, bytes], int]) -> bool:
         if not mpv_available:
             return False
-        try:
-            self._player = mpv.MPV(
-                vo="libmpv",
-                audio="no",
-                ao="null",
-                hwdec=_default_hwdec(),
-                keep_open="yes",
-                pause="yes",
-                profile="fast",
-                loglevel="warn",
-            )
-            self._proc_address_cfunc = mpv.MpvGlGetProcAddressFn(get_proc_address)
-            self._ctx = mpv.MpvRenderContext(
-                self._player, "opengl",
-                opengl_init_params={"get_proc_address": self._proc_address_cfunc},
-            )
-            self.logger.debug("ThumbnailMpv ready")
-            return True
-        except Exception as e:
-            self.logger.warning(f"ThumbnailMpv open failed: {e}")
-            self._player = None
-            self._ctx = None
-            return False
+        self._pending_get_proc_address = get_proc_address
+        self._lazy_failed = False
+        return True
 
     def load(self, video_path: str) -> bool:
+        self._pending_video_path = video_path
         if self._player is None:
-            return False
+            return True
         try:
             self._player.play(video_path)
             deadline = time.monotonic() + 3.0
@@ -97,7 +86,7 @@ class ThumbnailMpv:
                     except Exception:
                         pass
                     self.logger.info(
-                        f"Thumbnail hover ready: {video_path} "
+                        f"Thumbnail hover reloaded: {video_path} "
                         f"(duration={self._duration_s:.2f}s)")
                     return True
                 time.sleep(0.02)
@@ -106,6 +95,57 @@ class ThumbnailMpv:
             return False
         except Exception as e:
             self.logger.warning(f"ThumbnailMpv load failed: {e}")
+            return False
+
+    def _lazy_init(self) -> bool:
+        if self._lazy_failed:
+            return False
+        if self._player is not None and self._video_path:
+            return True
+        if not self._pending_get_proc_address or not self._pending_video_path:
+            return False
+        try:
+            self._player = mpv.MPV(
+                vo="libmpv", audio="no", ao="null",
+                hwdec=_default_hwdec(),
+                keep_open="yes", pause="yes",
+                profile="fast", loglevel="warn",
+            )
+            self._proc_address_cfunc = mpv.MpvGlGetProcAddressFn(
+                self._pending_get_proc_address)
+            self._ctx = mpv.MpvRenderContext(
+                self._player, "opengl",
+                opengl_init_params={"get_proc_address": self._proc_address_cfunc},
+            )
+            self._player.play(self._pending_video_path)
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                try:
+                    d = self._player.duration
+                except Exception:
+                    d = None
+                if d is not None and d > 0:
+                    self._duration_s = float(d)
+                    self._video_path = self._pending_video_path
+                    try:
+                        self._player.pause = True
+                        self._player.command("seek", 0.0, "absolute", "keyframes")
+                        self._player.command("frame-step")
+                    except Exception:
+                        pass
+                    self.logger.info(
+                        f"Thumbnail hover lazy-init complete: {self._video_path} "
+                        f"(duration={self._duration_s:.2f}s)")
+                    return True
+                time.sleep(0.02)
+            self.logger.warning("ThumbnailMpv lazy-init: duration timeout")
+            self._lazy_failed = True
+            return False
+        except Exception as e:
+            self.logger.warning(f"ThumbnailMpv lazy-init failed: {e}")
+            self._lazy_failed = True
+            self._player = None
+            self._ctx = None
             return False
 
     def _alloc_fbo(self, w: int, h: int) -> None:
@@ -170,7 +210,10 @@ class ThumbnailMpv:
     def render_frame(self, time_sec: float,
                      w: int = 320, h: int = 320) -> Optional[np.ndarray]:
         """Seek to time_sec and render one frame. Must run on main GL thread."""
-        if not self.is_loaded or self._ctx is None:
+        if self._player is None:
+            if not self._lazy_init():
+                return None
+        if self._ctx is None:
             return None
         try:
             t0 = time.monotonic()

@@ -68,10 +68,9 @@ def _coalesced_apply(tl, plugin_name: str, label: str, **params) -> None:
     fs.apply_plugin(plugin_name, axis=axis, **params)
     post = list(fs.get_axis_actions(axis) or [])
 
-    # Coalesce: if previous entry was a live-drag, drop it.
-    if tl.app.undo_manager.match_top(LiveDragCmd):
-        tl.app.undo_manager.pop_top(tl.app)
-    tl.app.undo_manager.push_done(LiveDragCmd(tl.timeline_num, pre, post, label))
+    # Coalesce: replace the prior tick's post in place (skips re-packing pre).
+    if not tl.app.undo_manager.update_live_drag_post(post):
+        tl.app.undo_manager.push_done(LiveDragCmd(tl.timeline_num, pre, post, label))
 
     tl.app.funscript_processor._post_mutation_refresh(tl.timeline_num, label)
     tl.invalidate_cache()

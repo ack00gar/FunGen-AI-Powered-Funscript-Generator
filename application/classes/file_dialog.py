@@ -70,6 +70,15 @@ class ImGuiFileDialog:
         self._needs_rescan: bool = True
         self._file_sizes_cache: dict = {}
         self._funscript_status_cache: dict = {}
+        # Funscript-status reads (open + json.loads) move off the UI thread.
+        from concurrent.futures import ThreadPoolExecutor
+        import queue, threading
+        self._fs_status_pending: set = set()
+        self._fs_status_lock = threading.Lock()
+        self._fs_status_done: "queue.Queue" = queue.Queue()
+        self._fs_status_executor = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="FsStatusProbe"
+        )
 
     @staticmethod
     def get_funscript_status(video_path: str, logger: logging.Logger) -> Optional[str]:
@@ -152,7 +161,42 @@ class ImGuiFileDialog:
         self._cached_special_packages = []
         self._file_sizes_cache.clear()
         self._funscript_status_cache.clear()
+        with self._fs_status_lock:
+            self._fs_status_pending.clear()
+        try:
+            import queue as _q
+            while True:
+                self._fs_status_done.get_nowait()
+        except Exception:
+            pass
         self._needs_rescan = True
+
+    def _drain_fs_status(self) -> None:
+        """Pull completed funscript-status results into the cache."""
+        try:
+            import queue as _q
+            while True:
+                full_path, status = self._fs_status_done.get_nowait()
+                self._funscript_status_cache[full_path] = status
+                with self._fs_status_lock:
+                    self._fs_status_pending.discard(full_path)
+        except Exception:
+            pass
+
+    def _schedule_fs_status(self, full_path: str) -> None:
+        """Spawn a worker for one funscript probe if not already in flight."""
+        with self._fs_status_lock:
+            if full_path in self._fs_status_pending:
+                return
+            self._fs_status_pending.add(full_path)
+        def _worker(p=full_path):
+            try:
+                status = ImGuiFileDialog.get_funscript_status(p, self.logger)
+                self._fs_status_done.put((p, status))
+            except Exception:
+                with self._fs_status_lock:
+                    self._fs_status_pending.discard(p)
+        self._fs_status_executor.submit(_worker)
 
     def _build_listing_if_needed(self) -> None:
         # Only (re)scan the filesystem when the directory actually changes or a refresh is requested
@@ -314,6 +358,7 @@ class ImGuiFileDialog:
                 imgui.text("Directory not found")
             else:
                 self._build_listing_if_needed()
+                self._drain_fs_status()
 
                 directories = self._cached_directories
                 files = self._cached_files
@@ -391,14 +436,13 @@ class ImGuiFileDialog:
             except Exception:
                 size_str = "N/A"
 
-            # Check for funscript status if the file is a video
+            # Funscript status: cache hit -> use; miss -> async probe, return None
             funscript_status = None
             if any(f.lower().endswith(ext) for ext in self.video_extensions):
                 if full_path in self._funscript_status_cache:
                     funscript_status = self._funscript_status_cache[full_path]
                 else:
-                    funscript_status = self._get_funscript_status(full_path)
-                    self._funscript_status_cache[full_path] = funscript_status
+                    self._schedule_fs_status(full_path)
 
             imgui.push_id(f"file_{i}")
 

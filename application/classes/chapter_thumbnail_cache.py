@@ -9,7 +9,10 @@ with OpenGL textures for fast rendering.
 import cv2
 import numpy as np
 import logging
-from typing import Optional, Tuple, Dict
+import queue
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Set, Tuple, Dict
 import OpenGL.GL as gl
 from pathlib import Path
 
@@ -23,6 +26,7 @@ class ChapterThumbnailCache:
     - Memory-efficient: Thumbnails are downscaled to a reasonable size
     - OpenGL texture caching: Ready for immediate ImGui rendering
     - Automatic cleanup: Textures are cleaned up when cache is cleared
+    - Async decode: ffmpeg/ffprobe + cv2 on worker pool; GL upload on UI thread.
     """
 
     def __init__(self, app, thumbnail_height=60):
@@ -40,8 +44,17 @@ class ChapterThumbnailCache:
         # Cache structure: {chapter_unique_id: (texture_id, width, height)}
         self._texture_cache: Dict[str, Tuple[int, int, int]] = {}
 
-        # Track video path to invalidate cache on video change
+        # _generation bumps on clear so stale worker results are dropped.
         self._current_video_path = None
+        self._generation = 0
+
+        # 2 workers saturate a single SSD on ffmpeg subprocess spawn cost.
+        self._executor = ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="ChapterThumb"
+        )
+        self._pending: Set[str] = set()
+        self._pending_lock = threading.Lock()
+        self._completed: "queue.Queue" = queue.Queue()
 
     def get_thumbnail(self, chapter) -> Optional[Tuple[int, int, int]]:
         """
@@ -59,113 +72,122 @@ class ChapterThumbnailCache:
             self.clear_cache()
             self._current_video_path = video_path
 
+        # Drain any completed decodes -> create GL textures here (UI thread).
+        self._drain_completed()
+
         # Return cached thumbnail if available
         if chapter.unique_id in self._texture_cache:
             return self._texture_cache[chapter.unique_id]
 
-        # Extract and cache new thumbnail
-        return self._extract_and_cache_thumbnail(chapter)
-
-    def _extract_and_cache_thumbnail(self, chapter) -> Optional[Tuple[int, int, int]]:
-        """Extract thumbnail from video and cache it."""
-        try:
-            # Get video path
-            video_path = self.app.file_manager.video_path if self.app.file_manager else None
-            if not video_path or not Path(video_path).exists():
-                self.logger.debug(f"Video path not available for thumbnail extraction")
-                return None
-
-            # Extract first frame of chapter via one-shot ffmpeg subprocess.
-            # Cheap (<300 ms cold spawn) and cached forever, so spawn cost is
-            # amortized to negligible. ffprobe first for fps + total_frames so
-            # we can validate the requested frame is in range and convert to
-            # a seek timestamp.
-            start_frame = chapter.start_frame_id
-            import subprocess
-            from video.ffmpeg_helpers import find_ffmpeg, subprocess_flags
-            from video.frame_source.probe import probe as _probe
-
-            info = _probe(video_path)
-            if info is None:
-                self.logger.debug(f"ffprobe failed for chapter thumbnail: {video_path}")
-                return None
-            fps = info.fps if info.fps > 0 else 30.0
-            total_frames = info.total_frames
-            if total_frames and start_frame >= total_frames:
-                self.logger.debug(
-                    f"Frame {start_frame} is beyond video length ({total_frames} frames)")
-                return None
-
-            seek_time = start_frame / fps
-            cmd = [
-                find_ffmpeg(), '-hide_banner', '-loglevel', 'error', '-nostats',
-                '-ss', f'{seek_time:.6f}',
-                '-i', video_path,
-                '-frames:v', '1',
-                '-f', 'image2pipe', '-c:v', 'bmp', '-',
-            ]
-            frame = None
-            try:
-                result = subprocess.run(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    timeout=10.0, creationflags=subprocess_flags(),
+        # Schedule async decode if not already in flight
+        if video_path:
+            with self._pending_lock:
+                already = chapter.unique_id in self._pending
+                if not already:
+                    self._pending.add(chapter.unique_id)
+            if not already:
+                gen = self._generation
+                self._executor.submit(
+                    self._decode_worker, chapter, video_path, gen,
                 )
-                if result.returncode == 0 and result.stdout:
-                    buf = np.frombuffer(result.stdout, dtype=np.uint8)
-                    frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-            except (OSError, subprocess.TimeoutExpired) as e:
-                self.logger.debug(f"ffmpeg chapter thumbnail extraction failed: {e}")
-                return None
+        return None
 
-            if frame is None or frame.size == 0:
-                self.logger.debug(
-                    f"Could not read frame {start_frame} for chapter thumbnail "
-                    f"(total frames: {total_frames})")
-                return None
+    def _drain_completed(self) -> None:
+        """Drain decoded buffers, upload as GL textures. UI-thread only."""
+        MAX_PER_FRAME = 4
+        for _ in range(MAX_PER_FRAME):
+            try:
+                cid, rgba, w, h, gen = self._completed.get_nowait()
+            except queue.Empty:
+                return
+            with self._pending_lock:
+                self._pending.discard(cid)
+            if gen != self._generation or cid in self._texture_cache:
+                continue
+            tex = self._create_gl_texture(rgba)
+            if tex is not None:
+                self._texture_cache[cid] = (tex, w, h)
 
-            if (hasattr(self.app, 'processor') and self.app.processor and
-                hasattr(self.app.processor, 'is_vr_active_or_potential') and
-                self.app.processor.is_vr_active_or_potential()):
-                from video import vr_panel
-                vr_format = getattr(self.app.processor, 'vr_input_format', '')
-                eye = vr_panel.read_setting(
-                    getattr(self.app, 'app_settings', None),
-                    default=vr_panel.EYE_LEFT)
-                if eye == vr_panel.EYE_FULL:
-                    eye = vr_panel.EYE_LEFT
-                orig_height, orig_width = frame.shape[:2]
-                region = vr_panel.resolve_eye(vr_format, eye)
-                if not region.is_full():
-                    x, y, w, h = region.pixel_rect(orig_width, orig_height)
-                    frame = frame[y:y + h, x:x + w]
-
-            # Resize thumbnail to target height while preserving aspect ratio
-            orig_height, orig_width = frame.shape[:2]
-            aspect_ratio = orig_width / orig_height
-            thumbnail_width = int(self.thumbnail_height * aspect_ratio)
-
-            thumbnail = cv2.resize(frame, (thumbnail_width, self.thumbnail_height),
-                                 interpolation=cv2.INTER_AREA)
-
-            # Convert BGR to RGBA for OpenGL
-            thumbnail_rgba = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2RGBA)
-
-            # Create OpenGL texture
-            texture_id = self._create_gl_texture(thumbnail_rgba)
-
-            if texture_id is None:
-                return None
-
-            # Cache the texture
-            self._texture_cache[chapter.unique_id] = (texture_id, thumbnail_width, self.thumbnail_height)
-
-            self.logger.debug(f"Cached thumbnail for chapter {chapter.unique_id[:8]}...")
-
-            return (texture_id, thumbnail_width, self.thumbnail_height)
-
+    def _decode_worker(self, chapter, video_path: str, generation: int) -> None:
+        try:
+            result = self._extract_thumbnail_buffer(chapter, video_path)
+            if result is not None:
+                rgba, w, h = result
+                self._completed.put((chapter.unique_id, rgba, w, h, generation))
+                return  # drain clears _pending on success
         except Exception as e:
-            self.logger.warning(f"Failed to extract thumbnail for chapter {chapter.unique_id}: {e}")
+            self.logger.debug(f"thumbnail worker failed: {e}")
+        with self._pending_lock:
+            self._pending.discard(chapter.unique_id)
+
+    def _extract_thumbnail_buffer(
+        self, chapter, video_path: str,
+    ) -> Optional[Tuple[np.ndarray, int, int]]:
+        """Off-thread: ffprobe + ffmpeg + cv2 + resize. No GL calls."""
+        if not video_path or not Path(video_path).exists():
             return None
+
+        start_frame = chapter.start_frame_id
+        import subprocess
+        from video.ffmpeg_helpers import find_ffmpeg, subprocess_flags
+        from video.frame_source.probe import probe as _probe
+
+        info = _probe(video_path)
+        if info is None:
+            return None
+        fps = info.fps if info.fps > 0 else 30.0
+        total_frames = info.total_frames
+        if total_frames and start_frame >= total_frames:
+            return None
+
+        seek_time = start_frame / fps
+        cmd = [
+            find_ffmpeg(), '-hide_banner', '-loglevel', 'error', '-nostats',
+            '-ss', f'{seek_time:.6f}',
+            '-i', video_path,
+            '-frames:v', '1',
+            '-f', 'image2pipe', '-c:v', 'bmp', '-',
+        ]
+        frame = None
+        try:
+            result = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=10.0, creationflags=subprocess_flags(),
+            )
+            if result.returncode == 0 and result.stdout:
+                buf = np.frombuffer(result.stdout, dtype=np.uint8)
+                frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+
+        if frame is None or frame.size == 0:
+            return None
+
+        if (hasattr(self.app, 'processor') and self.app.processor and
+            hasattr(self.app.processor, 'is_vr_active_or_potential') and
+            self.app.processor.is_vr_active_or_potential()):
+            from video import vr_panel
+            vr_format = getattr(self.app.processor, 'vr_input_format', '')
+            eye = vr_panel.read_setting(
+                getattr(self.app, 'app_settings', None),
+                default=vr_panel.EYE_LEFT)
+            if eye == vr_panel.EYE_FULL:
+                eye = vr_panel.EYE_LEFT
+            orig_height, orig_width = frame.shape[:2]
+            region = vr_panel.resolve_eye(vr_format, eye)
+            if not region.is_full():
+                x, y, w, h = region.pixel_rect(orig_width, orig_height)
+                frame = frame[y:y + h, x:x + w]
+
+        orig_height, orig_width = frame.shape[:2]
+        aspect_ratio = orig_width / orig_height
+        thumbnail_width = int(self.thumbnail_height * aspect_ratio)
+
+        thumbnail = cv2.resize(
+            frame, (thumbnail_width, self.thumbnail_height),
+            interpolation=cv2.INTER_AREA)
+        thumbnail_rgba = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2RGBA)
+        return (thumbnail_rgba, thumbnail_width, self.thumbnail_height)
 
     def _create_gl_texture(self, image_rgba: np.ndarray) -> Optional[int]:
         """
@@ -206,30 +228,46 @@ class ChapterThumbnailCache:
             return None
 
     def clear_cache(self):
-        """Clear all cached thumbnails and free OpenGL textures."""
+        """Free GL textures and invalidate in-flight worker results."""
         try:
             for chapter_id, (texture_id, _, _) in self._texture_cache.items():
                 if texture_id > 0:
                     gl.glDeleteTextures([texture_id])
         except Exception as e:
-            self.logger.warning(f"Error cleaning up textures: {e}")
+            self.logger.warning(f"texture cleanup: {e}")
 
         self._texture_cache.clear()
+        self._generation += 1
+        try:
+            while True:
+                self._completed.get_nowait()
+        except queue.Empty:
+            pass
+        with self._pending_lock:
+            self._pending.clear()
         self.logger.debug("Thumbnail cache cleared")
 
     def preload_thumbnails(self, chapters):
-        """
-        Preload thumbnails for a list of chapters in the background.
-
-        This can be called to warm up the cache before displaying the chapter list.
-
-        Args:
-            chapters: List of chapter objects to preload
-        """
+        """Schedule async decode for a batch of chapters."""
+        video_path = self.app.file_manager.video_path if self.app.file_manager else None
+        if not video_path:
+            return
+        gen = self._generation
         for chapter in chapters:
-            if chapter.unique_id not in self._texture_cache:
-                self._extract_and_cache_thumbnail(chapter)
+            if chapter.unique_id in self._texture_cache:
+                continue
+            with self._pending_lock:
+                if chapter.unique_id in self._pending:
+                    continue
+                self._pending.add(chapter.unique_id)
+            self._executor.submit(
+                self._decode_worker, chapter, video_path, gen,
+            )
 
     def __del__(self):
         """Cleanup OpenGL textures on deletion."""
+        try:
+            self._executor.shutdown(wait=False)
+        except Exception:
+            pass
         self.clear_cache()

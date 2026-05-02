@@ -955,13 +955,6 @@ class VideoDisplayCoreMixin:
             mon.record_pass_ms(getattr(shader, '_last_render_ms', None))
         except Exception:
             pass
-        try:
-            gl.glBindTexture(gl.GL_TEXTURE_2D,
-                              self.gui_instance.vr_dewarp_texture_id)
-            gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-        except Exception:
-            pass
 
     def _render_status_overlay(self, text, busy, img_min, img_max):
         if not text or img_min is None or img_max is None:

@@ -60,6 +60,12 @@ class FrameCache:
         with self._lock:
             return frame_index in self._cache
 
+    def missing(self, start: int, end_exclusive: int) -> list:
+        """Return indices in [start, end) not in the cache, single lock."""
+        with self._lock:
+            cached = self._cache
+            return [i for i in range(start, end_exclusive) if i not in cached]
+
     def clear(self) -> None:
         with self._lock:
             self._cache.clear()

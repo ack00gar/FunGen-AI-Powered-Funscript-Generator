@@ -162,8 +162,8 @@ class FramePrefetcher:
         if end_exclusive <= start:
             return
 
-        uncached = [i for i in range(start, end_exclusive)
-                    if not self.cache.contains(i)]
+        # One lock acquisition for the whole window vs N=count.
+        uncached = self.cache.missing(start, end_exclusive)
         if not uncached:
             return
         if prefer_tail:

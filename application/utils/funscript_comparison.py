@@ -294,18 +294,28 @@ def detect_problem_sections(
     ref_interp = np.interp(query_at, ref_at, ref_pos)
     errors = np.abs(query_pos - ref_interp)
 
-    # Slide window using searchsorted for O(log n) per step instead of O(n)
+    # Vectorized sliding window via cumulative sum: O(n_windows) numpy ops
+    # instead of a Python while-loop (was 28k iters for a 2h video).
     step_ms = window_ms / 2
-    bad_windows = []
-    t = overlap_start
-    while t + window_ms <= overlap_end:
-        i_start = int(np.searchsorted(query_at, t))
-        i_end = int(np.searchsorted(query_at, t + window_ms, side='right'))
-        if i_end - i_start >= 2:
-            local_mae = float(np.mean(errors[i_start:i_end]))
-            if local_mae > mae_threshold:
-                bad_windows.append((t, t + window_ms, local_mae))
-        t += step_ms
+    t_starts = np.arange(overlap_start, overlap_end - window_ms + 1e-9, step_ms)
+    if len(t_starts) == 0:
+        bad_windows = []
+    else:
+        t_ends = t_starts + window_ms
+        i_starts = np.searchsorted(query_at, t_starts)
+        i_ends = np.searchsorted(query_at, t_ends, side='right')
+        cum_errors = np.concatenate(([0.0], np.cumsum(errors)))
+        sums = cum_errors[i_ends] - cum_errors[i_starts]
+        counts = i_ends - i_starts
+        valid = counts >= 2
+        denom = np.where(valid, counts, 1)
+        local_maes = sums / denom
+        bad_mask = valid & (local_maes > mae_threshold)
+        bad_windows = list(zip(
+            t_starts[bad_mask].tolist(),
+            t_ends[bad_mask].tolist(),
+            local_maes[bad_mask].tolist(),
+        ))
 
     if not bad_windows:
         return []

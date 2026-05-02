@@ -30,7 +30,9 @@ class PluginUIRenderer:
         self.plugin_manager = plugin_manager
         self.logger = logger or logging.getLogger('PluginUIRenderer')
         self.timeline_reference = None  # Will be set by timeline
-        
+        # Plugins with a preview in flight this open session.
+        self._previewed: set = set()
+
         if not imgui:
             self.logger.error("ImGui not available - UI rendering will not work")
     
@@ -196,21 +198,23 @@ class PluginUIRenderer:
         if not window_open:
             self.plugin_manager.set_plugin_state(plugin_name, PluginUIState.CLOSED)
             self.plugin_manager.clear_preview(plugin_name)
+            self._previewed.discard(plugin_name)
             imgui.end()
             return
-        
+
         if window_expanded:
             # Render plugin description
             if ui_data['description']:
                 imgui.text_wrapped(ui_data['description'])
                 imgui.separator()
-            
+
             # Render parameter controls
             parameters_changed = self._render_parameter_controls(plugin_name, ui_data)
-            
-            # Auto-generate preview when parameters change or window first opens
-            if parameters_changed or ui_data['state'] == PluginUIState.OPEN:
+
+            # Preview on first open and on parameter change only.
+            if parameters_changed or plugin_name not in self._previewed:
                 self._start_plugin_preview(plugin_name, timeline_num)
+                self._previewed.add(plugin_name)
             
             imgui.separator()
             
@@ -385,6 +389,7 @@ class PluginUIRenderer:
         if imgui.button(cancel_id, width=button_width):
             self.plugin_manager.set_plugin_state(plugin_name, PluginUIState.CLOSED)
             self.plugin_manager.clear_preview(plugin_name)
+            self._previewed.discard(plugin_name)
     
     def _has_selection_support(self, ui_data: Dict[str, Any]) -> bool:
         """Check if a plugin supports apply-to-selection functionality."""

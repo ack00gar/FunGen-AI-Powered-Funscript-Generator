@@ -102,7 +102,9 @@ def run_detection(
     Returns:
         List of Detection objects sorted by confidence (highest first).
     """
-    results = model(frame, device=device, verbose=False, conf=conf, imgsz=imgsz)
+    # FP16 only on CUDA: 0.98x measured on MPS, slow on CPU.
+    results = model(frame, device=device, verbose=False, conf=conf, imgsz=imgsz,
+                    half=(device == 'cuda'))
     return _parse_detections(results, model.names)
 
 
@@ -125,7 +127,8 @@ def run_pose(
     Returns:
         List of PoseResult objects.
     """
-    results = model(frame, device=device, verbose=False, conf=conf, imgsz=imgsz)
+    results = model(frame, device=device, verbose=False, conf=conf, imgsz=imgsz,
+                    half=(device == 'cuda'))
     return _parse_poses(results)
 
 

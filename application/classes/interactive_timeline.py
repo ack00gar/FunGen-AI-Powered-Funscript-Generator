@@ -1142,31 +1142,34 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         def _on_reference_selected(path):
             if not path or not os.path.isfile(path):
                 return
-            try:
-                import json
-                with open(path, 'rb') as f:
-                    raw = f.read()
-                # Try UTF-8 first, fall back to latin-1 (covers all single-byte values)
-                for enc in ('utf-8', 'utf-8-sig', 'latin-1'):
-                    try:
-                        text = raw.decode(enc)
-                        break
-                    except UnicodeDecodeError:
-                        continue
-                else:
-                    text = raw.decode('latin-1')
-                data = json.loads(text)
-                actions = sorted(data.get('actions', []), key=lambda a: a['at'])
-                if len(actions) < 2:
-                    self.app.logger.warning("Reference funscript has fewer than 2 actions")
-                    return
-                self.reference_overlay_actions = actions
-                self.reference_overlay_name = os.path.basename(path)
-                self._reference_metrics_dirty = True
-                self._recompute_reference_data()
-                self.app.logger.info(f"Loaded reference funscript: {self.reference_overlay_name} ({len(actions)} actions)")
-            except Exception as e:
-                self.app.logger.error(f"Failed to load reference funscript: {e}")
+            # File I/O + json parse off the UI thread; dirty flag triggers
+            # next-frame recompute via the existing render-time path.
+            import threading
+            def _worker():
+                try:
+                    import json
+                    with open(path, 'rb') as f:
+                        raw = f.read()
+                    for enc in ('utf-8', 'utf-8-sig', 'latin-1'):
+                        try:
+                            text = raw.decode(enc)
+                            break
+                        except UnicodeDecodeError:
+                            continue
+                    else:
+                        text = raw.decode('latin-1')
+                    data = json.loads(text)
+                    actions = sorted(data.get('actions', []), key=lambda a: a['at'])
+                    if len(actions) < 2:
+                        self.app.logger.warning("Reference funscript has fewer than 2 actions")
+                        return
+                    self.reference_overlay_actions = actions
+                    self.reference_overlay_name = os.path.basename(path)
+                    self._reference_metrics_dirty = True
+                    self.app.logger.info(f"Loaded reference funscript: {self.reference_overlay_name} ({len(actions)} actions)")
+                except Exception as e:
+                    self.app.logger.error(f"Failed to load reference funscript: {e}")
+            threading.Thread(target=_worker, daemon=True, name="ReferenceFunscriptLoad").start()
 
         gi.file_dialog.show(
             title="Load Reference Funscript",
