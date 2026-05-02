@@ -56,15 +56,12 @@ class HeatmapColorMapper:
         self._grad_colors = np.array(
             [g[1] for g in _SPEED_GRADIENT], dtype=np.float32)
         self._overspeed_np = np.asarray(_OVERSPEED_COLOR, dtype=np.float32)
-        # 256-entry packed-u32 LUT for the heatmap fast path. One fancy-index
-        # in the redraw replaces searchsorted+lerp+pack on every call.
+        # 256-entry packed-u32 LUT used by speeds_to_colors_u32.
         self._build_lut()
 
     def _build_lut(self) -> None:
         """Precompute 256 packed-u32 colors covering [0, max_speed]."""
         sample_speeds = np.linspace(0.0, self.max_speed, 256, dtype=np.float32)
-        # Use the slow-path rgba (it does not consult the LUT) to avoid
-        # bootstrapping issues, then pack to u32.
         rgba = self._compute_rgba_uncached(sample_speeds)
         rgba_u8 = (rgba * 255.0 + 0.5).astype(np.uint32)
         self._lut_u32 = (
@@ -147,11 +144,7 @@ class HeatmapColorMapper:
         return result
 
     def speeds_to_colors_u32(self, speeds: np.ndarray) -> np.ndarray:
-        """Vectorized: convert speeds to packed imgui u32 color values.
-
-        Hot path: a single fancy-index into the precomputed 256-entry LUT.
-        Packing: R | (G<<8) | (B<<16) | (A<<24)  (imgui's ABGR layout).
-        """
+        """Convert speeds to packed imgui u32 colors via the 256-LUT."""
         abs_speeds = np.abs(np.asarray(speeds, dtype=np.float32))
         idx = (abs_speeds * (255.0 / self.max_speed) + 0.5).astype(np.int32)
         np.clip(idx, 0, 255, out=idx)

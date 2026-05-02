@@ -171,8 +171,8 @@ DEFAULT_SHORTCUTS = {
     "jump_to_prev_point": "DOWN_ARROW",   # Down arrow for previous point
     "jump_to_next_point_alt": ".",        # Alternative: period
     "jump_to_prev_point_alt": ",",        # Alternative: comma
-    "jump_to_next_point_any": "CTRL+SHIFT+UP_ARROW",   # Closest next point across all axes
-    "jump_to_prev_point_any": "CTRL+SHIFT+DOWN_ARROW", # Closest prev point across all axes
+    "jump_to_next_point_any": "CTRL+SHIFT+UP_ARROW",   # Next point across all axes
+    "jump_to_prev_point_any": "CTRL+SHIFT+DOWN_ARROW", # Prev point across all axes
 
     # Point Value Adjustment (nudge selected points)
     "nudge_selection_pos_up": "SHIFT+UP_ARROW",      # Shift+Up to raise selected point value
@@ -466,7 +466,7 @@ MOTION_INVERSION_THRESHOLD = 1.5
 ####################################################################################################
 # STAGE 1: VIDEO DECODING & DETECTION
 ####################################################################################################
-STAGE1_FRAME_QUEUE_MAXSIZE = 99
+STAGE1_FRAME_QUEUE_MAXSIZE = 256
 DEFAULT_S1_NUM_PRODUCERS = 1
 DEFAULT_S1_NUM_CONSUMERS = max(os.cpu_count() // 2, 1) if os.cpu_count() else 2
 # MPS: share one YOLO across thread consumers; saves N x 540ms + ~3GB.

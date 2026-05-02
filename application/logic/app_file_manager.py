@@ -740,7 +740,7 @@ class AppFileManager:
             funscript_data["notes"] = project_metadata["notes"]
 
         try:
-            # Atomic write: a crash mid-write leaves filepath untouched.
+            # Atomic write.
             tmp_path = filepath + ".tmp"
             with open(tmp_path, 'wb') as f:
                 f.write(orjson.dumps(funscript_data))

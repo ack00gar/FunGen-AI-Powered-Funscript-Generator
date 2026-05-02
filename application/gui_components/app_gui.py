@@ -10,6 +10,7 @@ import queue
 import ctypes
 import os
 import platform
+import functools
 from typing import List, Dict, Tuple
 from collections import deque
 
@@ -1385,10 +1386,10 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
     # ---- Shortcut hint helpers (status strip) ----
 
-    def _format_shortcut_hint(self, key_str):
-        """Platform-aware formatting: SUPER->Cmd/Ctrl, arrow symbols, etc."""
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def _format_shortcut_hint_cached(key_str: str, is_mac: bool) -> str:
         d = key_str
-        is_mac = platform.system() == "Darwin"
         d = d.replace("SUPER", "Cmd" if is_mac else "Ctrl")
         d = d.replace("CTRL", "Ctrl")
         d = d.replace("ALT", "Alt")
@@ -1405,6 +1406,10 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         d = d.replace("EQUAL", "=")
         d = d.replace("MINUS", "-")
         return d
+
+    def _format_shortcut_hint(self, key_str):
+        """Platform-aware formatting: SUPER->Cmd/Ctrl, arrow symbols, etc."""
+        return GUI._format_shortcut_hint_cached(key_str, platform.system() == "Darwin")
 
     def _get_contextual_hints(self, shortcuts, timeline_hovered, has_selection, active_mode=None):
         """Return 1-2 fixed hints based on current app state.

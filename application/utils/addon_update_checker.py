@@ -1,6 +1,24 @@
+import importlib.util
+import os
+import re
 import threading
 import time
-import requests
+
+_VERSION_RE = re.compile(r'__version__\s*=\s*[\'\"]([^\'\"]+)[\'\"]')
+
+
+def _read_addon_version(addon_name: str):
+    """Return the addon's __version__ string without importing it."""
+    spec = importlib.util.find_spec(addon_name)
+    if spec is None or spec.origin is None:
+        return None
+    try:
+        with open(spec.origin, 'r', encoding='utf-8', errors='replace') as f:
+            text = f.read()
+    except OSError:
+        return None
+    m = _VERSION_RE.search(text)
+    return m.group(1) if m else None
 
 
 class AddonUpdateChecker:
@@ -32,6 +50,8 @@ class AddonUpdateChecker:
         ).start()
 
     def _check_worker(self):
+        # Lazy: requests is ~30 ms cold and is only used here.
+        import requests
         try:
             resp = requests.get(
                 self.MANIFEST_URL,
@@ -46,19 +66,16 @@ class AddonUpdateChecker:
         outdated = []
         unowned = []
         for addon_name, info in manifest.get("addons", {}).items():
-            try:
-                mod = __import__(addon_name)
-                local_version = getattr(mod, "__version__", None)
-                if local_version is None:
-                    continue
-            except ImportError:
-                # Addon not installed — candidate for status strip ad
-                unowned.append({
-                    "name": addon_name,
-                    "display_name": info.get("display_name", addon_name),
-                    "remote_version": info.get("version", ""),
-                    "changelog": info.get("changelog", ""),
-                })
+            local_version = _read_addon_version(addon_name)
+            if local_version is None:
+                # Either not installed or version not declared.
+                if importlib.util.find_spec(addon_name) is None:
+                    unowned.append({
+                        "name": addon_name,
+                        "display_name": info.get("display_name", addon_name),
+                        "remote_version": info.get("version", ""),
+                        "changelog": info.get("changelog", ""),
+                    })
                 continue
 
             remote_version = info.get("version", "")

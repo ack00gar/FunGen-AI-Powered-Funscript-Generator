@@ -1236,17 +1236,18 @@ class YoloRoiTracker(BaseTracker):
             # Calculate magnitude weights (prioritize moving pixels)
             magnitudes = np.sqrt(dominant_flow_region[..., 0]**2 + dominant_flow_region[..., 1]**2)
 
-            # Create 2D Gaussian spatial weights (prioritize center of ROI)
-            center_x, sigma_x = region_w / 2, region_w / 4.0
-            center_y, sigma_y = region_h / 2, region_h / 4.0
-
-            x_coords = np.arange(region_w)
-            y_coords = np.arange(region_h)
-            weights_x = np.exp(-((x_coords - center_x) ** 2) / (2 * sigma_x ** 2))
-            weights_y = np.exp(-((y_coords - center_y) ** 2) / (2 * sigma_y ** 2))
-
-            # Create 2D spatial weight matrix
-            spatial_weights = np.outer(weights_y, weights_x)
+            # Cached Gaussian spatial weights keyed on ROI shape.
+            cache = getattr(self, '_yroi_spatial_cache', None)
+            ckey = (region_h, region_w)
+            if cache is None or cache[0] != ckey:
+                cx, sx = region_w * 0.5, region_w * 0.25
+                cy, sy = region_h * 0.5, region_h * 0.25
+                wx = np.exp(-((np.arange(region_w, dtype=np.float32) - cx) ** 2) / (2 * sx * sx))
+                wy = np.exp(-((np.arange(region_h, dtype=np.float32) - cy) ** 2) / (2 * sy * sy))
+                spatial_weights = np.outer(wy, wx).astype(np.float32)
+                self._yroi_spatial_cache = (ckey, spatial_weights)
+            else:
+                spatial_weights = cache[1]
 
             # Combine magnitude and spatial weights
             # This ensures: (1) moving pixels dominate, (2) center pixels are prioritized

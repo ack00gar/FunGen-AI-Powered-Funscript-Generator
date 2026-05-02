@@ -487,11 +487,7 @@ class MultiAxisFunscript:
         return []
 
     def _get_numpy_arrays_for_axis(self, axis: str):
-        """Return cached (ats_np, poss_np) float32 arrays for the axis.
-
-        Rebuilt only when the timestamp cache is dirty (i.e. actions changed).
-        Timeline drawing can slice these directly instead of rebuilding per frame.
-        """
+        """Return cached (ats_np, poss_np) float32 arrays via astype on PA cache."""
         actions = self.get_axis_actions(axis)
         if not actions:
             _empty = np.empty(0, dtype=np.float32)
@@ -499,19 +495,21 @@ class MultiAxisFunscript:
 
         # Determine cache slot
         if axis == 'primary':
-            self._get_timestamps_for_axis(axis)  # ensure dirty flag processed
+            self._get_timestamps_for_axis(axis)
             if self._primary_np_cache is not None:
                 return self._primary_np_cache
-            ats = np.array([a['at'] for a in actions], dtype=np.float32)
-            poss = np.array([a['pos'] for a in actions], dtype=np.float32)
+            t, v = self.get_arrays(axis)
+            ats = t.astype(np.float32)
+            poss = v.astype(np.float32)
             self._primary_np_cache = (ats, poss)
             return ats, poss
         elif axis == 'secondary':
             self._get_timestamps_for_axis(axis)
             if self._secondary_np_cache is not None:
                 return self._secondary_np_cache
-            ats = np.array([a['at'] for a in actions], dtype=np.float32)
-            poss = np.array([a['pos'] for a in actions], dtype=np.float32)
+            t, v = self.get_arrays(axis)
+            ats = t.astype(np.float32)
+            poss = v.astype(np.float32)
             self._secondary_np_cache = (ats, poss)
             return ats, poss
         else:
@@ -519,8 +517,9 @@ class MultiAxisFunscript:
             cached = self._additional_np_cache.get(axis)
             if cached is not None:
                 return cached
-            ats = np.array([a['at'] for a in actions], dtype=np.float32)
-            poss = np.array([a['pos'] for a in actions], dtype=np.float32)
+            t, v = self.get_arrays(axis)
+            ats = t.astype(np.float32)
+            poss = v.astype(np.float32)
             self._additional_np_cache[axis] = (ats, poss)
             return ats, poss
 

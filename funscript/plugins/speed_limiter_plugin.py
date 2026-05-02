@@ -172,23 +172,12 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
         
         # OPTIMIZATION: Use vectorized approach for large datasets
         if len(actions) > 5000:
-            # Extract timestamps as numpy array
-            timestamps = np.array([action['at'] for action in actions])
-            
-            # Calculate intervals between consecutive actions
+            timestamps = np.fromiter((action['at'] for action in actions),
+                                     dtype=np.int64, count=len(actions))
             intervals = np.diff(timestamps)
-            
-            # Create boolean mask for actions to keep
             keep_mask = np.ones(len(actions), dtype=bool)
-            
-            # Mark actions to remove (those with intervals < min_interval)
-            for i in range(len(intervals)):
-                if intervals[i] < min_interval:
-                    # Remove the later action (preserve chronological order)
-                    keep_mask[i + 1] = False
-            
-            # Filter actions using the mask
-            filtered_actions = [actions[i] for i in range(len(actions)) if keep_mask[i]]
+            keep_mask[1:] = intervals >= min_interval
+            filtered_actions = [a for a, k in zip(actions, keep_mask) if k]
             
             removed_count = len(actions) - len(filtered_actions)
             if removed_count > 0:

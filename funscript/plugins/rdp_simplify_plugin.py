@@ -380,7 +380,7 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
         
         epsilon = params['epsilon']
         if params.get('auto_scale_epsilon', False) and len(points) > 1:
-            # Scale by mean inter-point distance so user-facing epsilon is unitless.
+            # Scale eps by mean inter-point distance.
             diffs = np.diff(points, axis=0)
             mean_dist = float(np.mean(np.sqrt(diffs[:, 0] ** 2 + diffs[:, 1] ** 2)))
             if mean_dist > 0:

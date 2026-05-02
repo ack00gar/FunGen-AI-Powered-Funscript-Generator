@@ -123,7 +123,8 @@ class PluginPipeline:
         for i, step in enumerate(self.steps):
             if not step.enabled:
                 continue
-            params = copy.deepcopy(step.params)
+            # Shallow copy; plugins never mutate params.
+            params = dict(step.params)
             if selected_indices is not None:
                 params['selected_indices'] = selected_indices
             try:

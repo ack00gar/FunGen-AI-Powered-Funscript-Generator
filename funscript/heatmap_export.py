@@ -40,19 +40,12 @@ class HeatmapExporter:
         # Compute per-segment speeds
         speeds = HeatmapColorMapper.compute_segment_speeds(actions)
 
-        # Build a 1D speed profile across the image width
-        speed_profile = np.zeros(width, dtype=np.float32)
-        for i in range(len(speeds)):
-            t_start = actions[i]['at']
-            t_end = actions[i + 1]['at']
-
-            # Map time range to pixel columns
-            px_start = int((t_start / duration_ms) * width)
-            px_end = int((t_end / duration_ms) * width)
-            px_start = max(0, min(width - 1, px_start))
-            px_end = max(px_start + 1, min(width, px_end))
-
-            speed_profile[px_start:px_end] = speeds[i]
+        # Vectorized 1D speed profile via per-pixel segment lookup.
+        ats = np.array([a['at'] for a in actions], dtype=np.float64)
+        px_centers_ms = (np.arange(width, dtype=np.float64) + 0.5) * (duration_ms / width)
+        seg_idx = np.searchsorted(ats, px_centers_ms, side='right') - 1
+        np.clip(seg_idx, 0, len(speeds) - 1, out=seg_idx)
+        speed_profile = speeds[seg_idx].astype(np.float32)
 
         # Convert speeds to colors
         colors_rgba = self._mapper.speeds_to_colors_rgba(speed_profile)  # (width, 4) float

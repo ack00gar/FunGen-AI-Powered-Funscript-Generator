@@ -81,14 +81,13 @@ class FrameCache:
             first_idx = next(iter(self._cache), None) if self._cache else None
             last_idx = next(reversed(self._cache), None) if self._cache else None
             window_start = now - 5.0
-            hits = 0
-            total = 0
-            for ts, was_hit in self._events:
-                if ts < window_start:
-                    continue
-                total += 1
-                if was_hit:
-                    hits += 1
+            # Prune events older than the window from the front. After prune
+            # len(events) is total and sum hits is one C-level pass.
+            ev = self._events
+            while ev and ev[0][0] < window_start:
+                ev.popleft()
+            total = len(ev)
+            hits = sum(1 for _, was_hit in ev if was_hit)
             hit_rate = (hits / total) if total > 0 else 0.0
         return {
             "frames": n,

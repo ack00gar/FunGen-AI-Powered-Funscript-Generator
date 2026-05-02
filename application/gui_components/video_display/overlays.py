@@ -5,6 +5,23 @@ import logging
 from bisect import bisect_right
 from typing import Optional, Tuple
 
+# Tiny LRU on (r, g, b, a) -> u32. ImGui's get_color_u32_rgba is fast but
+# called 40-200 times per dense overlay frame; the cache halves it.
+_COLOR_U32_CACHE: dict = {}
+_COLOR_U32_CACHE_MAX = 256
+
+
+def _u32_for_rgba(r, g, b, a):
+    key = (r, g, b, a)
+    val = _COLOR_U32_CACHE.get(key)
+    if val is not None:
+        return val
+    val = imgui.get_color_u32_rgba(r, g, b, a)
+    if len(_COLOR_U32_CACHE) >= _COLOR_U32_CACHE_MAX:
+        _COLOR_U32_CACHE.clear()
+    _COLOR_U32_CACHE[key] = val
+    return val
+
 import config.constants as constants
 from config.element_group_colors import VideoDisplayColors
 from application.utils import get_logo_texture_manager, get_icon_texture_manager
@@ -272,37 +289,39 @@ class VideoOverlaysMixin:
             sx1, sy1 = to_screen(rect['x1'], rect['y1'])
             sx2, sy2 = to_screen(rect['x2'], rect['y2'])
             r, g, b, a = rect['color']
-            draw_list.add_rect_filled(sx1, sy1, sx2, sy2, imgui.get_color_u32_rgba(r, g, b, a))
+            draw_list.add_rect_filled(sx1, sy1, sx2, sy2, _u32_for_rgba(r, g, b, a))
 
         for rect in overlay.get('rects', []):
             sx1, sy1 = to_screen(rect['x1'], rect['y1'])
             sx2, sy2 = to_screen(rect['x2'], rect['y2'])
             r, g, b, a = rect['color']
-            draw_list.add_rect(sx1, sy1, sx2, sy2, imgui.get_color_u32_rgba(r, g, b, a),
+            col = _u32_for_rgba(r, g, b, a)
+            draw_list.add_rect(sx1, sy1, sx2, sy2, col,
                               thickness=rect.get('thickness', 1.0))
             label = rect.get('label')
             if label:
-                draw_list.add_text(sx1 + 3, sy1 + 3, imgui.get_color_u32_rgba(r, g, b, a), label)
+                draw_list.add_text(sx1 + 3, sy1 + 3, col, label)
 
         for circle in overlay.get('circles', []):
             sx, sy = to_screen(circle['x'], circle['y'])
             r, g, b, a = circle['color']
             radius = circle.get('radius', 3.0)
+            col = _u32_for_rgba(r, g, b, a)
             if circle.get('filled', False):
-                draw_list.add_circle_filled(sx, sy, radius, imgui.get_color_u32_rgba(r, g, b, a))
+                draw_list.add_circle_filled(sx, sy, radius, col)
             else:
-                draw_list.add_circle(sx, sy, radius, imgui.get_color_u32_rgba(r, g, b, a))
+                draw_list.add_circle(sx, sy, radius, col)
 
         for text in overlay.get('texts', []):
             sx, sy = to_screen(text['x'], text['y'])
             r, g, b, a = text['color']
-            draw_list.add_text(sx, sy, imgui.get_color_u32_rgba(r, g, b, a), text['text'])
+            draw_list.add_text(sx, sy, _u32_for_rgba(r, g, b, a), text['text'])
 
         for line in overlay.get('lines', []):
             sx1, sy1 = to_screen(line['x1'], line['y1'])
             sx2, sy2 = to_screen(line['x2'], line['y2'])
             r, g, b, a = line['color']
-            color_u32 = imgui.get_color_u32_rgba(r, g, b, a)
+            color_u32 = _u32_for_rgba(r, g, b, a)
             thickness = line.get('thickness', 2.0)
             draw_list.add_line(sx1, sy1, sx2, sy2, color_u32, thickness)
             # Arrow tip if requested

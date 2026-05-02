@@ -216,7 +216,7 @@ class ProjectManager:
         try:
             # Track disk I/O performance
             io_start = time.perf_counter()
-            # Atomic write: a crash mid-write leaves filepath untouched.
+            # Atomic write.
             tmp_path = filepath + ".tmp"
             with open(tmp_path, 'wb') as f:
                 f.write(orjson.dumps(project_data, default=numpy_default_handler))

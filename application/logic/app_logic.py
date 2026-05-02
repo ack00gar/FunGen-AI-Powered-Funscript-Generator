@@ -484,10 +484,7 @@ class ApplicationLogic:
                         sr = wf.getframerate()
                         raw = wf.readframes(wf.getnframes())
                     samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-                    # Higher-res waveform: 50000 points covers a 2h video at
-                    # ~144ms per bucket; render-time bucketing decimates
-                    # further per viewport. The render cache key still gates
-                    # the per-frame cost.
+                    # ~144ms per bucket on a 2h video.
                     n_target = 50000
                     chunk_size = max(1, len(samples) // n_target)
                     n = (len(samples) // chunk_size) * chunk_size

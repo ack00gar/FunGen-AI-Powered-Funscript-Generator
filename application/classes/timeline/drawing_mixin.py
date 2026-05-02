@@ -162,10 +162,13 @@ class DrawingMixin:
             ys_top = self._waveform_cache_ys_top
             ys_bot = self._waveform_cache_ys_bot
             step = self._waveform_cache_step
+            xs_l = self._waveform_cache_xs_l
+            yt_l = self._waveform_cache_yt_l
+            yb_l = self._waveform_cache_yb_l
+            pts_top = self._waveform_cache_pts_top
+            pts_bot = self._waveform_cache_pts_bot
         else:
-            # Bucketed peak envelope: stride decimation was dropping step-1
-            # samples per bucket, so peaks between strides vanished at zoom
-            # out. Reshape into (buckets, step) and take the per-bucket max.
+            # Bucketed peak envelope; stride decimation missed peaks.
             window = data[idx_start:idx_end]
             buckets = max(1, len(window) // step)
             usable = buckets * step
@@ -178,25 +181,29 @@ class DrawingMixin:
             center_y = tf.y_offset + tf.height / 2
             ys_top = center_y - (peaks * tf.height / 2)
             ys_bot = center_y + (peaks * tf.height / 2)
+            xs_l = xs.tolist()
+            yt_l = ys_top.tolist()
+            yb_l = ys_bot.tolist()
+            pts_top = np.column_stack((xs, ys_top)).tolist()
+            pts_bot = np.column_stack((xs, ys_bot)).tolist()
             self._waveform_cache_key = cache_key
             self._waveform_cache_xs = xs
             self._waveform_cache_ys_top = ys_top
             self._waveform_cache_ys_bot = ys_bot
             self._waveform_cache_step = step
+            self._waveform_cache_xs_l = xs_l
+            self._waveform_cache_yt_l = yt_l
+            self._waveform_cache_yb_l = yb_l
+            self._waveform_cache_pts_top = pts_top
+            self._waveform_cache_pts_bot = pts_bot
 
         col = _u32_from_const(TimelineColors.AUDIO_WAVEFORM)
 
-        # LOD: Lines vs Polylines
         if step > 10:
-            xs_l = xs.tolist()
-            yt_l = ys_top.tolist()
-            yb_l = ys_bot.tolist()
             _add_line = dl.add_line
             for i in range(len(xs_l)):
                 _add_line(xs_l[i], yt_l[i], xs_l[i], yb_l[i], col)
         else:
-            pts_top = np.column_stack((xs, ys_top)).tolist()
-            pts_bot = np.column_stack((xs, ys_bot)).tolist()
             dl.add_polyline(pts_top, col, False, 1.0)
             dl.add_polyline(pts_bot, col, False, 1.0)
 
@@ -344,8 +351,6 @@ class DrawingMixin:
         pixels_per_point = tf.width / points_on_screen if points_on_screen > 0 else 0
         base_col = color_override or (TimelineColors.PREVIEW_LINES if is_preview else (0.8, 0.8, 0.8, 1.0))
         col_u32 = imgui.get_color_u32_rgba(base_col[0], base_col[1], base_col[2], base_col[3] * alpha)
-        base_col = color_override or (TimelineColors.PREVIEW_LINES if is_preview else (0.8, 0.8, 0.8, 1.0))
-        col_u32 = imgui.get_color_u32_rgba(base_col[0], base_col[1], base_col[2], base_col[3] * alpha)
         base_thick = self._line_thickness_for_height()
         thick = max(1.0, base_thick - 0.5) if is_preview else base_thick
 
@@ -389,7 +394,9 @@ class DrawingMixin:
             if sel_empty:
                 is_sel_list = [False] * n_actions
             else:
-                is_sel_list = [(a['at'], a['pos']) in _sel_set for a in visible_actions]
+                # Use resolved-indices set cached by selection content.
+                resolved_set = self._resolved_indices_set()
+                is_sel_list = [(s_idx + i) in resolved_set for i in range(n_actions)]
 
             for i in range(n_actions):
                 real_idx = s_idx + i
@@ -534,7 +541,8 @@ class DrawingMixin:
         _add_circle = dl.add_circle
         n_actions = len(visible_actions)
         if _sel_set:
-            is_sel_list = [(a['at'], a['pos']) in _sel_set for a in visible_actions]
+            resolved_set = self._resolved_indices_set()
+            is_sel_list = [(s_idx + i) in resolved_set for i in range(n_actions)]
         else:
             is_sel_list = [False] * n_actions
 

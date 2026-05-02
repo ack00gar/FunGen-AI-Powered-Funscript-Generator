@@ -1,33 +1,76 @@
 import logging
 import inspect
+import os
+import re
 import subprocess
 from logging.handlers import RotatingFileHandler
 from config import constants
 
 
-def get_git_info():
-    """Get current git branch and commit hash for logging."""
+def _read_git_info_no_subprocess(repo_root: str):
+    """Parse .git/HEAD + ref / packed-refs without spawning git."""
+    head_path = os.path.join(repo_root, '.git', 'HEAD')
+    if not os.path.isfile(head_path):
+        return None
     try:
-        # Get current branch
+        with open(head_path, 'r') as f:
+            head = f.read().strip()
+    except OSError:
+        return None
+    if head.startswith('ref: '):
+        ref_name = head[5:].strip()
+        branch = ref_name.rsplit('/', 1)[-1]
+        ref_path = os.path.join(repo_root, '.git', ref_name)
+        commit = None
+        if os.path.isfile(ref_path):
+            try:
+                with open(ref_path, 'r') as f:
+                    commit = f.read().strip()
+            except OSError:
+                commit = None
+        if commit is None:
+            packed = os.path.join(repo_root, '.git', 'packed-refs')
+            if os.path.isfile(packed):
+                try:
+                    with open(packed, 'r') as f:
+                        for line in f:
+                            if line.endswith(' ' + ref_name + '\n'):
+                                commit = line.split(' ', 1)[0]
+                                break
+                except OSError:
+                    pass
+        return f"{branch}@{commit[:7] if commit else 'unknown'}"
+    if re.fullmatch(r'[0-9a-f]{40}', head):
+        return f"detached@{head[:7]}"
+    return None
+
+
+def get_git_info():
+    """Get current git branch and commit hash for logging.
+
+    Pure file read; no subprocess. Falls back to subprocess only if the
+    repo layout is unusual.
+    """
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    info = _read_git_info_no_subprocess(repo_root)
+    if info is not None:
+        return info
+    try:
         branch_result = subprocess.run(
             ['git', 'branch', '--show-current'],
             capture_output=True, text=True, timeout=2
         )
         branch = branch_result.stdout.strip() if branch_result.returncode == 0 else 'unknown'
-
-        # Get current commit hash (short version)
         commit_result = subprocess.run(
             ['git', 'rev-parse', '--short', 'HEAD'],
             capture_output=True, text=True, timeout=2
         )
         commit = commit_result.stdout.strip() if commit_result.returncode == 0 else 'unknown'
-
         return f"{branch}@{commit}"
     except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
         return "nogit@unknown"
 
 
-# Cache git info at import time (launch) to avoid repeated subprocess calls
 _GIT_INFO = get_git_info()
 
 

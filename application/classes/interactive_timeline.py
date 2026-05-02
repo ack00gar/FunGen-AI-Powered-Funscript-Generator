@@ -204,6 +204,11 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         self._waveform_cache_ys_top = None
         self._waveform_cache_ys_bot = None
         self._waveform_cache_step: int = 0
+        self._waveform_cache_xs_l = None
+        self._waveform_cache_yt_l = None
+        self._waveform_cache_yb_l = None
+        self._waveform_cache_pts_top = None
+        self._waveform_cache_pts_bot = None
 
         # Pan-seek throttle for continuous video updates during middle-mouse drag
         self._last_pan_seek_time: float = 0.0
@@ -271,22 +276,31 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         sel_set = self.multi_selected_action_indices
         if not actions or not sel_set:
             return []
-        # Result cache keyed on (actions_len, sel_len, sel_set_id). Hits every
-        # call during a single render frame, and typically for long stretches
-        # until the user edits either side.
-        cache_key = (len(actions), len(sel_set), id(sel_set))
+        # Cache key includes a content hash so in-place same-length mutations
+        # (set.add followed by set.discard) still invalidate.
+        cache_key = (len(actions), len(sel_set), hash(frozenset(sel_set)))
         cached = self._resolve_selected_cache
         if cached is not None and cached[0] == cache_key:
             return cached[1]
         indices = [i for i, a in enumerate(actions)
                    if (a['at'], a['pos']) in sel_set]
-        # Already in index order; no sort needed.
         self._resolve_selected_cache = (cache_key, indices)
         return indices
 
     def _invalidate_selection_cache(self) -> None:
         """Clear the resolve-indices cache. Call when the selection set mutates."""
         self._resolve_selected_cache = None
+        self._resolved_set_cache = None
+
+    def _resolved_indices_set(self) -> set:
+        """frozenset of resolved selection indices, cached per (resolved list)."""
+        indices = self._resolve_selected_indices()
+        cached = getattr(self, '_resolved_set_cache', None)
+        if cached is not None and cached[0] is indices:
+            return cached[1]
+        out = set(indices)
+        self._resolved_set_cache = (indices, out)
+        return out
 
     def invalidate_cache(self):
         """Forces updates on next frame"""

@@ -81,9 +81,16 @@ class AsyncYoloWorker:
     # ----- lifecycle -----
 
     def _probe_batch(self) -> None:
-        """Detect at init whether the model accepts batch>1. Avoids the
-        per-run WARNING when the engine is fixed-batch=1 (TRT default)."""
+        """Probe batch capability; result cached on the model object."""
         if self._batch_size <= 1:
+            return
+        cache_key = (int(self._imgsz), int(self._batch_size), str(self._device))
+        cache = getattr(self._model, '_fungen_batch_probe_cache', None)
+        if isinstance(cache, dict) and cache_key in cache:
+            ok = cache[cache_key]
+            if not ok:
+                self._batch_ok = False
+                self._batch_size = 1
             return
         try:
             import numpy as _np
@@ -92,12 +99,22 @@ class AsyncYoloWorker:
             self._model(dummy, device=self._device, verbose=False,
                         conf=self._conf, imgsz=self._imgsz,
                         half=(self._device == 'cuda'))
+            ok = True
         except Exception as e:
             self._logger.info(
                 f"YOLO model rejected batch={self._batch_size} "
                 f"({type(e).__name__}); using single-frame inference.")
             self._batch_ok = False
             self._batch_size = 1
+            ok = False
+        if cache is None:
+            try:
+                self._model._fungen_batch_probe_cache = {}
+                cache = self._model._fungen_batch_probe_cache
+            except Exception:
+                cache = None
+        if isinstance(cache, dict):
+            cache[cache_key] = ok
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():

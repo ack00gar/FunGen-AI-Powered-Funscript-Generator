@@ -12,6 +12,16 @@ from config.constants_colors import CurrentTheme
 class ChapterBarMixin:
     """Mixin fragment for VideoNavigationUI."""
 
+    def _chapters_by_start(self, chapters):
+        """Return chapters sorted by start_frame_id, cached by (id, len)."""
+        key = (id(chapters), len(chapters))
+        cache = getattr(self, '_chapters_sorted_cache', None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        out = sorted(chapters, key=lambda c: c.start_frame_id)
+        self._chapters_sorted_cache = (key, out)
+        return out
+
     def _render_chapter_bar(self, fs_proc, total_video_frames: int, bar_width: float, bar_height: float):
         self._ci.context_menu_opened_this_frame = False
         self._assign_chapter_colors_if_needed(fs_proc)
@@ -293,7 +303,7 @@ class ChapterBarMixin:
                 dragged_x_on_bar = mouse_pos[0] - bar_start_x
                 norm_drag_pos = max(0, min(1, dragged_x_on_bar / bar_width))
                 new_frame = int(norm_drag_pos * total_video_frames)
-                chapters_sorted = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
+                chapters_sorted = self._chapters_by_start(fs_proc.video_chapters)
 
                 if self._ci.resize_edge == 'left':
                     new_start = new_frame
@@ -438,7 +448,7 @@ class ChapterBarMixin:
         self.app.logger.info(
             f"Right-clicked on empty chapter bar space at frame: {clicked_frame_id}. Triggering create dialog.")
 
-        chapters_sorted = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
+        chapters_sorted = self._chapters_by_start(fs_proc.video_chapters)
         prev_ch = None
         for ch_idx, ch in enumerate(chapters_sorted):
             if ch.end_frame_id < clicked_frame_id:
@@ -510,7 +520,7 @@ class ChapterBarMixin:
 
             gap_detected = False
             if fs_proc.video_chapters:
-                chapters_sorted = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
+                chapters_sorted = self._chapters_by_start(fs_proc.video_chapters)
                 for i in range(len(chapters_sorted) - 1):
                     current_chapter = chapters_sorted[i]
                     next_chapter = chapters_sorted[i + 1]

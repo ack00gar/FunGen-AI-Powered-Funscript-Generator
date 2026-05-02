@@ -78,7 +78,6 @@ class AppEventHandlers:
 
         result = None
         if any_axis:
-            # Pick the closest candidate across every axis with actions.
             axes = fs.get_all_axis_names() if hasattr(fs, 'get_all_axis_names') else ['primary', 'secondary']
             candidates = []
             for ax in axes:
@@ -89,7 +88,6 @@ class AppEventHandlers:
                 if r is not None:
                     candidates.append(r)
             if candidates:
-                # Next: smallest action_ms; prev: largest action_ms.
                 key = (lambda r: r[1]) if direction == 'next' else (lambda r: -r[1])
                 result = min(candidates, key=key)
         elif direction == 'next':

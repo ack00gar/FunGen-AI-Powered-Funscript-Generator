@@ -122,22 +122,11 @@ class AsyncDisFlowWorker:
             self._flow_time_s += time.perf_counter() - t0
             if flow is None:
                 continue
-            # Magnitude-weighted averaging per axis
-            try:
-                magnitude = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
-                weight_sum = float(magnitude.sum())
-                if weight_sum > 1e-6:
-                    dy = float((flow[..., 1] * magnitude).sum() / weight_sum)
-                    dx = float((flow[..., 0] * magnitude).sum() / weight_sum)
-                else:
-                    dy = float(flow[..., 1].mean())
-                    dx = float(flow[..., 0].mean())
-            except Exception as e:
-                self._logger.debug(f"flow aggregation error: {e}")
-                continue
+            # Aggregation deferred to the consumer; vr_hybrid uses gaussian-
+            # weighted math so any worker-side aggregate is wasted.
             meta = {'patch_h': flow.shape[0], 'patch_w': flow.shape[1]}
             try:
-                self._on_result(f_idx, time_ms, dy, dx, dict(meta, flow=flow))
+                self._on_result(f_idx, time_ms, 0.0, 0.0, dict(meta, flow=flow))
             except Exception as e:
                 self._logger.debug(f"flow on_result error: {e}")
             self._completed += 1
