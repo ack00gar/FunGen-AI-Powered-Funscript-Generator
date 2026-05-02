@@ -1055,13 +1055,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         return self._is_modifier_held(io, "timeline_marquee_modifier", "CTRL")
 
     def _seek_video_no_pan(self, time_ms: float):
-        """Seek video without forcing timeline pan. Used during drag to update
-        the video frame while the user controls the timeline position."""
+        """Drag-scrub seek: keyframe-fast so embedded mpv stays responsive."""
         if self.app.processor and self.app.processor.video_info:
             fps = self.app.processor.fps
             if fps > 0:
                 frame = ms_to_frame(time_ms, fps)
-                self.app.processor.seek_video(frame)
+                self.app.processor.seek_video(frame, accurate=False)
 
     def _seek_if_cached(self, time_ms: float):
         """Seek only when the target frame is in the nav cache. Used during

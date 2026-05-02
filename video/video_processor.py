@@ -536,12 +536,8 @@ class VideoProcessor(
             self.logger.warning(f"MpvDisplay.load() raised: {e}", exc_info=True)
 
     def _mpv_seek_to_frame(self, frame_index: int) -> None:
-        """Forward a frame-indexed seek to the libmpv display.
-
-        Keyframe-fast by default to match external mpv reactivity; callers
-        that must land on the exact frame use _mpv_seek_to_frame_ex(exact=True).
-        """
-        self._mpv_seek_to_frame_ex(frame_index, exact=False)
+        """Forward a frame-indexed seek to the libmpv display."""
+        self._mpv_seek_to_frame_ex(frame_index, exact=True)
 
     def _mpv_seek_to_frame_ex(self, frame_index: int, exact: bool = True) -> None:
         disp = self._get_mpv_display()
@@ -1719,12 +1715,13 @@ class VideoProcessor(
 
         self.logger.debug("GUI processing stopped.")
 
-    def seek_video(self, frame_index: int):
+    def seek_video(self, frame_index: int, accurate: bool = True):
         """Seek to a specific frame via the active frame source.
 
-        When playing: fast (keyframe) seek - timeline snaps to target,
-        display catches up visually in the processing loop.
-        When paused: accurate seek - exact target frame is decoded.
+        accurate=True (default): mpv lands on exact target frame so single
+        seeks (jump-to-point, click, chapter, bookmark) display correctly.
+        accurate=False: keyframe-fast seek; only the drag-scrub path opts
+        in for responsiveness during continuous mouse drag.
         """
         if not self.video_info or self.video_info.get('fps', 0) <= 0 or self.total_frames <= 0:
             return
@@ -1759,7 +1756,7 @@ class VideoProcessor(
             self._seek_in_progress_since = 0.0
 
         # Keep libmpv display in sync with tracker's source.
-        self._mpv_seek_to_frame(target_frame)
+        self._mpv_seek_to_frame_ex(target_frame, exact=accurate)
 
         # Mirror to external fullscreen mpv so scrub updates current_frame_index.
         mpv_ctrl = getattr(self.app, '_mpv_controller', None) if self.app else None
