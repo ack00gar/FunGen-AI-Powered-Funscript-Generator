@@ -1030,13 +1030,18 @@ class YoloRoiTracker(BaseTracker):
         if main_roi_patch_gray.size == 0:
             self.prev_gray_main_roi = None
             return 50, 50
-        
-        # Call the original process_main_roi_content logic
+
+        # Promote slice view to a contiguous array once. This same array is
+        # reused as next frame's prev_gray_main_roi, eliminating the .copy()
+        # at the bottom AND the per-frame ascontiguousarray inside the flow
+        # path (which now sees an already-contiguous input).
+        patch_contig = np.ascontiguousarray(main_roi_patch_gray)
+
         final_primary_pos, final_secondary_pos, _, _, self.prev_features_main_roi = \
-            self.process_main_roi_content(processed_frame, main_roi_patch_gray, self.prev_gray_main_roi, self.prev_features_main_roi)
-        
-        self.prev_gray_main_roi = main_roi_patch_gray.copy()
-        
+            self.process_main_roi_content(processed_frame, patch_contig, self.prev_gray_main_roi, self.prev_features_main_roi)
+
+        self.prev_gray_main_roi = patch_contig
+
         return final_primary_pos, final_secondary_pos
     
     def process_main_roi_content(self, processed_frame_draw_target: np.ndarray, current_roi_patch_gray: np.ndarray, prev_roi_patch_gray: Optional[np.ndarray], prev_sparse_features: Optional[np.ndarray]) -> Tuple[int, int, float, float, Optional[np.ndarray]]:

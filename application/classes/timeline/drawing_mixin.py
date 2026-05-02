@@ -286,6 +286,16 @@ class DrawingMixin:
         d_ats, d_poss, _ = self._cached_catmull_with_seg(ats, poss, k)
         return d_ats, d_poss
 
+    def _cached_polyline_pts(self, x_src_id, y_src_id, x_off, zoom, y_off, h, xs, ys):
+        """Cache the np.column_stack().tolist() output keyed on viewport + ids."""
+        key = (x_src_id, y_src_id, x_off, zoom, y_off, h, len(xs))
+        cache = getattr(self, '_polyline_pts_cache', None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        pts = np.column_stack((xs, ys)).tolist()
+        self._polyline_pts_cache = (key, pts)
+        return pts
+
     def _expand_catmull(self, ats: np.ndarray, poss: np.ndarray, k: int):
         """Subsample each segment with catmull-rom spline. Returns (xs_a, ys_p, seg_idx).
         seg_idx maps each dense sample (excluding the appended final point) to its
@@ -370,11 +380,17 @@ class DrawingMixin:
                 d_ats, d_poss = self._cached_catmull(ats, poss, k)
                 d_xs = np.clip(tf.vec_time_to_x(d_ats), safe_min_x, safe_max_x)
                 d_ys = tf.vec_val_to_y(d_poss)
-                pts = np.column_stack((d_xs, d_ys)).tolist()
+                pts = self._cached_polyline_pts(id(d_ats), id(d_poss),
+                                                tf.x_offset, tf.zoom, tf.y_offset, tf.height,
+                                                d_xs, d_ys)
             else:
-                pts = np.column_stack((xs, ys)).tolist()
+                pts = self._cached_polyline_pts(id(xs), id(ys),
+                                                tf.x_offset, tf.zoom, tf.y_offset, tf.height,
+                                                xs, ys)
         else:
-            pts = np.column_stack((xs, ys)).tolist()
+            pts = self._cached_polyline_pts(id(xs), id(ys),
+                                            tf.x_offset, tf.zoom, tf.y_offset, tf.height,
+                                            xs, ys)
         dl.add_polyline(pts, col_u32, False, thick)
 
         # -- Points: always render every visible action point.
