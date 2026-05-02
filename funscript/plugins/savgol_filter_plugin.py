@@ -176,7 +176,7 @@ class SavgolFilterPlugin(FunscriptTransformationPlugin):
         if len(indices_to_filter) > 1000:
             # Vectorized extraction and processing for large datasets
             indices_array = np.array(indices_to_filter)
-            positions = np.array([actions_list[i]['pos'] for i in indices_to_filter])
+            positions = self._positions_at(funscript, axis, indices_to_filter)
             
             try:
                 # Apply Savitzky-Golay filter
@@ -193,7 +193,7 @@ class SavgolFilterPlugin(FunscriptTransformationPlugin):
                 raise
         else:
             # Original method for smaller datasets
-            positions = np.array([actions_list[i]['pos'] for i in indices_to_filter])
+            positions = self._positions_at(funscript, axis, indices_to_filter)
             
             try:
                 # Apply Savitzky-Golay filter

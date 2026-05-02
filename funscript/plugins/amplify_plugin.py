@@ -120,7 +120,7 @@ class AmplifyPlugin(FunscriptTransformationPlugin):
             indices_array = np.array(indices_to_amplify)
             
             # Extract all positions at once using advanced indexing
-            positions = np.array([actions_list[i]['pos'] for i in indices_to_amplify])
+            positions = self._positions_at(funscript, axis, indices_to_amplify)
             
             # Vectorized amplification (same as before)
             amplified_positions = center_value + (positions - center_value) * scale_factor
@@ -138,7 +138,7 @@ class AmplifyPlugin(FunscriptTransformationPlugin):
                 actions_list[idx]['pos'] = int(new_pos)
         else:
             # Original path for smaller datasets
-            positions = np.array([actions_list[i]['pos'] for i in indices_to_amplify])
+            positions = self._positions_at(funscript, axis, indices_to_amplify)
             amplified_positions = center_value + (positions - center_value) * scale_factor
             clamped_positions = np.clip(np.round(amplified_positions), 0, 100).astype(int)
             
@@ -222,7 +222,7 @@ class AmplifyPlugin(FunscriptTransformationPlugin):
             
             if indices_to_amplify:
                 # Calculate preview statistics
-                positions = np.array([actions_list[i]['pos'] for i in indices_to_amplify])
+                positions = self._positions_at(funscript, axis, indices_to_amplify)
                 
                 # Simulate amplification
                 amplified_positions = center_value + (positions - center_value) * scale_factor

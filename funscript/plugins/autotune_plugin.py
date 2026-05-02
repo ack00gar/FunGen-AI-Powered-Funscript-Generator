@@ -133,7 +133,7 @@ class AutotunePlugin(FunscriptTransformationPlugin):
             return None
         
         # Extract positions for analysis
-        positions = np.array([actions_list[i]['pos'] for i in indices_to_filter])
+        positions = self._positions_at(funscript, axis, indices_to_filter)
         num_points = len(positions)
         
         # Find optimal window size
@@ -286,7 +286,7 @@ class AutotunePlugin(FunscriptTransformationPlugin):
             indices_to_filter = self._get_indices_to_filter(actions_list, validated_params)
             
             if len(indices_to_filter) >= 3:
-                positions = np.array([actions_list[i]['pos'] for i in indices_to_filter])
+                positions = self._positions_at(funscript, axis, indices_to_filter)
                 
                 # Find optimal parameters (preview only)
                 best_params = self._find_optimal_window_size(positions, validated_params)

@@ -106,7 +106,7 @@ class InvertPlugin(FunscriptTransformationPlugin):
         if len(indices_to_invert) > 1000:
             # Vectorized inversion for large datasets
             indices_array = np.array(indices_to_invert)
-            positions = np.array([actions_list[i]['pos'] for i in indices_to_invert])
+            positions = self._positions_at(funscript, axis, indices_to_invert)
             inverted_positions = 100 - positions
             
             # Bulk update
@@ -187,7 +187,7 @@ class InvertPlugin(FunscriptTransformationPlugin):
             
             if indices_to_invert:
                 # Calculate preview statistics
-                positions = np.array([actions_list[i]['pos'] for i in indices_to_invert])
+                positions = self._positions_at(funscript, axis, indices_to_invert)
                 inverted_positions = 100 - positions
                 
                 # Calculate movement characteristics

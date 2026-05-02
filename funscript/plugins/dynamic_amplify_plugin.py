@@ -225,7 +225,7 @@ class DynamicAmplifyPlugin(FunscriptTransformationPlugin):
                 action_timestamps = [a['at'] for a in actions_copy]
 
                 # Calculate preview statistics
-                positions_before = np.array([actions_list[i]['pos'] for i in indices_to_process])
+                positions_before = self._positions_at(funscript, axis, indices_to_process)
                 positions_after = []
                 points_amplified = 0
 

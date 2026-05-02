@@ -129,7 +129,7 @@ class ThresholdClampPlugin(FunscriptTransformationPlugin):
         if len(indices_to_clamp) > 1000:
             # Convert to numpy array for vectorized operations
             indices_array = np.array(indices_to_clamp)
-            positions = np.array([actions_list[i]['pos'] for i in indices_to_clamp])
+            positions = self._positions_at(funscript, axis, indices_to_clamp)
             
             # Vectorized clamping using boolean indexing
             clamped_positions = positions.copy()
@@ -149,7 +149,7 @@ class ThresholdClampPlugin(FunscriptTransformationPlugin):
                     actions_list[idx]['pos'] = int(new_pos)
         else:
             # Original path for smaller datasets
-            positions = np.array([actions_list[i]['pos'] for i in indices_to_clamp])
+            positions = self._positions_at(funscript, axis, indices_to_clamp)
             
             clamped_positions = positions.copy()
             clamped_positions[positions < lower_thresh] = 0
@@ -232,7 +232,7 @@ class ThresholdClampPlugin(FunscriptTransformationPlugin):
             
             if indices_to_process:
                 # Calculate preview statistics
-                positions = np.array([actions_list[i]['pos'] for i in indices_to_process])
+                positions = self._positions_at(funscript, axis, indices_to_process)
                 
                 # Count affected points
                 below_lower = np.sum(positions < lower_thresh)
@@ -354,7 +354,7 @@ class ValueClampPlugin(FunscriptTransformationPlugin):
         
         # Vectorized value clamping
         # Extract positions using vectorized indexing
-        positions = np.array([actions_list[i]['pos'] for i in indices_to_clamp])
+        positions = self._positions_at(funscript, axis, indices_to_clamp)
         
         # Batch update only changed positions
         changed_mask = positions != clamp_value
@@ -433,7 +433,7 @@ class ValueClampPlugin(FunscriptTransformationPlugin):
             
             if indices_to_process:
                 # Calculate preview statistics
-                positions = np.array([actions_list[i]['pos'] for i in indices_to_process])
+                positions = self._positions_at(funscript, axis, indices_to_process)
                 
                 # Count points that would change
                 points_to_change = np.sum(positions != clamp_value)

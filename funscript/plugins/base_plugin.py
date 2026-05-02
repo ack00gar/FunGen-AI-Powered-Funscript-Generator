@@ -23,6 +23,38 @@ class FunscriptTransformationPlugin(ABC):
     def __init__(self, logger: Optional[logging.Logger] = None):
         """Initialize the plugin with optional logger."""
         self.logger = logger or logging.getLogger(self.__class__.__name__)
+
+    @staticmethod
+    def _positions_at(funscript, axis: str, indices=None):
+        """Vectorized extraction of positions as float64.
+
+        Fancy-indexes the funscript's cached PA uint8 array if available;
+        falls back to a list-comp for axes without a cache or when shapes
+        diverge (e.g. mid-mutation). Replaces the
+        ``np.array([actions[i]['pos'] for i in indices])`` pattern that
+        showed up in 28 plugin sites.
+        """
+        import numpy as _np
+        try:
+            _, v = funscript.get_arrays(axis)
+            actions = (funscript.primary_actions if axis == 'primary'
+                       else funscript.secondary_actions if axis == 'secondary'
+                       else funscript.additional_axes.get(axis, []))
+            if v is None or len(v) != len(actions):
+                raise ValueError("PA cache out of sync")
+            if indices is None:
+                return v.astype(_np.float64)
+            idx = _np.asarray(indices, dtype=_np.int64)
+            return v[idx].astype(_np.float64)
+        except Exception:
+            actions = (funscript.primary_actions if axis == 'primary'
+                       else funscript.secondary_actions if axis == 'secondary'
+                       else funscript.additional_axes.get(axis, []))
+            if indices is None:
+                return _np.fromiter((a['pos'] for a in actions),
+                                    dtype=_np.float64, count=len(actions))
+            return _np.fromiter((actions[i]['pos'] for i in indices),
+                                dtype=_np.float64, count=len(indices))
     
     @property
     @abstractmethod
