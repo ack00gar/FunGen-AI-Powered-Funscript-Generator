@@ -59,6 +59,8 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # every frame. _visible_extra_timelines is still recomputed per frame
         # because it reflects live user toggles.
         self._feat_supporter = _is_feature_available("patreon_features")
+        self._extra_timeline_attr_cache = None
+        self._last_font_global_scale = None
 
         self.frame_texture_id = 0
         self.heatmap_texture_id = 0
@@ -2295,9 +2297,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Cache visible extra timeline numbers (avoids per-frame getattr + f-string)
         if self._feat_supporter:
             app_state = self.app.app_state_ui
+            attr_names = self._extra_timeline_attr_cache
+            if attr_names is None:
+                attr_names = [(t, f"show_funscript_interactive_timeline{t}")
+                              for t in EXTRA_TIMELINE_RANGE]
+                self._extra_timeline_attr_cache = attr_names
             self._visible_extra_timelines = [
-                t for t in EXTRA_TIMELINE_RANGE
-                if getattr(app_state, f"show_funscript_interactive_timeline{t}", False)
+                t for t, name in attr_names
+                if getattr(app_state, name, False)
             ]
         else:
             self._visible_extra_timelines = []
@@ -2331,7 +2338,9 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # First-run wizard, full-window overlay, skips all other UI
         if self._first_run_wizard is not None:
             font_scale = self.app.app_settings.config.ui.global_font_scale
-            imgui.get_io().font_global_scale = font_scale
+            if font_scale != self._last_font_global_scale:
+                imgui.get_io().font_global_scale = font_scale
+                self._last_font_global_scale = font_scale
             wizard_done = self._first_run_wizard.render()
             if wizard_done:
                 self._first_run_wizard = None
@@ -2366,7 +2375,9 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self._time_render("Toolbar", self.toolbar_ui.render)
 
         font_scale = self.app.app_settings.config.ui.global_font_scale
-        imgui.get_io().font_global_scale = font_scale
+        if font_scale != self._last_font_global_scale:
+            imgui.get_io().font_global_scale = font_scale
+            self._last_font_global_scale = font_scale
 
         if hasattr(app_state, 'main_menu_bar_height_from_menu_class'):
             self.main_menu_bar_height = app_state.main_menu_bar_height_from_menu_class
