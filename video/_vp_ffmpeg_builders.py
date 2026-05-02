@@ -1,10 +1,14 @@
-"""VideoProcessor FFmpegBuildersMixin — extracted from video_processor.py."""
+"""VideoProcessor FFmpegBuildersMixin -- extracted from video_processor.py."""
 
 import os
 import platform
+import subprocess
 import numpy as np
-from typing import Optional, List
+from typing import Optional, List, Dict, Tuple
 from video.thumbnail_extractor import ThumbnailExtractor
+
+# (source_path, hwaccel_name, mtime) -> works_bool; one probe per source per session.
+_HWACCEL_PROBE_CACHE: Dict[Tuple[str, str, float], bool] = {}
 
 
 class FFmpegBuildersMixin:
@@ -243,6 +247,44 @@ class FFmpegBuildersMixin:
             f"Built FFmpeg filter (effective for single pipe, or pipe2 of 10bit-CUDA): {ffmpeg_filter if ffmpeg_filter else 'No explicit filter, direct output.'}")
         return ffmpeg_filter
 
+    def _probe_hwaccel_works(self, hwaccel_args: List[str]) -> bool:
+        """Test-decode 1 frame; ffmpeg's metadata layer succeeds even when
+        the hwaccel decode silently produces no output (e.g. qsv on non-intel)."""
+        if not hwaccel_args:
+            return True
+        src = self._active_video_source_path
+        if not src or not os.path.exists(src):
+            return True
+        try:
+            mtime = os.path.getmtime(src)
+        except OSError:
+            return True
+        try:
+            hw_name = hwaccel_args[hwaccel_args.index('-hwaccel') + 1]
+        except (ValueError, IndexError):
+            hw_name = ' '.join(hwaccel_args)
+        key = (src, hw_name, mtime)
+        cached = _HWACCEL_PROBE_CACHE.get(key)
+        if cached is not None:
+            return cached
+        from video.ffmpeg_helpers import find_ffmpeg, subprocess_flags
+        cmd = [find_ffmpeg(), '-hide_banner', '-loglevel', 'error',
+               *hwaccel_args, '-i', src, '-frames:v', '1', '-f', 'null', '-']
+        try:
+            rc = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=10,
+                                creationflags=subprocess_flags()).returncode
+            ok = (rc == 0)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self.logger.debug(f"hwaccel probe error ({hw_name}): {e}")
+            ok = False
+        _HWACCEL_PROBE_CACHE[key] = ok
+        if not ok:
+            self.logger.warning(
+                f"Hardware acceleration '{hw_name}' failed runtime probe on "
+                f"{os.path.basename(src)}; falling back to CPU decoding.")
+        return ok
+
     def _get_ffmpeg_hwaccel_args(self) -> List[str]:
         """Determines FFmpeg hardware acceleration arguments based on app settings."""
         hwaccel_args: List[str] = []
@@ -320,4 +362,7 @@ class FFmpegBuildersMixin:
                     f"Selected HW accel '{selected_hwaccel}' not in FFmpeg's available list. Using CPU.")
         else:
             self.logger.debug("Hardware acceleration explicitly disabled (CPU decoding).")
+        # Probe; silent hwaccel failure used to produce 0-frame batch runs.
+        if hwaccel_args and not self._probe_hwaccel_works(hwaccel_args):
+            return []
         return hwaccel_args

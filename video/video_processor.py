@@ -2002,8 +2002,15 @@ class VideoProcessor(
                     # Differentiate true EOS (decoder produced _EOS sentinel)
                     # from a transient pull timeout (decoder still working).
                     if src.is_eos:
-                        self.logger.info(
-                            f"ffmpeg loop: end of stream (idx={src.current_frame_index})")
+                        # idx<=0 + positive total_frames = silent decode failure.
+                        if (getattr(src, 'current_frame_index', -1) <= 0
+                                and (self.total_frames or 0) > 1):
+                            self.logger.error(
+                                "ffmpeg produced 0 frames before end-of-stream; "
+                                "decode likely failed. Try setting hwaccel to 'none' or 'auto' in settings.")
+                        else:
+                            self.logger.info(
+                                f"ffmpeg loop: end of stream (idx={src.current_frame_index})")
                         self.is_processing = False
                         self.enable_tracker_processing = False
                         if self.app:
