@@ -142,6 +142,7 @@ class HybridFlowTracker(BaseTracker):
         self._yolo_wake = None
         self._yolo_pending_lock = None
         self._yolo_pending_frame = None
+        self._yolo_pending_scale = (1.0, 1.0)
         self._yolo_result_lock = None
         self._yolo_result = None
         self._yolo_inflight = False
@@ -279,14 +280,18 @@ class HybridFlowTracker(BaseTracker):
                 return
             with self._yolo_pending_lock:
                 frame = self._yolo_pending_frame
+                scale = self._yolo_pending_scale
                 self._yolo_pending_frame = None
             if frame is None:
                 continue
             self._yolo_inflight = True
             try:
                 h, w = frame.shape[:2]
+                # Original (source) frame dims for downstream consumers.
+                src_h = int(h * scale[1])
+                src_w = int(w * scale[0])
                 t0 = time.perf_counter()
-                result = self._run_yolo(frame, h, w)
+                result = self._run_yolo(frame, src_h, src_w, scale)
                 self._yolo_last_ms = (time.perf_counter() - t0) * 1000.0
                 self._yolo_calls += 1
                 with self._yolo_result_lock:
@@ -359,8 +364,24 @@ class HybridFlowTracker(BaseTracker):
 
         if self._frames_since_yolo >= self._yolo_interval:
             if self._yolo_thread is not None and self._yolo_thread.is_alive():
+                # Resize once instead of frame.copy(): on 8K VR the copy is
+                # ~30 ms bandwidth-bound; cv2.resize to the YOLO input size
+                # is ~3-5 ms and ultralytics would resize internally anyway.
+                # Bboxes come back in resized coords; we apply the inverse
+                # scale in _run_yolo so callers still see source coords.
+                yolo_imgsz = int(getattr(self.app, 'yolo_input_size', 640))
+                src_h, src_w = frame.shape[:2]
+                if src_w > yolo_imgsz:
+                    tw = yolo_imgsz
+                    th = max(1, int(src_h * yolo_imgsz / src_w))
+                    submit_frame = cv2.resize(frame, (tw, th))
+                    scale = (src_w / tw, src_h / th)
+                else:
+                    submit_frame = frame.copy()
+                    scale = (1.0, 1.0)
                 with self._yolo_pending_lock:
-                    self._yolo_pending_frame = frame.copy()
+                    self._yolo_pending_frame = submit_frame
+                    self._yolo_pending_scale = scale
                 self._yolo_wake.set()
                 self._frames_since_yolo = 0
 
@@ -487,9 +508,10 @@ class HybridFlowTracker(BaseTracker):
     # YOLO detection
     # -------------------------------------------------------------------------
 
-    def _run_yolo(self, frame: np.ndarray, h: int, w: int
+    def _run_yolo(self, frame: np.ndarray, h: int, w: int,
+                  scale: Tuple[float, float] = (1.0, 1.0)
                   ) -> Tuple[Optional[Tuple[int, int, int, int]], Optional[Tuple], Optional[Tuple]]:
-        """Run YOLO, return (roi_box, penis_box, contact_box) or (None, None, None)."""
+        """Run YOLO, return (roi_box, penis_box, contact_box) in source coords."""
         try:
             det_objs = self._yolo_run_detection(
                 self._yolo_model, frame,
@@ -502,16 +524,19 @@ class HybridFlowTracker(BaseTracker):
         if not det_objs:
             return None, None, None
 
+        sx, sy = scale
+        scale_box = (lambda b: (b[0] * sx, b[1] * sy, b[2] * sx, b[3] * sy)) if (sx != 1.0 or sy != 1.0) else (lambda b: b)
+
         penis_box = None
         best_conf = 0.0
         contact_boxes = []
 
         for d in det_objs:
             if d.class_name == 'penis' and d.confidence > best_conf:
-                penis_box = d.bbox
+                penis_box = scale_box(d.bbox)
                 best_conf = d.confidence
             elif d.class_name in CONTACT_CLASSES:
-                contact_boxes.append(d.bbox)
+                contact_boxes.append(scale_box(d.bbox))
 
         if penis_box is None:
             return None, None, None
