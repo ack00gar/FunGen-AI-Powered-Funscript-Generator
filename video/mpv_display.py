@@ -126,9 +126,12 @@ class MpvDisplay:
                 if level in ("fatal", "error"):
                     self.logger.error(line)
                 elif level == "warn":
-                    self.logger.warning(line)
-                elif level == "info":
-                    self.logger.info(line)
+                    text = msg.lower() if isinstance(msg, str) else ""
+                    # Auto-recoverable conditions are debug, not user-facing warnings.
+                    if "desynchroni" in text or "a/v status" in text:
+                        self.logger.debug(line)
+                    else:
+                        self.logger.warning(line)
                 else:
                     self.logger.debug(line)
 
