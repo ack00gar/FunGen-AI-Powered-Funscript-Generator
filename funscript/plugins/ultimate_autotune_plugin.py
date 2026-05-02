@@ -17,6 +17,7 @@ Pipeline:
 
 from typing import Dict, Any, List, Optional
 import copy
+import numpy as np
 from funscript.plugins.base_plugin import FunscriptTransformationPlugin
 
 _ANCHOR_KEY = '_anchor'
