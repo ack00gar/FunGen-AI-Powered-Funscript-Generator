@@ -470,7 +470,9 @@ STAGE1_FRAME_QUEUE_MAXSIZE = 256
 DEFAULT_S1_NUM_PRODUCERS = 1
 DEFAULT_S1_NUM_CONSUMERS = max(os.cpu_count() // 2, 1) if os.cpu_count() else 2
 # MPS: share one YOLO across thread consumers; saves N x 540ms + ~3GB.
-STAGE1_USE_THREADED_CONSUMERS_ON_MPS = True
+# Disabled by default: CoreML mlpackage backend has thread-context quirks
+# that produced empty detections on M1 Pro user reports.
+STAGE1_USE_THREADED_CONSUMERS_ON_MPS = False
 # MPS heuristic (unified memory). YOLO det+pose + buffers peak ~2-4GB/consumer.
 MPS_MEMORY_PER_CONSUMER_GB = 4.0
 MPS_MEMORY_HEADROOM_GB = 6.0
