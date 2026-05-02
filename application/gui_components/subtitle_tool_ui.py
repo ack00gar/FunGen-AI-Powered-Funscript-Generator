@@ -165,7 +165,7 @@ class SubtitleToolUI:
                     with primary_button_style():
                         if imgui.button("Generate Subtitles##sg", width=-1, height=30):
                             self._start_generate()
-                    if not video_ok and imgui.is_item_hovered(imgui.HOVERED_FLAGS_ALLOW_WHEN_DISABLED):
+                    if not video_ok and imgui.is_item_hovered(imgui.HOVERED_ALLOW_WHEN_DISABLED):
                         imgui.set_tooltip("Open a video first")
 
     # ==============================================================

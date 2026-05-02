@@ -206,7 +206,7 @@ class GeneratedFileManagerWindow:
             with destructive_button_style():
                 if imgui.button("Delete"):
                     self._delete_path_with_status(file_info['path'], self.file_manager.delete_file, "file")
-                if imgui.is_item_hovered(imgui.HOVERED_FLAGS_ALLOW_WHEN_DISABLED):
+                if imgui.is_item_hovered(imgui.HOVERED_ALLOW_WHEN_DISABLED):
                     if not delete_enabled:
                         imgui.set_tooltip(".funscript files are protected. Tick 'Delete .funscript files' above to enable.")
                     else:
