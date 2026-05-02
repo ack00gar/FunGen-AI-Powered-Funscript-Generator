@@ -216,8 +216,11 @@ class ProjectManager:
         try:
             # Track disk I/O performance
             io_start = time.perf_counter()
-            with open(filepath, 'wb') as f:
+            # Atomic write: a crash mid-write leaves filepath untouched.
+            tmp_path = filepath + ".tmp"
+            with open(tmp_path, 'wb') as f:
                 f.write(orjson.dumps(project_data, default=numpy_default_handler))
+            os.replace(tmp_path, filepath)
             io_time = (time.perf_counter() - io_start) * 1000
             if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
                 self.app.gui_instance.track_disk_io_time("ProjectSave", io_time)
@@ -232,6 +235,11 @@ class ProjectManager:
             self.app.notify(f"Project saved", "success", 2.0)
             self.app.energy_saver.reset_activity_timer()
         except Exception as e:
+            try:
+                if os.path.exists(filepath + ".tmp"):
+                    os.remove(filepath + ".tmp")
+            except OSError:
+                pass
             self.app.logger.error(f"Error saving project to '{filepath}': {e}", exc_info=True, extra={'status_message': True})
 
     def perform_autosave(self, is_exit_save: bool = False):

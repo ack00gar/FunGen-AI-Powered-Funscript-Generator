@@ -740,13 +740,20 @@ class AppFileManager:
             funscript_data["notes"] = project_metadata["notes"]
 
         try:
-            # Use orjson for high-performance writing
-            with open(filepath, 'wb') as f:
+            # Atomic write: a crash mid-write leaves filepath untouched.
+            tmp_path = filepath + ".tmp"
+            with open(tmp_path, 'wb') as f:
                 f.write(orjson.dumps(funscript_data))
+            os.replace(tmp_path, filepath)
             self.logger.info(f"Funscript saved to {os.path.basename(filepath)}",
                              extra={'status_message': True})
             self.app.notify(f"Saved {os.path.basename(filepath)}", "success")
         except Exception as e:
+            try:
+                if os.path.exists(filepath + ".tmp"):
+                    os.remove(filepath + ".tmp")
+            except OSError:
+                pass
             self.logger.error(f"Error saving funscript to '{filepath}': {e}",
                               extra={'status_message': True})
 
@@ -808,14 +815,21 @@ class AppFileManager:
             funscript_data["axes"].append(axis_entry)
 
         try:
-            with open(filepath, 'wb') as f:
+            tmp_path = filepath + ".tmp"
+            with open(tmp_path, 'wb') as f:
                 f.write(orjson.dumps(funscript_data))
+            os.replace(tmp_path, filepath)
             axis_count = 1 + len(funscript_data["axes"])
             self.logger.info(
                 f"Unified funscript saved ({axis_count} axes) to {os.path.basename(filepath)}",
                 extra={'status_message': True})
             self.app.notify(f"Exported {os.path.basename(filepath)} ({axis_count} axes)", "success")
         except Exception as e:
+            try:
+                if os.path.exists(filepath + ".tmp"):
+                    os.remove(filepath + ".tmp")
+            except OSError:
+                pass
             self.logger.error(f"Error saving unified funscript to '{filepath}': {e}",
                               extra={'status_message': True})
 

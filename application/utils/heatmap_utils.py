@@ -56,6 +56,47 @@ class HeatmapColorMapper:
         self._grad_colors = np.array(
             [g[1] for g in _SPEED_GRADIENT], dtype=np.float32)
         self._overspeed_np = np.asarray(_OVERSPEED_COLOR, dtype=np.float32)
+        # 256-entry packed-u32 LUT for the heatmap fast path. One fancy-index
+        # in the redraw replaces searchsorted+lerp+pack on every call.
+        self._build_lut()
+
+    def _build_lut(self) -> None:
+        """Precompute 256 packed-u32 colors covering [0, max_speed]."""
+        sample_speeds = np.linspace(0.0, self.max_speed, 256, dtype=np.float32)
+        # Use the slow-path rgba (it does not consult the LUT) to avoid
+        # bootstrapping issues, then pack to u32.
+        rgba = self._compute_rgba_uncached(sample_speeds)
+        rgba_u8 = (rgba * 255.0 + 0.5).astype(np.uint32)
+        self._lut_u32 = (
+            rgba_u8[:, 0]
+            | (rgba_u8[:, 1] << 8)
+            | (rgba_u8[:, 2] << 16)
+            | (rgba_u8[:, 3] << 24)
+        ).astype(np.uint32)
+        if self.highlight_overspeed:
+            ou8 = (self._overspeed_np * 255.0 + 0.5).astype(np.uint32)
+            self._overspeed_u32 = np.uint32(
+                int(ou8[0]) | (int(ou8[1]) << 8)
+                | (int(ou8[2]) << 16) | (int(ou8[3]) << 24))
+        else:
+            self._overspeed_u32 = self._lut_u32[-1]
+
+    def _compute_rgba_uncached(self, speeds: np.ndarray) -> np.ndarray:
+        """Same math as speeds_to_colors_rgba but never touches the LUT."""
+        abs_speeds = np.abs(np.asarray(speeds, dtype=np.float32))
+        t = np.clip(abs_speeds / self.max_speed, 0.0, 1.0)
+        positions = self._grad_positions
+        colors = self._grad_colors
+        n_stops = positions.shape[0]
+        idx = np.searchsorted(positions, t, side='right') - 1
+        np.clip(idx, 0, n_stops - 2, out=idx)
+        pos0 = positions[idx]
+        pos1 = positions[idx + 1]
+        col0 = colors[idx]
+        col1 = colors[idx + 1]
+        denom = np.maximum(pos1 - pos0, 1e-3)
+        seg_t = ((t - pos0) / denom)[:, None]
+        return col0 + (col1 - col0) * seg_t
 
     def speed_to_color_rgba(self, speed: float) -> Tuple[float, float, float, float]:
         """Convert a single speed value (units/sec) to an RGBA color tuple."""
@@ -108,13 +149,19 @@ class HeatmapColorMapper:
     def speeds_to_colors_u32(self, speeds: np.ndarray) -> np.ndarray:
         """Vectorized: convert speeds to packed imgui u32 color values.
 
-        Avoids per-segment get_color_u32_rgba calls in the draw loop.
+        Hot path: a single fancy-index into the precomputed 256-entry LUT.
         Packing: R | (G<<8) | (B<<16) | (A<<24)  (imgui's ABGR layout).
         """
-        rgba = self.speeds_to_colors_rgba(speeds)
-        # Convert float [0,1] to uint8 [0,255] and pack
-        rgba_u8 = (rgba * 255.0 + 0.5).astype(np.uint32)
-        return rgba_u8[:, 0] | (rgba_u8[:, 1] << 8) | (rgba_u8[:, 2] << 16) | (rgba_u8[:, 3] << 24)
+        abs_speeds = np.abs(np.asarray(speeds, dtype=np.float32))
+        idx = (abs_speeds * (255.0 / self.max_speed) + 0.5).astype(np.int32)
+        np.clip(idx, 0, 255, out=idx)
+        out = self._lut_u32[idx]
+        if self.highlight_overspeed:
+            over = abs_speeds > self.max_speed
+            if np.any(over):
+                out = out.copy()
+                out[over] = self._overspeed_u32
+        return out
 
     @staticmethod
     def compute_segment_speeds(actions: List[Dict], ats_np=None, poss_np=None) -> np.ndarray:

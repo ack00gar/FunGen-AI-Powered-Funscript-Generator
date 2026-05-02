@@ -158,6 +158,10 @@ class ShortcutHandlerMixin:
             pass
         elif check_and_run_shortcut("jump_to_prev_point_alt", self.app.event_handlers.handle_jump_to_point, 'prev', repeat=True):
             pass
+        elif check_and_run_shortcut("jump_to_next_point_any", self.app.event_handlers.handle_jump_to_point, 'next', True, repeat=True):
+            pass
+        elif check_and_run_shortcut("jump_to_prev_point_any", self.app.event_handlers.handle_jump_to_point, 'prev', True, repeat=True):
+            pass
         elif video_loaded and check_and_run_shortcut("jump_to_start", self._handle_jump_to_start_shortcut):
             pass
         elif video_loaded and check_and_run_shortcut("jump_to_end", self._handle_jump_to_end_shortcut):

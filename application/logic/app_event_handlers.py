@@ -63,7 +63,7 @@ class AppEventHandlers:
 
         self.app.energy_saver.reset_activity_timer()
 
-    def handle_jump_to_point(self, direction: str):
+    def handle_jump_to_point(self, direction: str, any_axis: bool = False):
         if not self.app.processor or not self.app.processor.is_video_open():
             self.logger.info("Cannot jump: No video loaded.", extra={'status_message': True})
             return
@@ -77,7 +77,22 @@ class AppEventHandlers:
         fps = self.app.processor.fps
 
         result = None
-        if direction == 'next':
+        if any_axis:
+            # Pick the closest candidate across every axis with actions.
+            axes = fs.get_all_axis_names() if hasattr(fs, 'get_all_axis_names') else ['primary', 'secondary']
+            candidates = []
+            for ax in axes:
+                if direction == 'next':
+                    r = fs.find_next_action_position(current_frame, fps, ax)
+                else:
+                    r = fs.find_prev_action_position(current_frame, fps, ax)
+                if r is not None:
+                    candidates.append(r)
+            if candidates:
+                # Next: smallest action_ms; prev: largest action_ms.
+                key = (lambda r: r[1]) if direction == 'next' else (lambda r: -r[1])
+                result = min(candidates, key=key)
+        elif direction == 'next':
             result = fs.find_next_action_position(current_frame, fps, 'primary')
         elif direction == 'prev':
             result = fs.find_prev_action_position(current_frame, fps, 'primary')

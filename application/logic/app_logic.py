@@ -484,8 +484,12 @@ class ApplicationLogic:
                         sr = wf.getframerate()
                         raw = wf.readframes(wf.getnframes())
                     samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-                    # Downsample to 2000 points
-                    chunk_size = max(1, len(samples) // 2000)
+                    # Higher-res waveform: 50000 points covers a 2h video at
+                    # ~144ms per bucket; render-time bucketing decimates
+                    # further per viewport. The render cache key still gates
+                    # the per-frame cost.
+                    n_target = 50000
+                    chunk_size = max(1, len(samples) // n_target)
                     n = (len(samples) // chunk_size) * chunk_size
                     blocks = np.abs(samples[:n].reshape(-1, chunk_size))
                     waveform_data = np.max(blocks, axis=1).astype(np.float32)
@@ -494,7 +498,7 @@ class ApplicationLogic:
                 self.logger.debug(f"Cached audio waveform failed: {e}")
 
             if waveform_data is None:
-                waveform_data = self.processor.get_audio_waveform(num_samples=2000)
+                waveform_data = self.processor.get_audio_waveform(num_samples=50000)
 
             with self._waveform_lock:
                 self.audio_waveform_data = waveform_data

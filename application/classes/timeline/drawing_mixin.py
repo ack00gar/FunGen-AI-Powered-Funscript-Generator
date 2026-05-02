@@ -163,12 +163,21 @@ class DrawingMixin:
             ys_bot = self._waveform_cache_ys_bot
             step = self._waveform_cache_step
         else:
-            subset = data[idx_start:idx_end:step]
-            times = np.linspace(tf.visible_start_ms, tf.visible_end_ms, len(subset))
+            # Bucketed peak envelope: stride decimation was dropping step-1
+            # samples per bucket, so peaks between strides vanished at zoom
+            # out. Reshape into (buckets, step) and take the per-bucket max.
+            window = data[idx_start:idx_end]
+            buckets = max(1, len(window) // step)
+            usable = buckets * step
+            if usable > 0 and step > 1:
+                peaks = window[:usable].reshape(buckets, step).max(axis=1)
+            else:
+                peaks = window
+            times = np.linspace(tf.visible_start_ms, tf.visible_end_ms, len(peaks))
             xs = tf.vec_time_to_x(times)
             center_y = tf.y_offset + tf.height / 2
-            ys_top = center_y - (subset * tf.height / 2)
-            ys_bot = center_y + (subset * tf.height / 2)
+            ys_top = center_y - (peaks * tf.height / 2)
+            ys_bot = center_y + (peaks * tf.height / 2)
             self._waveform_cache_key = cache_key
             self._waveform_cache_xs = xs
             self._waveform_cache_ys_top = ys_top

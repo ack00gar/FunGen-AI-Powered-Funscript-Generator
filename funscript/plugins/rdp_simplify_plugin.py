@@ -52,6 +52,12 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
                 'description': 'Distance tolerance for point removal (higher = more aggressive)',
                 'constraints': {'min': 0.1, 'max': 20.0}
             },
+            'auto_scale_epsilon': {
+                'type': bool,
+                'required': False,
+                'default': False,
+                'description': 'Scale epsilon by mean inter-point distance. With this on, use much smaller epsilon values (try 0.1-0.5).'
+            },
             'start_time_ms': {
                 'type': int,
                 'required': False,
@@ -373,7 +379,13 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
             )).astype(np.float64)
         
         epsilon = params['epsilon']
-        
+        if params.get('auto_scale_epsilon', False) and len(points) > 1:
+            # Scale by mean inter-point distance so user-facing epsilon is unitless.
+            diffs = np.diff(points, axis=0)
+            mean_dist = float(np.mean(np.sqrt(diffs[:, 0] ** 2 + diffs[:, 1] ** 2)))
+            if mean_dist > 0:
+                epsilon = epsilon * mean_dist
+
         try:
             # Always use the fast numpy implementation
             simplified_points = self._rdp_numpy_implementation(points, epsilon)

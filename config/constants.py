@@ -171,6 +171,8 @@ DEFAULT_SHORTCUTS = {
     "jump_to_prev_point": "DOWN_ARROW",   # Down arrow for previous point
     "jump_to_next_point_alt": ".",        # Alternative: period
     "jump_to_prev_point_alt": ",",        # Alternative: comma
+    "jump_to_next_point_any": "CTRL+SHIFT+UP_ARROW",   # Closest next point across all axes
+    "jump_to_prev_point_any": "CTRL+SHIFT+DOWN_ARROW", # Closest prev point across all axes
 
     # Point Value Adjustment (nudge selected points)
     "nudge_selection_pos_up": "SHIFT+UP_ARROW",      # Shift+Up to raise selected point value
