@@ -1,4 +1,6 @@
 import os
+# Anchor cwd to install root; mac framework python hijacks cwd to Resources.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import multiprocessing
