@@ -91,7 +91,11 @@ class VRRenderQualityMonitor:
         self.ema_alpha = ema_alpha
         self._ema_ms: float = 0.0
         self._samples: int = 0
-        self._current_idx: int = 0   # start at L0 (best); step down if needed
+        # Start at L2 (1.0x ss, no bicubic, 4x aniso). Avoids the cold-start
+        # black screen on 8K VR where L0's 2x supersample overwhelms the GPU
+        # before the EMA observes a single frame. Step up to L1/L0 only after
+        # confirmed under-budget headroom.
+        self._current_idx: int = 2
         self._frames_since_change: int = 0
         self._frames_over_budget: int = 0
         self._frames_under_budget: int = 0
