@@ -100,17 +100,20 @@ class CheckpointManager:
     - Thread-safe operations
     """
     
-    def __init__(self, checkpoint_dir: str = "checkpoints", 
+    def __init__(self, checkpoint_dir: Optional[str] = None,
                  checkpoint_interval: float = 30.0,
                  max_checkpoints_per_video: int = 5):
         """
         Initialize checkpoint manager.
-        
+
         Args:
             checkpoint_dir: Directory to store checkpoint files
             checkpoint_interval: Minimum seconds between checkpoints
             max_checkpoints_per_video: Maximum checkpoints to keep per video
         """
+        if checkpoint_dir is None:
+            from config.constants import FUNGEN_ROOT
+            checkpoint_dir = os.path.join(FUNGEN_ROOT, "checkpoints")
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_interval = checkpoint_interval
         self.max_checkpoints_per_video = max_checkpoints_per_video
@@ -555,7 +558,7 @@ def get_checkpoint_manager() -> CheckpointManager:
         _checkpoint_manager = CheckpointManager()
     return _checkpoint_manager
 
-def initialize_checkpoint_manager(checkpoint_dir: str = "checkpoints",
+def initialize_checkpoint_manager(checkpoint_dir: Optional[str] = None,
                                 checkpoint_interval: float = 30.0,
                                 max_checkpoints_per_video: int = 5) -> CheckpointManager:
     """Initialize the global checkpoint manager with custom settings."""

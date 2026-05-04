@@ -68,8 +68,10 @@ class ApplicationLogic:
         status_log_config = {
             logging.INFO: 3.0, logging.WARNING: 6.0, logging.ERROR: 10.0, logging.CRITICAL: 15.0,
         }
-        Path("logs").mkdir(exist_ok=True)
-        self.app_log_file_path = 'logs/fungen.log'  # Define app_log_file_path
+        from config.constants import FUNGEN_ROOT
+        _logs_dir = Path(FUNGEN_ROOT) / "logs"
+        _logs_dir.mkdir(exist_ok=True)
+        self.app_log_file_path = str(_logs_dir / 'fungen.log')
 
         # Log purge runs in background, non-critical for startup
         threading.Thread(

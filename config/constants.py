@@ -575,7 +575,9 @@ DEFAULT_AUTO_POST_CLAMP_HIGH = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["clamp_up
 ####################################################################################################
 # DEFAULT MODELS & DOWNLOADS
 ####################################################################################################
-DEFAULT_MODELS_DIR = "models"
+# Anchored to the repo root via __file__ -- never depends on cwd.
+FUNGEN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_MODELS_DIR = os.path.join(FUNGEN_ROOT, "models")
 MODEL_DOWNLOAD_URLS = {
     "detection_pt": "https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/releases/download/models-v1.1.0/FunGen-12s-pov-1.1.0.pt",
     "detection_mlpackage_zip": "https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/releases/download/models-v1.1.0/FunGen-12s-pov-1.1.0.mlpackage.zip",
