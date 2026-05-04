@@ -141,7 +141,8 @@ class DrawingMixin:
                 if is_major and curr_ms >= 0:
                     txt = label_cache.get(curr_ms)
                     if txt is None:
-                        txt = f"{curr_ms/1000:.1f}s"
+                        txt = _format_time(self.app, curr_ms / 1000.0,
+                                           with_ms=(step_ms < 1000))
                         label_cache[curr_ms] = txt
                     dl.add_text(x + 3, tf.y_offset + tf.height - 15, grid_labels_u32, txt)
             curr_ms += step_ms

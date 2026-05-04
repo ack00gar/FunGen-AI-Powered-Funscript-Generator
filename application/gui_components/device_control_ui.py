@@ -15,7 +15,7 @@ import time
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
-from application.utils import primary_button_style, destructive_button_style
+from application.utils import primary_button_style, destructive_button_style, _format_time
 from config.constants_colors import CurrentTheme
 
 # Device control imports (conditional)
@@ -569,7 +569,9 @@ class DeviceControlUI:
             if self.playback_status:
                 status = self.playback_status
                 imgui.text(f"State: {status.state.value}")
-                imgui.text(f"Time: {status.current_time_ms/1000:.1f}s / {status.duration_ms/1000:.1f}s")
+                imgui.text(
+                    f"Time: {_format_time(None, status.current_time_ms/1000, with_ms=False)}"
+                    f" / {_format_time(None, status.duration_ms/1000, with_ms=False)}")
                 imgui.text(f"Actions: {status.actions_processed} / {status.total_actions}")
                 imgui.text(f"Device Updates: {status.position_updates_sent}")
     
