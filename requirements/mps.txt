@@ -7,3 +7,6 @@ torchvision~=0.23.0
 # Falls back to OpenGL or v360 if Metal is unavailable.
 pyobjc-framework-Metal>=10.0
 pyobjc-framework-MetalKit>=10.0
+
+# Ultralytics needs coremltools to load .mlpackage models on Apple Silicon.
+coremltools>=9.0

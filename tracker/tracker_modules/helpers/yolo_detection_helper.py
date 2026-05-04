@@ -72,6 +72,15 @@ def load_model(path: str, task: str = 'detect', *,
     for h in list(_ul.handlers):
         _ul.removeHandler(h)
     _ul.propagate = True
+    if str(path).endswith('.mlpackage'):
+        try:
+            import coremltools  # noqa: F401
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "coremltools missing -- needed to load .mlpackage models on "
+                "Apple Silicon. Run: uv pip install --python .venv/bin/python "
+                "coremltools  (or rerun install.sh after pulling latest)."
+            ) from exc
     model = YOLO(path, task=task)
     if warmup_device:
         try:
