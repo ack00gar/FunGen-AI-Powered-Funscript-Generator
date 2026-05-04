@@ -446,6 +446,13 @@ class StandaloneSplashWindow:
             glfw.terminate()
             return False
 
+        # NSApp now exists; override the default Python rocket dock icon.
+        try:
+            from application.utils.macos_dock_icon import apply as _apply_dock
+            _apply_dock(str(paths.LOGO_PATH))
+        except Exception:
+            pass
+
         # Center the window
         if monitor:
             mode = glfw.get_video_mode(monitor)
