@@ -481,11 +481,22 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         if self.app.shortcut_manager:
             self.app.shortcut_manager.reinitialize_key_map()
 
-        # Set window icon (macOS doesn't support window icons in GLFW, skip on macOS)
+        # Set window/dock icon. GLFW handles Windows + Linux; on macOS we
+        # use NSApplication.setApplicationIconImage_ since GLFW doesn't.
         try:
             import platform
-            if platform.system() != "Darwin":  # Skip on macOS
-                icon_path = str(paths.asset('logo.png'))
+            icon_path = str(paths.asset('logo.png'))
+            if platform.system() == "Darwin":
+                if os.path.exists(icon_path):
+                    try:
+                        from AppKit import NSApplication, NSImage
+                        img = NSImage.alloc().initWithContentsOfFile_(icon_path)
+                        if img and img.isValid():
+                            NSApplication.sharedApplication().setApplicationIconImage_(img)
+                            self.app.logger.debug(f"Dock icon set from {icon_path}")
+                    except Exception as e:
+                        self.app.logger.debug(f"Dock icon not set: {e}")
+            else:
                 if os.path.exists(icon_path):
                     # Load icon with cv2 (already imported)
                     icon_img = cv2.imread(icon_path, cv2.IMREAD_UNCHANGED)
