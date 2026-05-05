@@ -257,7 +257,7 @@ def _test_encode_works(encoder: str, ffmpeg: str, logger: Optional[logging.Logge
     try:
         rc = subprocess.run(
             [ffmpeg, "-hide_banner", "-loglevel", "error",
-             "-f", "lavfi", "-i", "color=black:s=64x64:d=0.1:r=1",
+             "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1:r=1",
              "-c:v", encoder, "-frames:v", "1", "-f", "null", "-"],
             capture_output=True, text=True, timeout=10,
             creationflags=subprocess_flags(),
