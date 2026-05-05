@@ -1889,6 +1889,30 @@ class VideoProcessor(
                     self._last_applied_speed_mode = speed_mode
                     self._last_applied_slow_mo_fps = getattr(_ui, 'slow_motion_fps', 10.0)
 
+                # ---- chapter-aware tracker start/stop ----
+                # Runs BEFORE the decode gate so an NR -> Position transition
+                # re-arms tracking_active on the same iteration; otherwise
+                # mpv-driven playback would never restart the tracker.
+                if self.tracker and self.enable_tracker_processing:
+                    current_chapter = self.app.funscript_processor.get_chapter_at_frame(self.current_frame_index)
+                    current_chapter_id = current_chapter.unique_id if current_chapter else None
+                    if current_chapter_id != self.last_processed_chapter_id:
+                        from config.constants import POSITION_INFO_MAPPING
+                        should_track = True
+                        if current_chapter:
+                            position_info = POSITION_INFO_MAPPING.get(current_chapter.position_short_name, {})
+                            category = position_info.get('category', 'Position')
+                            should_track = (category == "Position")
+                            if should_track and current_chapter.user_roi_fixed:
+                                self.tracker.reconfigure_for_chapter(current_chapter)
+                        if should_track and not self.tracker.tracking_active:
+                            self.tracker.start_tracking()
+                        elif not should_track and self.tracker.tracking_active:
+                            self.tracker.stop_tracking()
+                        self.last_processed_chapter_id = current_chapter_id
+                    if current_chapter and not self.tracker.tracking_active and current_chapter.user_roi_fixed:
+                        self.tracker.start_tracking()
+
                 # ---- gate ffmpeg decode on whether anyone consumes its frames ----
                 # Pure playback (no tracker, mpv loaded) doesn't need numpy
                 # frames; pause the source so its decoder thread is idle.
@@ -1953,28 +1977,6 @@ class VideoProcessor(
                         src.seek(self.current_frame_index, accurate=False)
                     src.resume()
                     next_frame_target_time = time.perf_counter()
-
-                # ---- chapter-aware tracker start/stop (mirror subprocess loop) ----
-                current_chapter = self.app.funscript_processor.get_chapter_at_frame(self.current_frame_index)
-                current_chapter_id = current_chapter.unique_id if current_chapter else None
-                if current_chapter_id != self.last_processed_chapter_id:
-                    if self.tracker and self.enable_tracker_processing:
-                        from config.constants import POSITION_INFO_MAPPING
-                        should_track = True
-                        if current_chapter:
-                            position_info = POSITION_INFO_MAPPING.get(current_chapter.position_short_name, {})
-                            category = position_info.get('category', 'Position')
-                            should_track = (category == "Position")
-                            if should_track and current_chapter.user_roi_fixed:
-                                self.tracker.reconfigure_for_chapter(current_chapter)
-                        if should_track and not self.tracker.tracking_active:
-                            self.tracker.start_tracking()
-                        elif not should_track and self.tracker.tracking_active:
-                            self.tracker.stop_tracking()
-                    self.last_processed_chapter_id = current_chapter_id
-                if current_chapter and self.tracker and self.enable_tracker_processing \
-                        and not self.tracker.tracking_active and current_chapter.user_roi_fixed:
-                    self.tracker.start_tracking()
 
                 # ---- pull next frame ----
                 # Capture epoch BEFORE pulling so we can detect a seek that

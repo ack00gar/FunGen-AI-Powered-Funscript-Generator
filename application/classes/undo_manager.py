@@ -138,7 +138,7 @@ class AddPointCmd(Command):
 
 
 class DeletePointsCmd(Command):
-    __slots__ = ('description', 'timestamp', 'tl', 'deleted')
+    __slots__ = ('description', 'timestamp', 'tl', '_sorted_asc', '_sorted_desc')
 
     def __init__(self, tl: int, deleted: list):
         n = len(deleted)
