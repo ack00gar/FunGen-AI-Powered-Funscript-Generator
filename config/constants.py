@@ -182,7 +182,7 @@ DEFAULT_SHORTCUTS = {
     "snap_nearest_to_playhead": "M",                 # Snap nearest point to current playhead position
     "select_left_of_playhead": "CTRL+ALT+LEFT_ARROW",   # Select all points before playhead
     "select_right_of_playhead": "CTRL+ALT+RIGHT_ARROW", # Select all points after playhead
-    "repeat_last_stroke": "HOME",                       # Repeat the previous stroke at the playhead
+    "repeat_last_stroke": "J",                          # Repeat the previous stroke at the playhead
 
     # Bookmarks
     "add_bookmark": "B",                              # Add bookmark at playhead position
@@ -230,6 +230,9 @@ DEFAULT_SHORTCUTS = {
     "filter_selection_top": "SHIFT+T",        # Keep only peaks within selection
     "filter_selection_bottom": "SHIFT+B",     # Keep only valleys within selection
     "filter_selection_mid": "SHIFT+M",        # Keep only non-extrema within selection
+    "select_peaks": "ALT+T",                  # Select peaks in selection/chapter/timeline
+    "select_valleys": "ALT+B",                # Select valleys in selection/chapter/timeline
+    "select_extrema": "ALT+E",                # Select peaks + valleys
     "toggle_selection_loop": "\\",            # A-B loop between first and last selected actions
 
     # Playback (Universal)

@@ -119,6 +119,9 @@ class KeyboardShortcutsDialog:
                 ("snap_nearest_to_playhead", "Snap Nearest Point to Playhead"),
                 ("select_left_of_playhead", "Select All Points Left of Playhead"),
                 ("select_right_of_playhead", "Select All Points Right of Playhead"),
+                ("select_peaks", "Select Peaks (in selection/chapter/timeline)"),
+                ("select_valleys", "Select Valleys (in selection/chapter/timeline)"),
+                ("select_extrema", "Select Peaks + Valleys"),
                 ("repeat_last_stroke", "Repeat Last Stroke at Playhead"),
             ],
             "Chapters": [

@@ -70,6 +70,10 @@ class ShortcutManager:
             except Exception:
                 pass
 
+        # Seed reverse map with every layout character so non-ASCII keys
+        # recorded in the rebind dialog (e.g. German ss) resolve at lookup.
+        self._reverse_key_map.update(layout_char_to_keycode)
+
         # A-Z: prefer layout-aware mapping, fall back to identity
         for i in range(ord('A'), ord('Z') + 1):
             char = chr(i)

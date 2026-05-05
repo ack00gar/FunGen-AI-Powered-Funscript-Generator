@@ -24,6 +24,7 @@ from .nudge import (
     nudge_selection_time, nudge_selection_value,
 )
 from .repeat_last_stroke import repeat_last_stroke
+from .select_extrema import select_extrema
 from .select_relative_to_playhead import select_relative_to_playhead
 from .snap_to_playhead import snap_to_playhead
 
@@ -48,6 +49,7 @@ __all__ = [
     "nudge_selection_time",
     "nudge_selection_value",
     "repeat_last_stroke",
+    "select_extrema",
     "select_points_in_chapter",
     "select_relative_to_playhead",
     "snap_to_playhead",

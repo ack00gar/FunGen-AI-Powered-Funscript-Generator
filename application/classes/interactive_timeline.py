@@ -34,6 +34,7 @@ from application.classes.timeline_ops import (
     nudge_all_time, nudge_chapter_time,
     nudge_selection_time, nudge_selection_value,
     repeat_last_stroke,
+    select_extrema,
     select_points_in_chapter, select_relative_to_playhead,
     snap_to_playhead,
 )
@@ -888,6 +889,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
             filter_selection(self, 'bottom')
         if check_shortcut("filter_selection_mid", "SHIFT+M"):
             filter_selection(self, 'mid')
+        if check_shortcut("select_peaks", "ALT+T"):
+            select_extrema(self, 'top')
+        if check_shortcut("select_valleys", "ALT+B"):
+            select_extrema(self, 'bottom')
+        if check_shortcut("select_extrema", "ALT+E"):
+            select_extrema(self, 'both')
         if check_shortcut("toggle_selection_loop", "\\"):
             self._toggle_selection_loop()
 

@@ -109,9 +109,9 @@ class AppEventHandlers:
                     if tl and hasattr(tl, 'multi_selected_action_indices') and tl.multi_selected_action_indices:
                         tl.multi_selected_action_indices.clear()
 
-            # Seek to nearest frame, but store the action's exact ms for playhead display
-            self.app.processor.playhead_override_ms = action_ms
+            # Seek first, then set override; seek_video clears it.
             self.seek_video_with_sync(target_frame)
+            self.app.processor.playhead_override_ms = action_ms
             self.app.energy_saver.reset_activity_timer()
 
             # Prefetch frames around the target so left/right arrow adjustments are instant

@@ -497,6 +497,8 @@ def ensure_mpv() -> None:
                 _run("winget", "install", "-e", "--id", "shinchiro.mpv",
                      "--silent", "--accept-source-agreements",
                      "--accept-package-agreements")
+                print("  mpv installed. If FunGen still reports 'mpv not found',")
+                print("  close this terminal and reopen it (or reboot) so PATH refreshes.")
             else:
                 print("  winget not found.")
                 print("  Install mpv manually so BOTH mpv.exe AND libmpv-2.dll land in the same folder on PATH.")

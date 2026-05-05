@@ -194,6 +194,8 @@ class NavBufferMixin:
         import time as _time
         target_frame = int(target_frame)
         prev = getattr(self, 'current_frame_index', -1)
+        # Arrow nav off the anchor frame invalidates sub-frame override.
+        self.playhead_override_ms = None
         if hasattr(self, "_nav_detector"):
             self._nav_detector.record(target_frame)
 

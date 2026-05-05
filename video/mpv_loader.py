@@ -70,13 +70,33 @@ def _windows_candidates() -> list[str]:
     local_app = os.environ.get("LOCALAPPDATA") or ""
     if local_app:
         for pattern in (
+            # Recursive: shinchiro.mpv unpacks to a versioned mpv-x86_64-* subdir
+            # whose name changes per release, so a fixed glob misses it.
             os.path.join(local_app, "Microsoft", "WinGet", "Packages",
-                         "shinchiro.mpv*", "mpv", "libmpv-2.dll"),
+                         "shinchiro.mpv*", "**", "libmpv-2.dll"),
             os.path.join(local_app, "Programs", "mpv", "libmpv-2.dll"),
         ):
-            paths.extend(glob.glob(pattern))
+            paths.extend(glob.glob(pattern, recursive=True))
     program_files = os.environ.get("ProgramFiles") or r"C:\Program Files"
     paths.append(os.path.join(program_files, "mpv", "libmpv-2.dll"))
+
+    # Registry: HKLM/HKCU App Paths is set by some mpv installers and survives
+    # the PATH-not-refreshed-yet trap right after a winget install.
+    try:
+        import winreg
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            for sub in (r"Software\Microsoft\Windows\CurrentVersion\App Paths\mpv.exe",):
+                try:
+                    with winreg.OpenKey(hive, sub) as k:
+                        val, _ = winreg.QueryValueEx(k, "Path")
+                        if val:
+                            for name in ("libmpv-2.dll", "mpv-2.dll", "mpv-1.dll"):
+                                paths.append(os.path.join(val, name))
+                except OSError:
+                    pass
+    except ImportError:
+        pass
+
     return paths
 
 
