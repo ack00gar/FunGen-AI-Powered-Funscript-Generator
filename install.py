@@ -491,14 +491,22 @@ def ensure_mpv() -> None:
     try:
         if sys_os == "Windows":
             if shutil.which("winget"):
-                # shinchiro.mpv is the canonical winget package that installs
-                # mpv.exe to PATH (other packages like mpv.net ship as mpvnet.exe
-                # which FunGen's IPC bridge cannot find).
+                # shinchiro.mpv winget package ships mpv.exe + d3dcompiler only.
+                # libmpv-2.dll lives in the separate mpv-dev SDK; FunGen needs
+                # it for the embedded video display, so we tell the user to
+                # grab it manually below.
                 _run("winget", "install", "-e", "--id", "shinchiro.mpv",
                      "--silent", "--accept-source-agreements",
                      "--accept-package-agreements")
-                print("  mpv installed. If FunGen still reports 'mpv not found',")
-                print("  close this terminal and reopen it (or reboot) so PATH refreshes.")
+                print()
+                print("  mpv.exe installed via winget.")
+                print("  IMPORTANT: shinchiro.mpv does NOT ship libmpv-2.dll.")
+                print("  FunGen needs it for the embedded video display. To install:")
+                print("    1. Download mpv-dev-x86_64-v3 from")
+                print("       https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest")
+                print("    2. Extract libmpv-2.dll from the .7z archive")
+                print(f"    3. Place it at: {ROOT / 'lib' / 'libmpv-2.dll'}")
+                print("       (FunGen searches that path automatically; no PATH edit needed)")
             else:
                 print("  winget not found.")
                 print("  Install mpv manually so BOTH mpv.exe AND libmpv-2.dll land in the same folder on PATH.")

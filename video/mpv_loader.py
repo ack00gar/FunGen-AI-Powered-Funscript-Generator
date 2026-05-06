@@ -55,6 +55,16 @@ def _windows_candidates() -> list[str]:
     python-mpv's default find_library only searches PATH for the bare DLL
     name, which fails when the dll is split from mpv.exe."""
     paths: list[str] = []
+    # FunGen install root: lets users drop libmpv-2.dll next to the app or
+    # under <root>/lib/. shinchiro player package (what winget installs) does
+    # not ship libmpv-2.dll; the dev SDK does and gets dropped here.
+    try:
+        from common.paths import APP_ROOT
+        for d in (APP_ROOT, APP_ROOT / "lib"):
+            for name in ("libmpv-2.dll", "mpv-2.dll", "mpv-1.dll"):
+                paths.append(str(d / name))
+    except Exception:
+        pass
     mpv_exe = shutil.which("mpv") or shutil.which("mpv.exe")
     if mpv_exe:
         mpv_dir = os.path.dirname(mpv_exe)
