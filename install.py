@@ -18,6 +18,7 @@ miniconda FunGen env from older installs.
 Re-runnable: blowing away .venv and re-running always lands on a known-good
 environment for the current machine.
 """
+import json
 import os
 import platform
 import re
@@ -479,6 +480,53 @@ def ensure_ffmpeg() -> None:
 
 # ─── mpv via system package manager (non-fatal) ─────────────────────────────
 
+def _ensure_libmpv_windows() -> bool:
+    """Fetch libmpv-2.dll into <ROOT>/lib/. Shinchiro's player package (what
+    winget installs) ships only mpv.exe; libmpv-2.dll lives in their dev SDK.
+    Windows 10 1803+ ships tar.exe (bsdtar/libarchive), which reads the BCJ2
+    filter the dev SDK uses, so no extra extractor is needed."""
+    target = ROOT / "lib" / "libmpv-2.dll"
+    if target.is_file():
+        return True
+    api = "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+    try:
+        with urllib.request.urlopen(api, timeout=15) as r:
+            release = json.load(r)
+    except Exception as e:
+        print(f"  github api unreachable: {e}")
+        return False
+    asset = next((a for a in release.get("assets", [])
+                  if a.get("name", "").startswith("mpv-dev-x86_64-v3-")
+                  and a["name"].endswith(".7z")), None)
+    if not asset:
+        print("  no mpv-dev-x86_64-v3 asset in latest shinchiro release")
+        return False
+    archive = Path(tempfile.gettempdir()) / asset["name"]
+    print(f"  downloading {asset['name']} ({asset.get('size', 0) // (1024*1024)} MB)")
+    try:
+        urllib.request.urlretrieve(asset["browser_download_url"], archive)
+    except Exception as e:
+        print(f"  download failed: {e}")
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        r = subprocess.run(
+            ["tar", "-xf", str(archive), "-C", str(target.parent), "libmpv-2.dll"],
+            capture_output=True, text=True, timeout=120)
+    except Exception as e:
+        print(f"  tar extract failed: {e}")
+        return False
+    finally:
+        try:
+            archive.unlink()
+        except OSError:
+            pass
+    if r.returncode != 0:
+        print(f"  tar exit {r.returncode}: {r.stderr.strip()[:200]}")
+        return False
+    return target.is_file() and target.stat().st_size > 50_000_000
+
+
 def ensure_mpv() -> None:
     """Try to install mpv via the OS package manager. Non-fatal: prints a
     manual-install hint and returns if no automated path works.
@@ -491,22 +539,20 @@ def ensure_mpv() -> None:
     try:
         if sys_os == "Windows":
             if shutil.which("winget"):
-                # shinchiro.mpv winget package ships mpv.exe + d3dcompiler only.
-                # libmpv-2.dll lives in the separate mpv-dev SDK; FunGen needs
-                # it for the embedded video display, so we tell the user to
-                # grab it manually below.
                 _run("winget", "install", "-e", "--id", "shinchiro.mpv",
                      "--silent", "--accept-source-agreements",
                      "--accept-package-agreements")
+                # winget gives us mpv.exe; libmpv-2.dll comes from the dev SDK.
                 print()
-                print("  mpv.exe installed via winget.")
-                print("  IMPORTANT: shinchiro.mpv does NOT ship libmpv-2.dll.")
-                print("  FunGen needs it for the embedded video display. To install:")
-                print("    1. Download mpv-dev-x86_64-v3 from")
-                print("       https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest")
-                print("    2. Extract libmpv-2.dll from the .7z archive")
-                print(f"    3. Place it at: {ROOT / 'lib' / 'libmpv-2.dll'}")
-                print("       (FunGen searches that path automatically; no PATH edit needed)")
+                print("  mpv.exe installed via winget. fetching libmpv-2.dll...")
+                if _ensure_libmpv_windows():
+                    print(f"  libmpv-2.dll installed at {ROOT / 'lib' / 'libmpv-2.dll'}")
+                else:
+                    print("  auto-fetch failed. To install libmpv-2.dll manually:")
+                    print("    1. Download mpv-dev-x86_64-v3 from")
+                    print("       https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest")
+                    print("    2. Extract libmpv-2.dll from the .7z archive")
+                    print(f"    3. Place it at: {ROOT / 'lib' / 'libmpv-2.dll'}")
             else:
                 print("  winget not found.")
                 print("  Install mpv manually so BOTH mpv.exe AND libmpv-2.dll land in the same folder on PATH.")
