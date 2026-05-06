@@ -776,9 +776,12 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             # 'auto' probes all hwdec options and falls back to SW only if
             # none work. 'auto-safe' was too conservative and left some 8K
             # h264 files on SW.
+            # Mac: VT decode in libmpv shows no throughput win on Apple
+            # Silicon and intermittently fails init on some M1 boxes
+            # (gh#127). Mirror the ffmpeg-subprocess policy and disable.
             backend = self.app.app_settings.config.mpv.render_backend
-            _default_hwdec = "auto"
             _sys = __import__("platform").system()
+            _default_hwdec = "no" if _sys == "Darwin" else "auto"
             hwdec_override = self.app.app_settings.config.mpv.hwdec_override or _default_hwdec
             disp = None
 
