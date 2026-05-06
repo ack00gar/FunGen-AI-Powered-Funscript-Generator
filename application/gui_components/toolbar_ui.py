@@ -481,14 +481,14 @@ class ToolbarUI:
         imgui.same_line()
 
         # Max Speed is only meaningful during tracking or offline analysis.
+        # The button is grayed out + click-gated when idle, but we do NOT
+        # mutate the persistent state: batch processors set MAX_SPEED before
+        # starting their work and an idle-render reset would race that set.
         tracker = self.app.tracker
         stage_proc = self.app.stage_processor
         _tracker_running = bool(tracker and getattr(tracker, 'tracking_active', False))
         _offline_running = bool(stage_proc and getattr(stage_proc, 'full_analysis_active', False))
         _max_speed_meaningful = _tracker_running or _offline_running
-        if not _max_speed_meaningful and current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
-            app_state.selected_processing_speed_mode = ProcessingSpeedMode.REALTIME
-            current_speed_mode = ProcessingSpeedMode.REALTIME
 
         if current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
             self._apply_button_active()

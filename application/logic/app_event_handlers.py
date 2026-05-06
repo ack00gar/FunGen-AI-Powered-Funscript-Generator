@@ -90,10 +90,17 @@ class AppEventHandlers:
             if candidates:
                 key = (lambda r: r[1]) if direction == 'next' else (lambda r: -r[1])
                 result = min(candidates, key=key)
-        elif direction == 'next':
-            result = fs.find_next_action_position(current_frame, fps, 'primary')
-        elif direction == 'prev':
-            result = fs.find_prev_action_position(current_frame, fps, 'primary')
+        else:
+            # Use the active timeline's axis instead of hardcoded 'primary'
+            # so up/down navigation follows whichever timeline the user
+            # is editing.
+            active_tl = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
+            _, active_axis = self.app.funscript_processor._get_target_funscript_object_and_axis(active_tl)
+            axis = active_axis or 'primary'
+            if direction == 'next':
+                result = fs.find_next_action_position(current_frame, fps, axis)
+            elif direction == 'prev':
+                result = fs.find_prev_action_position(current_frame, fps, axis)
 
         if result is not None:
             target_frame, action_ms = result
