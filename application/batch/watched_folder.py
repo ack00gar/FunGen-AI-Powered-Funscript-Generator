@@ -6,6 +6,7 @@ video files for processing when they appear in a watched directory.
 """
 
 import os
+import time
 import logging
 import threading
 from typing import Optional, Callable, Set
@@ -25,6 +26,11 @@ class WatchedFolderProcessor:
         self._on_new_video = on_new_video
         self._is_watching: bool = False
         self._known_files: Set[str] = set()
+        # Files seen but still being written; promoted to _known_files once
+        # size has been stable for STABLE_S. Avoids handing the queue a
+        # half-transferred file (gh#kaoszwerg).
+        self._pending: Set[str] = set()
+        self._stop_event = threading.Event()
         self._lock = threading.Lock()
 
     @property
@@ -46,9 +52,11 @@ class WatchedFolderProcessor:
 
         self._watch_path = path
         self._recursive = recursive
+        self._stop_event.clear()
 
         # Snapshot existing files so we only process new ones
         self._known_files = self._scan_existing_videos(path, recursive)
+        self._pending.clear()
         logger.info(f"Found {len(self._known_files)} existing video(s) in watch folder")
 
         try:
@@ -85,6 +93,9 @@ class WatchedFolderProcessor:
 
     def stop_watching(self):
         """Stop monitoring the folder."""
+        # Signal in-flight stability waiters before tearing down the observer
+        # so they exit on their next poll instead of running to MAX_S.
+        self._stop_event.set()
         if self._observer:
             try:
                 self._observer.stop()
@@ -98,20 +109,61 @@ class WatchedFolderProcessor:
         logger.info("Stopped folder watching")
 
     def _handle_file_event(self, filepath: str):
-        """Handle a new/moved file event."""
+        """File event entry. Spawns a stability waiter so a transfer that's
+        still in progress doesn't get queued mid-write."""
         ext = os.path.splitext(filepath)[1].lower()
         if ext not in VIDEO_EXTENSIONS:
             return
-
+        abs_path = os.path.abspath(filepath)
         with self._lock:
-            abs_path = os.path.abspath(filepath)
-            if abs_path in self._known_files:
+            if abs_path in self._known_files or abs_path in self._pending:
                 return
-            self._known_files.add(abs_path)
+            self._pending.add(abs_path)
+        logger.info(f"New video detected (waiting for stable size): {os.path.basename(filepath)}")
+        threading.Thread(
+            target=self._wait_stable, args=(abs_path,),
+            daemon=True, name="WatchStable").start()
 
-        logger.info(f"New video detected: {os.path.basename(filepath)}")
-        if self._on_new_video:
-            self._on_new_video(abs_path)
+    def _wait_stable(self, abs_path: str,
+                     poll_s: float = 2.0,
+                     stable_s: float = 5.0,
+                     max_s: float = 600.0):
+        """Promote `abs_path` to known + fire callback once size has been
+        unchanged for `stable_s` and the file opens for read. Exits early on
+        stop_event, vanished file, or `max_s` deadline."""
+        last_size = -1
+        last_change = time.time()
+        deadline = last_change + max_s
+        try:
+            while not self._stop_event.is_set() and time.time() < deadline:
+                try:
+                    size = os.path.getsize(abs_path)
+                except OSError:
+                    logger.warning(f"Watched file vanished mid-transfer: {abs_path}")
+                    return
+                if size != last_size:
+                    last_size = size
+                    last_change = time.time()
+                elif size > 0 and (time.time() - last_change) >= stable_s:
+                    try:
+                        with open(abs_path, "rb") as f:
+                            f.read(1)
+                    except OSError:
+                        # Writer still holds an exclusive lock; keep waiting.
+                        last_change = time.time()
+                    else:
+                        with self._lock:
+                            self._known_files.add(abs_path)
+                        logger.info(f"Watched file stable, queueing: {os.path.basename(abs_path)}")
+                        if self._on_new_video:
+                            self._on_new_video(abs_path)
+                        return
+                self._stop_event.wait(poll_s)
+            if not self._stop_event.is_set():
+                logger.warning(f"Gave up waiting for stable size: {abs_path}")
+        finally:
+            with self._lock:
+                self._pending.discard(abs_path)
 
     def _scan_existing_videos(self, path: str, recursive: bool) -> Set[str]:
         """Scan existing video files in the watch path."""
