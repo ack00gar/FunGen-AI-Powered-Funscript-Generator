@@ -158,6 +158,23 @@ class FramePrefetcher:
                   prefer_tail: bool = False) -> None:
         start = max(0, min(int(start), max(0, total - 1)))
         count = int(max(0, count))
+        # Cap window to the cache budget. Without this, a window larger than
+        # the cache thrashes (decode -> evict -> re-decode) at 800%+ CPU on
+        # high-res sources (8K VR at ~19 MB/frame vs default 1 GB cache).
+        try:
+            budget = int(getattr(self.cache, "max_bytes", 0) or 0)
+            w = int(getattr(self.proc, "_display_frame_w", 0) or 0)
+            h = int(getattr(self.proc, "_display_frame_h", 0) or 0)
+            per_frame = max(1, w * h * 3)
+            if budget > 0 and per_frame > 1:
+                max_count = max(8, int((budget * 0.7) // per_frame))
+                if count > max_count:
+                    cur = int(getattr(self.proc, "current_frame_index", 0) or 0)
+                    if start <= cur < start + count:
+                        start = max(0, cur - max_count // 2)
+                    count = max_count
+        except Exception:
+            pass
         end_exclusive = min(total, start + count)
         if end_exclusive <= start:
             return
