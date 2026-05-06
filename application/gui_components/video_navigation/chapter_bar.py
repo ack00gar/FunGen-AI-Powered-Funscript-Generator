@@ -612,7 +612,8 @@ class ChapterBarMixin:
         ):
             editor = self.gui_instance.timeline_editor1 if active_tl_num == 1 else self.gui_instance.timeline_editor2
             if editor:
-                editor.select_points_in_chapter()
+                from application.classes.timeline_ops import select_points_in_chapter
+                select_points_in_chapter(editor)
 
         del_points_sc_str = shortcuts.get("delete_points_in_chapter", "SHIFT+DELETE")
         del_points_alt_sc_str = shortcuts.get("delete_points_in_chapter_alt", "SHIFT+BACKSPACE")
