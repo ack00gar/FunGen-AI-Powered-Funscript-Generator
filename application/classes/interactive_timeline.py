@@ -121,6 +121,10 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         self.is_hovered: bool = False  # Set each frame; read by status strip hints
         self._alt_arrow_panning: bool = False  # Track Alt+Arrow pan for seek-on-release
         self._hovered_point_idx: int = -1  # For hover tooltip stats
+        # Horizontal-wheel pan: wheel events have no release, so we commit a
+        # full seek once the wheel has been quiet for H_WHEEL_SETTLE_S.
+        self._h_wheel_last_t: float = 0.0
+        self._h_wheel_pending: bool = False
 
         self.context_menu_target_idx: int = -1
         self.selection_anchor_idx: int = -1 # For Shift+Click range selection logic if needed
@@ -504,6 +508,19 @@ class InteractiveFunscriptTimeline(DrawingMixin):
                 # Wheel events have no release; if we set timeline_interaction_active
                 # here it never clears and blocks subsequent forced syncs.
 
+            # Horizontal wheel pans the timeline (extra tilt-wheel on some mice).
+            if io.mouse_wheel_horizontal != 0:
+                pan_px_per_tick = 60
+                app_state.timeline_pan_offset_ms += (
+                    io.mouse_wheel_horizontal * pan_px_per_tick * tf.zoom)
+                app_state.timeline_interaction_active = True
+                # Instant feedback if the new center is in the nav cache;
+                # otherwise the settle-timer below commits a full seek.
+                center_ms = tf.x_to_time(tf.x_offset + tf.width / 2)
+                self._seek_if_cached(center_ms)
+                self._h_wheel_last_t = time.monotonic()
+                self._h_wheel_pending = True
+
             # Double middle-click clears selection (fast deselect gesture).
             if imgui.is_mouse_double_clicked(glfw.MOUSE_BUTTON_MIDDLE):
                 if self.multi_selected_action_indices:
@@ -518,6 +535,14 @@ class InteractiveFunscriptTimeline(DrawingMixin):
                 app_state.timeline_interaction_active = True
                 center_ms = tf.x_to_time(tf.x_offset + tf.width / 2) - delta_x * tf.zoom
                 self._seek_if_cached(center_ms)
+
+        # Wheel-pan settle: commit the full seek once the wheel has been
+        # quiet for ~150 ms. Outside the is_hovered block so a flick-and-move
+        # still lands the playhead when the cursor leaves the timeline.
+        if self._h_wheel_pending and (time.monotonic() - self._h_wheel_last_t) >= 0.15:
+            self._h_wheel_pending = False
+            app_state.timeline_interaction_active = False
+            self._seek_pan_center_with_sync(app_state)
 
         # --- Mode-specific input dispatch ---
         if self._mode == TimelineMode.ALTERNATING:
