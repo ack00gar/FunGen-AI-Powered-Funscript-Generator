@@ -495,11 +495,14 @@ def _ensure_libmpv_windows() -> bool:
     except Exception as e:
         print(f"  github api unreachable: {e}")
         return False
+    # Skip the -v3 variant: it requires AVX2 / BMI2 (Haswell+ / Zen+) and
+    # crashes on older cpus. Match the plain x86_64 build whose name has a
+    # digit right after the architecture token.
     asset = next((a for a in release.get("assets", [])
-                  if a.get("name", "").startswith("mpv-dev-x86_64-v3-")
+                  if re.match(r"^mpv-dev-x86_64-\d", a.get("name", ""))
                   and a["name"].endswith(".7z")), None)
     if not asset:
-        print("  no mpv-dev-x86_64-v3 asset in latest shinchiro release")
+        print("  no mpv-dev-x86_64 asset in latest shinchiro release")
         return False
     archive = Path(tempfile.gettempdir()) / asset["name"]
     print(f"  downloading {asset['name']} ({asset.get('size', 0) // (1024*1024)} MB)")
