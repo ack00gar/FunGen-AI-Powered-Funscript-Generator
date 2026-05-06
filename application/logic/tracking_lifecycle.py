@@ -134,8 +134,7 @@ class TrackingLifecycleController:
 
         if not video_path:
             app.logger.warning("Completion event is missing its video path. Cannot save funscripts.")
-            if app.is_batch_processing_active:
-                app.save_and_reset_complete_event.set()
+            app.save_and_reset_complete_event.set()
             return
 
         # Chapter list is owned by funscript_processor (populated by the
@@ -166,10 +165,9 @@ class TrackingLifecycleController:
         project_filepath = app.file_manager.get_output_path_for_file(video_path, PROJECT_FILE_EXTENSION)
         app.project_manager.save_project(project_filepath)
 
-        # 6. Signal batch loop to continue.
-        if app.is_batch_processing_active and hasattr(app, 'save_and_reset_complete_event'):
-            app.logger.debug("Signaling batch loop to continue after offline analysis completion.")
-            app.save_and_reset_complete_event.set()
+        # Signal any batch waiter (legacy batch_processor or watched-folder
+        # BatchWorker). Single-video runs have no waiter; the set is a no-op.
+        app.save_and_reset_complete_event.set()
 
         # CLI + batch: no GUI to drive project reset, so do it here.
         if not app.gui_instance and app.is_batch_processing_active:
@@ -216,8 +214,7 @@ class TrackingLifecycleController:
             video_path = app.file_manager.video_path
             if not video_path:
                 app.logger.warning("Live session ended, but no video path is available to save the raw funscript.")
-                if app.is_batch_processing_active and hasattr(app, 'save_and_reset_complete_event'):
-                    app.save_and_reset_complete_event.set()
+                app.save_and_reset_complete_event.set()
                 return
 
             # Batch fires on_processing_stopped twice (EOS + post-join);
@@ -246,9 +243,8 @@ class TrackingLifecycleController:
                 except Exception as e:
                     app.logger.error(f"Live post-processing failed: {e}", exc_info=True)
                 finally:
-                    # Unblock the batch loop's wait before the next open_video.
-                    if app.is_batch_processing_active and hasattr(app, 'save_and_reset_complete_event'):
-                        app.save_and_reset_complete_event.set()
+                    # Unblock any batch waiter before the next open_video.
+                    app.save_and_reset_complete_event.set()
 
             app.logger.info("Live session ended, saving funscript and running post-processing...")
             t = _threading.Thread(

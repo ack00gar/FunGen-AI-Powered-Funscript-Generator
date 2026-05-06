@@ -281,9 +281,7 @@ class StageGuiEventsMixin:
                 self.stage2_status_text = "S2 Aborted."
             if self.current_analysis_stage == 3 or self.stage3_status_text.startswith("Running"):
                 self.stage3_status_text = "S3 Aborted."
-            if self.app.is_batch_processing_active and hasattr(self.app, 'save_and_reset_complete_event'):
-                self.logger.debug(f"Signaling batch loop to continue after handling '{status_override}' status.")
-                self.app.save_and_reset_complete_event.set()
+            self.app.save_and_reset_complete_event.set()
 
         elif status_override == "Failed":
             if self.current_analysis_stage == 1 or self.stage1_status_text.startswith("Running"):
@@ -292,9 +290,7 @@ class StageGuiEventsMixin:
                 self.stage2_status_text = "S2 Failed."
             if self.current_analysis_stage == 3 or self.stage3_status_text.startswith("Running"):
                 self.stage3_status_text = "S3 Failed."
-            if self.app.is_batch_processing_active and hasattr(self.app, 'save_and_reset_complete_event'):
-                self.logger.debug(f"Signaling batch loop to continue after handling '{status_override}' status.")
-                self.app.save_and_reset_complete_event.set()
+            self.app.save_and_reset_complete_event.set()
 
     # ------------------------------------------------------------------
     # Shared helpers for results handling
