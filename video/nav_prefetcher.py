@@ -147,6 +147,18 @@ class FramePrefetcher:
                 start = max(0, cur - lookahead)
                 self._run_plan(start, cur - start, total, prefer_tail=True)
             elif direction == "stop":
+                # Skip the speculative bidirectional fill on heavy frames
+                # (1440p+ and VR with v360 dewarp): decode cost on 8K
+                # (~30 ms/frame times ~38 capped frames) lands a CPU spike
+                # on every settled seek that the user feels even without
+                # arrow nav. Motion-based fwd/back above still fires for
+                # actual arrow nav, so the cache stays warm where it
+                # matters. Threshold lets 1080p (6.2 MB/frame) keep its
+                # prefetch since the spike is ~300 ms total there.
+                w = int(getattr(self.proc, "_display_frame_w", 0) or 0)
+                h = int(getattr(self.proc, "_display_frame_h", 0) or 0)
+                if w * h * 3 > 10_000_000:
+                    continue
                 self._run_plan(
                     max(0, cur - _BIDIR_MARGIN),
                     min(total - 1, cur + _BIDIR_MARGIN)
