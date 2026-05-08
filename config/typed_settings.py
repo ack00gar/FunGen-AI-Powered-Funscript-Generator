@@ -307,14 +307,6 @@ class UIConfig(_Section):
         self._store.set("show_video_feed", bool(value))
 
     @property
-    def hd_video_display(self) -> bool:
-        return bool(self._store.get("hd_video_display", True))
-
-    @hd_video_display.setter
-    def hd_video_display(self, value: bool) -> None:
-        self._store.set("hd_video_display", bool(value))
-
-    @property
     def show_audio_waveform(self) -> bool:
         return bool(self._store.get("show_audio_waveform", True))
 
@@ -1634,14 +1626,6 @@ class VRDisplayConfig(_Section):
         self._store.set("vr_display_aspect", float(value))
 
     @property
-    def quality_mode(self) -> str:
-        return str(self._store.get("vr_quality_mode", "auto"))
-
-    @quality_mode.setter
-    def quality_mode(self, value: str) -> None:
-        self._store.set("vr_quality_mode", str(value))
-
-    @property
     def shader_sg_scale(self) -> float:
         return float(self._store.get("vr_shader_sg_scale", 1.840))
 
@@ -1656,14 +1640,6 @@ class VRDisplayConfig(_Section):
     @shader_lock_to_tracker.setter
     def shader_lock_to_tracker(self, value: bool) -> None:
         self._store.set("vr_shader_lock_to_tracker", bool(value))
-
-    @property
-    def shader_supersample(self) -> bool:
-        return bool(self._store.get("vr_shader_supersample", True))
-
-    @shader_supersample.setter
-    def shader_supersample(self, value: bool) -> None:
-        self._store.set("vr_shader_supersample", bool(value))
 
 
 class DeviceControlConfig(_Section):

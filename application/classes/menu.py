@@ -1038,13 +1038,6 @@ class MainMenu:
         if clicked and lock_enabled and new_lock != cur_lock:
             settings.set('vr_shader_lock_to_tracker', bool(new_lock))
 
-        cur_ss = bool(settings.get('vr_shader_supersample', True))
-        clicked, new_ss = imgui.menu_item(
-            "Adaptive Quality (auto-tune)",
-            selected=cur_ss, enabled=lock_enabled or cur_mode == 'shader_dewarp')
-        if clicked and new_ss != cur_ss:
-            settings.set('vr_shader_supersample', bool(new_ss))
-
         imgui.separator()
 
         imgui.text_disabled("VR Eye")

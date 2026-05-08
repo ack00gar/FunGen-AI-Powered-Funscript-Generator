@@ -76,6 +76,17 @@ def compute_display_route(app) -> DisplayRoute:
                             show_overlays=False)
 
     tracker_active = bool(tracker and getattr(tracker, 'tracking_active', False))
+    # If the tracker is active but paused, the cpu_tracker texture is no
+    # longer being driven -- fall back to mpv so arrow nav and click-seek
+    # update the displayed frame instead of locking on the last produced
+    # tracker frame.
+    if tracker_active:
+        try:
+            paused = bool(getattr(proc, 'pause_event').is_set())
+        except Exception:
+            paused = False
+        if paused:
+            tracker_active = False
 
     determined_type = getattr(proc, 'determined_video_type', '') or ''
     is_vr = (determined_type == 'VR'
@@ -158,6 +169,25 @@ def compute_display_route(app) -> DisplayRoute:
     mpv_aspect = mpv_w / mpv_h if mpv_h > 0 else 1.0
 
     if is_vr and vr_mode == 'shader_dewarp' and shader_ready:
+        # Backward-nav ring override: replay the captured dewarp output for
+        # this frame instead of running mpv + shader (mpv frame-back-step
+        # silently fails on long-GOP HEVC). Cleared once mpv catches up.
+        override = getattr(gui, '_ring_override', None)
+        if override is not None:
+            cur = int(getattr(proc, 'current_frame_index', -1) or -1)
+            ov_frame, ov_tex = override
+            if int(ov_frame) == cur and int(ov_tex) > 0:
+                return DisplayRoute(
+                    source='ring_override',
+                    texture_id=int(ov_tex),
+                    uv=zoom_uv,
+                    content_aspect=1.0,
+                    fill_panel=not shader_locked,
+                    show_overlays=shader_locked,
+                    overlay_status=status_text,
+                    status_busy=status_busy,
+                    shader_locked=shader_locked,
+                )
         dewarp_tex = int(getattr(gui, 'vr_dewarp_texture_id', 0))
         return DisplayRoute(
             source='mpv_shader',
@@ -203,10 +233,14 @@ def _content_aspect_from_proc(proc) -> float:
     cf = getattr(proc, 'current_frame', None)
     if cf is not None and cf.shape[0] > 0 and cf.shape[1] > 0:
         return cf.shape[1] / cf.shape[0]
-    dfw = int(getattr(proc, '_display_frame_w', 0) or 0)
-    dfh = int(getattr(proc, '_display_frame_h', 0) or 0)
-    if dfw > 0 and dfh > 0:
-        return dfw / dfh
+    # _display_frame_w/h is always yolo_input_size now (ffmpeg tracker
+    # output). For display aspect fall back to source dims via video_info.
+    info = getattr(proc, 'video_info', None) if proc else None
+    if info:
+        sw = int(info.get('width', 0) or 0)
+        sh = int(info.get('height', 0) or 0)
+        if sw > 0 and sh > 0:
+            return sw / sh
     return 16 / 9
 
 

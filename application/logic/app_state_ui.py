@@ -349,16 +349,21 @@ class AppStateUI:
         self._cached_processing_uv = None
 
     def get_content_uv_rect(self) -> Tuple[float, float, float, float]:
-        """Content UV for display (texture UV coords and display sizing).
+        """Content UV for the display texture.
 
-        Returns (0,0,1,1) in HD mode since the display texture has no padding.
-        Cached per-video.
+        libmpv display texture is at native source aspect (no padding) so
+        full UV (0,0,1,1) is correct. Only the legacy ffmpeg-fed display
+        path uses the 640x640 padded layout where this rect carves the
+        content out of the padding. Cached per-video.
         """
         if self._cached_content_uv is not None:
             return self._cached_content_uv
 
-        proc = self.app.processor
-        if proc and proc.is_hd_active:
+        gui = getattr(self.app, 'gui_instance', None)
+        mpv_disp = getattr(gui, 'mpv_display', None) if gui else None
+        mpv_loaded = bool(mpv_disp is not None
+                          and getattr(mpv_disp, 'is_loaded', False))
+        if mpv_loaded:
             self._cached_content_uv = (0.0, 0.0, 1.0, 1.0)
         else:
             self._cached_content_uv = self._compute_processing_content_uv()
@@ -436,17 +441,17 @@ class AppStateUI:
                 and proc.current_frame.shape[0] > 0
                 and proc.current_frame.shape[1] > 0):
             frame_h_orig, frame_w_orig = proc.current_frame.shape[:2]
-        # Fall back to the processor's declared display dims — the mpv
-        # path pauses the ffmpeg source so current_frame can be None for
-        # the entire playback session. _display_frame_w/h is set the
-        # moment the video opens (see video_processor:_determine_display_size)
-        # and is the same size mpv's filter chain writes into the FBO.
+        # Fall back to source dimensions from video_info: the libmpv
+        # path leaves proc.current_frame as None for the whole session,
+        # and _display_frame_w/h is always 640x640 (ffmpeg tracker output)
+        # so it doesn't reflect display aspect anymore.
         if frame_w_orig == 0 or frame_h_orig == 0:
-            if proc is not None:
-                dfw = int(getattr(proc, '_display_frame_w', 0) or 0)
-                dfh = int(getattr(proc, '_display_frame_h', 0) or 0)
-                if dfw > 0 and dfh > 0:
-                    frame_w_orig, frame_h_orig = dfw, dfh
+            info = getattr(proc, 'video_info', None) if proc else None
+            if info:
+                sw = int(info.get('width', 0) or 0)
+                sh = int(info.get('height', 0) or 0)
+                if sw > 0 and sh > 0:
+                    frame_w_orig, frame_h_orig = sw, sh
         if frame_w_orig == 0 or frame_h_orig == 0:
             self._cached_fit_size = None
             return 0, 0, 0, 0

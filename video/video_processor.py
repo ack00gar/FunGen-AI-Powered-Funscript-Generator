@@ -16,7 +16,6 @@ from common import paths
 from video.vr_format_detector_ml_real import RealMLVRFormatDetector
 
 # Thumbnail extractor for fast random frame access
-from video.thumbnail_extractor import ThumbnailExtractor
 from video.frame_source._types import SourceConfig
 from video.frame_source.ffmpeg_source import FFmpegFrameSource
 
@@ -111,20 +110,12 @@ class VideoProcessor(
         self.ffmpeg_filter_string = ""
         self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
 
-        # HD display: decode at higher resolution for GUI, downsample to yolo_input_size for processing
-        self.hd_display_enabled = False
+        # libmpv drives the GUI display at native resolution; ffmpeg
+        # subprocess (when alive for the tracker) decodes at yolo_input_size.
+        # No HD-switching state needed: the two pipelines run independently
+        # at their natural target sizes.
         self._display_frame_w = self.yolo_input_size
         self._display_frame_h = self.yolo_input_size
-        self._is_hd_active = False
-        self._processing_frame_buf = np.zeros((self.yolo_input_size, self.yolo_input_size, 3), dtype=np.uint8)
-        self._proc_resize_dims = (self.yolo_input_size, self.yolo_input_size)
-        self._proc_pad_offset = (0, 0)
-        # Live-tracking HD suspend state (see suspend_hd_for_live_tracking).
-        self._hd_suspended_for_live = False
-        self._hd_suspended_saved_flag = False
-        self._hd_display_force_off = False
-        if self.app and hasattr(getattr(self.app, 'app_settings', None), 'config'):
-            self.hd_display_enabled = self.app.app_settings.config.ui.hd_video_display
 
         # VR Unwarp method. Only two options now:
         #   'v360' (default): libavfilter v360 applied inside the ffmpeg
@@ -137,7 +128,8 @@ class VideoProcessor(
             if self.vr_unwarp_method_override not in ('v360', 'none'):
                 self.vr_unwarp_method_override = 'v360'
 
-        # Thumbnail Extractor for fast random frame access (OpenCV-based)
+        # Legacy: kept None for any remaining external references.
+        # Thumbnails now come from gui_instance.thumbnail_mpv (second mpv).
         self.thumbnail_extractor = None
 
         # Performance timing metrics (for UI display)
@@ -167,13 +159,29 @@ class VideoProcessor(
         else:
             self.logger.debug("Tracker is available, but processing is DISABLED by default. An explicit call is needed to enable it.")
 
-        # Unified frame cache (byte-budgeted LRU). Serves both the
-        # arrow-nav hit path and random-access fetches; survives seeks so
-        # bouncing between regions reuses decoded frames for free until
-        # LRU eviction. Created here; the prefetcher thread is started
-        # after open_video succeeds and stopped on reset(close_video=True).
+        # Phase C: nav cache + prefetcher are no-op stubs. arrow-async
+        # worker stays for the cpu_tracker fallback path (libmpv unavailable
+        # or tracker active); on the normal libmpv path arrow nav goes
+        # straight to libmpv frame-step / seek and the worker is idle.
         self._init_nav_cache()
         self._init_arrow_async()
+        # Live pipeline metrics (seek timings, cache hit rate, prefetcher
+        # work, loop state). Read by the developer-perf panel; safe to
+        # read from any thread, GIL-protected simple writes.
+        from video._vp_metrics import PipelineMetrics
+        self.metrics = PipelineMetrics()
+        # Tracer: machine-readable JSONL of every pipeline event so
+        # optimization is driven by numbers. Off by default; flipped on
+        # via the developer-perf panel toggle. Output path follows the
+        # app's logs dir.
+        from video import _vp_trace as _trace
+        try:
+            from common.paths import APP_ROOT
+            _trace_path = str(APP_ROOT / "logs" / "traces.jsonl")
+        except Exception:
+            _trace_path = "logs/traces.jsonl"
+        _trace.init(_trace_path, enabled=False)
+        self.trace = _trace
 
         # ML format detector (lazy loaded)
         self.ml_detector = None
@@ -198,6 +206,32 @@ class VideoProcessor(
         self._pending_seek_target: Optional[int] = None
 
     # ---------------------------------------------------------- frame source
+
+    def _ensure_frame_source_started(self) -> bool:
+        """Lazy warm of the ffmpeg subprocess + decode thread.
+
+        At video open under libmpv display, _open_frame_source builds the
+        FFmpegFrameSource object but does NOT call .start(); ffmpeg has
+        no subprocess yet, no v360 dewarp running. Tracker activation calls
+        this to actually warm the pipe just before it needs frames.
+        """
+        if self.frame_source is None:
+            return False
+        # is_running is set by start(); use it as the "already warm" flag.
+        try:
+            if getattr(self.frame_source, 'is_running', False):
+                return True
+        except Exception:
+            pass
+        try:
+            self.frame_source.start(max(0, int(self.current_frame_index or 0)))
+            self.frame_source.wait_seek(timeout=2.0)
+            self.frame_source.next_frame(timeout=2.0)
+            self.frame_source.pause()
+            return True
+        except Exception as e:
+            self.logger.warning(f"frame source warm failed: {e}")
+            return False
 
     def _open_frame_source(self) -> bool:
         """Build and open the ffmpeg-subprocess frame source.
@@ -305,69 +339,6 @@ class VideoProcessor(
     # explicit tracker / display variants.
     def _build_filter_chain(self) -> str:
         return self._build_tracker_filter_chain()
-
-    # ---- HD gating for live tracking ----
-    # In v0.8.0 a GPUUnwarpWorker produced 640x640 tracker frames directly.
-    # v0.9.0 decodes at HD (up to 1920x1920) and CPU-resizes per frame in
-    # _make_processing_frame (~0.5-1 ms per frame, 30-65 ms/sec at 60 fps).
-    # Display uses the cpu_tracker route while tracking, so HD buys nothing.
-    # Drop it for the duration of live tracking.
-    def suspend_hd_for_live_tracking(self) -> None:
-        if self._hd_suspended_for_live:
-            return
-        if not self._is_hd_active:
-            return
-        src = self.frame_source
-        if src is None:
-            return
-        self._hd_suspended_saved_flag = getattr(self, 'hd_display_enabled', False)
-        try:
-            self._hd_display_force_off = True
-            self.hd_display_enabled = False
-            self._update_video_parameters()  # recomputes _display_frame_w/h
-            new_chain = self._build_tracker_filter_chain()
-            new_cfg = SourceConfig(
-                video_path=src.cfg.video_path,
-                filter_chain=new_chain,
-                output_w=self._display_frame_w,
-                output_h=self._display_frame_h,
-                decoder_threads=src.cfg.decoder_threads,
-            )
-            src.reapply_settings(new_cfg)
-            self._hd_suspended_for_live = True
-            self.logger.debug(
-                f"HD suspended for live tracking: output {self._display_frame_w}x{self._display_frame_h}")
-        except Exception as e:
-            self.logger.warning(f"suspend_hd_for_live_tracking failed: {e}")
-            self._hd_display_force_off = False
-            self.hd_display_enabled = self._hd_suspended_saved_flag
-
-    def resume_hd_after_live_tracking(self) -> None:
-        if not self._hd_suspended_for_live:
-            return
-        src = self.frame_source
-        if src is None:
-            self._hd_suspended_for_live = False
-            return
-        try:
-            self._hd_display_force_off = False
-            self.hd_display_enabled = self._hd_suspended_saved_flag
-            self._update_video_parameters()
-            new_chain = self._build_tracker_filter_chain()
-            new_cfg = SourceConfig(
-                video_path=src.cfg.video_path,
-                filter_chain=new_chain,
-                output_w=self._display_frame_w,
-                output_h=self._display_frame_h,
-                decoder_threads=src.cfg.decoder_threads,
-            )
-            src.reapply_settings(new_cfg)
-            self.logger.debug(
-                f"HD restored after live tracking: output {self._display_frame_w}x{self._display_frame_h}")
-        except Exception as e:
-            self.logger.warning(f"resume_hd_after_live_tracking failed: {e}")
-        finally:
-            self._hd_suspended_for_live = False
 
     def _vr_display_mode(self) -> str:
         """Returns 'passthrough' | 'shader_dewarp'."""
@@ -552,8 +523,47 @@ class VideoProcessor(
 
     def on_mpv_position(self, frame_index: int) -> None:
         """mpv time-pos observer. Drives current_frame_index during pure
-        playback and clears the seek-in-progress flag once mpv catches up."""
+        playback and clears the seek-in-progress flag once mpv catches up.
+
+        Logical cursor: while playhead_override_ms is set (a seek is in
+        flight) we do not regress current_frame_index to the pre-seek
+        position. The latch clears once mpv reports a frame at or past
+        the seek target, at which point regular playback updates resume."""
         self._seek_in_progress_since = 0.0
+        try:
+            mpv_idx = int(frame_index)
+        except (TypeError, ValueError):
+            return
+
+        override = self.playhead_override_ms
+        if override is not None and self.fps and self.fps > 0:
+            target_idx = int(round(override * self.fps / 1000.0))
+            # Bidirectional 1-frame tolerance: forward seeks may land at
+            # target-1 (keyframe-aligned), backward seeks may land at target
+            # or target+1 (mpv decodes forward from keyframe). Clearing only
+            # on >= target-1 was forward-biased and let stale time-pos events
+            # from a backward seek snap the cursor forward.
+            if abs(mpv_idx - target_idx) <= 1:
+                self.playhead_override_ms = None
+                # Drop the back-ring visual override now that mpv has caught
+                # up to the user-pressed target; live shader output resumes.
+                gui = getattr(self.app, 'gui_instance', None) if self.app else None
+                if gui is not None and getattr(gui, '_ring_override', None) is not None:
+                    gui._ring_override = None
+                    gui._shader_needs_repass = True
+            else:
+                # mpv still catching up to a user-initiated seek; do not let
+                # the time-pos event regress the visible cursor.
+                return
+
+        # Anchor for smooth-cursor extrapolation: set on every position
+        # event (paused or playing). Extrapolation only kicks in while
+        # playing; paused returns the anchor value as-is so a paused
+        # frame-step still updates the timeline cursor.
+        if self.fps and self.fps > 0:
+            self._pos_event_ms = mpv_idx * 1000.0 / self.fps
+            self._pos_event_t = time.monotonic()
+
         if not self.is_processing or self.pause_event.is_set():
             return
         if self.enable_tracker_processing:
@@ -561,10 +571,26 @@ class VideoProcessor(
         tracker = getattr(self.app, 'tracker', None) if self.app else None
         if tracker is not None and getattr(tracker, 'tracking_active', False):
             return
-        try:
-            self.current_frame_index = int(frame_index)
-        except (TypeError, ValueError):
-            pass
+        self.current_frame_index = mpv_idx
+
+    def playhead_ms_smooth(self) -> Optional[float]:
+        """Extrapolated playback cursor in ms. Between time-pos events,
+        advances at speed * elapsed-since-last-event so the visible cursor
+        glides smoothly instead of stepping at the event rate. Returns
+        None when no anchor is available; callers fall back to
+        current_frame_index in that case."""
+        anchor_ms = getattr(self, "_pos_event_ms", None)
+        anchor_t = getattr(self, "_pos_event_t", None)
+        if anchor_ms is None or anchor_t is None:
+            return None
+        if not self.is_processing or self.pause_event.is_set():
+            return anchor_ms
+        speed = float(getattr(self, "_playback_speed_factor", 1.0) or 1.0)
+        elapsed_s = max(0.0, time.monotonic() - anchor_t)
+        # Cap drift to one second; the next time-pos event will resync. This
+        # keeps a stalled mpv from running the cursor away forever.
+        elapsed_s = min(elapsed_s, 1.0)
+        return anchor_ms + elapsed_s * speed * 1000.0
 
     def _mpv_play(self) -> None:
         disp = self._get_mpv_display()
@@ -594,6 +620,9 @@ class VideoProcessor(
             factor = slo_mo_fps / self.fps if self.fps > 0 else 1.0
         else:
             factor = 1.0
+        # Track the actual factor we send to mpv so playhead_ms_smooth can
+        # extrapolate at the right rate between time-pos events.
+        self._playback_speed_factor = factor
         try:
             disp.set_speed(factor)
         except Exception:
@@ -717,177 +746,14 @@ class VideoProcessor(
     # ------------------------------------------------------------------ #
 
     def _compute_display_dimensions(self):
-        """Compute display frame dimensions based on video info and HD setting.
-
-        HD for 2D: scales to max 1920px on the longest edge, preserving
-        aspect ratio with even dimensions. HD for VR: the v360 filter
-        renders a square projection at 1920x1920. In both cases the tracker
-        frame is derived via _make_processing_frame, which downsamples to
-        yolo_input_size. ~3% cost measured vs 640x640 VR output.
-        """
+        """ffmpeg subprocess always outputs at yolo_input_size (640) now.
+        Display goes through libmpv at native resolution; the subprocess
+        only feeds the tracker, which wants 640 anyway. The HD-display +
+        downsample machinery this method used to drive is gone."""
         size = self.yolo_input_size
         self._display_frame_w = size
         self._display_frame_h = size
-        self._is_hd_active = False
-        self._processing_frame_buf = np.zeros((size, size, 3), dtype=np.uint8)
-        self._proc_resize_dims = (size, size)
-        self._proc_pad_offset = (0, 0)
-
-        if self.app and hasattr(getattr(self.app, 'app_settings', None), 'config'):
-            # Honor a caller-forced override (suspend_hd_for_live_tracking)
-            # without clobbering it from persistent settings.
-            if not getattr(self, '_hd_display_force_off', False):
-                self.hd_display_enabled = self.app.app_settings.config.ui.hd_video_display
-
-        if not self.hd_display_enabled:
-            return
-        if not self.video_info:
-            return
-        if hasattr(self, '_is_using_preprocessed_video') and self._is_using_preprocessed_video():
-            return
-
-        max_dim = 1920
-
-        if self.determined_video_type == 'VR':
-            # v360 output aspect is user-configurable; wider aspect widens the
-            # stereographic projection's horizontal field of view so VR content
-            # uses more of the available horizontal display space.
-            try:
-                aspect = self.app.app_settings.config.vr_display.display_aspect
-            except Exception:
-                aspect = 1.78
-            aspect = max(1.0, min(2.4, aspect))
-            out_h = max_dim
-            out_w = int(max_dim * aspect) & ~1
-        else:
-            src_w = self.video_info.get('width', 0)
-            src_h = self.video_info.get('height', 0)
-            if src_w <= 0 or src_h <= 0:
-                return
-            if max(src_w, src_h) <= max_dim:
-                out_w, out_h = src_w, src_h
-            elif src_w >= src_h:
-                out_w = max_dim
-                out_h = int(src_h * max_dim / src_w)
-            else:
-                out_h = max_dim
-                out_w = int(src_w * max_dim / src_h)
-            out_w = out_w & ~1
-            out_h = out_h & ~1
-            if max(out_w, out_h) < size:
-                return
-
-        self._display_frame_w = out_w
-        self._display_frame_h = out_h
-        self._is_hd_active = True
-        self.frame_size_bytes = out_w * out_h * 3
-
-        # Pre-compute processing frame resize params (avoids per-frame math)
-        scale = size / max(out_w, out_h)
-        new_w = int(out_w * scale) & ~1
-        new_h = int(out_h * scale) & ~1
-        new_w = min(new_w, size)
-        new_h = min(new_h, size)
-        self._proc_resize_dims = (new_w, new_h)
-        self._proc_pad_offset = ((size - new_w) // 2, (size - new_h) // 2)
-
-        self.logger.debug(f"HD display: {out_w}x{out_h} ({out_w * out_h * 3} bytes/frame)")
-
-    def _get_resize_device(self) -> str:
-        """Lazily resolve the device used by the HD-path resize.
-
-        Reads `hd_resize_device` from settings (default "cpu"). "auto" picks
-        CUDA > MPS > CPU. On any GPU-init failure the path falls back to CPU
-        and stays there for the life of the processor.
-        """
-        cached = getattr(self, "_resize_device", None)
-        if cached is not None:
-            return cached
-        try:
-            setting = str(self.app.app_settings.get("hd_resize_device", "cpu") or "cpu").lower()
-        except Exception:
-            setting = "cpu"
-        resolved = "cpu"
-        if setting in ("cuda", "mps", "auto"):
-            try:
-                import torch
-                if setting == "cuda" and torch.cuda.is_available():
-                    resolved = "cuda"
-                elif setting == "mps" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-                    resolved = "mps"
-                elif setting == "auto":
-                    if torch.cuda.is_available():
-                        resolved = "cuda"
-                    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-                        resolved = "mps"
-            except Exception:
-                resolved = "cpu"
-        self._resize_device = resolved
-        return resolved
-
-    def _resize_gpu(self, display_frame, new_w: int, new_h: int, device: str):
-        """Resize an HWC uint8 frame on a torch device. Returns HWC uint8 numpy.
-
-        Uses bilinear interpolation. Antialiasing is preferred for quality but
-        the op is not implemented on MPS, so we sticky-fall-back to the
-        non-AA path after the first exception and remember the choice for the
-        life of the processor.
-        """
-        import torch
-        import torch.nn.functional as F
-        t = torch.from_numpy(display_frame).to(device).permute(2, 0, 1).unsqueeze(0).float()
-        use_aa = getattr(self, "_resize_gpu_antialias", True)
-        try:
-            out = F.interpolate(t, size=(new_h, new_w), mode="bilinear",
-                                antialias=use_aa, align_corners=False)
-        except Exception:
-            if use_aa:
-                self._resize_gpu_antialias = False
-                out = F.interpolate(t, size=(new_h, new_w), mode="bilinear",
-                                    antialias=False, align_corners=False)
-            else:
-                raise
-        out = out.clamp_(0, 255).to(torch.uint8).squeeze(0).permute(1, 2, 0).contiguous()
-        return out.cpu().numpy()
-
-    def _make_processing_frame(self, display_frame):
-        """Resize an HD display frame down to yolo_input_size square with padding for YOLO/tracker.
-
-        Uses pre-allocated buffer and cached resize parameters to avoid
-        per-frame allocation overhead. The resize itself runs on CPU
-        (cv2.INTER_AREA) by default, or on the torch device selected by the
-        `hd_resize_device` setting ("cpu" | "auto" | "cuda" | "mps").
-        """
-        h, w = display_frame.shape[:2]
-        size = self.yolo_input_size
-        if h == size and w == size:
-            return display_frame
-
-        # Use cached resize params (computed once in _compute_display_dimensions)
-        new_w, new_h = self._proc_resize_dims
-        x_off, y_off = self._proc_pad_offset
-
-        device = self._get_resize_device()
-        if device != "cpu":
-            try:
-                resized = self._resize_gpu(display_frame, new_w, new_h, device)
-            except Exception as e:
-                self.logger.debug(f"GPU resize failed on {device}, pinning to CPU: {e}")
-                self._resize_device = "cpu"
-                resized = cv2.resize(display_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        else:
-            resized = cv2.resize(display_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-
-        # Reuse pre-allocated buffer (zero once, then overwrite content region)
-        buf = self._processing_frame_buf
-        buf[:] = 0
-        buf[y_off:y_off + new_h, x_off:x_off + new_w] = resized
-        return buf
-
-    @property
-    def is_hd_active(self):
-        """True when display frame is larger than processing frame."""
-        return self._is_hd_active
+        self.frame_size_bytes = size * size * 3
 
     def set_active_video_type_setting(self, video_type: str):
         if video_type not in ['auto', '2D', 'VR']:
@@ -963,37 +829,9 @@ class VideoProcessor(
         if src.is_running:
             src.stop()
 
-        # Force 640x640 output for the duration of the stream so trackers
-        # (chapter_maker, vr_hybrid_chapter, Stage 1 CD, Stage 3 flow) see
-        # the coordinate space they were written against. Restored in finally.
-        _saved_hd = getattr(self, 'hd_display_enabled', False)
-        _hd_was_on = _saved_hd and getattr(self, '_is_hd_active', False)
-        if _hd_was_on:
-            self.hd_display_enabled = False
-            # _update_video_parameters recomputes display dims + filter string
-            # but does NOT rebuild the ffmpeg filter graph. Do that explicitly.
-            self._update_video_parameters()
-            try:
-                new_chain = self._build_tracker_filter_chain()
-                new_cfg = SourceConfig(
-                    video_path=src.cfg.video_path,
-                    filter_chain=new_chain,
-                    output_w=self._display_frame_w,
-                    output_h=self._display_frame_h,
-                    decoder_threads=src.cfg.decoder_threads,
-                )
-                src.reapply_settings(new_cfg)
-            except Exception as e:
-                self.logger.error(f"stream_frames_for_segment: graph rebuild failed: {e}")
-                self.hd_display_enabled = _saved_hd
-                return
-
+        # ffmpeg subprocess always outputs at yolo_input_size now, no HD
+        # toggle to manage. Just stream frames.
         frames_yielded = 0
-        _hd_restore_needed = _hd_was_on
-        # Drive decode via the source's background thread so YOLO / DIS /
-        # cvtColor on the consumer thread overlap with decode (avoids the
-        # single-thread serialization that dropped us to ~100 FPS).
-        # start(start_frame=N) seeks internally before streaming.
         src.start(start_frame=start_frame_abs_idx)
         try:
             last_pull_ts = _time.perf_counter()
@@ -1019,26 +857,6 @@ class VideoProcessor(
         finally:
             try:
                 src.stop()
-            except Exception:
-                pass
-        # HD restore is a secondary finally block; the first one above
-        # already stopped the decode thread. Keep this as a top-level
-        # concern (no nested try to avoid indentation confusion).
-        if _hd_restore_needed:
-            try:
-                self.hd_display_enabled = _saved_hd
-                self._update_video_parameters()
-                src2 = self.frame_source
-                if src2 is not None:
-                    new_chain = self._build_tracker_filter_chain()
-                    new_cfg = SourceConfig(
-                        video_path=src2.cfg.video_path,
-                        filter_chain=new_chain,
-                        output_w=self._display_frame_w,
-                        output_h=self._display_frame_h,
-                        decoder_threads=src2.cfg.decoder_threads,
-                    )
-                    src2.reapply_settings(new_cfg)
             except Exception:
                 pass
 
@@ -1198,15 +1016,19 @@ class VideoProcessor(
         if not self._open_frame_source():
             self.logger.error("Failed to open frame source; playback will not work")
         else:
-            # Pre-start the decoder in paused state so arrow-nav / scrub hits
-            # the fast +1 pump path without paying the decode-thread spin-up
-            # on every keypress. Consume the seek-response frame so the
-            # source's _current_frame_index is published; that primes the
-            # +1 fast path for the first arrow press.
-            self.frame_source.start(0)
-            self.frame_source.wait_seek(timeout=2.0)
-            self.frame_source.next_frame(timeout=2.0)
-            self.frame_source.pause()
+            # If libmpv is the display, don't pre-warm the ffmpeg subprocess.
+            # The pre-warm (start + wait_seek + next_frame) takes multi-second
+            # on 8K with v360 and produces a numpy frame that nothing reads
+            # while libmpv drives the display. Tracker activation will
+            # spawn-and-warm lazily.
+            disp = self._get_mpv_display()
+            if disp is not None and getattr(disp, 'is_loaded', False):
+                self.frame_source.pause()
+            else:
+                self.frame_source.start(0)
+                self.frame_source.wait_seek(timeout=2.0)
+                self.frame_source.next_frame(timeout=2.0)
+                self.frame_source.pause()
         self.set_target_fps(self.fps)
         self.current_frame_index = 0
         self.stop_event.clear()
@@ -1220,13 +1042,17 @@ class VideoProcessor(
         # Boot the nav prefetcher now that the frame source is warm.
         # Idle-gated internally: it only runs while paused + tracker-idle.
         self._start_nav_prefetcher()
-        # OPTIMIZATION: Load first frame with thumbnail for instant startup
-        try:
-            self.current_frame = self._get_specific_frame(0, use_thumbnail=True)
-            self._frame_version += 1
-        except Exception as e:
-            self.logger.warning(f"Could not load initial frame: {e}")
-            self.current_frame = None
+        # Initial-frame numpy fetch: only when libmpv display is not driving.
+        # Otherwise libmpv already has the first frame on screen and the
+        # ffmpeg get_frame would just block startup on 8K.
+        disp = self._get_mpv_display()
+        if disp is None or not getattr(disp, 'is_loaded', False):
+            try:
+                self.current_frame = self._get_specific_frame(0, use_thumbnail=True)
+                self._frame_version += 1
+            except Exception as e:
+                self.logger.warning(f"Could not load initial frame: {e}")
+                self.current_frame = None
 
         if self.tracker:
             reset_reason = "project_load_preserve_actions" if from_project_load else None
@@ -1305,11 +1131,14 @@ class VideoProcessor(
         # Reinitialize thumbnail extractor with new display dimensions
         self._init_thumbnail_extractor()
         if self._open_frame_source():
-            # Pre-start paused (see open_video path for rationale).
-            self.frame_source.start(max(0, stored_frame_index))
-            self.frame_source.wait_seek(timeout=2.0)
-            self.frame_source.next_frame(timeout=2.0)
-            self.frame_source.pause()
+            disp = self._get_mpv_display()
+            if disp is not None and getattr(disp, 'is_loaded', False):
+                self.frame_source.pause()
+            else:
+                self.frame_source.start(max(0, stored_frame_index))
+                self.frame_source.wait_seek(timeout=2.0)
+                self.frame_source.next_frame(timeout=2.0)
+                self.frame_source.pause()
             self._start_nav_prefetcher()
 
         self.logger.info(f"Attempting to fetch frame {stored_frame_index} with new settings.")
@@ -1330,21 +1159,14 @@ class VideoProcessor(
         self.logger.info("Video settings applied successfully", extra={'status_message': True})
 
     def _get_specific_frame(self, frame_index_abs: int, update_current_index: bool = True, immediate_display: bool = False, use_thumbnail: bool = False) -> Optional[np.ndarray]:
-        """Random-access frame fetch. Cache hit -> instant; cache miss ->
-        frame_source.get_frame (~120 ms cold-spawn on subprocess backend,
-        <1 ms on hot)."""
+        """Random-access frame fetch via the active frame source. Phase C
+        dropped the LRU lookup; the cache is a no-op stub now and the
+        get/put cycle was burning a lock for nothing."""
         if not self.video_path or not self.video_info or self.video_info.get('fps', 0) <= 0:
             self.logger.warning("Cannot get frame: video not loaded/invalid FPS.")
             if update_current_index:
                 self.current_frame_index = frame_index_abs
             return None
-
-        frame = self._nav_cache.get(int(frame_index_abs))
-        if frame is not None:
-            if update_current_index:
-                self.current_frame_index = frame_index_abs
-            return frame
-
         if self.frame_source is None:
             self.logger.warning(f"_get_specific_frame({frame_index_abs}): no frame source")
             return None
@@ -1352,20 +1174,20 @@ class VideoProcessor(
         if frame is None:
             self.logger.warning(f"frame_source.get_frame failed for {frame_index_abs}")
             return None
-        self._nav_cache.put(int(frame_index_abs), frame)
         if update_current_index:
             self.current_frame_index = frame_index_abs
         return frame
 
 
     def _get_video_info(self, filename):
-        """Probe comprehensive video + audio metadata via ffprobe.
-
-        Returns the same dict shape the rest of the app expects (callers
-        pull width/height/fps/duration/codec_name/bit_depth/has_audio/etc.).
-        Ported from v0.8.0's _get_video_info pattern that leveraged ffprobe
-        + filename/resolution heuristics without opening a decoder.
-        """
+        """Probe video + audio metadata. Try libmpv first (no subprocess);
+        fall back to ffprobe if libmpv is unavailable or returns insufficient
+        data. Same dict shape regardless of source so call sites match."""
+        from video import mpv_probe
+        info = mpv_probe.probe(filename, logger=self.logger)
+        if info is not None and info.get("width", 0) > 0 and info.get("fps", 0) > 0:
+            return info
+        # libmpv path failed; legacy ffprobe path below.
         import json as _json
         import subprocess as _subprocess
         from video.ffmpeg_helpers import find_ffprobe as _find_ffprobe, subprocess_flags as _flags
@@ -1576,24 +1398,31 @@ class VideoProcessor(
 
     def start_processing(self, start_frame=None, end_frame=None, cli_progress_callback=None):
         if self.is_processing and self.pause_event.is_set():
-            self.logger.debug(f"Resuming playback from frame {self.current_frame_index}")
-            self.pause_event.clear()
-            tracker_active = self.tracker and getattr(self.tracker, 'tracking_active', False)
-            # Skip the ffmpeg seek+resume when mpv is going to drive display.
-            # Without a tracker pulling frames, the playback loop's mpv branch
-            # immediately re-pauses the source anyway, so a play-time seek on
-            # an 8K source costs hundreds of ms for nothing.
-            if tracker_active and self.frame_source is not None:
-                fs_idx = getattr(self.frame_source, 'current_frame_index', self.current_frame_index)
-                if fs_idx != self.current_frame_index:
-                    self._pending_seek_target = self.current_frame_index
-                    self._frame_source_seek_epoch += 1
-                    self.frame_source.seek(self.current_frame_index, accurate=True)
-                self.frame_source.resume()
-            if not tracker_active:
-                self._mpv_seek_to_frame(self.current_frame_index)
-                self._mpv_play()
+            _t0 = time.perf_counter()
+            with self.trace.span("resume_processing", frame=self.current_frame_index):
+                self.logger.debug(f"Resuming playback from frame {self.current_frame_index}")
+                self.pause_event.clear()
+                tracker_active = self.tracker and getattr(self.tracker, 'tracking_active', False)
+                # Skip the ffmpeg seek+resume when mpv is going to drive display.
+                # Without a tracker pulling frames, the playback loop's mpv branch
+                # immediately re-pauses the source anyway, so a play-time seek on
+                # an 8K source costs hundreds of ms for nothing.
+                if tracker_active and self.frame_source is not None:
+                    fs_idx = getattr(self.frame_source, 'current_frame_index', self.current_frame_index)
+                    if fs_idx != self.current_frame_index:
+                        self._pending_seek_target = self.current_frame_index
+                        self._frame_source_seek_epoch += 1
+                        with self.trace.span("frame_source.seek", accurate=True):
+                            self.frame_source.seek(self.current_frame_index, accurate=True)
+                    with self.trace.span("frame_source.resume"):
+                        self.frame_source.resume()
+                if not tracker_active:
+                    with self.trace.span("mpv.seek", exact=True):
+                        self._mpv_seek_to_frame(self.current_frame_index)
+                    with self.trace.span("mpv.play"):
+                        self._mpv_play()
 
+            self.metrics.record_resume_ms((time.perf_counter() - _t0) * 1000.0)
             if self._playback_state_callbacks:
                 current_time_ms = (self.current_frame_index / self.fps) * 1000.0 if self.fps > 0 else 0.0
                 self._notify_playback_state_callbacks(True, current_time_ms)
@@ -1647,15 +1476,18 @@ class VideoProcessor(
         if not self.is_processing or self.pause_event.is_set():
             return
 
-        self.logger.debug(f"Pausing playback at frame {self.current_frame_index}")
-        self.pause_event.set()
-        # Pause the source so it stops pumping frames past current_frame_index;
-        # otherwise arrow nav's +1 fast path reads the speculated-ahead frame.
-        if self.frame_source is not None:
-            self.frame_source.pause()
-        self._mpv_pause()
-        if hasattr(self, "_nav_prefetcher"):
-            self._nav_prefetcher.notify()
+        _t0 = time.perf_counter()
+        with self.trace.span("pause_processing", frame=self.current_frame_index):
+            self.logger.debug(f"Pausing playback at frame {self.current_frame_index}")
+            self.pause_event.set()
+            # Pause the source so it stops pumping frames past current_frame_index;
+            # otherwise arrow nav's +1 fast path reads the speculated-ahead frame.
+            if self.frame_source is not None:
+                with self.trace.span("frame_source.pause"):
+                    self.frame_source.pause()
+            with self.trace.span("mpv.pause"):
+                self._mpv_pause()
+        self.metrics.record_pause_ms((time.perf_counter() - _t0) * 1000.0)
 
         if self._playback_state_callbacks:
             current_time_ms = (self.current_frame_index / self.fps) * 1000.0 if self.fps > 0 else 0.0
@@ -1714,6 +1546,57 @@ class VideoProcessor(
 
         self.logger.debug("GUI processing stopped.")
 
+    def _begin_interactive_seek(self) -> None:
+        """Pause libmpv (and external mpv) while the user is actively
+        dragging / wheel-panning so each scrub tick is a paused absolute
+        seek rather than a seek-while-playing. Idempotent: only the first
+        call stashes prior playing state; subsequent calls are no-ops.
+
+        End the scrub via _end_interactive_seek() to restore playback if
+        it was running before the drag began.
+        """
+        if getattr(self, "_interactive_seek_active", False):
+            return
+        was_playing = bool(self.is_processing) and not self.pause_event.is_set()
+        self._interactive_seek_active = True
+        self._interactive_seek_was_playing = was_playing
+        if was_playing:
+            disp = self._get_mpv_display()
+            if disp is not None and disp.is_alive:
+                try:
+                    disp.pause()
+                except Exception:
+                    pass
+            mpv_ctrl = getattr(self.app, '_mpv_controller', None) if self.app else None
+            if mpv_ctrl is not None and getattr(mpv_ctrl, 'is_active', False):
+                try:
+                    mpv_ctrl.pause()
+                except Exception:
+                    pass
+
+    def _end_interactive_seek(self) -> None:
+        """Counterpart to _begin_interactive_seek; restores playback if it
+        was running before the drag started. Safe to call when no scrub is
+        in flight."""
+        if not getattr(self, "_interactive_seek_active", False):
+            return
+        was_playing = bool(getattr(self, "_interactive_seek_was_playing", False))
+        self._interactive_seek_active = False
+        self._interactive_seek_was_playing = False
+        if was_playing:
+            disp = self._get_mpv_display()
+            if disp is not None and disp.is_alive:
+                try:
+                    disp.play()
+                except Exception:
+                    pass
+            mpv_ctrl = getattr(self.app, '_mpv_controller', None) if self.app else None
+            if mpv_ctrl is not None and getattr(mpv_ctrl, 'is_active', False):
+                try:
+                    mpv_ctrl.play()
+                except Exception:
+                    pass
+
     def seek_video(self, frame_index: int, accurate: bool = True):
         """Seek to a specific frame via the active frame source.
 
@@ -1730,59 +1613,65 @@ class VideoProcessor(
 
         _t0 = time.perf_counter()
         target_frame = max(0, min(frame_index, self.total_frames - 1))
-        self.playhead_override_ms = None
-        self._frame_source_seek_epoch += 1
-        self.current_frame_index = target_frame
-        self._pending_seek_target = target_frame
-        self._seek_in_progress_since = time.monotonic()
-        # NOTE: we deliberately DO NOT clear the nav cache on seek anymore.
-        # The LRU cache is keyed by frame index and survives jumps, so
-        # bouncing between regions of the video (timeline scrub, chapter
-        # jump, up/down point jump) keeps every frame the user already
-        # decoded until byte-budget pressure evicts it. Cache clears only
-        # on video change or frame-shape change (see _clear_cache).
-        if hasattr(self, "_nav_detector"):
-            self._nav_detector.record(target_frame)
-        if hasattr(self, "_nav_prefetcher"):
-            self._nav_prefetcher.notify()
-        self._notify_seek_callbacks(target_frame)
+        with self.trace.span("seek_video", frame=target_frame, accurate=accurate) as _root:
+            # Logical cursor latch: write the target ms synchronously so the
+            # timeline cursor moves the moment the user clicks/jumps, even
+            # while mpv is still decoding to the new keyframe. on_mpv_position
+            # respects this latch: it will not regress the cursor back to
+            # the pre-seek position while a seek is in flight; the latch
+            # clears once mpv reports a position at or past the target.
+            if self.fps and self.fps > 0:
+                self.playhead_override_ms = target_frame * 1000.0 / self.fps
+            else:
+                self.playhead_override_ms = None
+            self._frame_source_seek_epoch += 1
+            self.current_frame_index = target_frame
+            self._pending_seek_target = target_frame
+            self._seek_in_progress_since = time.monotonic()
+            self._notify_seek_callbacks(target_frame)
 
-        # Skip the ffmpeg seek when no tracker consumes frames: mpv drives
-        # the display, the playback loop has already paused the source, and
-        # the loop's transition path will re-seek + resume on tracker
-        # activation. On 8K VR with v360 dewarp this avoids hundreds of ms
-        # of keyframe-decode latency per scrub.
-        tracker_needs_frames = (
-            self.enable_tracker_processing
-            or (self.tracker is not None
-                and getattr(self.tracker, 'tracking_active', False))
-        )
-        if tracker_needs_frames:
-            self.frame_source.seek(target_frame, accurate=False)
-            if not (self.is_processing and not self.pause_event.is_set()):
+            tracker_needs_frames = (
+                self.enable_tracker_processing
+                or (self.tracker is not None
+                    and getattr(self.tracker, 'tracking_active', False))
+            )
+            _root.add(tracker_needs=tracker_needs_frames)
+            # Skip the ffmpeg seek when no tracker consumes frames: mpv drives
+            # the display, the playback loop has already paused the source, and
+            # the loop's transition path will re-seek + resume on tracker
+            # activation. On 8K VR with v360 dewarp this avoids hundreds of ms
+            # of keyframe-decode latency per scrub.
+            if tracker_needs_frames:
+                with self.trace.span("frame_source.seek", accurate=False):
+                    self.frame_source.seek(target_frame, accurate=False)
+                if not (self.is_processing and not self.pause_event.is_set()):
+                    self._pending_seek_target = None
+                    self._seek_in_progress_since = 0.0
+            else:
                 self._pending_seek_target = None
                 self._seek_in_progress_since = 0.0
-        else:
-            self._pending_seek_target = None
-            self._seek_in_progress_since = 0.0
 
-        _t1 = time.perf_counter()
-        # Keep libmpv display in sync with tracker's source.
-        self._mpv_seek_to_frame_ex(target_frame, exact=accurate)
-        _t2 = time.perf_counter()
-        if (_t2 - _t0) * 1000.0 > 30.0:
-            self.logger.debug(
-                f"seek {target_frame}: total={(_t2-_t0)*1000:.1f}ms "
-                f"ffmpeg={(_t1-_t0)*1000:.1f}ms mpv={(_t2-_t1)*1000:.1f}ms "
-                f"tracker_needs={tracker_needs_frames} accurate={accurate}")
+            _t1 = time.perf_counter()
+            with self.trace.span("mpv.seek", exact=accurate):
+                self._mpv_seek_to_frame_ex(target_frame, exact=accurate)
+            _t2 = time.perf_counter()
+            self.metrics.record_seek(
+                target_frame=target_frame,
+                total_ms=(_t2 - _t0) * 1000.0,
+                ffmpeg_ms=(_t1 - _t0) * 1000.0,
+                mpv_ms=(_t2 - _t1) * 1000.0,
+                tracker_needs=tracker_needs_frames,
+                accurate=accurate,
+            )
 
         # Mirror to external fullscreen mpv so scrub updates current_frame_index.
         mpv_ctrl = getattr(self.app, '_mpv_controller', None) if self.app else None
         if mpv_ctrl is not None and getattr(mpv_ctrl, 'is_active', False):
-            try:
-                mpv_ctrl.seek(target_frame)
-            except Exception as e:
-                self.logger.debug(f"external mpv seek failed: {e}")
+            with self.trace.span("external_mpv.seek"):
+                try:
+                    mpv_ctrl.seek(target_frame)
+                except Exception as e:
+                    self.logger.debug(f"external mpv seek failed: {e}")
 
     def is_vr_active_or_potential(self) -> bool:
         if self.video_type_setting == 'VR':
@@ -1804,16 +1693,12 @@ class VideoProcessor(
             timestamp_ms = int(self.current_frame_index * (1000.0 / fps_for_timestamp))
             try:
                 if not self.is_processing:
-                    # Create 640x640 processing frame for tracker (HD frame is display-only)
-                    if self.is_hd_active:
-                        processing_frame = self._make_processing_frame(raw_frame_to_process)
-                    else:
-                        # Skip copy when the active tracker has opted out via
-                        # BaseTracker.mutates_input_frame = False.
-                        cur = getattr(self.tracker, '_current_tracker', None)
-                        needs_copy = getattr(cur, 'mutates_input_frame', True)
-                        processing_frame = raw_frame_to_process.copy() if needs_copy else raw_frame_to_process
-                    # Tracker populates live_overlay; display frame stays clean
+                    # ffmpeg subprocess outputs at yolo_input_size; tracker
+                    # consumes that directly. Skip copy when the active tracker
+                    # opted out via BaseTracker.mutates_input_frame = False.
+                    cur = getattr(self.tracker, '_current_tracker', None)
+                    needs_copy = getattr(cur, 'mutates_input_frame', True)
+                    processing_frame = raw_frame_to_process.copy() if needs_copy else raw_frame_to_process
                     self.tracker.process_frame(processing_frame, timestamp_ms, self.current_frame_index)
             except Exception as e:
                 self.logger.error(f"Error processing frame with tracker in display_current_frame: {e}", exc_info=True)
@@ -1952,6 +1837,11 @@ class VideoProcessor(
                         f"tracker_needs={tracker_needs_frames}, "
                         f"mpv_fps={getattr(disp, 'fps', 0):.2f})")
                     _prev_source_idle = mpv_drives_display
+                self.metrics.record_loop_state(
+                    tracker_needs=tracker_needs_frames,
+                    mpv_drives=mpv_drives_display,
+                    src_paused=bool(src.is_paused),
+                )
                 if mpv_drives_display:
                     if not src.is_paused:
                         src.pause()
@@ -2046,23 +1936,13 @@ class VideoProcessor(
                 if epoch_before != self._frame_source_seek_epoch:
                     continue
 
-                # Post-seek catch-up: the user clicked frame T, source landed on
-                # the GOP keyframe at T'<T and is decoding forward. Show those
-                # frames so the video plays through the catch-up (good UX), but
-                # keep current_frame_index pinned to the user's intent (T) until
-                # the source actually reaches it. After that, resume normal
-                # index updates from the decoded frame index.
-                # MAX_SPEED is the offline analysis path; the user isn't
-                # scrubbing mid-run so the nav cache would just burn memory
-                # bandwidth (75 MB per frame on 8K VR) for frames that will
-                # never be revisited.
-                cache_this_frame = speed_mode != constants.ProcessingSpeedMode.MAX_SPEED
-
+                # Post-seek catch-up: the user clicked frame T, source landed
+                # on the GOP keyframe at T'<T and is decoding forward. Show
+                # those frames so the video plays through the catch-up (good
+                # UX), but keep current_frame_index pinned to the user's
+                # intent (T) until the source actually reaches it.
                 seek_target = self._pending_seek_target
                 if seek_target is not None and idx < seek_target:
-                    # Fast-skip: only cache and bump version.
-                    if cache_this_frame:
-                        self._buffer_append(idx, frame_np)
                     with self.frame_lock:
                         self.current_frame = frame_np
                         self._frame_version += 1
@@ -2071,18 +1951,13 @@ class VideoProcessor(
                 self._seek_in_progress_since = 0.0
                 self.current_frame_index = idx
 
-                # Only resize when a tracker will consume the frame.
+                # ffmpeg subprocess always outputs at yolo_input_size; the
+                # tracker consumes that directly without a downsize step.
                 tracker_will_run = bool(
                     self.tracker and self.tracker.tracking_active
                     and self.enable_tracker_processing
                 )
-                if tracker_will_run and self.is_hd_active:
-                    processing_frame = self._make_processing_frame(frame_np)
-                else:
-                    processing_frame = frame_np
-
-                if cache_this_frame:
-                    self._buffer_append(self.current_frame_index, frame_np)
+                processing_frame = frame_np
 
                 # ---- tracker ----
                 if tracker_will_run:
@@ -2177,9 +2052,6 @@ class VideoProcessor(
             # doesn't race against a torn-down decoder.
             self._stop_nav_prefetcher()
             self._stop_arrow_async()
-            if self.thumbnail_extractor:
-                self.thumbnail_extractor.close()
-                self.thumbnail_extractor = None
             self._close_frame_source()
             self.video_path = ""
             self._active_video_source_path = ""

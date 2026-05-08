@@ -102,23 +102,6 @@ class VideoSettingsMixin:
 
         # HD Video Display — only for 2D videos, disabled during playback/processing
         from application.utils.imgui_helpers import DisabledScope as _DS
-        is_2d = processor.determined_video_type == '2D' or (
-            processor.determined_video_type is None
-            and processor.video_type_setting != 'VR')
-        if is_2d:
-            row_label("HD Video Display",
-                      "Decode at higher resolution for sharper preview.\n"
-                      "Disable on slow machines. Stop playback to change.")
-            with _DS(processor.is_processing):
-                hd_val = self.app.app_settings.config.ui.hd_video_display
-                changed, hd_val = imgui.checkbox("Enabled##HDVideoVid", hd_val)
-                if changed and not processor.is_processing:
-                    self.app.app_settings.config.ui.hd_video_display = hd_val
-                    if processor.is_video_open():
-                        threading.Thread(target=processor.reapply_video_settings,
-                                         daemon=True, name='HDVideoReapply').start()
-            row_end()
-
         end_settings_columns()
 
         # --- VR Settings (conditional) ---
@@ -185,18 +168,6 @@ class VideoSettingsMixin:
                 "Enabled##vrLockTracker", cur_lock)
             if changed_lock:
                 _vr_cfg.shader_lock_to_tracker = new_lock
-            row_end()
-
-            row_label("Adaptive Quality",
-                      "Auto-tunes shader resolution + filters based on "
-                      "GPU headroom. Lets the monitor scale up to 2x "
-                      "supersample on fast hardware, and down to 0.5x "
-                      "render scale on slow hardware to hold frame rate.")
-            cur_ss = _vr_cfg.shader_supersample
-            changed_ss, new_ss = imgui.checkbox(
-                "Enabled##vrAdaptive", cur_ss)
-            if changed_ss:
-                _vr_cfg.shader_supersample = new_ss
             row_end()
 
             row_label("Dewarp zoom",

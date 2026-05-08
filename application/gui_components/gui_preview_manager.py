@@ -335,16 +335,36 @@ class PreviewManagerMixin:
             # Keep frame in BGR format - update_texture will handle BGR→RGB conversion
 
 
-            # Crop out black padding if frame is padded (non-HD 640x640 mode only)
             height, width = frame.shape[:2]
-            is_hd = self.app.processor and self.app.processor.is_hd_active
-            if not is_hd and hasattr(self.app, 'app_state_ui'):
-                c_l, c_t, c_r, c_b = self.app.app_state_ui.get_processing_content_uv_rect()
-                if (c_l, c_t, c_r, c_b) != (0.0, 0.0, 1.0, 1.0):
-                    y0, y1 = int(c_t * height), int(c_b * height)
-                    x0, x1 = int(c_l * width), int(c_r * width)
-                    frame = frame[y0:y1, x0:x1]
-                    height, width = frame.shape[:2]
+            proc = self.app.processor
+            fmt = (getattr(proc, 'vr_input_format', '') or '').lower() if proc else ''
+            if fmt:
+                # VR: crop to the selected eye via vr_panel. Skip the
+                # processing-rect crop; the two combined gave "half an eye".
+                try:
+                    from video import vr_panel
+                    eye = vr_panel.read_setting(self.app.app_settings,
+                                                 default=vr_panel.EYE_LEFT)
+                    region = vr_panel.resolve_eye(fmt, eye)
+                    if not region.is_full():
+                        x0 = int(region.x * width)
+                        y0 = int(region.y * height)
+                        x1 = int((region.x + region.w) * width)
+                        y1 = int((region.y + region.h) * height)
+                        if x1 > x0 and y1 > y0:
+                            frame = frame[y0:y1, x0:x1]
+                            height, width = frame.shape[:2]
+                except Exception:
+                    pass
+            else:
+                # 2D fallback (numpy path only): strip yolo-input padding.
+                if hasattr(self.app, 'app_state_ui'):
+                    c_l, c_t, c_r, c_b = self.app.app_state_ui.get_processing_content_uv_rect()
+                    if (c_l, c_t, c_r, c_b) != (0.0, 0.0, 1.0, 1.0):
+                        y0, y1 = int(c_t * height), int(c_b * height)
+                        x0, x1 = int(c_l * width), int(c_r * width)
+                        frame = frame[y0:y1, x0:x1]
+                        height, width = frame.shape[:2]
 
             # Resize for preview (keep aspect ratio)
             aspect_ratio = width / height if height > 0 else 16/9
@@ -461,6 +481,11 @@ class PreviewManagerMixin:
             if show_video_frame:
                 imgui.separator()
 
+                # Static-frame preview only: per-tick mpv render to a
+                # second instance was stuttering main playback. Fall back
+                # to the async numpy fetch from ThumbnailMpvQueue + texture
+                # upload (one render per cursor position, not per imgui
+                # tick).
                 frame_data = tooltip_data.get('frame_data')
                 frame_loading = tooltip_data.get('frame_loading', False)
 

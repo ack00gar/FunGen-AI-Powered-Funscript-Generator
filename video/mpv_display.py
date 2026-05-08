@@ -283,17 +283,32 @@ class MpvDisplay:
         except Exception:
             pass
 
+    def _async_cmd(self, *args) -> bool:
+        p = self._player
+        if p is None:
+            return False
+        try:
+            ca = getattr(p, "command_async", None)
+            if ca is not None:
+                ca(*args)
+            else:
+                p.command(*args)
+            return True
+        except Exception as e:
+            self.logger.debug(f"async cmd {args!r} failed: {e}")
+            return False
+
     def play(self) -> None:
         if self._player is None:
             return
-        self._player.pause = False
         self._is_paused = False
+        self._async_cmd("set", "pause", "no")
 
     def pause(self) -> None:
         if self._player is None:
             return
-        self._player.pause = True
         self._is_paused = True
+        self._async_cmd("set", "pause", "yes")
 
     @property
     def is_paused(self) -> bool:
@@ -303,10 +318,7 @@ class MpvDisplay:
         if self._player is None:
             return
         precision = "exact" if exact else "keyframes"
-        try:
-            self._player.command("seek", float(time_seconds), "absolute", precision)
-        except Exception as e:
-            self.logger.debug(f"MpvDisplay seek({time_seconds}) failed: {e}")
+        if not self._async_cmd("seek", float(time_seconds), "absolute", precision):
             return
         if self._fps > 0:
             frame_idx = int(round(time_seconds * self._fps))
@@ -319,26 +331,18 @@ class MpvDisplay:
     def step_forward(self) -> None:
         if self._player is None:
             return
-        try:
-            self._player.command("frame-step")
-        except Exception as e:
-            self.logger.debug(f"frame-step failed: {e}")
+        self._async_cmd("frame-step")
 
     def step_backward(self) -> None:
         if self._player is None:
             return
-        try:
-            self._player.command("frame-back-step")
-        except Exception as e:
-            self.logger.debug(f"frame-back-step failed: {e}")
+        self._async_cmd("frame-back-step")
 
     def set_speed(self, factor: float) -> None:
         if self._player is None:
             return
-        try:
-            self._player.speed = max(0.1, min(4.0, float(factor)))
-        except Exception:
-            pass
+        clamped = max(0.1, min(4.0, float(factor)))
+        self._async_cmd("set", "speed", str(clamped))
 
     def render_to_buffer(self, w: int, h: int) -> Optional[np.ndarray]:
         """Decode the current frame into a CPU RGBA buffer.

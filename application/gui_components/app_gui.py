@@ -11,7 +11,7 @@ import ctypes
 import os
 import platform
 import functools
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from collections import deque
 
 from common import paths
@@ -621,15 +621,17 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.mpv_display = None
         self.mpv_display_texture_id = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.mpv_display_texture_id)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER,
-                           gl.GL_LINEAR_MIPMAP_LINEAR)
+        # Plain GL_LINEAR, no mipmap chain. The
+        # previous LINEAR_MIPMAP_LINEAR + per-frame glGenerateMipmap was
+        # softening everything because the dewarp's non-linear UV
+        # derivatives caused the aniso sampler to pick lower mip levels.
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_SWIZZLE_A, gl.GL_ONE)
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, 1920, 1080, 0,
                         gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None)
-        gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         self.mpv_display_fbo = gl.glGenFramebuffers(1)
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.mpv_display_fbo)
@@ -662,6 +664,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         self._init_mpv_display()
         self._init_vr_dewarp_shader()
+        # Backward-nav ring of recent shader outputs. mpv's frame-back-step
+        # silently fails on long-GOP HEVC (8k VR), so we replay from this
+        # ring when the user steps backward by 1.
+        from application.gui_components.back_frame_ring import BackFrameRing
+        self.back_frame_ring = BackFrameRing(capacity=30)
+        # Visual override: when set, the display path renders this texture
+        # instead of running mpv + shader. Cleared once mpv catches up.
+        self._ring_override: Optional[Tuple[int, int]] = None  # (frame_idx, tex_id)
 
         # Tracker debug overlay texture (community trackers can set tracker.debug_frame)
         self._debug_frame_texture_id = gl.glGenTextures(1)
@@ -776,12 +786,13 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             # 'auto' probes all hwdec options and falls back to SW only if
             # none work. 'auto-safe' was too conservative and left some 8K
             # h264 files on SW.
-            # Mac: VT decode in libmpv shows no throughput win on Apple
-            # Silicon and intermittently fails init on some M1 boxes
-            # (gh#127). Mirror the ffmpeg-subprocess policy and disable.
+            # Note: previously defaulted Mac to "no" for gh#127, but that
+            # forces CPU keyframe decode on every mpv seek and balloons 8K
+            # seek latency. Test re-enabling "auto" for snappiness; revisit
+            # the M1 init-failure case with a fallback if needed.
             backend = self.app.app_settings.config.mpv.render_backend
             _sys = __import__("platform").system()
-            _default_hwdec = "no" if _sys == "Darwin" else "auto"
+            _default_hwdec = "auto"
             hwdec_override = self.app.app_settings.config.mpv.hwdec_override or _default_hwdec
             disp = None
 
@@ -855,8 +866,17 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             # loaded at app start before gui_instance existed), the prior
             # _load_into_mpv_display() call hit a None disp and bailed.
             # Now that disp exists, fire it so mpv actually loads the file.
+            # Same situation for thumbnail_mpv: _init_thumbnail_extractor
+            # ran before this gui's thumbnail_mpv existed, so the live
+            # preview path bailed (is_loaded==False). Re-fire the load.
             proc = getattr(self.app, 'processor', None)
             if proc is not None and getattr(proc, 'video_path', None):
+                if self.thumbnail_mpv is not None:
+                    try:
+                        self.thumbnail_mpv.load(proc.video_path)
+                    except Exception as e:
+                        self.app.logger.debug(
+                            f"Project-restore thumbnail_mpv load failed: {e}")
                 self.app.logger.debug(
                     "Project-restore: loading current video into MpvDisplay")
                 try:
@@ -909,15 +929,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             pass
         new_tex = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, new_tex)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER,
-                           gl.GL_LINEAR_MIPMAP_LINEAR)
+        # Plain GL_LINEAR (no mipmap chain). imgui samples this 1:1 now.
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_SWIZZLE_A, gl.GL_ONE)
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, w, h, 0,
                         gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None)
-        gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         new_fbo = gl.glGenFramebuffers(1)
         _prev_fbo = gl.glGetIntegerv(gl.GL_DRAW_FRAMEBUFFER_BINDING)
@@ -961,15 +980,15 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         # Fresh texture.
         new_tex = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, new_tex)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER,
-                           gl.GL_LINEAR_MIPMAP_LINEAR)
+        # Plain GL_LINEAR; mipmaps softened the
+        # dewarp output via aniso-selected lower mips.
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_SWIZZLE_A, gl.GL_ONE)
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA8, w, h, 0,
                         gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None)
-        gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         new_fbo = gl.glGenFramebuffers(1)
         _prev_fbo = gl.glGetIntegerv(gl.GL_DRAW_FRAMEBUFFER_BINDING)
@@ -2114,31 +2133,14 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 elif ratio < 0.9:
                     tracker_fps_color = (0.95, 0.85, 0.30, 0.9)   # yellow: borderline
 
-        # --- Compute Frame Buffer bar ---
-        buf_label = "Frame Buffer "
-        buf_label_w = imgui.calc_text_size(buf_label)[0]
-        bar_w = 60
+        # Frame Buffer indicator deleted in phase C: the lru cache it
+        # visualised is gone (libmpv handles all decode caching now).
         has_buf = False
-        green_start_frac = 0.0
-        green_end_frac = 0.0
-        cursor_frac = 0.0
-        buf_size = 0
-        buf_capacity = 1
-        buf_start = buf_end = buf_current = 0
-        if proc and proc.is_video_open():
-            has_buf = True
-            if hasattr(proc, 'buffer_info'):
-                buf = proc.buffer_info
-                buf_size = buf['size']
-                buf_capacity = buf['capacity'] if buf['capacity'] > 0 else 1
-                if buf_size > 0:
-                    buf_start = buf['start']
-                    buf_end = buf['end']
-                    buf_current = buf.get('current', buf_start)
-                    bar_left = buf_end - buf_capacity + 1
-                    green_start_frac = max(0.0, (buf_start - bar_left) / buf_capacity)
-                    green_end_frac = min(1.0, (buf_end - bar_left + 1) / buf_capacity)
-                    cursor_frac = max(0.0, min(1.0, (buf_current - bar_left + 0.5) / buf_capacity))
+        bar_w = 0
+        buf_label_w = 0
+        buf_label = ""
+        green_start_frac = green_end_frac = cursor_frac = 0.0
+        buf_size = buf_capacity = buf_start = buf_end = buf_current = 0
 
         # --- Layout: measure total width from right edge ---
         right_margin = 28
@@ -2461,7 +2463,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         look dead to the user while Ctrl-combos (which DO come through as
         key events on those devices, because modifiers travel a different
         HID path) keep working. SDL2 handles this transparently; GLFW does
-        not, which is why the same devices work in OFS and fail here.
+        not, which is why the same devices work in SDL2 apps and fail here.
 
         We (1) forward to the renderer's own char handler so text-input
         widgets keep receiving typed characters, then (2) when no text

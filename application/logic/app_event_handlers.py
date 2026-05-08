@@ -120,10 +120,6 @@ class AppEventHandlers:
             self.seek_video_with_sync(target_frame)
             self.app.processor.playhead_override_ms = action_ms
             self.app.energy_saver.reset_activity_timer()
-
-            # Prefetch frames around the target so left/right arrow adjustments are instant
-            if hasattr(self.app.processor, 'prefetch_around'):
-                self.app.processor.prefetch_around(target_frame)
         else:
             self.logger.info(f"No {direction} point found to jump to.", extra={'status_message': True})
 

@@ -2,6 +2,7 @@ import imgui
 import logging
 from typing import Optional, Tuple
 
+import numpy as np
 import OpenGL.GL as gl
 
 import config.constants as constants
@@ -13,6 +14,16 @@ from config.constants_colors import CurrentTheme
 
 # Module-level logger for Handy debug output (disabled by default)
 _handy_debug_logger = logging.getLogger(__name__ + '.handy')
+
+
+def _v360_match_output_fov(vr_fov: float) -> float:
+    """Output FOV that makes the GPU shader output match ffmpeg v360
+    pixel-for-pixel. Calibrated 2026-05-08 against three reference clips
+    (HE 180 -> 84, FISHEYE 190 -> 91, MKX 200 -> 98.5). The shader's sg
+    projection geometry differs from v360's just enough that the locked
+    output_fov has to scale with input fov.
+    """
+    return 0.75 * float(vr_fov) - 51.5
 
 
 
@@ -31,7 +42,6 @@ class VideoDisplayCoreMixin:
         self._cached_overlay_data = None  # Cache overlay rendering data
         self._overlay_dirty = True  # Flag for overlay re-rendering
         self._last_overlay_hash = None  # Detect overlay changes
-        self._render_quality_mode = "auto"  # auto/high/medium/low
         self._frame_skip_counter = 0  # Skip expensive operations during load
 
         # Video texture update optimization (dirty flag)
@@ -221,7 +231,7 @@ class VideoDisplayCoreMixin:
                 return
 
             # Begin the window. The second return value `new_visibility` will be False if the user clicks the 'x'.
-            is_expanded, new_visibility = imgui.begin("FunGen: Video Display", closable=True, flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_COLLAPSE)
+            is_expanded, new_visibility = imgui.begin("FunGen: Video Display", closable=True, flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE | imgui.WINDOW_NO_COLLAPSE)
 
             # Update our state based on the window's visibility (i.e., if the user closed it).
             if new_visibility != app_state.show_video_display_window:
@@ -233,7 +243,7 @@ class VideoDisplayCoreMixin:
                 should_render_content = True
         else:
             # For fixed mode, it's a static panel that's always present.
-            imgui.begin("Video Display##CenterVideo", flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
+            imgui.begin("Video Display##CenterVideo", flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
             should_render_content = True
 
         if should_render_content:
@@ -303,59 +313,26 @@ class VideoDisplayCoreMixin:
                             cursor_x_offset, cursor_y_offset = off_x, off_y
 
                         if route.source in ('mpv_shader', 'mpv_direct'):
-                            # One settings+monitor read per frame. Used by
-                            # both the mpv FBO sizing and the shader pass.
-                            ss = 1.0
-                            if route.source == 'mpv_shader':
-                                mon = getattr(self.gui_instance, '_vr_quality_monitor', None)
-                                if mon is not None:
-                                    try:
-                                        mode = self.app.app_settings.config.vr_display.quality_mode
-                                    except Exception:
-                                        mode = 'auto'
-                                    try:
-                                        sup_on = self.app.app_settings.config.vr_display.shader_supersample
-                                    except Exception:
-                                        sup_on = True
-                                    ss = float(mon.current_spec(mode=mode).supersample_factor) if sup_on else 1.0
-                                    self.gui_instance._vr_active_ss = ss
-                                    self.gui_instance._vr_active_mode = mode
-                            # Floor at 1024 so small panels do not regress
-                            # vs the historical default; scale up beyond that
-                            # with display_size * supersample factor.
-                            mpv_cap = max(1024, int(round(max(display_w, display_h) * ss)))
+                            # mpv FBO at the larger of viewport size and 2048.
+                            # 1024 floor was downscaling 8K -> 1024 (8x) which
+                            # the shader couldn't recover from; 2048 floor
+                            # gives gpu-hq/ewa_lanczossharp enough source
+                            # detail to land crisp output even on small panels.
+                            mpv_cap = max(2048, min(4096,
+                                max(display_w, display_h)))
                             mpv_has_new = bool(
                                 getattr(mpv_display, '_new_frame_pending', True))
                             last_applied_cap = getattr(self.gui_instance,
                                                        '_last_mpv_cap', -1)
                             cap_changed = last_applied_cap != mpv_cap
                             if mpv_has_new or cap_changed:
-                                # In direct (non-shader) mode the mpv scaler
-                                # is the final quality step before imgui's
-                                # LINEAR blit. Pin it to ewa_lanczos if we
-                                # don't already set it (shader path picks
-                                # per-quality-level below).
-                                if route.source == 'mpv_direct' and mpv_display is not None:
-                                    try:
-                                        cur = getattr(mpv_display, '_current_scale', None)
-                                        if cur != 'ewa_lanczos':
-                                            player = getattr(mpv_display, '_player', None) \
-                                                     or getattr(mpv_display, 'player', None)
-                                            if player is not None:
-                                                try:
-                                                    player.scale = 'ewa_lanczos'
-                                                    mpv_display._current_scale = 'ewa_lanczos'
-                                                except Exception:
-                                                    pass
-                                    except Exception:
-                                        pass
                                 self._render_mpv_to_fbo(proc, mpv_display, target_cap=mpv_cap)
                                 self.gui_instance._last_mpv_cap = mpv_cap
                                 self.gui_instance._shader_needs_repass = True
                         if route.source == 'mpv_shader':
                             shader_key = self._shader_params_key(
                                 proc, app_state, display_w, display_h,
-                                route.shader_locked, ss)
+                                route.shader_locked, 1.0)
                             last_key = getattr(self.gui_instance,
                                                '_last_shader_params_key', None)
                             needs_repass = bool(
@@ -836,71 +813,16 @@ class VideoDisplayCoreMixin:
             target_h = int(avail_h)
         if target_w <= 0 or target_h <= 0:
             return
-        # Pick the adaptive-quality spec for this frame.
-        from video.vr_render_quality import VRRenderQualityMonitor
-        mon = getattr(self.gui_instance, '_vr_quality_monitor', None)
-        if mon is None:
-            mon = VRRenderQualityMonitor()
-            self.gui_instance._vr_quality_monitor = mon
-        # Reuse the mode + ss picked at the top of the render block so
-        # app_settings lookups + current_spec() run once per frame rather
-        # than twice.
-        mode = getattr(self.gui_instance, '_vr_active_mode', 'auto')
-        spec = mon.current_spec(mode=mode)
-        ss_factor = float(getattr(self.gui_instance, '_vr_active_ss', spec.supersample_factor))
-        # Log level changes so users can see adaptive quality working.
-        _last_level = getattr(self.gui_instance, '_vr_quality_last_level', None)
-        if _last_level != spec.name:
-            self.app.logger.info(
-                f"VR shader quality: {spec.name} (ss={ss_factor:.2f}x "
-                f"bicubic={'on' if spec.use_bicubic else 'off'} "
-                f"aniso={int(spec.aniso_level)}x ema={mon.ema_ms:.1f}ms)")
-            self.gui_instance._vr_quality_last_level = spec.name
-        cap = 4096 if ss_factor > 1.0 else 2048
-        dw_w = max(64, min(int(round(target_w * ss_factor)), cap))
-        dw_h = max(64, min(int(round(target_h * ss_factor)), cap))
+        # Render dewarp directly at viewport size. The
+        # previous 2x supersample wrote to a 2x fbo, then imgui blitted
+        # 2x->1x with LINEAR minification, which softened detail edges.
+        # Bicubic + 16x aniso on the shader input side already gives
+        # quality at the sampling step; output is now pixel-perfect 1:1.
+        dw_w = max(64, min(target_w, 4096))
+        dw_h = max(64, min(target_h, 4096))
         self.gui_instance.resize_vr_dewarp_target(dw_w, dw_h)
-        # Apply anisotropic filtering to the input (mpv display) texture.
-        # Cache the GL_MAX_TEXTURE_MAX_ANISOTROPY cap on first use (glGetFloatv
-        # can force a pipeline sync every frame otherwise) and skip the
-        # texture parameter update if the effective level has not changed --
-        # glTexParameterf is cheap but redundant calls still traverse the GL
-        # driver.
-        try:
-            import OpenGL.GL.EXT.texture_filter_anisotropic as _aniso_ext
-            aniso_cap = getattr(self.gui_instance, "_aniso_cap", None)
-            if aniso_cap is None:
-                aniso_cap = float(gl.glGetFloatv(
-                    _aniso_ext.GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT))
-                self.gui_instance._aniso_cap = aniso_cap
-            aniso = min(float(spec.aniso_level), aniso_cap)
-            last_aniso = getattr(self.gui_instance, "_last_applied_aniso", None)
-            if last_aniso != aniso:
-                gl.glBindTexture(gl.GL_TEXTURE_2D,
-                                  self.gui_instance.mpv_display_texture_id)
-                gl.glTexParameterf(gl.GL_TEXTURE_2D,
-                                    _aniso_ext.GL_TEXTURE_MAX_ANISOTROPY_EXT,
-                                    aniso)
-                gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-                self.gui_instance._last_applied_aniso = aniso
-        except Exception:
-            pass
-        # Apply mpv scaler choice (runtime property change is cheap).
-        mpv_display = getattr(self.gui_instance, 'mpv_display', None)
-        if mpv_display is not None:
-            try:
-                cur_scale = getattr(mpv_display, '_current_scale', None)
-                if cur_scale != spec.mpv_scale:
-                    player = getattr(mpv_display, '_player', None) \
-                             or getattr(mpv_display, 'player', None)
-                    if player is not None:
-                        try:
-                            player.scale = spec.mpv_scale
-                        except Exception:
-                            pass
-                    mpv_display._current_scale = spec.mpv_scale
-            except Exception:
-                pass
+        # Anisotropy + mpv scaler are pinned at startup
+        # (see app_gui._init_mpv_display + resize_vr_dewarp_target).
 
         fmt = (getattr(proc, 'vr_input_format', '') or '').lower()
         eye = vr_panel.read_setting(self.app.app_settings,
@@ -909,7 +831,8 @@ class VideoDisplayCoreMixin:
         if locked:
             yaw = 0.0
             pitch = float(getattr(proc, 'vr_pitch', 0) or 0.0)
-            output_fov = 90.0
+            output_fov = _v360_match_output_fov(
+                float(getattr(proc, 'vr_fov', 0) or 190) or 190.0)
         else:
             yaw = float(getattr(app_state, 'vr_pan_yaw', 0.0))
             pitch = float(getattr(app_state, 'vr_pan_pitch', 0.0))
@@ -921,13 +844,9 @@ class VideoDisplayCoreMixin:
             out_scale = self.app.app_settings.config.vr_display.shader_sg_scale
         except Exception:
             out_scale = 1.840
-        try:
-            gl.glBindTexture(gl.GL_TEXTURE_2D,
-                              self.gui_instance.mpv_display_texture_id)
-            gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-        except Exception:
-            pass
+        # No glGenerateMipmap: source texture is now GL_LINEAR (mip-free)
+        # texture filter: Mipmaps were softening the dewarp via
+        # aniso-selected lower mip levels.
         in_w = int(getattr(self.gui_instance, 'mpv_display_w', 0) or 0)
         in_h = int(getattr(self.gui_instance, 'mpv_display_h', 0) or 0)
         shader.render_pass(
@@ -945,16 +864,25 @@ class VideoDisplayCoreMixin:
                 "projection": projection,
                 "output_projection": output_projection,
                 "output_scale": out_scale,
-                "use_bicubic": spec.use_bicubic,
+                "use_bicubic": False,
                 "input_tex_w": in_w,
                 "input_tex_h": in_h,
             },
         )
-        # Feed timing back into the monitor so auto mode can adapt next frame.
-        try:
-            mon.record_pass_ms(getattr(shader, '_last_render_ms', None))
-        except Exception:
-            pass
+        # Snapshot the dewarp output keyed by current frame index. Replayed
+        # by backward arrow nav when mpv frame-back-step fails (long-GOP HEVC).
+        ring = getattr(self.gui_instance, 'back_frame_ring', None)
+        if ring is not None and not locked:
+            try:
+                fi = int(getattr(proc, 'current_frame_index', -1) or -1)
+                if fi >= 0:
+                    ring.capture(
+                        fi,
+                        int(self.gui_instance.vr_dewarp_texture_id),
+                        int(self.gui_instance.vr_dewarp_w),
+                        int(self.gui_instance.vr_dewarp_h))
+            except Exception:
+                pass
 
     def _render_status_overlay(self, text, busy, img_min, img_max):
         if not text or img_min is None or img_max is None:
@@ -988,7 +916,12 @@ class VideoDisplayCoreMixin:
                     imgui.get_color_u32_rgba(1, 1, 1, alpha))
 
     def _handle_video_mouse_interaction(self, app_state):
-        if not (self.app.processor and self.app.processor.current_frame is not None): return
+        # Allow zoom/pan as long as a video is loaded, even when libmpv is
+        # the display source and proc.current_frame (the ffmpeg numpy path)
+        # is unused.
+        proc = self.app.processor
+        if proc is None or not getattr(proc, 'video_path', ''):
+            return
 
         img_rect = self._actual_video_image_rect_on_screen
         is_hovering_video = imgui.is_mouse_hovering_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'])

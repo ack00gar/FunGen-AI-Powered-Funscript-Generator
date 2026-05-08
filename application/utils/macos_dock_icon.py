@@ -3,7 +3,7 @@
 When FunGen runs via .venv/bin/python (not a .app bundle), macOS shows
 the Python framework's default rocket icon. NSApplication.setApplicationIconImage_
 overrides it for the running process. Must be called after NSApplication
-exists -- in practice, after the first GLFW window is created (or right
+exists; in practice, after the first GLFW window is created (or right
 before, since GLFW lazily inits NSApp the first time create_window runs).
 
 The NSImage must be retained for the lifetime of the process; we cache it

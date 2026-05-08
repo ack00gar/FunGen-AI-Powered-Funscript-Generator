@@ -361,7 +361,11 @@ class ApplicationLogic:
         # mode still runs analysis immediately after init so keeps eager init.
         if not self.is_cli_mode and self.tracker:
             tracker_name = self.app_state_ui.selected_tracker_name
-            if not self.tracker.set_tracking_mode(tracker_name, lazy=True):
+            # preload=False: don't load the YOLO model at app boot. Six
+            # seconds of MPS work competing with libmpv during the user's
+            # first video open. First Start pays the one-time load.
+            if not self.tracker.set_tracking_mode(tracker_name, lazy=True,
+                                                   preload=False):
                 from config.tracker_discovery import get_tracker_discovery, TrackerCategory
                 discovery = get_tracker_discovery()
                 live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
@@ -369,7 +373,8 @@ class ApplicationLogic:
                     fallback = live_trackers[0].internal_name
                     self.logger.info(f"Tracker '{tracker_name}' unavailable, falling back to '{fallback}'")
                     self.app_state_ui.selected_tracker_name = fallback
-                    self.tracker.set_tracking_mode(fallback, lazy=True)
+                    self.tracker.set_tracking_mode(fallback, lazy=True,
+                                                    preload=False)
 
     @staticmethod
     def _purge_old_log_entries(log_file_path: str):

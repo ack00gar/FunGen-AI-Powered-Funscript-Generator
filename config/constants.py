@@ -578,7 +578,7 @@ DEFAULT_AUTO_POST_CLAMP_HIGH = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["clamp_up
 ####################################################################################################
 # DEFAULT MODELS & DOWNLOADS
 ####################################################################################################
-# Anchored to the repo root via __file__ -- never depends on cwd.
+# Anchored to the repo root via __file__; never depends on cwd.
 FUNGEN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_MODELS_DIR = os.path.join(FUNGEN_ROOT, "models")
 MODEL_DOWNLOAD_URLS = {

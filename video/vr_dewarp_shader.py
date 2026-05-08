@@ -2,7 +2,7 @@
 
 One render pass: read mpv's raw fisheye/equirect texture, apply spherical
 projection with yaw/pitch/output-FOV uniforms, write a rectilinear texture
-that imgui paints. Math ported from OFS's flatten-fisheye-2.glsl (via the
+that imgui paints. Math from a flatten-fisheye-2.glsl (via the
 old gpu_unwarp_worker prototype). Yaw rotation added on top of the
 prototype's pitch-only mat3.
 """

@@ -142,7 +142,8 @@ class TrackerManager:
 
         self.logger.debug("TrackerManager initialized - Direct modular tracker interface")
 
-    def set_tracking_mode(self, mode_name: str, lazy: bool = False) -> bool:
+    def set_tracking_mode(self, mode_name: str, lazy: bool = False,
+                          preload: bool = True) -> bool:
         """Set tracking mode with direct tracker instantiation.
 
         When ``lazy`` is True, the tracker object is instantiated and axes are
@@ -204,7 +205,8 @@ class TrackerManager:
             if lazy:
                 self._pending_initialize = True
                 self.logger.debug(f"Tracker {mode_name} staged (lazy init); model load deferred.")
-                self._start_preload_async()
+                if preload:
+                    self._start_preload_async()
             else:
                 self._pending_initialize = False
                 if not self._initialize_tracker():
@@ -281,18 +283,25 @@ class TrackerManager:
                 if not self.ensure_initialized():
                     return False
 
+            # Lazy ffmpeg frame source spawn: skipped at video open when
+            # libmpv was the display, so first tracker start needs to
+            # actually warm the decoder pipe now.
+            processor = getattr(self.app, 'processor', None) if self.app else None
+            if processor is not None and hasattr(processor, '_ensure_frame_source_started'):
+                try:
+                    processor._ensure_frame_source_started()
+                except Exception as e:
+                    self.logger.debug(f"frame source warm failed: {e}")
+
             self.tracking_active = True
             self._suspend_mpv_display_for_tracking()
-            self._suspend_hd_for_live_tracking()
             if hasattr(self._current_tracker, 'start_tracking'):
                 result = self._current_tracker.start_tracking()
-                # Handle different return types
                 return result if isinstance(result, bool) else True
             return True
         except Exception as e:
             self.logger.error(f"Failed to start tracking: {e}")
             self.tracking_active = False
-            self._resume_hd_after_live_tracking()
             self._resume_mpv_display_after_tracking()
             return False
 
@@ -321,10 +330,6 @@ class TrackerManager:
 
             import threading as _threading
             def _teardown():
-                try:
-                    self._resume_hd_after_live_tracking()
-                except Exception as e:
-                    self.logger.warning(f"async HD resume failed: {e}")
                 try:
                     self._resume_mpv_display_after_tracking()
                 except Exception as e:
@@ -359,29 +364,6 @@ class TrackerManager:
         except Exception as e:
             if self.logger:
                 self.logger.debug(f"mpv suspend-for-tracking failed: {e}")
-
-    def _suspend_hd_for_live_tracking(self) -> None:
-        # Ask the processor to downgrade ffmpeg output to tracker size while
-        # live tracking runs. Skips the per-frame CPU resize in
-        # _make_processing_frame.
-        proc = getattr(self.app, 'processor', None) if self.app else None
-        if proc is None or not hasattr(proc, 'suspend_hd_for_live_tracking'):
-            return
-        try:
-            proc.suspend_hd_for_live_tracking()
-        except Exception as e:
-            if self.logger:
-                self.logger.debug(f"HD suspend for tracking failed: {e}")
-
-    def _resume_hd_after_live_tracking(self) -> None:
-        proc = getattr(self.app, 'processor', None) if self.app else None
-        if proc is None or not hasattr(proc, 'resume_hd_after_live_tracking'):
-            return
-        try:
-            proc.resume_hd_after_live_tracking()
-        except Exception as e:
-            if self.logger:
-                self.logger.debug(f"HD resume after tracking failed: {e}")
 
     def _resume_mpv_display_after_tracking(self) -> None:
         # No-op if we never actually suspended (stop_tracking can fire during

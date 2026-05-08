@@ -20,6 +20,7 @@ Invariants:
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import subprocess
 import threading
@@ -28,6 +29,14 @@ from collections import OrderedDict
 from typing import List, Optional, Tuple
 
 import numpy as np
+
+
+def _decoder_threads() -> int:
+    """ffmpeg -threads value: cap CPU thread count at 16. Beyond ~16 the
+    HEVC decoder has diminishing returns and added scheduling overhead;
+    on smaller machines, just use what's available."""
+    n = os.cpu_count() or 1
+    return min(max(1, n), 16)
 
 from video.ffmpeg_helpers import find_ffmpeg, subprocess_flags
 from video.frame_source._types import (
@@ -408,7 +417,8 @@ class FFmpegFrameSource:
         seconds on long files.
         """
         t_s = (start_frame / self._fps) if self._fps > 0 else 0.0
-        cmd = [find_ffmpeg(), "-hide_banner", "-loglevel", "warning", "-nostats"]
+        cmd = [find_ffmpeg(), "-hide_banner", "-loglevel", "warning", "-nostats",
+               "-threads", str(_decoder_threads())]
         cmd.extend(self._hwaccel_args)
         if t_s > 0.001:
             cmd.extend(["-ss", f"{t_s:.6f}"])
@@ -642,7 +652,8 @@ class FFmpegFrameSource:
         Used by scrub preview / arrow nav when playback isn't running.
         """
         t_s = (frame_index / self._fps) if self._fps > 0 else 0.0
-        cmd = [find_ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostats"]
+        cmd = [find_ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostats",
+               "-threads", str(_decoder_threads())]
         cmd.extend(self._hwaccel_args)
         if t_s > 0.001:
             cmd.extend(["-ss", f"{t_s:.6f}"])
@@ -682,7 +693,8 @@ class FFmpegFrameSource:
         if count == 0 or self._fps <= 0:
             return
         t_s = max(0.0, start_frame / self._fps)
-        cmd = [find_ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostats"]
+        cmd = [find_ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostats",
+               "-threads", str(_decoder_threads())]
         cmd.extend(self._hwaccel_args)
         if t_s > 0.001:
             cmd.extend(["-ss", f"{t_s:.6f}"])

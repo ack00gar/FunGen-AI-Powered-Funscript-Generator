@@ -125,6 +125,11 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         # full seek once the wheel has been quiet for H_WHEEL_SETTLE_S.
         self._h_wheel_last_t: float = 0.0
         self._h_wheel_pending: bool = False
+        # Pause-during-drag bookkeeping: each drag source tracks its own
+        # armed flag so the begin/end pair only fires once per gesture
+        # even though multiple drag sources can be checked per frame.
+        self._mid_drag_active: bool = False
+        self._mod_pan_drag_armed: bool = False
 
         self.context_menu_target_idx: int = -1
         self.selection_anchor_idx: int = -1 # For Shift+Click range selection logic if needed
@@ -514,6 +519,14 @@ class InteractiveFunscriptTimeline(DrawingMixin):
                 app_state.timeline_pan_offset_ms += (
                     io.mouse_wheel_horizontal * pan_px_per_tick * tf.zoom)
                 app_state.timeline_interaction_active = True
+                # First wheel tick of a burst pauses libmpv so the per-tick
+                # scrub is a paused absolute seek; settle handler restores
+                # playback if it was running.
+                if not self._h_wheel_pending and self.app.processor is not None:
+                    try:
+                        self.app.processor._begin_interactive_seek()
+                    except Exception:
+                        pass
                 # Instant feedback if the new center is in the nav cache;
                 # otherwise the settle-timer below commits a full seek.
                 center_ms = tf.x_to_time(tf.x_offset + tf.width / 2)
@@ -533,6 +546,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
                 delta_x = io.mouse_delta[0]
                 app_state.timeline_pan_offset_ms -= delta_x * tf.zoom
                 app_state.timeline_interaction_active = True
+                if not self._mid_drag_active and self.app.processor is not None:
+                    self._mid_drag_active = True
+                    try:
+                        self.app.processor._begin_interactive_seek()
+                    except Exception:
+                        pass
                 center_ms = tf.x_to_time(tf.x_offset + tf.width / 2) - delta_x * tf.zoom
                 self._seek_if_cached(center_ms)
 
@@ -543,6 +562,11 @@ class InteractiveFunscriptTimeline(DrawingMixin):
             self._h_wheel_pending = False
             app_state.timeline_interaction_active = False
             self._seek_pan_center_with_sync(app_state)
+            if self.app.processor is not None:
+                try:
+                    self.app.processor._end_interactive_seek()
+                except Exception:
+                    pass
 
         # --- Mode-specific input dispatch ---
         if self._mode == TimelineMode.ALTERNATING:
@@ -651,6 +675,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
                 delta_x = io.mouse_delta[0]
                 app_state.timeline_pan_offset_ms -= delta_x * tf.zoom
                 app_state.timeline_interaction_active = True
+                if not self._mod_pan_drag_armed and self.app.processor is not None:
+                    self._mod_pan_drag_armed = True
+                    try:
+                        self.app.processor._begin_interactive_seek()
+                    except Exception:
+                        pass
 
             elif self.dragging_action_idx != -1:
                 # Threshold check (prevent jitter on simple clicks)
@@ -685,6 +715,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
                 self._is_modifier_panning = False
                 app_state.timeline_interaction_active = False
                 self._seek_pan_center_with_sync(app_state)
+                if self._mod_pan_drag_armed and self.app.processor is not None:
+                    self._mod_pan_drag_armed = False
+                    try:
+                        self.app.processor._end_interactive_seek()
+                    except Exception:
+                        pass
             else:
                 if self.is_marqueeing:
                     self._finalize_marquee(tf, actions, io.key_ctrl)
@@ -706,6 +742,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         if imgui.is_mouse_released(glfw.MOUSE_BUTTON_MIDDLE):
             app_state.timeline_interaction_active = False
             self._seek_pan_center_with_sync(app_state)
+            if self._mid_drag_active and self.app.processor is not None:
+                self._mid_drag_active = False
+                try:
+                    self.app.processor._end_interactive_seek()
+                except Exception:
+                    pass
 
         # --- Context Menu ---
         if is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT):
@@ -1109,18 +1151,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
                 self.app.processor.seek_video(frame, accurate=False)
 
     def _seek_if_cached(self, time_ms: float):
-        """Seek only when the target frame is in the nav cache. Used during
-        middle-drag pan to keep the video in sync without decode stutter;
-        cache-miss seeks are deferred to mouse-release."""
-        proc = self.app.processor
-        if not proc or proc.fps <= 0:
-            return
-        nav = getattr(proc, '_nav_cache', None)
-        if nav is None:
-            return
-        frame = ms_to_frame(time_ms, proc.fps)
-        if nav.contains(frame):
-            proc.seek_video(frame)
+        """Phase C: nav cache deleted. Mid-drag soft-seek is a no-op now.
+        Final seek on drag release (via _seek_pan_center_with_sync) gives
+        the intended feedback; libmpv handles the actual decode without
+        the cache hit/miss dance.
+        """
+        return None
 
     def _seek_pan_center_with_sync(self, app_state):
         """Same path as alt+arrow pan-release: single seek_video_with_sync."""
@@ -1140,9 +1176,20 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         if not proc or proc.fps <= 0:
             return None
         ms = getattr(proc, 'playhead_override_ms', None)
-        if ms is None:
-            ms = frame_to_ms(proc.current_frame_index, proc.fps)
-        return ms
+        if ms is not None:
+            return ms
+        # Smooth-cursor extrapolation: between mpv time-pos events the
+        # cursor glides at playback speed instead of stepping at the
+        # event rate (~25-60 Hz, often jittery).
+        sm = getattr(proc, 'playhead_ms_smooth', None)
+        if callable(sm):
+            try:
+                v = sm()
+                if v is not None:
+                    return v
+            except Exception:
+                pass
+        return frame_to_ms(proc.current_frame_index, proc.fps)
 
     def _find_nearest_point_index(self) -> Optional[int]:
         """Find the index of the action nearest to the current playhead, without moving it."""

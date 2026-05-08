@@ -5,7 +5,6 @@ import platform
 import subprocess
 import numpy as np
 from typing import Optional, List, Dict, Tuple
-from video.thumbnail_extractor import ThumbnailExtractor
 
 # (source_path, hwaccel_name, mtime) -> works_bool; one probe per source per session.
 _HWACCEL_PROBE_CACHE: Dict[Tuple[str, str, float], bool] = {}
@@ -35,11 +34,8 @@ class FFmpegBuildersMixin:
         return False
 
     def _get_2d_video_filters(self) -> List[str]:
-        """Builds the list of FFmpeg filter segments for standard 2D video."""
-        # HD display mode: scale to display dimensions, no padding
-        if self.is_hd_active:
-            return [f"scale={self._display_frame_w}:{self._display_frame_h}"]
-
+        """Builds the list of FFmpeg filter segments for standard 2D video.
+        ffmpeg subprocess always outputs at yolo_input_size."""
         if not self.video_info:
             # Fallback if no video info
             return [
@@ -78,89 +74,52 @@ class FFmpegBuildersMixin:
             ]
 
     def _init_thumbnail_extractor(self):
-        """Initialize FFmpeg-based thumbnail extractor for frame-accurate random access."""
-        # Close existing extractor if present
-        if self.thumbnail_extractor:
-            self.thumbnail_extractor.close()
-            self.thumbnail_extractor = None
-
-        # Only initialize if we have a valid video
+        """Hand the active video path to ThumbnailMpv (a second mpv instance).
+        External pattern: thumbnails come from a paused mpv player scrubbed on
+        hover. No ffmpeg subprocess per thumbnail.
+        """
         if not self._active_video_source_path or not self.video_info:
             return
-
-        try:
-            # Don't apply VR cropping if using preprocessed video (already cropped/unwrapped)
-            vr_format = None
-            if self.determined_video_type == 'VR' and not self._is_using_preprocessed_video():
-                vr_format = self.vr_input_format
-
-            # HD display dims apply to thumbnails only for 2D (no fixed output
-            # size in the thumbnail filter). For VR, the thumbnail filter's
-            # v360 outputs at yolo_input_size (640), so passing HD dims here
-            # would mismatch the actual output and break shape validation.
-            display_dims = None
-            if self.is_hd_active and self.determined_video_type == '2D':
-                display_dims = (self._display_frame_w, self._display_frame_h)
-
-            from video import vr_panel
-            thumb_eye = vr_panel.read_setting(
-                getattr(self.app, 'app_settings', None),
-                default=vr_panel.EYE_LEFT)
-            extractor = ThumbnailExtractor(
-                video_path=self._active_video_source_path,
-                fps=self.fps,
-                total_frames=self.total_frames,
-                output_size=self.yolo_input_size,
-                vr_input_format=vr_format,
-                vr_fov=getattr(self, 'vr_fov', 190),
-                vr_pitch=getattr(self, 'vr_pitch', 0.0),
-                display_dimensions=display_dims,
-                eye=thumb_eye,
-                logger=self.logger,
-            )
-            if extractor.is_open:
-                self.thumbnail_extractor = extractor
-                source_type = "preprocessed" if self._is_using_preprocessed_video() else "original"
-                self.logger.debug(f"Thumbnail extractor initialized (FFmpeg-based, {source_type} video)")
-            else:
-                self.logger.warning("Thumbnail extractor probe failed, falling back to FFmpeg batch")
-
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize thumbnail extractor: {e}")
-            self.thumbnail_extractor = None
-
         gui = getattr(self.app, 'gui_instance', None)
         tmb = getattr(gui, 'thumbnail_mpv', None) if gui else None
-        if tmb is not None and self._active_video_source_path:
+        if tmb is not None:
             try:
                 tmb.load(self._active_video_source_path)
             except Exception as e:
                 self.logger.debug(f"ThumbnailMpv load failed: {e}")
 
     def get_thumbnail_frame(self, frame_index: int, **_kwargs) -> Optional[np.ndarray]:
-        """Returns a BGR24 numpy frame for the given index (or None)."""
+        """Returns a BGR24 numpy frame for the given index (or None).
+
+        Request size matches source aspect so eye-crop on the caller side
+        (gui_preview_manager) produces correct geometry. mpv letterboxes
+        when the request shape does not match source aspect, which would
+        turn an SBS left-eye crop into a vertical strip.
+        """
         gui = getattr(self.app, 'gui_instance', None)
         tq = getattr(gui, 'thumbnail_mpv_queue', None) if gui else None
         if tq is not None and self.fps > 0:
             try:
                 time_sec = float(frame_index) / float(self.fps)
-                size = int(self.yolo_input_size) if self.yolo_input_size else 320
-                frame = tq.request(time_sec, w=size, h=size, timeout=3.0)
+                long_side = int(self.yolo_input_size) if self.yolo_input_size else 320
+                src_w = int((self.video_info or {}).get('width', 0) or 0)
+                src_h = int((self.video_info or {}).get('height', 0) or 0)
+                if src_w > 0 and src_h > 0:
+                    if src_w >= src_h:
+                        w = long_side
+                        h = max(1, int(round(long_side * src_h / src_w)))
+                    else:
+                        h = long_side
+                        w = max(1, int(round(long_side * src_w / src_h)))
+                else:
+                    w = h = long_side
+                frame = tq.request(time_sec, w=w, h=h, timeout=3.0)
                 if frame is not None:
                     return frame
             except Exception as e:
                 self.logger.debug(f"ThumbnailMpv request failed: {e}")
-
-        if self.thumbnail_extractor is None:
-            return self._get_specific_frame(
-                frame_index, update_current_index=False, use_thumbnail=True)
-        try:
-            return self.thumbnail_extractor.get_frame(frame_index)
-        except Exception as e:
-            self.logger.warning(
-                f"Thumbnail extraction failed: {e}, falling back to FFmpeg batch")
-            return self._get_specific_frame(
-                frame_index, update_current_index=False, use_thumbnail=True)
+        return self._get_specific_frame(
+            frame_index, update_current_index=False, use_thumbnail=True)
 
     def _get_vr_video_filters(self) -> List[str]:
         """Builds the list of FFmpeg filter segments for VR video, including cropping and v360."""
@@ -169,18 +128,12 @@ class FFmpegBuildersMixin:
 
         original_width = self.video_info.get('width', 0)
         original_height = self.video_info.get('height', 0)
-        # Output dimensions + FOV for the stereographic projection. When HD
-        # is active we honor _display_frame_{w,h}; horizontal FOV scales with
-        # output aspect to fill wider displays without squashing content.
-        if self.is_hd_active:
-            out_w = self._display_frame_w
-            out_h = self._display_frame_h
-        else:
-            out_w = self.yolo_input_size
-            out_h = self.yolo_input_size
+        # Tracker output is square at yolo_input_size; v_fov=h_fov=90 for
+        # the stereographic projection.
+        out_w = self.yolo_input_size
+        out_h = self.yolo_input_size
         v_fov = 90
-        aspect = (out_w / out_h) if out_h > 0 else 1.0
-        h_fov = max(60, min(170, int(round(v_fov * aspect))))
+        h_fov = 90
 
         vr_filters = []
         from video import vr_panel

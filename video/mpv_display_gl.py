@@ -147,10 +147,11 @@ class MpvDisplayGL:
                 "keep_open": "yes",
                 "pause": "yes",
                 "hwdec": self.hwdec,
-                "profile": "fast",
-                "scale": "bilinear",
-                "cscale": "bilinear",
-                "dscale": "bilinear",
+                # gpu-hq: ewa_lanczossharp + mitchell
+                # + linear-light upscaling. Cost is acceptable when the FBO
+                # is viewport-sized (ss=1.0); the previous fail was ss=2.0
+                # which made the FBO 4x and starved 8K.
+                "profile": "gpu-hq",
                 "video_sync": "display-resample",
                 "display_fps_override": str(self.display_fps),
                 "log_handler": _mpv_log,
@@ -309,17 +310,36 @@ class MpvDisplayGL:
         except Exception:
             pass
 
+    def _async_cmd(self, *args) -> bool:
+        # Fire-and-forget mpv command. command_async returns a Future the
+        # event loop fulfils; we drop the reference so the UI thread never
+        # waits on libmpv. Falls back to sync command on older mpv builds
+        # that don't expose command_async.
+        p = self._player
+        if p is None:
+            return False
+        try:
+            ca = getattr(p, "command_async", None)
+            if ca is not None:
+                ca(*args)
+            else:
+                p.command(*args)
+            return True
+        except Exception as e:
+            self.logger.debug(f"async cmd {args!r} failed: {e}")
+            return False
+
     def play(self) -> None:
         if self._player is None:
             return
-        self._player.pause = False
         self._is_paused = False
+        self._async_cmd("set", "pause", "no")
 
     def pause(self) -> None:
         if self._player is None:
             return
-        self._player.pause = True
         self._is_paused = True
+        self._async_cmd("set", "pause", "yes")
 
     @property
     def is_paused(self) -> bool:
@@ -329,10 +349,7 @@ class MpvDisplayGL:
         if self._player is None:
             return
         precision = "exact" if exact else "keyframes"
-        try:
-            self._player.command("seek", float(time_seconds), "absolute", precision)
-        except Exception as e:
-            self.logger.debug(f"MpvDisplayGL seek({time_seconds}) failed: {e}")
+        if not self._async_cmd("seek", float(time_seconds), "absolute", precision):
             return
         # Force a render on the next tick; mpv's update_cb won't always
         # fire immediately on an exact-seek to a keyframe close to pos.
@@ -348,28 +365,20 @@ class MpvDisplayGL:
     def step_forward(self) -> None:
         if self._player is None:
             return
-        try:
-            self._player.command("frame-step")
+        if self._async_cmd("frame-step"):
             self._new_frame_pending = True
-        except Exception as e:
-            self.logger.debug(f"frame-step failed: {e}")
 
     def step_backward(self) -> None:
         if self._player is None:
             return
-        try:
-            self._player.command("frame-back-step")
+        if self._async_cmd("frame-back-step"):
             self._new_frame_pending = True
-        except Exception as e:
-            self.logger.debug(f"frame-back-step failed: {e}")
 
     def set_speed(self, factor: float) -> None:
         if self._player is None:
             return
-        try:
-            self._player.speed = max(0.1, min(4.0, float(factor)))
-        except Exception:
-            pass
+        clamped = max(0.1, min(4.0, float(factor)))
+        self._async_cmd("set", "speed", str(clamped))
 
     def render_to_fbo(self, fbo_id: int, w: int, h: int) -> bool:
         """Render mpv's current frame into the caller-owned FBO.
@@ -488,6 +497,11 @@ class MpvDisplayGL:
                 self._last_time_pos = float(value)
             except (TypeError, ValueError):
                 return
+            # time-pos advance means a new frame is in mpv's pipeline.
+            # update_cb does not always fire on paused frame-step / exact
+            # seek (see seek()), so the host loop would otherwise sit on a
+            # stale FBO until something else triggers a re-render.
+            self._new_frame_pending = True
             fps = self._fps
             # Hot path first: skip the property fetches once fps is known.
             if fps <= 0:

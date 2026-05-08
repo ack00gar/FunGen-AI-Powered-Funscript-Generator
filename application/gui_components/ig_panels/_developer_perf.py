@@ -184,65 +184,6 @@ class DeveloperPerfMixin:
         imgui.separator()
         imgui.spacing()
 
-        # Navigation Buffer Status
-        imgui.text_colored("Navigation Buffer Status:", *CurrentTheme.BLUE_LIGHT)
-        imgui.spacing()
-
-        # Nav cache stats (byte-budgeted LRU). Reports fill percentage
-        # against the configured byte budget, not a frame count.
-        if hasattr(processor, '_nav_cache'):
-            buf = processor.buffer_info
-            bytes_used = buf.get('bytes', 0)
-            budget = buf.get('budget', 0) or 1
-            frames_cached = buf.get('size', 0)
-            fill_percentage = buf.get('fill_pct', 0.0)
-            hit_rate = buf.get('hit_rate_5s', 0.0)
-
-            if fill_percentage < 0.3:
-                buffer_color = (1.0, 0.4, 0.2, 1.0)
-            elif fill_percentage < 0.7:
-                buffer_color = CurrentTheme.YELLOW
-            else:
-                buffer_color = CurrentTheme.GREEN
-
-            imgui.text(f"Cache: {frames_cached} frames  "
-                       f"{bytes_used / (1024*1024):.0f} / "
-                       f"{budget / (1024*1024):.0f} MB")
-
-            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *buffer_color)
-            imgui.progress_bar(
-                fill_percentage,
-                size=(0, 0),
-                overlay=f"{fill_percentage*100:.1f}% of budget",
-            )
-            imgui.pop_style_color()
-
-            range_txt = "(empty)"
-            start_idx = buf.get('start', -1)
-            end_idx = buf.get('end', -1)
-            if start_idx >= 0 and end_idx >= 0:
-                range_txt = f"oldest={start_idx}  newest={end_idx}"
-            imgui.text_disabled(
-                f"Hit rate (5s): {hit_rate*100:.0f}%   {range_txt}")
-
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    f"Navigation cache (LRU, byte-budgeted)\n\n"
-                    f"Frames cached: {frames_cached}\n"
-                    f"Memory used: {bytes_used / (1024*1024):.1f} MB / "
-                    f"{budget / (1024*1024):.0f} MB ({fill_percentage*100:.1f}%)\n"
-                    f"Hit rate (last 5 s): {hit_rate*100:.1f}%\n"
-                    f"Cached range: {range_txt}\n\n"
-                    "Frames evict LRU when the byte budget is exceeded.\n"
-                    "Survives seeks, so bouncing between regions reuses\n"
-                    "already-decoded frames until evicted.\n\n"
-                    "Color: green >70% full budget, yellow 30-70%, red <30%"
-                )
-        else:
-            imgui.text_disabled("Navigation cache not available")
-
-        imgui.spacing()
-
         # Nav debug logging toggle.
         current = self.app.app_settings.config.navigation.debug_logging
         changed, new_val = imgui.checkbox("Debug nav logging", current)
@@ -263,6 +204,101 @@ class DeveloperPerfMixin:
         # Performance recommendations
         if total_time > 0:
             imgui.text_disabled("Tip: Check individual component times to identify bottlenecks")
+
+        # Live pipeline metrics: seek timings, prefetcher work, loop state.
+        # Populated in real time by VideoProcessor / FramePrefetcher hooks.
+        self._render_pipeline_live_metrics(processor)
+
+    def _render_pipeline_live_metrics(self, processor):
+        metrics = getattr(processor, "metrics", None)
+        if metrics is None:
+            return
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        imgui.text_colored("Live Diagnostics:", *CurrentTheme.BLUE_LIGHT)
+        imgui.spacing()
+
+        # Trace recorder controls.
+        trace = getattr(processor, "trace", None)
+        if trace is not None:
+            recording = trace.is_enabled()
+            label = "[REC] Stop" if recording else "Start recording"
+            if imgui.button(label):
+                if recording:
+                    trace.stop_recording()
+                else:
+                    trace.start_recording()
+            imgui.same_line()
+            out = trace.out_path() or "(unset)"
+            imgui.text_disabled(out)
+            imgui.spacing()
+            self._render_trace_summary(trace)
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+        # Loop state (where the system is right now).
+        age_s = metrics.loop_state_age_s()
+        age_str = f"{age_s:.1f}s ago" if age_s < 60 else "stale"
+        state = "tracker" if metrics.loop_tracker_needs else (
+            "mpv" if metrics.loop_mpv_drives else "idle")
+        src_state = "paused" if metrics.loop_src_paused else "running"
+        imgui.text(f"Loop: {state}  |  ffmpeg src: {src_state}  ({age_str})")
+
+        # Recent seeks: total / ffmpeg / mpv breakdown.
+        seeks = metrics.recent_seeks()
+        imgui.spacing()
+        imgui.text("Recent seeks (newest first):")
+        if not seeks:
+            imgui.text_disabled("  none yet")
+        else:
+            now_t = time.monotonic()
+            for ev in reversed(seeks[-6:]):
+                age = now_t - ev.timestamp
+                if ev.total_ms < 30:
+                    color = CurrentTheme.GREEN
+                elif ev.total_ms < 100:
+                    color = CurrentTheme.YELLOW
+                else:
+                    color = CurrentTheme.RED
+                line = (
+                    f"  -{age:5.1f}s  f={ev.target_frame:<7}  "
+                    f"total={ev.total_ms:5.1f}ms  "
+                    f"ff={ev.ffmpeg_ms:5.1f}ms  "
+                    f"mpv={ev.mpv_ms:5.1f}ms  "
+                    f"{'tracker' if ev.tracker_needs else 'mpv-only'}")
+                imgui.text_colored(line, *color)
+
+        # Pause / resume single-slot timings.
+        imgui.spacing()
+        if metrics.last_pause_ms > 0 or metrics.last_resume_ms > 0:
+            imgui.text(
+                f"Last pause: {metrics.last_pause_ms:.1f}ms  |  "
+                f"last resume: {metrics.last_resume_ms:.1f}ms")
+
+
+    def _render_trace_summary(self, trace):
+        """Show the most recent root traces with their top child legs."""
+        if not trace.is_enabled():
+            imgui.text_disabled("Tracing off; press Start recording to capture.")
+            return
+        roots = trace.recent_roots(8)
+        if not roots:
+            imgui.text_disabled("No traces yet. Click around or press play.")
+            return
+        imgui.text("Recent traces (newest last):")
+        for r in roots:
+            color = (CurrentTheme.GREEN if r.ms < 30 else
+                     CurrentTheme.YELLOW if r.ms < 100 else CurrentTheme.RED)
+            line = f"  {r.name:<22} {r.ms:7.2f}ms"
+            if r.attrs:
+                # Render the most useful attrs compactly.
+                kv = "  ".join(f"{k}={v}" for k, v in list(r.attrs.items())[:3])
+                line = f"{line}  {kv}"
+            imgui.text_colored(line, *color)
+            for c in r.children[:2]:
+                imgui.text_disabled(f"    {c.name:<20} {c.ms:7.2f}ms")
 
     def _render_disk_io_section(self):
         """Render the independent Disk I/O section."""
