@@ -135,6 +135,59 @@ def _patch_find_library() -> None:
     ctypes.util.find_library = _patched
 
 
+def _try_fetch_libmpv_windows() -> bool:
+    """Last-resort autofetch when first import fails on Windows.
+
+    The winget shinchiro.mpv package ships mpv.exe but no libmpv-2.dll,
+    so users with that install combo land here even after a clean
+    install of FunGen if they skipped install.py. Pulls the dev SDK,
+    extracts libmpv-2.dll into <ROOT>/lib/. Stdlib only; tar.exe ships
+    with Windows 10 1803+ and reads the BCJ2-filtered .7z."""
+    if platform.system() != "Windows":
+        return False
+    try:
+        from common.paths import APP_ROOT
+    except Exception:
+        return False
+    target = APP_ROOT / "lib" / "libmpv-2.dll"
+    if target.is_file():
+        return True
+    import json as _json
+    import re as _re
+    import subprocess as _sp
+    import tempfile as _tempfile
+    import urllib.request as _urlreq
+    api = "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+    try:
+        with _urlreq.urlopen(api, timeout=15) as r:
+            release = _json.load(r)
+    except Exception:
+        return False
+    asset = next((a for a in release.get("assets", [])
+                  if _re.match(r"^mpv-dev-x86_64-\d", a.get("name", ""))
+                  and a["name"].endswith(".7z")), None)
+    if not asset:
+        return False
+    archive = os.path.join(_tempfile.gettempdir(), asset["name"])
+    try:
+        _urlreq.urlretrieve(asset["browser_download_url"], archive)
+    except Exception:
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        r = _sp.run(["tar", "-xf", archive, "-C", str(target.parent),
+                     "libmpv-2.dll"],
+                    capture_output=True, text=True, timeout=120)
+    except Exception:
+        return False
+    finally:
+        try:
+            os.remove(archive)
+        except OSError:
+            pass
+    return r.returncode == 0 and target.is_file() and target.stat().st_size > 50_000_000
+
+
 mpv = None
 mpv_available = False
 mpv_load_error: str = ""
@@ -145,9 +198,27 @@ try:
     mpv = _mpv
     mpv_available = True
 except Exception as e:
-    mpv_load_error = f"{type(e).__name__}: {e}"
-    mpv = None
-    mpv_available = False
+    # Windows + winget shinchiro.mpv is the most common path that lands
+    # here: mpv.exe is on PATH but libmpv-2.dll is missing. Try one
+    # autofetch + reload before giving up.
+    if platform.system() == "Windows" and _try_fetch_libmpv_windows():
+        # Re-scan candidates so the patched find_library picks up the
+        # newly downloaded dll, then retry the import.
+        _CANDIDATES["Windows"] = _windows_candidates()
+        try:
+            _patch_find_library()
+            import mpv as _mpv  # type: ignore
+            mpv = _mpv
+            mpv_available = True
+            mpv_load_error = ""
+        except Exception as e2:
+            mpv_load_error = f"{type(e2).__name__}: {e2}"
+            mpv = None
+            mpv_available = False
+    else:
+        mpv_load_error = f"{type(e).__name__}: {e}"
+        mpv = None
+        mpv_available = False
 
 
 __all__ = ["mpv", "mpv_available", "mpv_load_error"]

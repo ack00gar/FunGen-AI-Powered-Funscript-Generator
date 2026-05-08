@@ -535,6 +535,21 @@ def ensure_mpv() -> None:
     manual-install hint and returns if no automated path works.
     FunGen spawns `mpv` as a subprocess for fullscreen review playback."""
     if shutil.which("mpv"):
+        # On Windows, mpv.exe alone is not enough: the python-mpv binding
+        # needs libmpv-2.dll, which the shinchiro.mpv winget package does
+        # not ship. Always check + fetch if the dll is missing.
+        if platform.system() == "Windows":
+            target = ROOT / "lib" / "libmpv-2.dll"
+            if not target.is_file():
+                _print_section("libmpv-2.dll missing, fetching dev SDK")
+                if _ensure_libmpv_windows():
+                    print(f"  libmpv-2.dll installed at {target}")
+                else:
+                    print("  auto-fetch failed. To install libmpv-2.dll manually:")
+                    print("    1. Download mpv-dev-x86_64-v3 from")
+                    print("       https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest")
+                    print("    2. Extract libmpv-2.dll from the .7z archive")
+                    print(f"    3. Place it at: {target}")
         return
 
     _print_section("mpv not found, attempting install")
