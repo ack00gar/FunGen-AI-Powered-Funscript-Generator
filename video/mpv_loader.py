@@ -125,10 +125,24 @@ def _patch_find_library() -> None:
     override = _first_existing(_CANDIDATES.get(platform.system(), []))
     if override is None:
         return
+    # On Windows + Python 3.8+, transitive DLL search no longer walks
+    # PATH automatically. add_dll_directory makes sure any sibling DLLs
+    # the libmpv build pulls in (vulkan-1, d3d12 helpers, codec shims)
+    # actually resolve.
+    if platform.system() == "Windows":
+        try:
+            os.add_dll_directory(os.path.dirname(override))  # type: ignore[attr-defined]
+        except (AttributeError, OSError):
+            pass
     _orig = ctypes.util.find_library
 
     def _patched(name):
-        if name == "mpv":
+        # python-mpv tries several names in order: "mpv", "libmpv-2",
+        # "libmpv-1", "libmpv". Intercept all of them so a relative
+        # "libmpv-2.dll" from Windows PATH search never reaches CDLL.
+        if name and name.lower() in (
+            "mpv", "libmpv", "libmpv-1", "libmpv-2", "mpv-1", "mpv-2"
+        ):
             return override
         return _orig(name)
 

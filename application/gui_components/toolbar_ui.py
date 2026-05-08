@@ -508,13 +508,19 @@ class ToolbarUI:
             self._apply_button_default()
 
     def _render_audio_mute_button(self, icon_mgr, btn_size):
-        """Mute / unmute toggle. Lives in the Playback section now; system
-        volume is the source of truth for level (no app-side slider)."""
+        """Mute / unmute toggle. Drives both the legacy sounddevice player
+        (waveform-driven preview audio) and libmpv's own audio output, so
+        a single click silences everything the app produces."""
         app = self.app
         audio_cfg = app.app_settings.config.audio
         sd_ok = SOUNDDEVICE_AVAILABLE
         player_ok = getattr(app, '_audio_player', None) is not None
-        has_audio_system = sd_ok and player_ok
+        has_sd_audio = sd_ok and player_ok
+        gui = getattr(app, 'gui_instance', None)
+        mpv_disp = getattr(gui, 'mpv_display', None) if gui else None
+        has_mpv_audio = mpv_disp is not None and getattr(
+            mpv_disp, 'is_loaded', False)
+        has_audio_system = has_sd_audio or has_mpv_audio
         is_muted = audio_cfg.muted
         disabled = not has_audio_system
 
@@ -524,22 +530,22 @@ class ToolbarUI:
         if is_muted and not disabled:
             self._apply_button_active()
         if disabled:
-            reasons = []
-            if not sd_ok:
-                reasons.append("sounddevice not installed")
-            if not player_ok:
-                reasons.append("audio player not initialized")
-            tooltip = f"Audio unavailable ({', '.join(reasons)})"
+            tooltip = "Audio unavailable (no video loaded)"
         else:
             tooltip = "Unmute Audio" if is_muted else "Mute Audio"
         if self._toolbar_button(icon_mgr, icon, btn_size, tooltip):
             if not disabled:
                 is_muted = not is_muted
                 audio_cfg.muted = is_muted
-                # Reuse last known volume; no in-app slider any more.
-                vol = getattr(app, '_audio_volume_live', audio_cfg.volume)
-                if app._audio_sync:
-                    app._audio_sync.update_settings(vol, is_muted)
+                if has_sd_audio:
+                    vol = getattr(app, '_audio_volume_live', audio_cfg.volume)
+                    if app._audio_sync:
+                        app._audio_sync.update_settings(vol, is_muted)
+                if has_mpv_audio:
+                    try:
+                        mpv_disp.set_mute(is_muted)
+                    except Exception:
+                        pass
         if is_muted and not disabled:
             self._apply_button_default()
         if disabled:

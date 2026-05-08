@@ -380,6 +380,16 @@ class MpvDisplayGL:
         clamped = max(0.1, min(4.0, float(factor)))
         self._async_cmd("set", "speed", str(clamped))
 
+    def set_mute(self, muted: bool) -> None:
+        """Toggle mpv's audio output. Used by the toolbar mute button so
+        the user has a single switch that silences the whole app."""
+        if self._player is None:
+            return
+        try:
+            self._player.mute = bool(muted)
+        except Exception as e:
+            self.logger.debug(f"set_mute failed: {e}")
+
     def render_to_fbo(self, fbo_id: int, w: int, h: int) -> bool:
         """Render mpv's current frame into the caller-owned FBO.
 

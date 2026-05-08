@@ -476,6 +476,16 @@ class VideoProcessor(
                         disp.pause()
                 except Exception as _e:
                     self.logger.debug(f"mpv pause sync failed: {_e}")
+                # Apply the user's saved mute preference. mpv defaults to
+                # unmuted on every load(); without this the toolbar mute
+                # button silently disagrees with mpv's actual state across
+                # video opens.
+                try:
+                    if self.app is not None:
+                        muted = bool(self.app.app_settings.config.audio.muted)
+                        disp.set_mute(muted)
+                except Exception as _e:
+                    self.logger.debug(f"mpv mute sync failed: {_e}")
                 self.logger.debug(
                     f"MpvDisplay.load() ok in {dur:.0f}ms "
                     f"(is_loaded={disp.is_loaded}, fps={disp.fps:.2f}, "
