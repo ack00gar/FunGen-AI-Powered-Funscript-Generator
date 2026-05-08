@@ -76,16 +76,20 @@ def compute_display_route(app) -> DisplayRoute:
                             show_overlays=False)
 
     tracker_active = bool(tracker and getattr(tracker, 'tracking_active', False))
-    # If the tracker is active but paused, the cpu_tracker texture is no
-    # longer being driven -- fall back to mpv so arrow nav and click-seek
-    # update the displayed frame instead of locking on the last produced
-    # tracker frame.
+    # The cpu_tracker texture is only refreshed while the playback loop
+    # is actively pumping frames (is_processing and not paused). In any
+    # other state (loop stopped, tracker armed but not started, live
+    # tracking paused), scrubbing the timeline updates current_frame_index
+    # but nothing writes proc.current_frame, so frame_texture_id stays on
+    # whatever frame the loop produced last. Fall back to the mpv route
+    # in those cases so click-seek and arrow nav refresh the display.
     if tracker_active:
         try:
-            paused = bool(getattr(proc, 'pause_event').is_set())
+            is_running = (bool(getattr(proc, 'is_processing', False))
+                          and not bool(getattr(proc, 'pause_event').is_set()))
         except Exception:
-            paused = False
-        if paused:
+            is_running = False
+        if not is_running:
             tracker_active = False
 
     determined_type = getattr(proc, 'determined_video_type', '') or ''
