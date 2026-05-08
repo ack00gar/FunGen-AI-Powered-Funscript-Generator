@@ -219,25 +219,6 @@ class DeveloperPerfMixin:
         imgui.text_colored("Live Diagnostics:", *CurrentTheme.BLUE_LIGHT)
         imgui.spacing()
 
-        # Trace recorder controls.
-        trace = getattr(processor, "trace", None)
-        if trace is not None:
-            recording = trace.is_enabled()
-            label = "[REC] Stop" if recording else "Start recording"
-            if imgui.button(label):
-                if recording:
-                    trace.stop_recording()
-                else:
-                    trace.start_recording()
-            imgui.same_line()
-            out = trace.out_path() or "(unset)"
-            imgui.text_disabled(out)
-            imgui.spacing()
-            self._render_trace_summary(trace)
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
         # Loop state (where the system is right now).
         age_s = metrics.loop_state_age_s()
         age_str = f"{age_s:.1f}s ago" if age_s < 60 else "stale"
@@ -277,28 +258,6 @@ class DeveloperPerfMixin:
                 f"Last pause: {metrics.last_pause_ms:.1f}ms  |  "
                 f"last resume: {metrics.last_resume_ms:.1f}ms")
 
-
-    def _render_trace_summary(self, trace):
-        """Show the most recent root traces with their top child legs."""
-        if not trace.is_enabled():
-            imgui.text_disabled("Tracing off; press Start recording to capture.")
-            return
-        roots = trace.recent_roots(8)
-        if not roots:
-            imgui.text_disabled("No traces yet. Click around or press play.")
-            return
-        imgui.text("Recent traces (newest last):")
-        for r in roots:
-            color = (CurrentTheme.GREEN if r.ms < 30 else
-                     CurrentTheme.YELLOW if r.ms < 100 else CurrentTheme.RED)
-            line = f"  {r.name:<22} {r.ms:7.2f}ms"
-            if r.attrs:
-                # Render the most useful attrs compactly.
-                kv = "  ".join(f"{k}={v}" for k, v in list(r.attrs.items())[:3])
-                line = f"{line}  {kv}"
-            imgui.text_colored(line, *color)
-            for c in r.children[:2]:
-                imgui.text_disabled(f"    {c.name:<20} {c.ms:7.2f}ms")
 
     def _render_disk_io_section(self):
         """Render the independent Disk I/O section."""

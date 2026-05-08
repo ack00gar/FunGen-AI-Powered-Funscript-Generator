@@ -8,7 +8,6 @@ the cache stored numpy frames nothing read.
 """
 from __future__ import annotations
 
-import time as _time
 from typing import Optional
 
 import numpy as np
@@ -63,50 +62,45 @@ class NavBufferMixin:
     def _nav_to_target(self, target_frame: int) -> Optional[np.ndarray]:
         target_frame = int(target_frame)
         prev = getattr(self, 'current_frame_index', -1)
-        with self.trace.span("arrow_nav", frame=target_frame, prev=prev) as _root:
-            # Logical cursor latch on arrow nav: the cursor jumps to
-            # target_frame instantly; mpv catches up async.
-            fps = getattr(self, 'fps', 0) or 0
-            if fps and fps > 0:
-                self.playhead_override_ms = target_frame * 1000.0 / fps
-            else:
-                self.playhead_override_ms = None
+        # Logical cursor latch on arrow nav: the cursor jumps to
+        # target_frame instantly; mpv catches up async.
+        fps = getattr(self, 'fps', 0) or 0
+        if fps and fps > 0:
+            self.playhead_override_ms = target_frame * 1000.0 / fps
+        else:
+            self.playhead_override_ms = None
 
-            # Drive libmpv. delta=+1 -> frame-step (instant, no decode from
-            # keyframe). delta=-1 -> ring replay if cached, else exact seek
-            # (frame-back-step is unreliable on long-GOP HEVC). Larger
-            # deltas fall back to exact seek. command_async coalesces
-            # rapid bursts inside libmpv.
-            disp_getter = getattr(self, "_get_mpv_display", None)
-            disp = disp_getter() if disp_getter else None
-            mpv_alive = disp is not None and getattr(disp, "is_alive", False)
-            delta = target_frame - prev
-            ring_hit = False
-            if delta == -1:
-                gui = getattr(getattr(self, 'app', None), 'gui_instance', None)
-                ring = getattr(gui, 'back_frame_ring', None) if gui else None
-                if ring is not None:
-                    tex = ring.get(target_frame)
-                    if tex is not None:
-                        gui._ring_override = (int(target_frame), int(tex))
-                        ring_hit = True
-            with self.trace.span("arrow_nav.mpv_drive", delta=delta,
-                                  ring_hit=ring_hit):
-                try:
-                    if mpv_alive and delta == 1:
-                        disp.step_forward()
-                    elif mpv_alive and (ring_hit or delta == -1):
-                        if hasattr(self, "_mpv_seek_to_frame_ex"):
-                            self._mpv_seek_to_frame_ex(target_frame, exact=True)
-                    elif hasattr(self, "_mpv_seek_to_frame_ex"):
-                        self._mpv_seek_to_frame_ex(target_frame, exact=True)
-                except Exception as e:
-                    self.logger.debug(f"arrow nav mpv drive failed: {e}")
+        # Drive libmpv. delta=+1 means frame-step (instant, no decode
+        # from keyframe). delta=-1 means ring replay if cached, else
+        # exact seek (frame-back-step is unreliable on long-GOP HEVC).
+        # Larger deltas fall back to exact seek. command_async coalesces
+        # rapid bursts inside libmpv.
+        disp_getter = getattr(self, "_get_mpv_display", None)
+        disp = disp_getter() if disp_getter else None
+        mpv_alive = disp is not None and getattr(disp, "is_alive", False)
+        delta = target_frame - prev
+        ring_hit = False
+        if delta == -1:
+            gui = getattr(getattr(self, 'app', None), 'gui_instance', None)
+            ring = getattr(gui, 'back_frame_ring', None) if gui else None
+            if ring is not None:
+                tex = ring.get(target_frame)
+                if tex is not None:
+                    gui._ring_override = (int(target_frame), int(tex))
+                    ring_hit = True
+        try:
+            if mpv_alive and delta == 1:
+                disp.step_forward()
+            elif mpv_alive and (ring_hit or delta == -1):
+                if hasattr(self, "_mpv_seek_to_frame_ex"):
+                    self._mpv_seek_to_frame_ex(target_frame, exact=True)
+            elif hasattr(self, "_mpv_seek_to_frame_ex"):
+                self._mpv_seek_to_frame_ex(target_frame, exact=True)
+        except Exception as e:
+            self.logger.debug(f"arrow nav mpv drive failed: {e}")
 
-            self.current_frame_index = target_frame
-            _root.add(hit=ring_hit, mpv_alive=mpv_alive)
+        self.current_frame_index = target_frame
         if self._nav_dbg_enabled():
-            t_ms = (_time.perf_counter()) * 0.0  # debug log only on enable path
             self.logger.info(
                 f"NAV nav_to from={prev} to={target_frame} "
                 f"delta={target_frame-prev:+d} ring_hit={ring_hit}")

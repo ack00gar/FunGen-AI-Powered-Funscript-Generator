@@ -170,19 +170,6 @@ class VideoProcessor(
         # read from any thread, GIL-protected simple writes.
         from video._vp_metrics import PipelineMetrics
         self.metrics = PipelineMetrics()
-        # Tracer: machine-readable JSONL of every pipeline event so
-        # optimization is driven by numbers. Off by default; flipped on
-        # via the developer-perf panel toggle. Output path follows the
-        # app's logs dir.
-        from video import _vp_trace as _trace
-        try:
-            from common.paths import APP_ROOT
-            _trace_path = str(APP_ROOT / "logs" / "traces.jsonl")
-        except Exception:
-            _trace_path = "logs/traces.jsonl"
-        _trace.init(_trace_path, enabled=False)
-        self.trace = _trace
-
         # ML format detector (lazy loaded)
         self.ml_detector = None
         self.ml_model_path = str(paths.MODELS_DIR / 'vr_detector_model_rf.pkl')
@@ -1399,28 +1386,23 @@ class VideoProcessor(
     def start_processing(self, start_frame=None, end_frame=None, cli_progress_callback=None):
         if self.is_processing and self.pause_event.is_set():
             _t0 = time.perf_counter()
-            with self.trace.span("resume_processing", frame=self.current_frame_index):
-                self.logger.debug(f"Resuming playback from frame {self.current_frame_index}")
-                self.pause_event.clear()
-                tracker_active = self.tracker and getattr(self.tracker, 'tracking_active', False)
-                # Skip the ffmpeg seek+resume when mpv is going to drive display.
-                # Without a tracker pulling frames, the playback loop's mpv branch
-                # immediately re-pauses the source anyway, so a play-time seek on
-                # an 8K source costs hundreds of ms for nothing.
-                if tracker_active and self.frame_source is not None:
-                    fs_idx = getattr(self.frame_source, 'current_frame_index', self.current_frame_index)
-                    if fs_idx != self.current_frame_index:
-                        self._pending_seek_target = self.current_frame_index
-                        self._frame_source_seek_epoch += 1
-                        with self.trace.span("frame_source.seek", accurate=True):
-                            self.frame_source.seek(self.current_frame_index, accurate=True)
-                    with self.trace.span("frame_source.resume"):
-                        self.frame_source.resume()
-                if not tracker_active:
-                    with self.trace.span("mpv.seek", exact=True):
-                        self._mpv_seek_to_frame(self.current_frame_index)
-                    with self.trace.span("mpv.play"):
-                        self._mpv_play()
+            self.logger.debug(f"Resuming playback from frame {self.current_frame_index}")
+            self.pause_event.clear()
+            tracker_active = self.tracker and getattr(self.tracker, 'tracking_active', False)
+            # Skip the ffmpeg seek+resume when mpv is going to drive display.
+            # Without a tracker pulling frames, the playback loop's mpv branch
+            # immediately re-pauses the source anyway, so a play-time seek on
+            # an 8K source costs hundreds of ms for nothing.
+            if tracker_active and self.frame_source is not None:
+                fs_idx = getattr(self.frame_source, 'current_frame_index', self.current_frame_index)
+                if fs_idx != self.current_frame_index:
+                    self._pending_seek_target = self.current_frame_index
+                    self._frame_source_seek_epoch += 1
+                    self.frame_source.seek(self.current_frame_index, accurate=True)
+                self.frame_source.resume()
+            if not tracker_active:
+                self._mpv_seek_to_frame(self.current_frame_index)
+                self._mpv_play()
 
             self.metrics.record_resume_ms((time.perf_counter() - _t0) * 1000.0)
             if self._playback_state_callbacks:
@@ -1477,16 +1459,13 @@ class VideoProcessor(
             return
 
         _t0 = time.perf_counter()
-        with self.trace.span("pause_processing", frame=self.current_frame_index):
-            self.logger.debug(f"Pausing playback at frame {self.current_frame_index}")
-            self.pause_event.set()
-            # Pause the source so it stops pumping frames past current_frame_index;
-            # otherwise arrow nav's +1 fast path reads the speculated-ahead frame.
-            if self.frame_source is not None:
-                with self.trace.span("frame_source.pause"):
-                    self.frame_source.pause()
-            with self.trace.span("mpv.pause"):
-                self._mpv_pause()
+        self.logger.debug(f"Pausing playback at frame {self.current_frame_index}")
+        self.pause_event.set()
+        # Pause the source so it stops pumping frames past current_frame_index;
+        # otherwise arrow nav's +1 fast path reads the speculated-ahead frame.
+        if self.frame_source is not None:
+            self.frame_source.pause()
+        self._mpv_pause()
         self.metrics.record_pause_ms((time.perf_counter() - _t0) * 1000.0)
 
         if self._playback_state_callbacks:
@@ -1613,65 +1592,60 @@ class VideoProcessor(
 
         _t0 = time.perf_counter()
         target_frame = max(0, min(frame_index, self.total_frames - 1))
-        with self.trace.span("seek_video", frame=target_frame, accurate=accurate) as _root:
-            # Logical cursor latch: write the target ms synchronously so the
-            # timeline cursor moves the moment the user clicks/jumps, even
-            # while mpv is still decoding to the new keyframe. on_mpv_position
-            # respects this latch: it will not regress the cursor back to
-            # the pre-seek position while a seek is in flight; the latch
-            # clears once mpv reports a position at or past the target.
-            if self.fps and self.fps > 0:
-                self.playhead_override_ms = target_frame * 1000.0 / self.fps
-            else:
-                self.playhead_override_ms = None
-            self._frame_source_seek_epoch += 1
-            self.current_frame_index = target_frame
-            self._pending_seek_target = target_frame
-            self._seek_in_progress_since = time.monotonic()
-            self._notify_seek_callbacks(target_frame)
+        # Logical cursor latch: write the target ms synchronously so the
+        # timeline cursor moves the moment the user clicks/jumps, even
+        # while mpv is still decoding to the new keyframe. on_mpv_position
+        # respects this latch: it will not regress the cursor back to
+        # the pre-seek position while a seek is in flight; the latch
+        # clears once mpv reports a position at or past the target.
+        if self.fps and self.fps > 0:
+            self.playhead_override_ms = target_frame * 1000.0 / self.fps
+        else:
+            self.playhead_override_ms = None
+        self._frame_source_seek_epoch += 1
+        self.current_frame_index = target_frame
+        self._pending_seek_target = target_frame
+        self._seek_in_progress_since = time.monotonic()
+        self._notify_seek_callbacks(target_frame)
 
-            tracker_needs_frames = (
-                self.enable_tracker_processing
-                or (self.tracker is not None
-                    and getattr(self.tracker, 'tracking_active', False))
-            )
-            _root.add(tracker_needs=tracker_needs_frames)
-            # Skip the ffmpeg seek when no tracker consumes frames: mpv drives
-            # the display, the playback loop has already paused the source, and
-            # the loop's transition path will re-seek + resume on tracker
-            # activation. On 8K VR with v360 dewarp this avoids hundreds of ms
-            # of keyframe-decode latency per scrub.
-            if tracker_needs_frames:
-                with self.trace.span("frame_source.seek", accurate=False):
-                    self.frame_source.seek(target_frame, accurate=False)
-                if not (self.is_processing and not self.pause_event.is_set()):
-                    self._pending_seek_target = None
-                    self._seek_in_progress_since = 0.0
-            else:
+        tracker_needs_frames = (
+            self.enable_tracker_processing
+            or (self.tracker is not None
+                and getattr(self.tracker, 'tracking_active', False))
+        )
+        # Skip the ffmpeg seek when no tracker consumes frames: mpv drives
+        # the display, the playback loop has already paused the source, and
+        # the loop's transition path will re-seek + resume on tracker
+        # activation. On 8K VR with v360 dewarp this avoids hundreds of ms
+        # of keyframe-decode latency per scrub.
+        if tracker_needs_frames:
+            self.frame_source.seek(target_frame, accurate=False)
+            if not (self.is_processing and not self.pause_event.is_set()):
                 self._pending_seek_target = None
                 self._seek_in_progress_since = 0.0
+        else:
+            self._pending_seek_target = None
+            self._seek_in_progress_since = 0.0
 
-            _t1 = time.perf_counter()
-            with self.trace.span("mpv.seek", exact=accurate):
-                self._mpv_seek_to_frame_ex(target_frame, exact=accurate)
-            _t2 = time.perf_counter()
-            self.metrics.record_seek(
-                target_frame=target_frame,
-                total_ms=(_t2 - _t0) * 1000.0,
-                ffmpeg_ms=(_t1 - _t0) * 1000.0,
-                mpv_ms=(_t2 - _t1) * 1000.0,
-                tracker_needs=tracker_needs_frames,
-                accurate=accurate,
-            )
+        _t1 = time.perf_counter()
+        self._mpv_seek_to_frame_ex(target_frame, exact=accurate)
+        _t2 = time.perf_counter()
+        self.metrics.record_seek(
+            target_frame=target_frame,
+            total_ms=(_t2 - _t0) * 1000.0,
+            ffmpeg_ms=(_t1 - _t0) * 1000.0,
+            mpv_ms=(_t2 - _t1) * 1000.0,
+            tracker_needs=tracker_needs_frames,
+            accurate=accurate,
+        )
 
         # Mirror to external fullscreen mpv so scrub updates current_frame_index.
         mpv_ctrl = getattr(self.app, '_mpv_controller', None) if self.app else None
         if mpv_ctrl is not None and getattr(mpv_ctrl, 'is_active', False):
-            with self.trace.span("external_mpv.seek"):
-                try:
-                    mpv_ctrl.seek(target_frame)
-                except Exception as e:
-                    self.logger.debug(f"external mpv seek failed: {e}")
+            try:
+                mpv_ctrl.seek(target_frame)
+            except Exception as e:
+                self.logger.debug(f"external mpv seek failed: {e}")
 
     def is_vr_active_or_potential(self) -> bool:
         if self.video_type_setting == 'VR':
