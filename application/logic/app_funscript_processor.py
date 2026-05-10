@@ -694,9 +694,10 @@ class AppFunscriptProcessor:
                 except Exception:
                     pass
 
-        if timeline_num == 1:
-            self.app.app_state_ui.heatmap_dirty = True
-            self.app.app_state_ui.funscript_preview_dirty = True
+        # Heatmap and preview track whichever timeline is active. Marking
+        # only on T1 left T2/T3 mutations stale until the next count change.
+        self.app.app_state_ui.heatmap_dirty = True
+        self.app.app_state_ui.funscript_preview_dirty = True
 
         # Clear selection if it was for the timeline/axis that just changed
         current_timeline_num_for_selection = 1 if self.selected_axis_for_processing == 'primary' else 2
