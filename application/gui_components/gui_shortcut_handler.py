@@ -234,6 +234,24 @@ class ShortcutHandlerMixin:
             pass
         elif check_and_run_shortcut("set_chapter_end", self._handle_set_chapter_end_shortcut):
             pass
+        elif video_loaded and check_and_run_shortcut("split_chapter_at_cursor", self._handle_split_chapter_at_cursor):
+            pass
+        elif video_loaded and check_and_run_shortcut("seek_to_chapter_start", self._handle_seek_to_chapter_start):
+            pass
+        elif video_loaded and check_and_run_shortcut("seek_to_chapter_end", self._handle_seek_to_chapter_end):
+            pass
+        elif video_loaded and check_and_run_shortcut("snap_chapter_start_to_playhead", self._handle_snap_chapter_start):
+            pass
+        elif video_loaded and check_and_run_shortcut("snap_chapter_end_to_playhead", self._handle_snap_chapter_end):
+            pass
+        elif video_loaded and check_and_run_shortcut("start_tracker_in_chapter", self._handle_start_tracker_in_chapter):
+            pass
+        elif video_loaded and check_and_run_shortcut("bookmark_prev", self._handle_bookmark_prev):
+            pass
+        elif video_loaded and check_and_run_shortcut("bookmark_next", self._handle_bookmark_next):
+            pass
+        elif check_and_run_shortcut("set_active_timeline_toggle", self._handle_set_active_timeline_toggle):
+            pass
 
         # Add Points at specific values (Number keys 0-9 and = for 100%)
         # These add a point at the current video time to the active timeline
@@ -693,6 +711,87 @@ class ShortcutHandlerMixin:
                     self._auto_create_chapter_from_stored_frames()
                 else:
                     self.app.logger.info(f"Chapter end marked at frame {current_frame} (Press I to set start, then Shift+C to create)", extra={'status_message': True})
+
+    def _handle_split_chapter_at_cursor(self):
+        from application.logic.chapter_actions import split_chapter_at_cursor
+        if not split_chapter_at_cursor(self.app):
+            self.app.logger.info("No splittable chapter at playhead", extra={'status_message': True})
+
+    def _handle_seek_to_chapter_start(self):
+        from application.logic.chapter_actions import seek_to_chapter_start
+        if not seek_to_chapter_start(self.app):
+            self.app.logger.info("No chapter at playhead", extra={'status_message': True})
+
+    def _handle_seek_to_chapter_end(self):
+        from application.logic.chapter_actions import seek_to_chapter_end
+        if not seek_to_chapter_end(self.app):
+            self.app.logger.info("No chapter at playhead", extra={'status_message': True})
+
+    def _handle_snap_chapter_start(self):
+        from application.logic.chapter_actions import snap_chapter_start_to_playhead
+        if not snap_chapter_start_to_playhead(self.app):
+            self.app.logger.info("Cannot snap chapter start (out of range)", extra={'status_message': True})
+
+    def _handle_snap_chapter_end(self):
+        from application.logic.chapter_actions import snap_chapter_end_to_playhead
+        if not snap_chapter_end_to_playhead(self.app):
+            self.app.logger.info("Cannot snap chapter end (out of range)", extra={'status_message': True})
+
+    def _handle_start_tracker_in_chapter(self):
+        # Resolve the chapter at the playhead, set scripting range, kick off live tracker.
+        proc = getattr(self.app, 'processor', None)
+        fs_proc = getattr(self.app, 'funscript_processor', None)
+        if proc is None or fs_proc is None:
+            return
+        frame = int(getattr(proc, 'current_frame_index', 0) or 0)
+        chapter = fs_proc.get_chapter_at_frame(frame)
+        if chapter is None:
+            self.app.logger.info("No chapter at playhead", extra={'status_message': True})
+            return
+        if hasattr(fs_proc, 'set_scripting_range_from_chapter'):
+            fs_proc.set_scripting_range_from_chapter(chapter)
+        ev = getattr(self.app, 'event_handlers', None)
+        if ev is not None and hasattr(ev, 'handle_start_live_tracker_click'):
+            ev.handle_start_live_tracker_click()
+
+    def _handle_bookmark_prev(self):
+        self._seek_to_bookmark(direction=-1)
+
+    def _handle_bookmark_next(self):
+        self._seek_to_bookmark(direction=1)
+
+    def _seek_to_bookmark(self, direction: int):
+        tl = self._get_active_timeline()
+        if tl is None or not getattr(tl, '_bookmark_manager', None):
+            return
+        proc = self.app.processor
+        if proc is None or not proc.fps:
+            return
+        cur_ms = frame_to_ms(int(getattr(proc, 'current_frame_index', 0) or 0), proc.fps)
+        bm = tl._bookmark_manager.get_nearest(cur_ms, direction=direction)
+        if bm is None:
+            return
+        target = int(round(bm.time_ms * proc.fps / 1000.0))
+        proc.seek_video(target)
+        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+
+    def _handle_set_active_timeline_toggle(self):
+        app_state = self.app.app_state_ui
+        cur = getattr(app_state, 'active_timeline_num', 1)
+        # Only toggle to T2 if it is visible.
+        t2_visible = bool(getattr(app_state, 'show_funscript_interactive_timeline2', False))
+        new = 2 if (cur == 1 and t2_visible) else 1
+        app_state.active_timeline_num = new
+        self.app.logger.info(f"Active timeline: T{new}", extra={'status_message': True})
+
+    def _get_active_timeline(self):
+        app_state = self.app.app_state_ui
+        n = getattr(app_state, 'active_timeline_num', 1)
+        if n == 1:
+            return getattr(self, 'timeline_editor1', None)
+        if n == 2:
+            return getattr(self, 'timeline_editor2', None)
+        return getattr(self, '_extra_timeline_editors', {}).get(n)
 
     def _handle_add_point_at_value(self, value: int):
         """Add a point at the current video playhead position with the specified value (0-100).

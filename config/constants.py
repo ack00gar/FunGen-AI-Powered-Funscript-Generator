@@ -266,6 +266,17 @@ DEFAULT_SHORTCUTS = {
     "set_oscillation_area": "X",     # Toggle oscillation area drawing mode
     "set_user_roi": "U",             # Toggle User ROI drawing mode
 
+    # Chapter actions at playhead (no default binding; assign in Settings)
+    "split_chapter_at_cursor": "",
+    "seek_to_chapter_start": "",
+    "seek_to_chapter_end": "",
+    "snap_chapter_start_to_playhead": "",
+    "snap_chapter_end_to_playhead": "",
+    "start_tracker_in_chapter": "",
+    "bookmark_prev": "",
+    "bookmark_next": "",
+    "set_active_timeline_toggle": "",
+
 }
 
 # Merge subtitle shortcuts if module is available
