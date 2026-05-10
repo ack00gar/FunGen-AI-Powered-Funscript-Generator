@@ -123,14 +123,15 @@ class DynamicTrackerUI:
 
         info = self.discovery.get_tracker_info(tracker_name)
         if info and info.properties:
-            # Hybrid trackers handle their own pipeline — not a standard stage2 tracker
+            # Hybrid trackers handle their own pipeline -- not a standard stage2 tracker
             if info.properties.get("is_hybrid_tracker"):
                 return False
             # Use property if available
             if "is_stage2_tracker" in info.properties:
                 return info.properties["is_stage2_tracker"]
-            # Check if it produces funscript in stage 2 and has exactly 2 stages
-            if info.properties.get("num_stages") == 2 and info.properties.get("produces_funscript_in_stage2"):
+            # num_stages is the tracker's internal pipeline depth (typically 1);
+            # produces_funscript_in_stage2 is what gates the terminal branch.
+            if info.properties.get("produces_funscript_in_stage2"):
                 return True
 
         return False
