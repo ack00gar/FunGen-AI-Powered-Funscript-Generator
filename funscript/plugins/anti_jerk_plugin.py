@@ -62,6 +62,14 @@ class AntiJerkPlugin(FunscriptTransformationPlugin):
                 'default': 15.0,
                 'description': 'Maximum deviation from direct path to allow',
                 'constraints': {'min': 5.0, 'max': 30.0}
+            },
+            'selected_indices': {
+                'type': list,
+                'required': False,
+                'default': None,
+                'description': 'Indices defining the region to process (None = full axis). '
+                               'The 4-point pattern needs context, so the range between '
+                               'min and max selected index is filtered as a slice.'
             }
         }
     
@@ -164,32 +172,47 @@ class AntiJerkPlugin(FunscriptTransformationPlugin):
             jerk_threshold = kwargs.get('jerk_threshold', 20.0)
             min_main_movement = kwargs.get('min_main_movement', 50.0)
             deviation_threshold = kwargs.get('deviation_threshold', 15.0)
-            
+            selected_indices = kwargs.get('selected_indices')
+
             # Validate parameters
             jerk_threshold = max(5.0, min(40.0, jerk_threshold))
             min_main_movement = max(20.0, min(100.0, min_main_movement))
             deviation_threshold = max(5.0, min(30.0, deviation_threshold))
-            
+
             axes_to_process = []
             if axis in ['primary', 'both']:
                 axes_to_process.append('primary')
             if axis in ['secondary', 'both']:
                 axes_to_process.append('secondary')
-            
+
             for current_axis in axes_to_process:
                 actions = getattr(funscript, f'{current_axis}_actions')
                 if not actions or len(actions) < 4:
                     continue
-                
-                # Apply the targeted jerk filter
-                cleaned_actions = self._remove_intermediate_jerks(
-                    actions, jerk_threshold, min_main_movement, deviation_threshold
-                )
-                
+
+                # Scope by selection: filter the contiguous slice between
+                # min and max selected index. Surrounding actions stay verbatim.
+                if selected_indices and len(selected_indices) > 0:
+                    valid = sorted(i for i in selected_indices if 0 <= i < len(actions))
+                    if len(valid) < 4:
+                        continue
+                    lo, hi = valid[0], valid[-1] + 1
+                    head = actions[:lo]
+                    body = actions[lo:hi]
+                    tail = actions[hi:]
+                    cleaned_body = self._remove_intermediate_jerks(
+                        body, jerk_threshold, min_main_movement, deviation_threshold
+                    )
+                    cleaned_actions = head + cleaned_body + tail
+                else:
+                    cleaned_actions = self._remove_intermediate_jerks(
+                        actions, jerk_threshold, min_main_movement, deviation_threshold
+                    )
+
                 # Update the actions
                 actions.clear()
                 actions.extend(cleaned_actions)
-            
+
             return None
             
         except Exception as e:

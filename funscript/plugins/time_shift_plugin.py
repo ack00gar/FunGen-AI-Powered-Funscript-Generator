@@ -45,6 +45,12 @@ class TimeShiftPlugin(FunscriptTransformationPlugin):
                 'default': 0,
                 'description': 'Time delta in milliseconds (positive = forward, negative = backward)',
                 'constraints': {'min': -60000, 'max': 60000}
+            },
+            'selected_indices': {
+                'type': list,
+                'required': False,
+                'default': None,
+                'description': 'Specific action indices to shift (None = all)'
             }
         }
 
@@ -58,6 +64,7 @@ class TimeShiftPlugin(FunscriptTransformationPlugin):
             raise ValueError(f"Unsupported axis '{axis}'. Must be one of {self.supported_axes}")
 
         time_delta_ms = validated_params['time_delta_ms']
+        selected_indices = validated_params.get('selected_indices')
 
         if time_delta_ms == 0:
             self.logger.info("Time delta is 0, no shift applied")
@@ -71,11 +78,13 @@ class TimeShiftPlugin(FunscriptTransformationPlugin):
             axes_to_process = [axis]
 
         for current_axis in axes_to_process:
-            self._apply_time_shift_to_axis(funscript, current_axis, time_delta_ms)
+            self._apply_time_shift_to_axis(funscript, current_axis, time_delta_ms,
+                                            selected_indices)
 
         return None  # Modifies in-place
 
-    def _apply_time_shift_to_axis(self, funscript, axis: str, time_delta_ms: int):
+    def _apply_time_shift_to_axis(self, funscript, axis: str, time_delta_ms: int,
+                                   selected_indices=None):
         """Apply time shift to a single axis."""
         actions_list = funscript.primary_actions if axis == 'primary' else funscript.secondary_actions
 
@@ -83,11 +92,17 @@ class TimeShiftPlugin(FunscriptTransformationPlugin):
             self.logger.debug(f"No actions found for {axis} axis")
             return
 
-        # Shift all timestamps
-        for action in actions_list:
-            action['at'] += time_delta_ms
+        # Resolve which indices to shift. None / empty = all.
+        if selected_indices is not None and len(selected_indices) > 0:
+            indices_to_shift = {i for i in selected_indices if 0 <= i < len(actions_list)}
+        else:
+            indices_to_shift = set(range(len(actions_list)))
 
-        # Sort by time (in case shifting made them out of order)
+        for i, action in enumerate(actions_list):
+            if i in indices_to_shift:
+                action['at'] += time_delta_ms
+
+        # Sort by time (selection-only shift may reorder).
         actions_list.sort(key=lambda x: x['at'])
 
         # Remove any actions that went negative

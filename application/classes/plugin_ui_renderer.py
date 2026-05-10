@@ -393,9 +393,10 @@ class PluginUIRenderer:
     
     def _has_selection_support(self, ui_data: Dict[str, Any]) -> bool:
         """Check if a plugin supports apply-to-selection functionality."""
-        # For now, assume all plugins support selection
-        # This could be determined from plugin metadata in the future
-        return True
+        # The transform must declare selected_indices in its parameters_schema.
+        # Without that, the kwarg is dropped on the floor and the checkbox is a lie.
+        schema = ui_data.get('schema') or {}
+        return 'selected_indices' in schema
     
     def _start_plugin_preview(self, plugin_name: str, timeline_num: int):
         """Start/update preview for a plugin."""
