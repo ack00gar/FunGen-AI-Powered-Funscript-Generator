@@ -582,6 +582,9 @@ class AppStageProcessor(StageGuiEventsMixin, StageExecutorMixin, StageCheckpoint
             if should_skip_stage1 and not self.frame_range_override:  # Never skip for autotuner
                 stage1_success = True
                 self.logger.info(f"[Thread] Stage 1 skipped, using existing artifacts.")
+                # Sentinel for the adaptive tuner: no Stage 1 measurement available;
+                # the tuner must not penalize the current P/C config.
+                self.stage1_final_fps_str = "Cached"
                 self.gui_event_queue.put(("stage1_completed", "00:00:00 (Cached)", "Cached"))
                 # Since we skipped, the preprocessed path is the one that already exists.
                 preprocessed_path_for_s3 = preprocessed_video_path if preprocessed_video_exists else None

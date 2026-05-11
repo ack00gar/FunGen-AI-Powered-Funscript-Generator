@@ -381,17 +381,23 @@ class AppBatchProcessor:
 
                     # Record adaptive tuning result from completed video
                     if self.app.adaptive_tuning_state and not self.app.adaptive_tuning_state.is_converged:
-                        fps_val = 0.0
-                        success = True
-                        try:
-                            fps_str_raw = self.app.stage_processor.stage1_final_fps_str
-                            if fps_str_raw and "FPS" in fps_str_raw:
-                                fps_val = float(fps_str_raw.replace("FPS", "").strip())
-                            else:
+                        fps_str_raw = self.app.stage_processor.stage1_final_fps_str
+                        # Stage 1 was skipped because cached artifacts exist; no
+                        # throughput measurement so the tuner gets no signal -- do
+                        # not penalize the current P/C config.
+                        if fps_str_raw and "Cached" in fps_str_raw:
+                            pass
+                        else:
+                            fps_val = 0.0
+                            success = True
+                            try:
+                                if fps_str_raw and "FPS" in fps_str_raw:
+                                    fps_val = float(fps_str_raw.replace("FPS", "").strip())
+                                else:
+                                    success = False
+                            except (ValueError, TypeError, AttributeError):
                                 success = False
-                        except (ValueError, TypeError, AttributeError):
-                            success = False
-                        self._adaptive_tuning_record_result(self.app.adaptive_tuning_state, fps_val, success)
+                            self._adaptive_tuning_record_result(self.app.adaptive_tuning_state, fps_val, success)
 
                     # Pause checkpoint — wait after video analysis (event-driven)
                     while self.app.pause_batch_event.is_set() and not self.app.stop_batch_event.is_set():
