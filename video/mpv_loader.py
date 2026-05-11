@@ -149,6 +149,9 @@ def _patch_find_library() -> None:
     ctypes.util.find_library = _patched
 
 
+_autofetch_diag: list = []
+
+
 def _try_fetch_libmpv_windows() -> bool:
     """Last-resort autofetch when first import fails on Windows.
 
@@ -156,15 +159,23 @@ def _try_fetch_libmpv_windows() -> bool:
     so users with that install combo land here even after a clean
     install of FunGen if they skipped install.py. Pulls the dev SDK,
     extracts libmpv-2.dll into <ROOT>/lib/. Stdlib only; tar.exe ships
-    with Windows 10 1803+ and reads the BCJ2-filtered .7z."""
+    with Windows 10 1803+ and reads the BCJ2-filtered .7z.
+
+    Each step appends to _autofetch_diag so the final mpv_load_error
+    can tell the user exactly which step failed.
+    """
+    _autofetch_diag.clear()
     if platform.system() != "Windows":
+        _autofetch_diag.append("not on Windows")
         return False
     try:
         from common.paths import APP_ROOT
-    except Exception:
+    except Exception as e:
+        _autofetch_diag.append(f"APP_ROOT resolve failed: {e}")
         return False
     target = APP_ROOT / "lib" / "libmpv-2.dll"
     if target.is_file():
+        _autofetch_diag.append(f"already present at {target}")
         return True
     import json as _json
     import re as _re
@@ -175,31 +186,71 @@ def _try_fetch_libmpv_windows() -> bool:
     try:
         with _urlreq.urlopen(api, timeout=15) as r:
             release = _json.load(r)
-    except Exception:
+    except Exception as e:
+        _autofetch_diag.append(f"GitHub API fetch failed (rate limit / network / firewall): {e}")
         return False
     asset = next((a for a in release.get("assets", [])
                   if _re.match(r"^mpv-dev-x86_64-\d", a.get("name", ""))
                   and a["name"].endswith(".7z")), None)
     if not asset:
+        _autofetch_diag.append("no mpv-dev-x86_64 .7z asset found in latest release")
         return False
+    _autofetch_diag.append(f"downloading {asset['name']} ({asset.get('size', 0)//1024//1024} MB)")
     archive = os.path.join(_tempfile.gettempdir(), asset["name"])
     try:
         _urlreq.urlretrieve(asset["browser_download_url"], archive)
-    except Exception:
+    except Exception as e:
+        _autofetch_diag.append(f"download failed: {e}")
         return False
-    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        _autofetch_diag.append(f"cannot create {target.parent}: {e}")
+        try:
+            os.remove(archive)
+        except OSError:
+            pass
+        return False
     try:
         r = _sp.run(["tar", "-xf", archive, "-C", str(target.parent),
                      "libmpv-2.dll"],
                     capture_output=True, text=True, timeout=120)
-    except Exception:
+    except Exception as e:
+        _autofetch_diag.append(f"tar extraction failed: {e}")
+        try:
+            os.remove(archive)
+        except OSError:
+            pass
         return False
     finally:
         try:
             os.remove(archive)
         except OSError:
             pass
-    return r.returncode == 0 and target.is_file() and target.stat().st_size > 50_000_000
+    if r.returncode != 0:
+        _autofetch_diag.append(f"tar returned {r.returncode}: {r.stderr.strip()[:200]}")
+        return False
+    if not target.is_file():
+        _autofetch_diag.append("tar succeeded but libmpv-2.dll was not extracted")
+        return False
+    sz = target.stat().st_size
+    if sz < 50_000_000:
+        _autofetch_diag.append(f"extracted file too small ({sz} bytes), likely corrupt")
+        return False
+    _autofetch_diag.append(f"installed libmpv-2.dll ({sz//1024//1024} MB)")
+    return True
+
+
+def _manual_install_hint() -> str:
+    return (
+        "libmpv-2.dll not found. To install manually:\n"
+        "  1. Download mpv-dev-x86_64-vN-*.7z from "
+        "https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest\n"
+        "  2. Extract libmpv-2.dll from the archive\n"
+        "  3. Place it next to FunGen's main.py, or in <FunGen>/lib/, "
+        "or anywhere on your %PATH%\n"
+        "  4. Restart FunGen"
+    )
 
 
 mpv = None
@@ -215,22 +266,37 @@ except Exception as e:
     # Windows + winget shinchiro.mpv is the most common path that lands
     # here: mpv.exe is on PATH but libmpv-2.dll is missing. Try one
     # autofetch + reload before giving up.
-    if platform.system() == "Windows" and _try_fetch_libmpv_windows():
-        # Re-scan candidates so the patched find_library picks up the
-        # newly downloaded dll, then retry the import.
-        _CANDIDATES["Windows"] = _windows_candidates()
-        try:
-            _patch_find_library()
-            import mpv as _mpv  # type: ignore
-            mpv = _mpv
-            mpv_available = True
-            mpv_load_error = ""
-        except Exception as e2:
-            mpv_load_error = f"{type(e2).__name__}: {e2}"
+    _first_err = f"{type(e).__name__}: {e}"
+    if platform.system() == "Windows":
+        fetched = _try_fetch_libmpv_windows()
+        if fetched:
+            # Re-scan candidates so the patched find_library picks up the
+            # newly downloaded dll, then retry the import.
+            _CANDIDATES["Windows"] = _windows_candidates()
+            try:
+                _patch_find_library()
+                import mpv as _mpv  # type: ignore
+                mpv = _mpv
+                mpv_available = True
+                mpv_load_error = ""
+            except Exception as e2:
+                mpv_load_error = (
+                    f"{type(e2).__name__}: {e2}\nautofetch steps: "
+                    + " -> ".join(_autofetch_diag)
+                    + "\n" + _manual_install_hint()
+                )
+                mpv = None
+                mpv_available = False
+        else:
+            mpv_load_error = (
+                f"{_first_err}\nautofetch failed: "
+                + " -> ".join(_autofetch_diag)
+                + "\n" + _manual_install_hint()
+            )
             mpv = None
             mpv_available = False
     else:
-        mpv_load_error = f"{type(e).__name__}: {e}"
+        mpv_load_error = _first_err
         mpv = None
         mpv_available = False
 

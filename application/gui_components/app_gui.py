@@ -772,6 +772,13 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 self.app.logger.info(
                     f"libmpv not loaded: {mpv_load_error or 'unavailable'}; "
                     "video display will use the CPU upload path.")
+                self.show_error_popup(
+                    "libmpv not loaded -- falling back to ffmpeg",
+                    (mpv_load_error or "libmpv unavailable on this system.")
+                    + "\n\nFunGen runs better with libmpv (smoother playback, "
+                    "faster seek, lower CPU). The ffmpeg fallback works but is "
+                    "noticeably worse on VR / large files."
+                )
                 return
 
             import ctypes as _ctypes
