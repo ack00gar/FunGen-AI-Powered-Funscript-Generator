@@ -86,6 +86,9 @@ class CockHeroBeatTracker(BaseOfflineTracker):
                 "produces_funscript_in_stage2": True,
                 "supports_batch": True,
                 "num_stages": 1,
+                # Audio-only; bypass Stage 1 chapter detection and the
+                # YOLO-model availability check so users without YOLO can run it.
+                "is_hybrid_tracker": True,
             },
         )
 
