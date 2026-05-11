@@ -83,6 +83,7 @@ class KeyboardShortcutsDialog:
                 ("toggle_3d_simulator", "Toggle 3D Simulator"),
                 ("toggle_script_gauge", "Toggle Gauge"),
                 ("toggle_chapter_list", "Toggle Chapter List"),
+                ("set_active_timeline_toggle", "Toggle Active Timeline (T1/T2)"),
             ],
             "Timeline Displays": [
                 ("toggle_heatmap", "Toggle Heatmap"),
@@ -132,9 +133,17 @@ class KeyboardShortcutsDialog:
                 ("delete_selected_chapter_alt", "Delete Chapter (Alt)"),
                 ("delete_points_in_chapter", "Delete Points in Chapter"),
                 ("delete_points_in_chapter_alt", "Delete Points in Chapter (Alt)"),
+                ("split_chapter_at_cursor", "Split Chapter at Cursor"),
+                ("seek_to_chapter_start", "Seek to Chapter Start"),
+                ("seek_to_chapter_end", "Seek to Chapter End"),
+                ("snap_chapter_start_to_playhead", "Snap Chapter Start to Playhead"),
+                ("snap_chapter_end_to_playhead", "Snap Chapter End to Playhead"),
+                ("start_tracker_in_chapter", "Start Tracker in Chapter"),
             ],
             "Bookmarks": [
                 ("add_bookmark", "Add Bookmark"),
+                ("bookmark_prev", "Jump to Previous Bookmark"),
+                ("bookmark_next", "Jump to Next Bookmark"),
             ],
             "Tracking Tools": [
                 ("set_oscillation_area", "Set Oscillation Area"),
