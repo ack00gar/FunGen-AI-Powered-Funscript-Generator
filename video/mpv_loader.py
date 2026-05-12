@@ -121,7 +121,11 @@ def _first_existing(paths):
     return None
 
 
+_preload_error: str = ""
+
+
 def _patch_find_library() -> None:
+    global _preload_error
     override = _first_existing(_CANDIDATES.get(platform.system(), []))
     if override is None:
         return
@@ -134,6 +138,15 @@ def _patch_find_library() -> None:
             os.add_dll_directory(os.path.dirname(override))  # type: ignore[attr-defined]
         except (AttributeError, OSError):
             pass
+        # Pre-load the DLL ourselves so python-mpv reuses the already-loaded
+        # library on import and we capture the real Windows error if it
+        # fails (Defender block, missing dep, bad arch, file lock). Without
+        # this, python-mpv's generic "Cannot find" OSError masks the cause.
+        try:
+            ctypes.CDLL(override)
+            _preload_error = ""
+        except OSError as e:
+            _preload_error = f"CDLL({override!r}) failed: {e}"
     _orig = ctypes.util.find_library
 
     def _patched(name):
@@ -257,6 +270,16 @@ mpv = None
 mpv_available = False
 mpv_load_error: str = ""
 
+def _format_error(outer: str) -> str:
+    parts = [outer]
+    if _preload_error:
+        parts.append(f"underlying load error: {_preload_error}")
+    if _autofetch_diag:
+        parts.append("autofetch steps: " + " -> ".join(_autofetch_diag))
+    parts.append(_manual_install_hint())
+    return "\n".join(parts)
+
+
 try:
     _patch_find_library()
     import mpv as _mpv
@@ -285,19 +308,11 @@ except Exception as e:
                 mpv_available = True
                 mpv_load_error = ""
             except Exception as e2:
-                mpv_load_error = (
-                    f"{type(e2).__name__}: {e2}\nautofetch steps: "
-                    + " -> ".join(_autofetch_diag)
-                    + "\n" + _manual_install_hint()
-                )
+                mpv_load_error = _format_error(f"{type(e2).__name__}: {e2}")
                 mpv = None
                 mpv_available = False
         else:
-            mpv_load_error = (
-                f"{_first_err}\nautofetch failed: "
-                + " -> ".join(_autofetch_diag)
-                + "\n" + _manual_install_hint()
-            )
+            mpv_load_error = _format_error(_first_err)
             mpv = None
             mpv_available = False
     else:
