@@ -229,7 +229,12 @@ class MultiAxisFunscript:
         """
         cached_t = self._pa_times.get(axis)
         cached_v = self._pa_values.get(axis)
-        src = self._actions_for_axis(axis)
+        # Snapshot the live list so a concurrent mutation (live tracker
+        # append, plugin transform, batch save) cannot shrink it between
+        # len() and np.fromiter and trip "iterator too short". list() is a
+        # single C-level GIL-held pass so the snapshot is internally
+        # consistent.
+        src = list(self._actions_for_axis(axis))
         n = len(src)
         # Guard: in-place dict mutation that changes the action count without
         # going through the helper APIs would still be detected here.
