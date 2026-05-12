@@ -32,7 +32,19 @@ def _find_mpv_binary() -> str:
     found = shutil.which("mpv")
     if found:
         return found
-    # Example for macOS Homebrew, fallback
+    # FunGen-local drop-in spots, same shape as libmpv-2.dll discovery:
+    # users who drop mpv.exe next to main.py or in <FunGen>/lib/ get
+    # picked up without having to touch %PATH%.
+    try:
+        from common.paths import APP_ROOT
+        exe_name = "mpv.exe" if os.name == "nt" else "mpv"
+        for d in (APP_ROOT, APP_ROOT / "lib"):
+            cand = d / exe_name
+            if cand.is_file():
+                return str(cand)
+    except Exception:
+        pass
+    # macOS Homebrew fallback
     homebrew_path = "/opt/homebrew/bin/mpv"
     if os.path.isfile(homebrew_path):
         return homebrew_path
