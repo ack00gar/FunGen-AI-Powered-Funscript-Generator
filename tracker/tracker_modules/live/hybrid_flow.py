@@ -359,6 +359,35 @@ class HybridFlowTracker(BaseTracker):
 
         h, w = frame.shape[:2]
 
+        # Cold-start: run YOLO synchronously on the very first frame so the
+        # ROI is established before optical flow runs. Without this, async
+        # YOLO takes ~50-100 ms wall clock; at MAX_SPEED that window covers
+        # many video frames, all of which were emitting bogus pos=50 actions
+        # (no ROI -> dy/dx stay 0 -> position centers at 50). One blocking
+        # call at frame 1 trades a small startup pause for clean output.
+        if self._frame_count == 1 and self._current_roi is None:
+            yolo_imgsz = int(getattr(self.app, 'yolo_input_size', 640))
+            if w > yolo_imgsz:
+                tw = yolo_imgsz
+                th = max(1, int(h * yolo_imgsz / w))
+                sync_frame = cv2.resize(frame, (tw, th))
+                sync_scale = (w / tw, h / th)
+            else:
+                sync_frame = frame
+                sync_scale = (1.0, 1.0)
+            try:
+                roi, penis_box, contact_box = self._run_yolo(sync_frame, h, w, sync_scale)
+            except Exception as _e:
+                roi, penis_box, contact_box = None, None, None
+                self.logger.debug(f"sync YOLO on first frame failed: {_e}")
+            if roi is not None:
+                self._current_roi = roi
+                self._last_penis_box = penis_box
+                self._last_contact_box = contact_box
+                self._roi_refreshed_this_frame = True
+                # We just ran YOLO; don't immediately dispatch another one.
+                self._frames_since_yolo = 0
+
         # --- Step 1: YOLO dispatch + consume latest result (async) ---
         self._roi_refreshed_this_frame = False
 
@@ -476,13 +505,20 @@ class HybridFlowTracker(BaseTracker):
             else:
                 secondary_to_write = final_secondary
 
-        if self.funscript:
+        # No ROI yet means optical flow never ran -- dy/dx are 0 and the
+        # "position" is just the center default. Skip the write so the
+        # funscript doesn't fill with bogus pos=50 actions while async
+        # YOLO is still warming up (visible at MAX_SPEED).
+        emit_action = self._current_roi is not None
+        if self.funscript and emit_action:
             self.funscript.add_action(
                 timestamp_ms=frame_time_ms,
                 primary_pos=primary_to_write,
                 secondary_pos=secondary_to_write)
 
-        action_log = [{'at': frame_time_ms, 'pos': primary_to_write, 'secondary_pos': secondary_to_write}]
+        action_log = []
+        if emit_action:
+            action_log.append({'at': frame_time_ms, 'pos': primary_to_write, 'secondary_pos': secondary_to_write})
 
         display_frame = frame
         self._draw_overlay()
