@@ -150,13 +150,16 @@ def _patch_find_library() -> None:
             _preload_error = f"CDLL({override!r}) failed: {e}"
     _orig = ctypes.util.find_library
 
+    # python-mpv on Windows calls find_library with the .dll suffix
+    # (mpv-2.dll, libmpv-2.dll, mpv-1.dll). On other platforms it uses
+    # the bare 'mpv'. Match both forms.
+    _names = {
+        "mpv", "libmpv", "libmpv-1", "libmpv-2", "mpv-1", "mpv-2",
+        "mpv-1.dll", "mpv-2.dll", "libmpv-1.dll", "libmpv-2.dll",
+    }
+
     def _patched(name):
-        # python-mpv tries several names in order: "mpv", "libmpv-2",
-        # "libmpv-1", "libmpv". Intercept all of them so a relative
-        # "libmpv-2.dll" from Windows PATH search never reaches CDLL.
-        if name and name.lower() in (
-            "mpv", "libmpv", "libmpv-1", "libmpv-2", "mpv-1", "mpv-2"
-        ):
+        if name and name.lower() in _names:
             return override
         return _orig(name)
 
