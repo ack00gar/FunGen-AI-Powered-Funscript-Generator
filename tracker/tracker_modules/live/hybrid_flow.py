@@ -359,13 +359,15 @@ class HybridFlowTracker(BaseTracker):
 
         h, w = frame.shape[:2]
 
-        # Cold-start: run YOLO synchronously on the very first frame so the
-        # ROI is established before optical flow runs. Without this, async
-        # YOLO takes ~50-100 ms wall clock; at MAX_SPEED that window covers
-        # many video frames, all of which were emitting bogus pos=50 actions
-        # (no ROI -> dy/dx stay 0 -> position centers at 50). One blocking
-        # call at frame 1 trades a small startup pause for clean output.
-        if self._frame_count == 1 and self._current_roi is None:
+        # Cold-start: run YOLO synchronously until we either get a detection
+        # or hit a small frame cap. Without this, async YOLO takes ~50-100 ms
+        # wall clock; at MAX_SPEED that window covers many video frames where
+        # the tracker can't emit anything (no ROI -> no action). One blocking
+        # call per startup frame trades a tiny pause for output that begins
+        # as soon as the video has content YOLO can detect. The 30-frame cap
+        # (0.5s at 60fps) bounds the worst-case startup wait for content with
+        # a long intro / fade-in / black-frame lead.
+        if self._frame_count <= 30 and self._current_roi is None:
             yolo_imgsz = int(getattr(self.app, 'yolo_input_size', 640))
             if w > yolo_imgsz:
                 tw = yolo_imgsz
@@ -379,7 +381,7 @@ class HybridFlowTracker(BaseTracker):
                 roi, penis_box, contact_box = self._run_yolo(sync_frame, h, w, sync_scale)
             except Exception as _e:
                 roi, penis_box, contact_box = None, None, None
-                self.logger.debug(f"sync YOLO on first frame failed: {_e}")
+                self.logger.debug(f"sync YOLO on frame {self._frame_count} failed: {_e}")
             if roi is not None:
                 self._current_roi = roi
                 self._last_penis_box = penis_box
