@@ -122,6 +122,10 @@ def _first_existing(paths):
 
 
 _preload_error: str = ""
+# Hold the add_dll_directory handle for the process lifetime. If GC'd, the
+# directory is removed from Windows DLL search path and python-mpv's bare
+# CDLL("libmpv-2.dll") loses its way back to the file.
+_dll_dir_handles: list = []
 
 
 def _patch_find_library() -> None:
@@ -129,13 +133,10 @@ def _patch_find_library() -> None:
     override = _first_existing(_CANDIDATES.get(platform.system(), []))
     if override is None:
         return
-    # On Windows + Python 3.8+, transitive DLL search no longer walks
-    # PATH automatically. add_dll_directory makes sure any sibling DLLs
-    # the libmpv build pulls in (vulkan-1, d3d12 helpers, codec shims)
-    # actually resolve.
     if platform.system() == "Windows":
         try:
-            os.add_dll_directory(os.path.dirname(override))  # type: ignore[attr-defined]
+            h = os.add_dll_directory(os.path.dirname(override))  # type: ignore[attr-defined]
+            _dll_dir_handles.append(h)
         except (AttributeError, OSError):
             pass
         # Pre-load the DLL ourselves so python-mpv reuses the already-loaded
