@@ -1946,6 +1946,15 @@ class VideoProcessor(
                 self._pending_seek_target = None
                 self._seek_in_progress_since = 0.0
                 self.current_frame_index = idx
+                # Clear the playhead_override_ms latch from the ffmpeg path
+                # too. It was only being cleared in on_mpv_position, so users
+                # without libmpv loaded had T1 cursor stuck at the last
+                # seek target forever (HoosierDaddy123 report).
+                _override = self.playhead_override_ms
+                if _override is not None and self.fps and self.fps > 0:
+                    _target_idx = int(round(_override * self.fps / 1000.0))
+                    if abs(idx - _target_idx) <= 1:
+                        self.playhead_override_ms = None
 
                 # ffmpeg subprocess always outputs at yolo_input_size; the
                 # tracker consumes that directly without a downsize step.
