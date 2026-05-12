@@ -273,6 +273,11 @@ except Exception as e:
             # Re-scan candidates so the patched find_library picks up the
             # newly downloaded dll, then retry the import.
             _CANDIDATES["Windows"] = _windows_candidates()
+            # Drop the failed partial module from sys.modules so the second
+            # import actually re-runs the body. Without this the cached
+            # failed module is returned and patch_find_library has no effect.
+            import sys as _sys
+            _sys.modules.pop("mpv", None)
             try:
                 _patch_find_library()
                 import mpv as _mpv  # type: ignore

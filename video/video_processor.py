@@ -446,6 +446,18 @@ class VideoProcessor(
                 base_hwdec = getattr(disp, 'hwdec', '') or ''
                 if base_hwdec and not base_hwdec.endswith('-copy') and base_hwdec != 'no':
                     hwdec_override = base_hwdec + '-copy'
+            # NVDEC cannot decode H.264 wider than 4096; mpv's hwdec=auto picks
+            # cuda first on Windows boxes with nvidia drivers and then errors
+            # "Failed setup for format cuda" with no frame. Force hwdec off
+            # for that combo so mpv falls through to CPU decode.
+            try:
+                info = self.video_info or {}
+                vw = int(info.get('width', 0) or 0)
+                codec = (info.get('codec_name', '') or '').lower()
+            except Exception:
+                vw, codec = 0, ''
+            if vw > 4096 and codec in ('h264', 'avc1', 'avc'):
+                hwdec_override = 'no'
             self.logger.debug(
                 f"MpvDisplay.load() starting: path={path} "
                 f"mode={self._vr_display_mode()} vf={vf!r} "
