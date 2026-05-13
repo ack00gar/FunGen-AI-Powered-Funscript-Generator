@@ -84,7 +84,14 @@ class VideoProcessor(
         self._frame_version = 0  # Incremented each time current_frame is replaced
         self.fps = 0.0
         self._ms_per_frame = 0.0
-        self.playhead_override_ms = None  # Set by point-jump to display at exact action time
+        # playhead_override_ms is a property; backing fields:
+        #   _playhead_override_ms    visible value
+        #   _playhead_override_set_at  monotonic timestamp of last set
+        # Used by on_mpv_position to escape the latch after a max hold time
+        # so a long-GOP keyframe-snap (mpv lands far from the requested
+        # frame) cannot permanently desync the timeline from the video.
+        self._playhead_override_ms = None
+        self._playhead_override_set_at = 0.0
         self._seek_in_progress_since = 0.0  # monotonic; display_route shows "Seeking..." while fresh
         self._video_open_in_progress = False
         self.target_fps = 30
@@ -530,6 +537,25 @@ class VideoProcessor(
             except Exception as e:
                 self.logger.debug(f"MpvDisplay seek failed: {e}")
 
+    @property
+    def playhead_override_ms(self):
+        return self._playhead_override_ms
+
+    @playhead_override_ms.setter
+    def playhead_override_ms(self, value):
+        self._playhead_override_ms = value
+        # Time-stamp every set so on_mpv_position knows when to give up
+        # waiting for mpv to land within tolerance.
+        if value is None:
+            self._playhead_override_set_at = 0.0
+        else:
+            self._playhead_override_set_at = time.monotonic()
+
+    # Time-based latch escape: if mpv doesn't land within +/-1 of target
+    # within this window, accept mpv's reported position. Covers long-GOP
+    # HEVC keyframe snap where exact-seek lands ~10-20 frames off.
+    _PLAYHEAD_LATCH_MAX_S = 0.4
+
     def on_mpv_position(self, frame_index: int) -> None:
         """mpv time-pos observer. Drives current_frame_index during pure
         playback and clears the seek-in-progress flag once mpv catches up.
@@ -547,12 +573,17 @@ class VideoProcessor(
         override = self.playhead_override_ms
         if override is not None and self.fps and self.fps > 0:
             target_idx = int(round(override * self.fps / 1000.0))
-            # Bidirectional 1-frame tolerance: forward seeks may land at
-            # target-1 (keyframe-aligned), backward seeks may land at target
-            # or target+1 (mpv decodes forward from keyframe). Clearing only
-            # on >= target-1 was forward-biased and let stale time-pos events
-            # from a backward seek snap the cursor forward.
-            if abs(mpv_idx - target_idx) <= 1:
+            within_tol = abs(mpv_idx - target_idx) <= 1
+            # Time-based escape: long-GOP HEVC exact-seek can land far from
+            # target (keyframe snap). Don't hold the latch forever or the
+            # timeline cursor stays at target while the video plays from
+            # the keyframe -- visible desync. Cap the wait.
+            stale = (
+                self._playhead_override_set_at > 0.0
+                and (time.monotonic() - self._playhead_override_set_at)
+                    > self._PLAYHEAD_LATCH_MAX_S
+            )
+            if within_tol or stale:
                 self.playhead_override_ms = None
                 # Drop the back-ring visual override now that mpv has caught
                 # up to the user-pressed target; live shader output resumes.
