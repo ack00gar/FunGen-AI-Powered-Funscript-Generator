@@ -152,10 +152,20 @@ class DialogRendererMixin:
             batch_compatible_trackers = []
             tracker_internal_names = []
 
+            def _produces_funscript(t) -> bool:
+                """Hide chapter only / feature only tools from the batch picker.
+                Batch always wants a stroke output; if none of the stage flags
+                claim funscript production the tracker is e.g. Chapter Maker
+                or a feature extractor and selecting it just confuses users."""
+                props = getattr(t, 'properties', None) or {}
+                return bool(props.get('produces_funscript_in_stage1')
+                            or props.get('produces_funscript_in_stage2')
+                            or props.get('produces_funscript_in_stage3'))
+
             # Add offline trackers
             offline_trackers = discovery.get_trackers_by_category(TrackerCategory.OFFLINE)
             for tracker in offline_trackers:
-                if tracker.supports_batch:
+                if tracker.supports_batch and _produces_funscript(tracker):
                     # Add prefix based on folder name
                     if tracker.folder_name and tracker.folder_name.lower() == "experimental":
                         display_name = f"Experimental: {tracker.display_name}"
