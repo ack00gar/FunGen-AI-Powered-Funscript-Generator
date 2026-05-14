@@ -42,6 +42,42 @@ from typing import Callable, List, Optional
 from video.mpv_loader import mpv, mpv_available
 
 
+def _extract_bad_mpv_option(exc) -> Optional[str]:
+    """python-mpv raises a tuple-args exception when an option is rejected.
+    Pull the option name out so the caller can drop and retry."""
+    try:
+        triple = exc.args[2]
+        opt = triple[1]
+        if isinstance(opt, (bytes, bytearray)):
+            name = opt.decode("utf-8", errors="replace")
+        else:
+            name = str(opt)
+        # mpv uses dashes; python-mpv kwargs use underscores.
+        return name.replace("-", "_")
+    except (AttributeError, IndexError, TypeError):
+        return None
+
+
+def _init_mpv_with_fallback(kwargs: dict, optional_keys: set, logger) -> "mpv.MPV":
+    """mpv.MPV(**kwargs) but drop optional kwargs that the mpv build rejects
+    and retry. Keeps trying until init succeeds or a required kwarg fails."""
+    attempts = 0
+    while True:
+        attempts += 1
+        if attempts > 16:  # paranoia cap
+            return mpv.MPV(**kwargs)
+        try:
+            return mpv.MPV(**kwargs)
+        except Exception as e:
+            offender = _extract_bad_mpv_option(e)
+            if offender is None or offender not in optional_keys or offender not in kwargs:
+                raise
+            logger.warning(
+                f"mpv option {offender!r} rejected by this build "
+                f"(value={kwargs.get(offender)!r}); dropping and retrying")
+            kwargs.pop(offender, None)
+
+
 SeekCallback = Callable[[int], None]
 PlaybackStateCallback = Callable[[bool, float], None]
 PositionCallback = Callable[[int], None]
@@ -159,7 +195,13 @@ class MpvDisplayGL:
             }
             if self.vf:
                 kwargs["vf"] = self.vf
-            self._player = mpv.MPV(**kwargs)
+            # mpv builds vary on which options they support. shinchiro builds
+            # are usually current but some older or stripped builds reject
+            # profile / video_sync / display_fps_override. drop offenders
+            # iteratively rather than failing the whole init.
+            optional = {"profile", "video_sync", "display_fps_override", "vf"}
+            self._player = _init_mpv_with_fallback(
+                kwargs, optional, self.logger)
         except Exception as e:
             self.logger.error(f"mpv.MPV init failed: {e}")
             return False

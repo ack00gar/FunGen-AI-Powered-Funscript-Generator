@@ -158,7 +158,11 @@ class MpvDisplay:
             }
             if self.vf:
                 kwargs["vf"] = self.vf
-            self._player = mpv.MPV(**kwargs)
+            from video.mpv_display_gl import _init_mpv_with_fallback
+            optional = {"profile", "scale", "cscale", "dscale",
+                        "vd_lavc_threads", "audio_buffer", "vf"}
+            self._player = _init_mpv_with_fallback(
+                kwargs, optional, self.logger)
         except Exception as e:
             self.logger.error(f"mpv.MPV init failed: {e}")
             return False
