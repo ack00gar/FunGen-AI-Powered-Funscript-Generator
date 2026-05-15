@@ -542,18 +542,25 @@ class InteractiveFunscriptTimeline(DrawingMixin):
 
             # Middle-drag pan: seek only when the target is in the nav cache,
             # otherwise defer to mouse-release to avoid decode stutter.
+            # Wrap defensively -- this fires every frame while the user drags,
+            # so any transient bad state (no video loaded, processor torn down,
+            # mpv handle dead) must not propagate out and crash the app.
             if imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_MIDDLE):
-                delta_x = io.mouse_delta[0]
-                app_state.timeline_pan_offset_ms -= delta_x * tf.zoom
-                app_state.timeline_interaction_active = True
-                if not self._mid_drag_active and self.app.processor is not None:
-                    self._mid_drag_active = True
-                    try:
-                        self.app.processor._begin_interactive_seek()
-                    except Exception:
-                        pass
-                center_ms = tf.x_to_time(tf.x_offset + tf.width / 2) - delta_x * tf.zoom
-                self._seek_if_cached(center_ms)
+                try:
+                    delta_x = io.mouse_delta[0]
+                    app_state.timeline_pan_offset_ms -= delta_x * tf.zoom
+                    app_state.timeline_interaction_active = True
+                    if not self._mid_drag_active and self.app.processor is not None:
+                        self._mid_drag_active = True
+                        try:
+                            self.app.processor._begin_interactive_seek()
+                        except Exception:
+                            pass
+                    center_ms = tf.x_to_time(tf.x_offset + tf.width / 2) - delta_x * tf.zoom
+                    self._seek_if_cached(center_ms)
+                except Exception as _mid_drag_err:
+                    if hasattr(self.app, 'logger'):
+                        self.app.logger.debug(f"middle-drag handler error: {_mid_drag_err}")
 
         # Wheel-pan settle: commit the full seek once the wheel has been
         # quiet for ~150 ms. Outside the is_hovered block so a flick-and-move
@@ -740,8 +747,12 @@ class InteractiveFunscriptTimeline(DrawingMixin):
 
         # Also clear interaction flag when middle mouse is released (after panning)
         if imgui.is_mouse_released(glfw.MOUSE_BUTTON_MIDDLE):
-            app_state.timeline_interaction_active = False
-            self._seek_pan_center_with_sync(app_state)
+            try:
+                app_state.timeline_interaction_active = False
+                self._seek_pan_center_with_sync(app_state)
+            except Exception as _mid_release_err:
+                if hasattr(self.app, 'logger'):
+                    self.app.logger.debug(f"middle-drag release seek error: {_mid_release_err}")
             if self._mid_drag_active and self.app.processor is not None:
                 self._mid_drag_active = False
                 try:

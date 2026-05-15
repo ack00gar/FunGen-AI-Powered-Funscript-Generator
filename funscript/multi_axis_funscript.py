@@ -122,16 +122,25 @@ class MultiAxisFunscript:
         if axis == 'primary' or axis == 'both':
             self._cache_dirty_primary = True
             self._drop_pa('primary')
+            # Drop the float32 view too. _get_timestamps_for_axis clears
+            # this on dirty consume, but renderers that path through
+            # _get_numpy_arrays_for_axis without first hitting timestamps
+            # would otherwise see a stale tuple after in-place mutation
+            # (GH #126 nudge: spline cached the pre-nudge ats/poss).
+            self._primary_np_cache = None
         if axis == 'secondary' or axis == 'both':
             self._cache_dirty_secondary = True
             self._drop_pa('secondary')
+            self._secondary_np_cache = None
         if axis in self._additional_cache_dirty:
             self._additional_cache_dirty[axis] = True
             self._drop_pa(axis)
+            self._additional_np_cache.pop(axis, None)
         if axis == 'both':
             for ax_name in self._additional_cache_dirty:
                 self._additional_cache_dirty[ax_name] = True
                 self._drop_pa(ax_name)
+                self._additional_np_cache.pop(ax_name, None)
         # Clear get_value bracket cache too — stale idx after mutation is wrong.
         self._gv_cache_n = 0
 

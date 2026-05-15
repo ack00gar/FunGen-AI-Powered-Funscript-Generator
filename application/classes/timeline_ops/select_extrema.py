@@ -44,20 +44,30 @@ def select_extrema(tl, mode: str) -> None:
     if mode not in ('top', 'bottom', 'both'):
         return
     actions = tl._get_actions()
-    if not actions or len(actions) < 3:
+    if not actions or len(actions) < 2:
         return
     s, e = _resolve_range(tl)
     if s is None:
         return
-    s = max(1, s)
-    e = min(len(actions) - 1, e)
+    s = max(0, s)
+    e = min(len(actions), e)
     keys = set()
+    n = len(actions)
     for i in range(s, e):
-        prev_v = actions[i - 1]['pos']
         cur_v = actions[i]['pos']
-        next_v = actions[i + 1]['pos']
-        is_peak = (cur_v > prev_v) and (cur_v >= next_v)
-        is_valley = (cur_v < prev_v) and (cur_v <= next_v)
+        prev_v = actions[i - 1]['pos'] if i > 0 else None
+        next_v = actions[i + 1]['pos'] if i < n - 1 else None
+        # Endpoints: only the one neighbor decides. Compares strictly so
+        # a flat run isn't all peaks AND all valleys.
+        if prev_v is None:
+            is_peak = next_v is not None and cur_v > next_v
+            is_valley = next_v is not None and cur_v < next_v
+        elif next_v is None:
+            is_peak = cur_v > prev_v
+            is_valley = cur_v < prev_v
+        else:
+            is_peak = (cur_v > prev_v) and (cur_v >= next_v)
+            is_valley = (cur_v < prev_v) and (cur_v <= next_v)
         if mode == 'top' and is_peak:
             keys.add(tl._action_key(actions[i]))
         elif mode == 'bottom' and is_valley:

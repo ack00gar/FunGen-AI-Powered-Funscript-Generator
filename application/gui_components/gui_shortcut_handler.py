@@ -802,14 +802,21 @@ class ShortcutHandlerMixin:
         if not self.app.processor or not self.app.processor.video_info:
             return
 
-        # Anchor on current_frame_index; playhead_override_ms is display-only
-        # and can lag arrow nav.
-        current_frame = self.app.processor.current_frame_index
-        fps = self.app.processor.fps
+        # Prefer playhead_override_ms when set: that's the user-visible cursor
+        # position (click-to-seek, arrow-nav, jump-to-point all set it
+        # synchronously). current_frame_index can briefly lag mpv catch-up
+        # after a seek, so reading it dropped points at the prior frame --
+        # GH #126 (NikAWing). Fall back to current_frame_index when no
+        # seek is in flight.
+        proc = self.app.processor
+        fps = proc.fps
         if fps <= 0:
             return
-
-        current_time_ms = frame_to_ms(current_frame, fps)
+        override_ms = getattr(proc, 'playhead_override_ms', None)
+        if override_ms is not None:
+            current_time_ms = int(override_ms)
+        else:
+            current_time_ms = frame_to_ms(proc.current_frame_index, fps)
 
         # Get the active timeline and add the point
         app_state = self.app.app_state_ui
