@@ -193,10 +193,20 @@ def main():
             logger.error("Please manually install the requirements using: pip install -r requirements/base.txt")
             sys.exit(1)
     
-    # Now try to import and run the dependency checker
+    # Now try to import and run the dependency checker.
+    # Load by file path so we don't trigger application/utils/__init__.py,
+    # which eagerly imports logo/icon_texture -> cv2 (not yet installed on
+    # fresh CLI installs, GH #119).
     try:
-        from application.utils.dependency_checker import check_and_install_dependencies
-        check_and_install_dependencies()
+        import importlib.util
+        from pathlib import Path
+        _dc_path = Path(__file__).resolve().parent / "application" / "utils" / "dependency_checker.py"
+        if not _dc_path.is_file():
+            raise ImportError(f"dependency_checker.py not found at {_dc_path}")
+        _spec = importlib.util.spec_from_file_location("_fungen_dependency_checker", _dc_path)
+        _dc_mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_dc_mod)
+        _dc_mod.check_and_install_dependencies()
     except ImportError as e:
         logger.error(f"Failed to import dependency checker after bootstrap: {e}")
         logger.error("Please ensure the file 'application/utils/dependency_checker.py' exists.")
