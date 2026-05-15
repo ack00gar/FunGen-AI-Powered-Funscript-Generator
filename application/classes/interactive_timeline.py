@@ -329,6 +329,23 @@ class InteractiveFunscriptTimeline(DrawingMixin):
         app_state = self.app.app_state_ui
         visibility_attr = self._visibility_attr
 
+        # Plugin windows are top-level floating imgui.begin() popups; they
+        # do not live inside the timeline canvas. Sharky bug: when the
+        # timeline was hidden, clicking a plugin set state but never
+        # rendered the window because the early-return below skipped the
+        # late-stage plugin render call. Repeated clicks queued multiple
+        # opens that all tried to render at once when the timeline came
+        # back, locking the app. Drive plugin windows before the
+        # visibility gate so they open whether the canvas is shown or not.
+        try:
+            self.plugin_renderer.render_plugin_windows(
+                self.timeline_num, f"TL{self.timeline_num}")
+            self._check_and_apply_pending_plugins()
+        except Exception as _plugin_err:
+            if hasattr(self.app, 'logger'):
+                self.app.logger.debug(
+                    f"plugin window render error (timeline hidden path): {_plugin_err}")
+
         if not getattr(app_state, visibility_attr, False):
             return
 
@@ -449,11 +466,9 @@ class InteractiveFunscriptTimeline(DrawingMixin):
 
         # 6f. Reference comparison metrics (rendered in info_graphs_ui, not on canvas)
 
-        # 7. Render Plugin Windows (Popups)
-        self.plugin_renderer.render_plugin_windows(self.timeline_num, f"TL{self.timeline_num}")
-
-        # 7b. Check for and execute pending plugin apply requests
-        self._check_and_apply_pending_plugins()
+        # 7. Plugin windows + apply requests run at the top of render()
+        # before the visibility gate now; see comment there. Not repeated
+        # here to avoid two imgui.begin() passes per frame.
 
         # 8. Handle Auto-Scroll/Sync
         self._handle_sync_logic(app_state, tf)
