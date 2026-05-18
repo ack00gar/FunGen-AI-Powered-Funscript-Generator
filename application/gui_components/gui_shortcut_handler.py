@@ -606,6 +606,15 @@ class ShortcutHandlerMixin:
             is_actively_playing = False
 
         if not is_actively_playing and not is_tracking:
+            # arrow_nav_forward/backward -> _nav_to_target is the single
+            # source of truth for paused arrow nav: it sets the logical
+            # cursor (playhead_override_ms + current_frame_index) and drives
+            # libmpv (step_forward / ring / exact-seek) in one place. A prior
+            # mpv_disp.step_*() block here re-drove the same mpv_display
+            # object on top of that, so every right-arrow advanced mpv by 2
+            # frames and every left-arrow seeked-then-back-stepped to
+            # target-1; the timeline cursor and the visible frame drifted,
+            # and number-key point inserts landed beside what the user saw.
             if delta_frames > 0:
                 frame = proc.arrow_nav_forward(new_frame)
                 path_taken = 'nav_fwd'
@@ -616,18 +625,6 @@ class ShortcutHandlerMixin:
                 with proc.frame_lock:
                     proc.current_frame = frame
                     proc._frame_version += 1
-            try:
-                mpv_disp = getattr(self.app.gui_instance,
-                                   'mpv_display', None) if self.app.gui_instance else None
-                if mpv_disp is not None and getattr(mpv_disp, 'is_loaded', False):
-                    if delta_frames == 1 and hasattr(mpv_disp, 'step_forward'):
-                        mpv_disp.step_forward()
-                    elif delta_frames == -1 and hasattr(mpv_disp, 'step_backward'):
-                        mpv_disp.step_backward()
-                    elif hasattr(proc, '_mpv_seek_to_frame'):
-                        proc._mpv_seek_to_frame(new_frame)
-            except Exception:
-                pass
             self._nav_log('frame_seek', cur, new_frame, path_taken,
                           (time.perf_counter() - t0) * 1000,
                           ok=bool(frame is not None))
