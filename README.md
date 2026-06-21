@@ -1,3 +1,13 @@
+> [!IMPORTANT]
+> ## ⚠️ FunGen 1 is legacy
+> This is the original Python version of FunGen. It has been **completely rewritten from the ground up as [FunGen 2](https://github.com/ack00gar/FunGen)**: a single native binary (no Python, no dependencies to chase), with a full-featured funscript editor and a built-in AI generation pipeline (2D & VR).
+>
+> **→ Get FunGen 2: [Download](https://github.com/ack00gar/FunGen/releases) · [Website](https://ack00gar.github.io/fungen-site/) · [Discord](https://discord.com/invite/WYkjMbtCZA)**
+>
+> FunGen 1 below remains for reference and is no longer actively developed.
+
+---
+
 # FunGen
 
 FunGen is a Python-based tool that uses AI to generate Funscript files from VR and 2D POV videos. It enables fully automated funscript creation for individual scenes or entire folders of videos.
