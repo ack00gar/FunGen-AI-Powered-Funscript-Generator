@@ -1,0 +1,113 @@
+# FunGen Supplemental Terms
+
+Version 1.0 - 2026-07-13
+Copyright (c) 2025-2026 k00gar. All rights reserved.
+
+These Supplemental Terms apply **in addition to** the PolyForm Strict
+License 1.0.0 in the accompanying `LICENSE` file. Together they are the
+FunGen licence. Where these terms are stricter, these terms apply; nothing
+here grants you rights that PolyForm Strict does not.
+
+They cover what an off-the-shelf licence cannot: the Pro Pass, the AI
+models, and who owns the funscripts you make.
+
+Definitions used below: **FunGen** or the **Software** is the FunGen
+application in any form - source, binaries, installers, app bundles, and
+everything shipped with or downloaded by it, including the machine-learning
+model weights, encrypted or otherwise. **Pro AI Features** are the features
+unlocked by a Pro Pass that generate or modify funscript data automatically:
+the AI/ML trackers, AI suggestions, and batch generation.
+
+---
+
+## 1. Pro Pass
+
+A Pro Pass (`.fgpass`) unlocks paid features. It is a personal, revocable
+entitlement to use those features. It is **not** a sale of the Software or
+of any copy of it, and it grants no right to distribute anything.
+
+- A Pro Pass is issued to **one person**, and is for that person's use only.
+  You may install it on the machines **you personally own or control** - for
+  example your desktop and your laptop. It is not a site, team, household,
+  or organisation licence.
+- A Pro Pass is **non-transferable**. You may not share, publish, lend,
+  resell, or otherwise pass on a Pro Pass file or its contents, and you may
+  not let anyone else use the Software through your pass.
+- Pro Passes that are shared, published, leaked, forged, or used to
+  circumvent these terms **may be blocked** in current and future builds,
+  without notice and without refund.
+- A time-limited Pro Pass unlocks paid features for its stated term only.
+  Nothing obliges the licensor to issue, renew, replace, or keep honouring
+  a Pro Pass beyond that term.
+
+## 2. No circumvention
+
+You may not:
+
+- circumvent, disable, bypass, or interfere with any licensing, entitlement,
+  metering, or protection mechanism in the Software;
+- decrypt, extract, convert, retrain on, or repackage the Software's
+  machine-learning model weights, or make them usable outside the Software;
+- reverse-engineer the Software in order to do any of the above; or
+- create, use, publish, or distribute any patch, crack, keygen, forged Pro
+  Pass, loader, or instructions for producing one.
+
+Obtain FunGen only from the official channels. Do not re-upload or mirror it
+(PolyForm Strict already forbids distributing the Software; this is a
+reminder, not a new restriction).
+
+## 3. The funscripts you make
+
+This is the part most users care about, so it is stated plainly.
+
+**Scripts you author or edit yourself are yours.** Funscripts you create by
+hand in FunGen's editor, or that you have made your own through your own
+editing work, belong to you. The licensor claims no ownership of them and no
+royalty on them. You may use, publish, share, and **sell** them freely.
+
+**Selling scripts made with the Pro AI Features needs a commercial licence.**
+If you use the Pro AI Features to generate a funscript, or to assist you in
+authoring one, and you then sell that script or otherwise monetise it, that
+is a commercial use of FunGen and requires a Commercial Licence (section 4).
+Letting the AI do the work and then charging for the result is exactly what
+the noncommercial licence does not cover.
+
+**Sharing AI-generated scripts for free is fine.** Publishing scripts made
+with the Pro AI Features to the community, at no charge and with no
+commercial benefit to you, is a noncommercial purpose and is permitted.
+
+## 4. Commercial Licence
+
+Any commercial use of FunGen - including selling scripts produced with the
+Pro AI Features, use by or on behalf of a business, and use in a paid
+production pipeline - requires a separate written Commercial Licence from
+the licensor.
+
+Enquire at **fungen_ai@proton.me**.
+
+A Commercial Licence covers only the seats it names. It never permits
+selling, reselling, sublicensing, or redistributing FunGen itself: no
+licence of any kind does, and none ever will.
+
+## 5. Third-party components
+
+FunGen incorporates third-party open-source components, each under its own
+licence. Those licences govern those components, and nothing in the FunGen
+licence limits your rights under them. See the accompanying
+`THIRD-PARTY-NOTICES` file for the list and the required attributions.
+
+## 6. No warranty, no liability
+
+The disclaimer in the PolyForm Strict License 1.0.0 ("No Liability") applies
+to these Supplemental Terms in full. The Software is provided as is, without
+warranty or condition of any kind.
+
+Nothing in the FunGen licence excludes or limits any liability that cannot
+lawfully be excluded or limited, or affects the statutory rights you have as
+a consumer.
+
+## 7. Changes
+
+The licensor may publish revised Supplemental Terms for future versions of
+the Software. The version shipped with a given build governs that build. The
+canonical current text is published at <https://fungen.app/license>.

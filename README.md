@@ -342,13 +342,18 @@ This project started as a dream to automate Funscript generation for VR videos. 
 
 # License
 
-This project is licensed under the **Non-Commercial License**. You are free to use the software for personal, non-commercial purposes only. Commercial use, redistribution, or modification for commercial purposes is strictly prohibited without explicit permission from the copyright holder.
+FunGen is **not** open-source. It is source-available and free of charge for **personal, noncommercial use only**, under the [PolyForm Strict License 1.0.0](LICENSE) together with the [FunGen Supplemental Terms](LICENSE-SUPPLEMENTAL). Both apply.
 
-This project is not intended for commercial use, nor for generating and distributing in a commercial environment.
+Canonical, always-current text: **<https://fungen.app/license>**
 
-For commercial use, please contact me.
+- **Nobody may sell, resell, sublicense, or charge for FunGen**, in any form, ever. No licence grants that right, and none ever will - not even a commercial one.
+- **No redistribution.** No mirrors, re-uploads, repackagings, published forks, ports, or modified builds. Link people to the official download instead.
+- **The funscripts you author or edit yourself are yours.** Use, publish, share, and **sell** them freely. No ownership claim, no cut.
+- **Selling scripts made with the Pro AI features needs a commercial licence.** Sharing them with the community for free does not.
+- **A Pro Pass covers one person**, on the machines that person owns. It is non-transferable; leaked or forged passes get blocked.
+- Provided **as is**, without warranty of any kind.
 
-See the [LICENSE](LICENSE) file for full details.
+For a commercial licence, contact **fungen_ai@proton.me**.
 
 ---
 
