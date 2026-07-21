@@ -1,8 +1,21 @@
 > [!IMPORTANT]
-> ## ⚠️ FunGen 1 is legacy
-> This is the original Python version of FunGen. It has been **completely rewritten from the ground up as [FunGen 2](https://github.com/ack00gar/FunGen)**: a single native binary (no Python, no dependencies to chase), with a full-featured funscript editor and a built-in AI generation pipeline (2D & VR).
+> ## ⚠️ FunGen 1 is legacy — FunGen 2 is the current release
 >
-> **→ Get FunGen 2: [Download](https://github.com/ack00gar/FunGen/releases) · [Website](https://fungen.app) · [Discord](https://discord.com/invite/WYkjMbtCZA)**
+> This is the original Python version. FunGen has since been **completely rewritten** as
+> **FunGen 2**: a single native binary — no Python, no venv, no dependencies to chase — with a
+> full funscript studio and a built-in AI generation pipeline for 2D and VR.
+>
+> ## → **[fungen.app](https://fungen.app)**
+>
+> [![FunGen 2](https://raw.githubusercontent.com/ack00gar/FunGen/main/assets/screenshot.png)](https://fungen.app)
+>
+> - **AI generation for 2D and VR** — fisheye, equirectangular, side-by-side and top/bottom, up to 8K, tracked on your GPU
+> - **Frame-accurate multi-axis editor** — stroke, surge, sway, twist, roll, pitch, on one timeline
+> - **Plays straight to your device** — The Handy, OSR2 / SR6, Autoblow, anything on Buttplug.io / Intiface
+> - **Runs entirely on your own machine** — nothing is uploaded
+> - **Free to download** — no account, no card
+>
+> **[Get FunGen 2](https://fungen.app)** · [Releases](https://github.com/ack00gar/FunGen/releases) · [Discord](https://discord.com/invite/WYkjMbtCZA)
 >
 > FunGen 1 below remains for reference and is no longer actively developed.
 
