@@ -429,7 +429,8 @@ class TensorRTCompiler:
             stdout, stderr = self._run_export_subprocess(export_script, pt_model_path, output_dir)
             
             if self._export_process.returncode != 0:
-                raise TensorRTCompilerError(f"Export failed: {stderr}")
+                # stderr is always empty (merged into stdout via stderr=STDOUT)
+                raise TensorRTCompilerError(f"Export failed: {stdout}")
 
             try:
                 # Try to find JSON in the output (may be mixed with other text)
@@ -439,7 +440,11 @@ class TensorRTCompiler:
                     json_str = stdout[json_start:json_end]
                     result = json.loads(json_str)
                     if not result.get('success'):
-                        raise TensorRTCompilerError(f"Export failed: {result.get('error', 'Unknown error')}")
+                        error_msg = result.get('error', 'Unknown error')
+                        tb = result.get('traceback', '')
+                        if tb:
+                            error_msg = f"{error_msg}\n\nTraceback:\n{tb}"
+                        raise TensorRTCompilerError(f"Export failed: {error_msg}")
 
                     # Move the created engine file to the expected location
                     created_engine = result.get('engine_file')
