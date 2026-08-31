@@ -44,10 +44,22 @@ def export_model(model_path, output_dir):
         logger.info("Searching for generated engine files...")
         # Find the specific engine file that should have been created
         model_basename = os.path.splitext(os.path.basename(model_path))[0]
-        expected_engine_path = os.path.join(output_dir, model_basename + ".engine")
+        engine_filename = model_basename + ".engine"
+        expected_engine_path = os.path.join(output_dir, engine_filename)
+        # Ultralytics writes the .engine next to the source .pt, not always output_dir
+        pt_engine_path = os.path.join(os.path.dirname(model_path), engine_filename)
         
         if os.path.exists(expected_engine_path):
             logger.info(f"Found engine file: {expected_engine_path}")
+            result = {
+                'success': True,
+                'engine_file': expected_engine_path
+            }
+        elif os.path.exists(pt_engine_path):
+            logger.info(f"Found engine file next to the model: {pt_engine_path}")
+            if os.path.abspath(pt_engine_path) != os.path.abspath(expected_engine_path):
+                import shutil
+                shutil.move(pt_engine_path, expected_engine_path)
             result = {
                 'success': True,
                 'engine_file': expected_engine_path
@@ -56,7 +68,7 @@ def export_model(model_path, output_dir):
             logger.error("No engine file was created!")
             result = {
                 'success': False,
-                'error': 'No engine file was created'
+                'error': f'No engine file was created. Checked: {expected_engine_path}, {pt_engine_path}'
             }
     except Exception as e:
         result = {
