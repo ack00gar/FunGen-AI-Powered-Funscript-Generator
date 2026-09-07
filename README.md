@@ -1,5 +1,10 @@
 # FunGen: AI funscript generator for 2D and VR
 
+> [!IMPORTANT]
+> **This is the archived FunGen 1 source repository.** It is unmaintained. For
+> the current FunGen 2 application, documentation and official downloads, use
+> **[fungen.app](https://fungen.app)**.
+
 FunGen generates funscripts from 2D and VR video with AI, entirely on your own
 machine, and nothing is uploaded. It is also a full frame-accurate, multi-axis
 funscript editor and player, so you can build a script by hand, clean up what
@@ -7,7 +12,7 @@ the AI generated, and drive your device straight from the timeline.
 
 ## → **[fungen.app](https://fungen.app)**
 
-[![FunGen 2](https://raw.githubusercontent.com/ack00gar/FunGen/main/assets/screenshot.png)](https://fungen.app)
+[![Current FunGen 2 Studio interface](https://fungen.app/shots/studio-current.webp)](https://fungen.app/studio/)
 
 The current release is **FunGen 2**: a single native binary for Windows, macOS
 (Apple Silicon native) and Linux, with no Python, no venv and no dependencies to chase.
@@ -24,6 +29,9 @@ The current release is **FunGen 2**: a single native binary for Windows, macOS
 
 **[Get FunGen 2](https://fungen.app)** ·
 [Download](https://github.com/ack00gar/FunGen/releases) ·
+[How it generates funscripts](https://fungen.app/generate-funscripts-from-video/) ·
+[Supported devices](https://fungen.app/supported-devices/) ·
+[Pricing](https://fungen.app/pricing/) ·
 [Discord](https://discord.gg/WYkjMbtCZA)
 
 ---
