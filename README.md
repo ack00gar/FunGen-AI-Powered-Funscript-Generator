@@ -34,6 +34,16 @@ The current release is **FunGen 2**: a single native binary for Windows, macOS
 [Pricing](https://fungen.app/pricing/) ·
 [Discord](https://discord.gg/WYkjMbtCZA)
 
+## Guides
+
+Step-by-step, for FunGen 2:
+
+- **[How to make a funscript](how-to-make-a-funscript.md)**: the four ways to
+  build one (AI generation, by hand, recorded live, or from the audio), then
+  cleaning it up and playing it on a device.
+- **[Funscript editor](funscript-editor.md)**: the timeline, selection,
+  transforms, multi-axis, chapters, the Funscript Doctor and device playback.
+
 ---
 
 ## About this repository
