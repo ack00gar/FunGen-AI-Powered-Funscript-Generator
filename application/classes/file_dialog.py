@@ -62,6 +62,11 @@ class ImGuiFileDialog:
         self.overwrite_file_path: str = ""
         self.video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm']
 
+        # Dialog size, restored on open and saved on close
+        self._window_width: int = 750
+        self._window_height: int = 400
+        self._size_initialized: bool = False
+
         # Cached directory listing and metadata to avoid per-frame filesystem hits
         self._current_dir_cached: str = ""
         self._cached_directories: list[str] = []
@@ -151,8 +156,18 @@ class ImGuiFileDialog:
         if initial_path and os.path.isdir(initial_path):
             self.current_dir = initial_path
 
+        self._window_width = self.app.app_settings.get("file_dialog_width", 750)
+        self._window_height = self.app.app_settings.get("file_dialog_height", 400)
+        self._size_initialized = False
+
         # Invalidate caches on open
         self._invalidate_listing_cache()
+
+    def _save_window_size(self) -> None:
+        """Remembers the dialog size so the next open matches this one."""
+        width, height = imgui.get_window_size()
+        self.app.app_settings.set("file_dialog_width", int(width))
+        self.app.app_settings.set("file_dialog_height", int(height))
 
     def _invalidate_listing_cache(self) -> None:
         self._current_dir_cached = ""
@@ -311,10 +326,13 @@ class ImGuiFileDialog:
         if not self.open:
             return
 
-        imgui.set_next_window_size(750, 400)
+        if not self._size_initialized:
+            imgui.set_next_window_size(self._window_width, self._window_height)
+            self._size_initialized = True
         is_open_current_frame, self.open = imgui.begin(self.title, self.open)
 
         if not self.open:
+            self._save_window_size()
             imgui.end()
             return
 
@@ -336,6 +354,8 @@ class ImGuiFileDialog:
                 self._draw_overwrite_confirm()
             finally:
                 imgui.columns(1)
+                if not self.open:
+                    self._save_window_size()
                 imgui.end()
 
     def _draw_directory_navigation(self) -> None:
